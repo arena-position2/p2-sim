@@ -1,12 +1,12 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
+import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 import {
   buildEmailToUserMap,
   fetchArenaUsersList,
   parseCommaSeparated,
 } from '@/lib/arena-utils/users-list'
-import { env } from '@/lib/core/config/env'
-import { getArenaToken } from '@/app/api/tools/arena/utils/get-token'
 
 const logger = createLogger('ArenaCommentsUpdatedAPI')
 
@@ -29,20 +29,19 @@ function toMentionTag(sysId: string, displayName: string): string {
 export async function POST(req: NextRequest) {
   const data = await req.json()
   const { workflowId, ...restData } = data
-  const tokenObject = await getArenaToken(req, workflowId)
-  if (tokenObject.found === false) {
-    logger.error('Add comment (updated) failed: Arena token not resolved', {
-      reason: tokenObject.reason,
+  const resolved = await resolveArenaCaller(req, workflowId)
+  if (!resolved.found) {
+    logger.error('Add comment (updated) failed: Arena caller not resolved', {
+      reason: resolved.reason,
       workflowId,
     })
     return NextResponse.json(
-      { error: 'Failed to add comment', details: tokenObject.reason },
+      { error: 'Failed to add comment', details: resolved.reason },
       { status: 400 }
     )
   }
-  const { arenaToken, email: userEmail } = tokenObject
+  const { caller } = resolved
 
-  const arenaBackendBaseUrl = env.ARENA_BACKEND_BASE_URL || ''
   let comment = restData.comment ?? ''
   let userMentionedIds: string[] = Array.isArray(restData.userMentionedIds)
     ? restData.userMentionedIds
@@ -52,7 +51,12 @@ export async function POST(req: NextRequest) {
   const ccRaw = typeof restData.cc === 'string' ? restData.cc.trim() : ''
 
   if (toRaw || ccRaw) {
-    const users = await fetchArenaUsersList(arenaToken, arenaBackendBaseUrl)
+    const users = await fetchArenaUsersList({
+      mode: caller.mode,
+      userId: caller.userId,
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+    })
     const emailToUser = buildEmailToUserMap(users)
 
     const toEmails = parseCommaSeparated(toRaw)
@@ -91,26 +95,36 @@ export async function POST(req: NextRequest) {
   }
 
   const { to: _to, cc: _cc, ...restPayload } = restData
-  const payload = {
-    ...restPayload,
-    comment,
-    userMentionedIds,
-    createdBy: userEmail,
-  }
+  const payload =
+    caller.mode === 'automation'
+      ? {
+          ...restPayload,
+          comment,
+          userMentionedIds,
+        }
+      : {
+          ...restPayload,
+          comment,
+          userMentionedIds,
+          createdBy: caller.email,
+        }
 
   try {
-    const res = await fetch(
-      `${arenaBackendBaseUrl}/project/commentattachmentservice/addcomment-updated`,
-      {
+    const res = await arenaSolFetch({
+      mode: caller.mode,
+      userId: caller.userId,
+      pathOrUrl: '/project/commentattachmentservice/addcomment-updated',
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+      init: {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           accept: '*/*',
-          authorisation: arenaToken || '',
         },
         body: JSON.stringify(payload),
-      }
-    )
+      },
+    })
 
     const responseData = await res.json()
 
@@ -129,6 +143,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(responseData, { status: res.status })
   } catch (error) {
+    if (error instanceof ArenaAuthError) {
+      return NextResponse.json({ error: error.message }, { status: 401 })
+    }
     logger.error('Add comment (updated) failed: unexpected error', { error, workflowId })
     return NextResponse.json({ error: 'Failed to add comment', details: error }, { status: 500 })
   }

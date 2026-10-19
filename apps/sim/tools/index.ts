@@ -3297,6 +3297,12 @@ async function resolveFirstPartyToolRoute(
         : undefined
   const token = await generateInternalToken(userId)
   const existingHeaders = tool.request.headers
+  const triggerType =
+    typeof params._context?.triggerType === 'string' ? params._context.triggerType : undefined
+  const executionId =
+    typeof params._context?.executionId === 'string' ? params._context.executionId : undefined
+  const workflowId =
+    typeof params._context?.workflowId === 'string' ? params._context.workflowId : undefined
 
   return {
     ...tool,
@@ -3306,8 +3312,12 @@ async function resolveFirstPartyToolRoute(
       allowSameOrigin: true,
       headers: (headerParams) => {
         const base = existingHeaders(headerParams)
-        if (base.Authorization || base.authorization) return base
-        return { ...base, Authorization: `Bearer ${token}` }
+        const withContext: Record<string, string> = { ...base }
+        if (triggerType) withContext['X-Sim-Trigger-Type'] = triggerType
+        if (executionId) withContext['X-Sim-Execution-Id'] = executionId
+        if (workflowId) withContext['X-Sim-Workflow-Id'] = workflowId
+        if (withContext.Authorization || withContext.authorization) return withContext
+        return { ...withContext, Authorization: `Bearer ${token}` }
       },
     },
   }

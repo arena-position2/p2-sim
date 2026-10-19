@@ -1,13 +1,13 @@
 import { db } from '@sim/db'
 import { userArenaDetails, workflow } from '@sim/db/schema'
 import { eq } from 'drizzle-orm'
+import { getHumanArenaAccessToken } from '@/lib/arena/tokens'
 import type { WorkflowTokenLookup } from '@/app/api/tools/arena/utils/types'
 
 /**
- * Get the arenaToken associated with a workflow's user.
+ * Interactive fallback: human SSO access token for a workflow's owner.
  */
 export async function getArenaTokenByWorkflowId(workflowId: string): Promise<WorkflowTokenLookup> {
-  // 1. Look up the workflow to get userId
   const wf = await db
     .select({
       id: workflow.id,
@@ -27,10 +27,8 @@ export async function getArenaTokenByWorkflowId(workflowId: string): Promise<Wor
     return { found: false, reason: 'Workflow has no userId' }
   }
 
-  // 2. Look up arena token in user_arena_details
   const details = await db
     .select({
-      arenaToken: userArenaDetails.arenaToken,
       timezone: userArenaDetails.timezone,
       persona: userArenaDetails.persona,
     })
@@ -38,7 +36,8 @@ export async function getArenaTokenByWorkflowId(workflowId: string): Promise<Wor
     .where(eq(userArenaDetails.userIdRef, userId))
     .limit(1)
 
-  if (details.length === 0 || !details[0].arenaToken) {
+  const arenaToken = await getHumanArenaAccessToken(userId)
+  if (!arenaToken) {
     return { found: false, reason: 'Arena token not found for user' }
   }
 
@@ -46,8 +45,8 @@ export async function getArenaTokenByWorkflowId(workflowId: string): Promise<Wor
     found: true,
     workflowId,
     userId,
-    arenaToken: details[0].arenaToken,
-    timezone: details[0].timezone ?? null,
-    persona: details[0].persona ?? null,
+    arenaToken,
+    timezone: details[0]?.timezone ?? null,
+    persona: details[0]?.persona ?? null,
   }
 }

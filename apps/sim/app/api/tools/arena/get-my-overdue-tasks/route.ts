@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { env } from '@/lib/core/config/env'
-import { getArenaToken } from '@/app/api/tools/arena/utils/get-token'
+import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
+import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -10,23 +10,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required field: workflowId' }, { status: 400 })
   }
 
-  const tokenObject = await getArenaToken(req, workflowId)
-  if (tokenObject.found === false) {
+  const resolved = await resolveArenaCaller(req, workflowId)
+  if (!resolved.found) {
     return NextResponse.json(
-      { error: 'Failed to get my overdue tasks', details: tokenObject.reason },
+      { error: 'Failed to get my overdue tasks', details: resolved.reason },
       { status: 400 }
     )
   }
-  const { arenaToken } = tokenObject
+  const { caller } = resolved
 
   try {
-    const arenaBackendBaseUrl = env.ARENA_BACKEND_BASE_URL
-    const res = await fetch(`${arenaBackendBaseUrl}/sol/v1/tasks/get-my-overdue-tasks`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        authorisation: arenaToken || '',
-      },
+    const res = await arenaSolFetch({
+      mode: caller.mode,
+      userId: caller.userId,
+      pathOrUrl: '/sol/v1/tasks/get-my-overdue-tasks',
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+      init: { method: 'GET', headers: { 'Content-Type': 'application/json' } },
     })
 
     const responseData = await res.json()
@@ -39,6 +39,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(responseData, { status: res.status })
   } catch (error) {
+    if (error instanceof ArenaAuthError) {
+      return NextResponse.json({ error: error.message }, { status: 401 })
+    }
     return NextResponse.json(
       { error: 'Failed to get my overdue tasks', details: error },
       { status: 500 }

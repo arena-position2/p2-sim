@@ -3,34 +3,29 @@ import Cookies from 'js-cookie'
 
 const COOKIE_NAME = 'arena_token'
 
+/**
+ * Fetches a short-lived Arena access token for browser-side Arena API calls.
+ * Does not persist the JWT in a cookie (legacy cookies are cleared if present).
+ */
 export async function getArenaToken(): Promise<string | null> {
-  // 1. Check if cookie exists
-  const existingToken = Cookies.get(COOKIE_NAME)
-  if (existingToken) {
-    return existingToken
+  if (Cookies.get(COOKIE_NAME)) {
+    Cookies.remove(COOKIE_NAME)
   }
 
-  // 2. If not in cookies, call API
   try {
-    const res = await fetch('/api/arena/token', { method: 'GET' })
+    // boundary-raw-fetch: short-lived Arena access JWT for browser selectors; not a contract JSON shape
+    const res = await fetch('/api/arena/token', { method: 'GET', cache: 'no-store' })
     if (!res.ok) {
-      console.error('Failed to fetch arena token')
       return null
     }
 
-    const data = await res.json()
+    const data = (await res.json()) as { found?: boolean; arenaToken?: string }
     if (data.found && data.arenaToken) {
-      // 3. Save token in cookie (session cookie — no expiry, no secure)
-      Cookies.set(COOKIE_NAME, data.arenaToken, {
-        sameSite: 'Lax',
-      })
-
       return data.arenaToken
     }
 
     return null
-  } catch (err) {
-    console.error('Error fetching arena token:', err)
+  } catch {
     return null
   }
 }

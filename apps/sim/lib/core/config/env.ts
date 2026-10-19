@@ -790,6 +790,7 @@ export const env = createEnv({
     // Arena
     ARENA_BACKEND_BASE_URL:               z.string().url().optional(),            // Arena backend base URL
     ARENA_FRONTEND_APP_URL:               z.string().url().optional(),            // Arena frontend app URL
+    ARENA_SERVICE_KEY:                    z.string().min(1).optional(),           // Server-only Arena automation key (schedules/webhooks); never expose to client
     SIM_APIS_SECRET_KEY:                  z.string().min(1).optional(),           // Shared secret for sol SSO redeem (must match sol sim.apis.secret.key)
 
     UNIPILE_API_KEY:                      z.string().min(1).optional(),           // Unipile API key (X-API-KEY)

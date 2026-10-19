@@ -1,4 +1,6 @@
 import { createLogger } from '@sim/logger'
+import type { ArenaAuthMode } from '@/lib/arena/auth'
+import { arenaSolFetch } from '@/lib/arena/fetch'
 
 const logger = createLogger('ArenaUsersList')
 
@@ -8,21 +10,27 @@ export interface ArenaUserListItem {
   email?: string
 }
 
+export type FetchArenaUsersListOptions = {
+  mode: ArenaAuthMode
+  userId: string
+  workflowId?: string
+  executionId?: string
+}
+
 /**
  * Fetches the list of Arena users (all users when allUsers=true).
  * Used during comment execution to map to/cc emails to user IDs.
  */
 export async function fetchArenaUsersList(
-  arenaToken: string,
-  baseUrl: string
+  options: FetchArenaUsersListOptions
 ): Promise<ArenaUserListItem[]> {
-  const url = `${baseUrl}/sol/v1/users/list?allUsers=true`
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      authorisation: arenaToken || '',
-    },
+  const res = await arenaSolFetch({
+    mode: options.mode,
+    userId: options.userId,
+    pathOrUrl: '/sol/v1/users/list?allUsers=true',
+    workflowId: options.workflowId,
+    executionId: options.executionId,
+    init: { method: 'GET', headers: { Accept: 'application/json' } },
   })
 
   if (!res.ok) {

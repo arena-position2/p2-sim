@@ -549,8 +549,12 @@ export class HumanInTheLoopBlockHandler implements BlockHandler {
             _context: {
               workflowId: ctx.workflowId,
               workspaceId: ctx.workspaceId,
+              executionId: ctx.executionId,
               userId: ctx.userId,
               isDeployedContext: ctx.isDeployedContext,
+              workflowUserId: ctx.metadata?.workflowUserId,
+              sessionUserId: ctx.metadata?.sessionUserId,
+              triggerType: ctx.metadata?.triggerType,
               enforceCredentialAccess: ctx.enforceCredentialAccess,
             },
             blockData: blockDataWithPause,

@@ -19,6 +19,11 @@ export type ArenaSsoRedeemResult = {
   email: string
   sysId?: string
   id?: string
+  /** Short-lived Arena access JWT (redeem field name: `token`). */
+  token?: string
+  accessToken?: string
+  /** Opaque rotating refresh token — persist encrypted at rest. */
+  refreshToken?: string
 }
 
 function solBackendBaseUrl(): string {
@@ -61,6 +66,17 @@ export async function redeemArenaSsoCode(code: string, aud: string): Promise<Are
   const payload = (await response.json()) as ArenaSsoRedeemResult
   if (!payload?.email) {
     throw new Error('SSO redeem returned no email')
+  }
+  if (!payload.token && !payload.accessToken) {
+    logger.warn('SSO redeem returned no access token')
+  }
+  if (!payload.refreshToken) {
+    logger.warn('SSO redeem returned no refresh token')
+  }
+  if (!payload.sysId && !payload.id) {
+    logger.warn(
+      'SSO redeem returned no Arena sysId — automation acting-user will fail until linked'
+    )
   }
   return payload
 }

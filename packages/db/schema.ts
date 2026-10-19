@@ -5209,7 +5209,10 @@ export const userArenaDetails = pgTable(
     airbyteExtractedAt: timestamp('_airbyte_extracted_at', { withTimezone: true }), // timestamptz
     airbyteGenerationId: bigint('_airbyte_generation_id', { mode: 'number' }), // int8
     airbyteMeta: jsonb('_airbyte_meta'), // jsonb
-    arenaToken: text('arena_token'), // text
+    /** Short-lived Arena access JWT from SSO redeem / refresh (interactive only). */
+    arenaToken: text('arena_token'),
+    /** Encrypted Arena refresh token (AES-256-GCM). Interactive SSO only. */
+    arenaRefreshToken: text('arena_refresh_token'),
     timezone: text('timezone'), // nullable
     persona: text('persona'), // nullable
   },

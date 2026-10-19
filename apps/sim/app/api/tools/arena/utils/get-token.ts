@@ -3,6 +3,7 @@ import { user, userArenaDetails } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
+import { getHumanArenaAccessToken } from '@/lib/arena/tokens'
 import { getSession } from '@/lib/auth'
 import { verifyInternalToken } from '@/lib/auth/internal'
 import { getArenaTokenByWorkflowId } from '@/app/api/tools/arena/utils/db-utils'
@@ -32,9 +33,6 @@ function isAllowedEmail(email: string): boolean {
   return email.trim().toLowerCase().endsWith(POSITION2_DOMAIN)
 }
 
-/**
- * Resolves the authorized user id from session or from internal token + userId (same logic as get-token route).
- */
 async function resolveAuthorizedUserId(
   req: NextRequest
 ): Promise<{ ok: true; userId: string } | { ok: false; body: ArenaTokenNotFound }> {
@@ -73,8 +71,8 @@ async function resolveAuthorizedUserId(
 }
 
 /**
- * Resolves the Arena token in-process using the same logic as the get-token route (session or internal token, then DB).
- * No HTTP request to the get-token API.
+ * Interactive path only: resolves a human SSO access token (with refresh).
+ * Schedules/webhooks must use resolveArenaCaller + arenaSolFetch automation mode instead.
  */
 export async function fetchArenaTokenFromApi(req: NextRequest): Promise<ArenaTokenResponse> {
   const resolved = await resolveAuthorizedUserId(req)
@@ -102,7 +100,6 @@ export async function fetchArenaTokenFromApi(req: NextRequest): Promise<ArenaTok
 
   const details = await db
     .select({
-      arenaToken: userArenaDetails.arenaToken,
       timezone: userArenaDetails.timezone,
       persona: userArenaDetails.persona,
     })
@@ -110,7 +107,8 @@ export async function fetchArenaTokenFromApi(req: NextRequest): Promise<ArenaTok
     .where(eq(userArenaDetails.userIdRef, userId))
     .limit(1)
 
-  if (details.length === 0 || !details[0].arenaToken) {
+  const arenaToken = await getHumanArenaAccessToken(userId)
+  if (!arenaToken) {
     return { found: false, reason: 'Arena token not found for user' }
   }
 
@@ -119,15 +117,12 @@ export async function fetchArenaTokenFromApi(req: NextRequest): Promise<ArenaTok
     userId,
     name,
     email,
-    arenaToken: details[0].arenaToken,
-    timezone: details[0].timezone ?? null,
-    persona: details[0].persona ?? null,
+    arenaToken,
+    timezone: details[0]?.timezone ?? null,
+    persona: details[0]?.persona ?? null,
   }
 }
 
-/**
- * Get Arena token: resolve in-process (session or internal token + DB), then fallback to workflow owner via getArenaTokenByWorkflowId when not found.
- */
 export async function getArenaToken(
   req: NextRequest,
   workflowId?: string
