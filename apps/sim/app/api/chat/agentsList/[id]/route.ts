@@ -16,8 +16,9 @@ const logger = createLogger('DeployedChatAgentDetailAPI')
  * GET /api/chat/agentsList/[id]
  * Returns a single agent (chat deployment) by id, using the same response shape
  * as one item from GET /api/chat/agentsList. Auth matches the list endpoint.
- * Requires `emailId` so `disabled` matches list behavior:
+ * `emailId` is optional. When it is present, `disabled` matches list behavior:
  * `false` when emailId or the user's domain is in allowedEmails, otherwise `true`.
+ * When it is missing, the agent is still returned and the saved redirect URL is unchanged.
  * Chat deployments remain fetchable even when the workflow also has an active
  * schedule or webhook.
  */
@@ -34,10 +35,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!agentId) {
       return NextResponse.json({ success: false, error: 'id is required' }, { status: 400 })
-    }
-
-    if (!emailId) {
-      return NextResponse.json({ success: false, error: 'emailId is required' }, { status: 400 })
     }
 
     const rows = await db
@@ -90,7 +87,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         : `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
       arena_path: row.arenaPath?.trim() || null,
       block_names: blockNamesByWorkflowId.get(row.workflowId) ?? [],
-      disabled: !hasAgentEmailAccess(row.allowedEmails, emailId),
+      disabled: !hasAgentEmailAccess(row.allowedEmails, emailId ?? ''),
     }
 
     return NextResponse.json({ success: true, agent }, { status: 200 })
