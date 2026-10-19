@@ -1,5 +1,15 @@
 const VIDEO_BUILDER_AGENT_HOST = 'video-builder-agent.vercel.app'
 
+/** True only for the video builder app. Other deployed redirect URLs are false. */
+export function isVideoBuilderAgentUrl(redirectUrl: string | null | undefined): boolean {
+  if (!redirectUrl?.trim()) return false
+  try {
+    return new URL(redirectUrl).hostname === VIDEO_BUILDER_AGENT_HOST
+  } catch {
+    return false
+  }
+}
+
 /**
  * Puts the logged-in Arena email on the video builder app URL only.
  * Every other redirect, including other deployed apps, is returned unchanged.

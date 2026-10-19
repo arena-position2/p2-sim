@@ -2,7 +2,10 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import { withLoggedInEmailOnVideoAgentUrl } from '@/lib/chat/video-agent-redirect'
+import {
+  isVideoBuilderAgentUrl,
+  withLoggedInEmailOnVideoAgentUrl,
+} from '@/lib/chat/video-agent-redirect'
 
 describe('withLoggedInEmailOnVideoAgentUrl', () => {
   it('sets emailId on the video builder app and replaces a saved email', () => {
@@ -18,6 +21,12 @@ describe('withLoggedInEmailOnVideoAgentUrl', () => {
   it('leaves other agent redirect URLs unchanged', () => {
     const saved = 'https://abm-signal-dashboard.vercel.app/'
     expect(withLoggedInEmailOnVideoAgentUrl(saved, 'akshay.poojary@position2.com')).toBe(saved)
+  })
+
+  it('recognises only the video builder host, including a URL with no email', () => {
+    expect(isVideoBuilderAgentUrl('https://video-builder-agent.vercel.app/')).toBe(true)
+    expect(isVideoBuilderAgentUrl('https://abm-signal-dashboard.vercel.app/')).toBe(false)
+    expect(isVideoBuilderAgentUrl(null)).toBe(false)
   })
 
   it('leaves the video URL unchanged when the viewer email is missing', () => {
