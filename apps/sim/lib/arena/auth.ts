@@ -18,6 +18,36 @@ export function resolveArenaAuthMode(triggerType?: string | null): ArenaAuthMode
   return isAutomationTrigger(triggerType) ? 'automation' : 'human'
 }
 
+/**
+ * Schedule and webhook Arena calls carry the trigger on the query string.
+ * The tool route still selects the service key when `X-Sim-Trigger-Type` is dropped.
+ * Manual and API runs are left unchanged.
+ */
+export function withArenaAutomationQuery(
+  absoluteUrl: string,
+  triggerType?: string | null,
+  executionId?: string | null
+): string {
+  if (!triggerType || !isAutomationTrigger(triggerType)) return absoluteUrl
+  let url: URL
+  try {
+    url = new URL(absoluteUrl)
+  } catch {
+    return absoluteUrl
+  }
+  if (!url.pathname.includes('/api/tools/arena/')) return absoluteUrl
+
+  const normalizedTrigger = triggerType.trim().toLowerCase()
+  if (!url.searchParams.has('triggerType')) {
+    url.searchParams.set('triggerType', normalizedTrigger)
+  }
+  const execution = executionId?.trim()
+  if (execution && !url.searchParams.has('executionId')) {
+    url.searchParams.set('executionId', execution)
+  }
+  return url.toString()
+}
+
 export type AutomationArenaHeaderOptions = {
   actingUserSysId: string
   workflowId?: string

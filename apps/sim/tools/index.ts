@@ -10,6 +10,7 @@ import { requestJson } from '@/lib/api/client/request'
 import type { FunctionExecuteBody } from '@/lib/api/contracts'
 import { oauthTokenPostContract } from '@/lib/api/contracts/oauth-connections'
 import { getBYOKKey } from '@/lib/api-key/byok'
+import { withArenaAutomationQuery } from '@/lib/arena/auth'
 import { generateInternalToken, type InternalSandboxProfile } from '@/lib/auth/internal'
 import {
   BILLING_ATTRIBUTION_HEADER,
@@ -3287,7 +3288,12 @@ async function resolveFirstPartyToolRoute(
     return tool
   }
 
-  const absoluteUrl = new URL(rawUrl, getInternalApiBaseUrl()).toString()
+  const resolvedUrl = new URL(rawUrl, getInternalApiBaseUrl()).toString()
+  const triggerType =
+    typeof params._context?.triggerType === 'string' ? params._context.triggerType : undefined
+  const executionId =
+    typeof params._context?.executionId === 'string' ? params._context.executionId : undefined
+  const absoluteUrl = withArenaAutomationQuery(resolvedUrl, triggerType, executionId)
   const contextUserId = params._context?.userId
   const userId =
     typeof contextUserId === 'string' && contextUserId.length > 0
@@ -3297,10 +3303,6 @@ async function resolveFirstPartyToolRoute(
         : undefined
   const token = await generateInternalToken(userId)
   const existingHeaders = tool.request.headers
-  const triggerType =
-    typeof params._context?.triggerType === 'string' ? params._context.triggerType : undefined
-  const executionId =
-    typeof params._context?.executionId === 'string' ? params._context.executionId : undefined
   const workflowId =
     typeof params._context?.workflowId === 'string' ? params._context.workflowId : undefined
 
