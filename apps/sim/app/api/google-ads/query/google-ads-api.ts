@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { sleep } from '@sim/utils/helpers'
-import { POSITION2_MANAGER } from './constants'
+import { GOOGLE_ADS_API_VERSION, POSITION2_MANAGER } from './constants'
 
 const logger = createLogger('GoogleAdsAPI')
 
@@ -145,7 +145,7 @@ export async function makeGoogleAdsRequest(accountId: string, gaqlQuery: string)
     const formattedCustomerId = accountId.replace(/-/g, '')
 
     // Make Google Ads API request
-    const adsApiUrl = `https://googleads.googleapis.com/v22/customers/${formattedCustomerId}/googleAds:search`
+    const adsApiUrl = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers/${formattedCustomerId}/googleAds:search`
 
     const requestPayload = {
       query: gaqlQuery.trim(),
