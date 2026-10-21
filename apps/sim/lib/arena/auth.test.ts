@@ -2,7 +2,12 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import { getHumanArenaHeaders, isAutomationTrigger, resolveArenaAuthMode } from '@/lib/arena/auth'
+import {
+  getHumanArenaHeaders,
+  isAutomationTrigger,
+  resolveArenaAuthMode,
+  withArenaAutomationQuery,
+} from '@/lib/arena/auth'
 
 describe('isAutomationTrigger', () => {
   it('treats schedule and webhook as automation', () => {
@@ -24,6 +29,25 @@ describe('resolveArenaAuthMode', () => {
     expect(resolveArenaAuthMode('schedule')).toBe('automation')
     expect(resolveArenaAuthMode('webhook')).toBe('automation')
     expect(resolveArenaAuthMode('manual')).toBe('human')
+  })
+})
+
+describe('withArenaAutomationQuery', () => {
+  const arenaUrl = 'http://localhost:3000/api/tools/arena/get-my-overdue-tasks?workflowId=wf-1'
+
+  it('adds triggerType and executionId for schedule and webhook', () => {
+    expect(withArenaAutomationQuery(arenaUrl, 'schedule', 'exec-1')).toBe(
+      'http://localhost:3000/api/tools/arena/get-my-overdue-tasks?workflowId=wf-1&triggerType=schedule&executionId=exec-1'
+    )
+    expect(withArenaAutomationQuery(arenaUrl, 'Webhook', 'exec-2')).toContain('triggerType=webhook')
+  })
+
+  it('leaves manual, API, and non-Arena URLs unchanged', () => {
+    expect(withArenaAutomationQuery(arenaUrl, 'manual', 'exec-1')).toBe(arenaUrl)
+    expect(withArenaAutomationQuery(arenaUrl, 'api', 'exec-1')).toBe(arenaUrl)
+    expect(withArenaAutomationQuery(arenaUrl, undefined, 'exec-1')).toBe(arenaUrl)
+    const slackUrl = 'http://localhost:3000/api/tools/slack/send?workflowId=wf-1'
+    expect(withArenaAutomationQuery(slackUrl, 'schedule', 'exec-1')).toBe(slackUrl)
   })
 })
 
