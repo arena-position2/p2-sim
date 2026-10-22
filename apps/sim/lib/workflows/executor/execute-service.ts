@@ -233,6 +233,23 @@ async function compactServiceOutput<T>(
   return compacted
 }
 
+/**
+ * Key identity preprocessing uses to bill a deployed API call to the key owner's
+ * organization. Session and system principals have no key.
+ */
+function apiKeyAttributionFromPrincipal(principal: WorkflowExecutionPrincipal): {
+  apiKeyId?: string
+  apiKeyType?: 'personal' | 'workspace'
+} {
+  if (principal.kind === 'personal_api_key') {
+    return { apiKeyId: principal.keyId, apiKeyType: 'personal' }
+  }
+  if (principal.kind === 'workspace_api_key') {
+    return { apiKeyId: principal.keyId, apiKeyType: 'workspace' }
+  }
+  return {}
+}
+
 export function executeWorkflowService(
   params: ExecuteWorkflowServiceParams & { mode: 'sync-result-stream' }
 ): Promise<ExecuteWorkflowServicePendingRun | ExecuteWorkflowServiceFailureResult>
@@ -370,6 +387,7 @@ export async function executeWorkflowService(
     }
 
     const loggingSession = new LoggingSession(workflowId, executionId, triggerType, requestId)
+    const apiKeyAttribution = apiKeyAttributionFromPrincipal(principal)
 
     const preprocessResult = await preprocessExecution({
       workflowId,
@@ -381,6 +399,8 @@ export async function executeWorkflowService(
       rateLimitCounter,
       loggingSession,
       useAuthenticatedUserAsActor,
+      apiKeyId: apiKeyAttribution.apiKeyId,
+      apiKeyType: apiKeyAttribution.apiKeyType,
       workflowRecord,
       billingAttribution: upstreamBillingAttribution,
       executionType: mode === 'async' ? 'async' : 'sync',

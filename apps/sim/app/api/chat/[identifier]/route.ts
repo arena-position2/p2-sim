@@ -14,6 +14,7 @@ import { deployedChatPostContract, goldenQueriesSchema } from '@/lib/api/contrac
 import { parseRequest } from '@/lib/api/server'
 import { getSession } from '@/lib/auth'
 import { releaseExecutionSlot } from '@/lib/billing/calculations/usage-reservation'
+import { getUserIdByEmail } from '@/lib/billing/core/billing-attribution'
 import { formatChartDeployOutputForChat } from '@/lib/chart-generation/echarts-option'
 import { getAgentDepartmentLabel } from '@/lib/chat/arena-departments'
 import { extractGeneratedImagesFromData } from '@/lib/chat/assistant-assets'
@@ -509,6 +510,15 @@ export const POST = withRouteHandler(
       // Get userId from session for external chat API requests
       const session = await getSession()
       const userId = session?.user?.id || null
+      const openerEmail =
+        request.nextUrl.searchParams.get('emailId')?.trim() ||
+        authResult.authenticatedEmail ||
+        (email?.trim() ? email.trim() : '')
+      let billingCallerUserId = userId ?? undefined
+      if (!billingCallerUserId && openerEmail) {
+        const openerUserId = await getUserIdByEmail(openerEmail)
+        if (openerUserId) billingCallerUserId = openerUserId
+      }
 
       if ((password || email) && !input) {
         const response = createSuccessResponse(toChatConfigResponse(deployment))
@@ -571,6 +581,7 @@ export const POST = withRouteHandler(
         userId: deployment.userId,
         // Whoever deployed this chat, not whoever is talking to it.
         userIdIsStoredReference: true,
+        billingCallerUserId,
         triggerType: 'chat',
         executionId,
         requestId,

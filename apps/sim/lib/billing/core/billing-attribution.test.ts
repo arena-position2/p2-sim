@@ -42,12 +42,14 @@ import {
   checkAttributedBillingBlocks,
   checkAttributedUsageLimits,
   createAttributedBillingRequestEnvelope,
+  getUserIdByEmail,
   requireAccountBillingDecisionHeader,
   requireBillingAttributionHeader,
   requireBillingCallbackAttribution,
   requireBillingRequestIdHeader,
   requireWorkspaceBillingAttributionHeader,
   resolveBillingAttribution,
+  resolveCallerOrganizationBillingAttribution,
   resolveLegacyV0BillingAttribution,
   resolveSystemBillingAttribution,
   serializeAccountBillingDecisionHeader,
@@ -155,6 +157,76 @@ describe('resolveBillingAttribution', () => {
       workspaceId: 'workspace-b',
     })
     expect(dbChainMockFns.limit).toHaveBeenCalledTimes(1)
+  })
+
+  describe('getUserIdByEmail', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      resetDbChainMock()
+    })
+
+    it('returns the user id for the opener email', async () => {
+      dbChainMockFns.limit.mockResolvedValueOnce([{ id: 'fiff-user' }])
+
+      await expect(getUserIdByEmail('  User@FIFF.com ')).resolves.toBe('fiff-user')
+    })
+
+    it('returns null when the email matches no account', async () => {
+      dbChainMockFns.limit.mockResolvedValueOnce([])
+
+      await expect(getUserIdByEmail('missing@fiff.com')).resolves.toBeNull()
+    })
+
+    it('returns null for a blank email without querying', async () => {
+      await expect(getUserIdByEmail('   ')).resolves.toBeNull()
+      expect(dbChainMockFns.limit).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('resolveCallerOrganizationBillingAttribution', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      resetDbChainMock()
+    })
+
+    it('returns null when the caller has no organization membership', async () => {
+      dbChainMockFns.limit.mockResolvedValueOnce([])
+
+      const attribution = await resolveCallerOrganizationBillingAttribution({
+        actorUserId: 'caller-1',
+        workspaceId: 'workflow-workspace',
+      })
+
+      expect(attribution).toBeNull()
+      expect(mockGetOrganizationSubscription).not.toHaveBeenCalled()
+    })
+
+    it('bills the caller organization and keeps the workflow workspace', async () => {
+      dbChainMockFns.limit
+        .mockResolvedValueOnce([{ organizationId: 'org-caller' }])
+        .mockResolvedValueOnce([{ userId: 'caller-org-owner' }])
+      mockGetOrganizationSubscription.mockResolvedValue({
+        ...ORG_SUBSCRIPTION,
+        referenceId: 'org-caller',
+      })
+
+      const attribution = await resolveCallerOrganizationBillingAttribution({
+        actorUserId: 'caller-1',
+        workspaceId: 'workflow-workspace',
+      })
+
+      expect(attribution).toMatchObject({
+        actorUserId: 'caller-1',
+        billedAccountUserId: 'caller-org-owner',
+        billingEntity: { id: 'org-caller', type: 'organization' },
+        organizationId: 'org-caller',
+        workspaceId: 'workflow-workspace',
+      })
+      expect(mockGetOrganizationSubscription).toHaveBeenCalledWith('org-caller', {
+        onError: 'throw',
+      })
+      expect(Object.isFrozen(attribution)).toBe(true)
+    })
   })
 
   it('uses the workspace organization reference even when its billed owner has other memberships', async () => {

@@ -1,7 +1,8 @@
 import { db } from '@sim/db'
-import { member, workspace } from '@sim/db/schema'
+import { apiKey, foldedEmail, member, user, workspace } from '@sim/db/schema'
 import { generateId, isValidUuid } from '@sim/utils/id'
 import { isRecordLike } from '@sim/utils/object'
+import { normalizeEmail } from '@sim/utils/string'
 import { and, eq } from 'drizzle-orm'
 import {
   checkBillingBlocked,
@@ -763,6 +764,59 @@ export async function resolveOrganizationBillingAttribution(input: {
   return buildBillingAttributionSnapshot({
     actorUserId: input.actorUserId,
     workspaceId: null,
+    ...payer,
+  })
+}
+
+/**
+ * Owner recorded on an API key. Workspace keys have no user on the principal,
+ * so deployed-API billing reads this row to find the caller's organization.
+ */
+export async function getApiKeyOwnerUserId(apiKeyId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ userId: apiKey.userId })
+    .from(apiKey)
+    .where(eq(apiKey.id, apiKeyId))
+    .limit(1)
+  return row?.userId ?? null
+}
+
+/**
+ * Sim user for an opener email, such as the `emailId` Arena sends when someone
+ * opens a deployed app. Returns null when the address matches no account.
+ */
+export async function getUserIdByEmail(email: string): Promise<string | null> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return null
+  const [row] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(foldedEmail(user.email), normalizedEmail))
+    .limit(1)
+  return row?.id ?? null
+}
+
+/**
+ * Bills the caller's organization for a run that still executes in the workflow workspace.
+ *
+ * Returns null when the caller has no `member` row. The workspace payer stays in
+ * place for that case, including public API calls that have no caller at all.
+ */
+export async function resolveCallerOrganizationBillingAttribution(input: {
+  actorUserId: string
+  workspaceId: string
+}): Promise<BillingAttributionSnapshot | null> {
+  const [membership] = await db
+    .select({ organizationId: member.organizationId })
+    .from(member)
+    .where(eq(member.userId, input.actorUserId))
+    .limit(1)
+  if (!membership?.organizationId) return null
+
+  const payer = await resolveOrganizationBillingPayer(membership.organizationId)
+  return buildBillingAttributionSnapshot({
+    actorUserId: input.actorUserId,
+    workspaceId: input.workspaceId,
     ...payer,
   })
 }

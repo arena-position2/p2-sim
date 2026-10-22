@@ -844,8 +844,13 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         files: payload.files ? `${payload.files.length} files` : undefined,
       })
 
+      const openerEmail = new URLSearchParams(window.location.search).get('emailId')?.trim()
+      const executeUrl = openerEmail
+        ? `/api/chat/${identifier}?emailId=${encodeURIComponent(openerEmail)}`
+        : `/api/chat/${identifier}`
+
       // boundary-raw-fetch: deployed chat endpoint returns an SSE stream consumed by handleStreamedResponse via response.body.getReader()
-      const response = await fetch(`/api/chat/${identifier}`, {
+      const response = await fetch(executeUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

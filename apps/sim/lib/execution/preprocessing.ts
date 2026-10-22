@@ -10,7 +10,9 @@ import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
   checkAttributedUsageLimits,
+  getApiKeyOwnerUserId,
   resolveBillingAttribution,
+  resolveCallerOrganizationBillingAttribution,
   resolveSystemBillingAttribution,
 } from '@/lib/billing/core/billing-attribution'
 import type { HighestPrioritySubscription } from '@/lib/billing/core/plan'
@@ -108,6 +110,11 @@ export interface PreprocessExecutionOptions {
   /** Use the authenticated user as actor for client executions and personal API keys. */
   useAuthenticatedUserAsActor?: boolean
   /**
+   * Signed-in person using a deployed chat or app. When they belong to an
+   * organization, that organization is billed instead of the workflow workspace.
+   */
+  billingCallerUserId?: string
+  /**
    * Declares that `userId` names a stored reference — a workflow owner, a chat's
    * creator — rather than someone who just acted, so the suspension gate skips
    * it. Suspending one member must not take down the schedules, webhooks, and
@@ -168,6 +175,47 @@ function retryAfterMsFrom(retryAfterSeconds: number | undefined): { retryAfterMs
 
 export const WORKFLOW_NOT_DEPLOYED_CODE = 'WORKFLOW_NOT_DEPLOYED'
 
+function isResolvableBillingUserId(userId: string | undefined | null): userId is string {
+  return Boolean(userId && userId !== 'unknown')
+}
+
+/**
+ * Human billed for a deployed workflow.
+ *
+ * API calls use the key owner, or the authenticated caller when there is no key.
+ * Chat and app runs use the opener: the signed-in visitor, or the user resolved
+ * from the email that opened the app. Public calls, schedules, webhooks, and
+ * editor runs return null so the workflow workspace remains the payer.
+ */
+async function resolveDeployedSurfaceBillingUserId(params: {
+  triggerType: CoreTriggerType
+  isDeployed: boolean
+  userId: string
+  useAuthenticatedUserAsActor: boolean
+  billingCallerUserId?: string
+  apiKeyId?: string
+  apiKeyType?: 'personal' | 'workspace'
+}): Promise<string | null> {
+  if (!params.isDeployed) return null
+
+  if (params.triggerType === 'chat') {
+    return isResolvableBillingUserId(params.billingCallerUserId) ? params.billingCallerUserId : null
+  }
+
+  if (params.triggerType !== 'api') return null
+
+  if (params.apiKeyId && (params.apiKeyType === 'personal' || params.apiKeyType === 'workspace')) {
+    const ownerUserId = await getApiKeyOwnerUserId(params.apiKeyId)
+    if (ownerUserId) return ownerUserId
+  }
+
+  if (params.useAuthenticatedUserAsActor && isResolvableBillingUserId(params.userId)) {
+    return params.userId
+  }
+
+  return null
+}
+
 export interface PreprocessExecutionSuccess {
   success: true
   actorUserId: string
@@ -220,6 +268,7 @@ export async function preprocessExecution(
     loggingSession: providedLoggingSession,
     triggerData,
     useAuthenticatedUserAsActor = false,
+    billingCallerUserId,
     apiKeyId,
     apiKeyType,
     webhookId: providedWebhookId,
@@ -410,6 +459,46 @@ export async function preprocessExecution(
       logger.info(`[${requestId}] Using authenticated user as actor: ${actorUserId}`)
     }
 
+    let deployedApiCallerUserId: string | null = null
+    if (
+      !billingAttribution &&
+      workflowRecord.isDeployed &&
+      (triggerType === 'api' || triggerType === 'chat')
+    ) {
+      const callerUserId = await withDatabaseReadRetry(
+        () =>
+          resolveDeployedSurfaceBillingUserId({
+            triggerType,
+            isDeployed: workflowRecord.isDeployed,
+            userId,
+            useAuthenticatedUserAsActor: useAuthenticatedUserAsActor ?? false,
+            billingCallerUserId,
+            apiKeyId,
+            apiKeyType,
+          }),
+        { label: 'resolveDeployedSurfaceBillingUserId' }
+      )
+      if (callerUserId) {
+        const callerAttribution = await withDatabaseReadRetry(
+          () =>
+            resolveCallerOrganizationBillingAttribution({
+              actorUserId: callerUserId,
+              workspaceId,
+            }),
+          { label: 'resolveCallerOrganizationBillingAttribution' }
+        )
+        if (callerAttribution) {
+          deployedApiCallerUserId = callerUserId
+          actorUserId = callerUserId
+          billingAttribution = callerAttribution
+          logger.info(`[${requestId}] Billing deployed run to the caller's organization`, {
+            actorUserId,
+            billingEntity: billingAttribution.billingEntity,
+          })
+        }
+      }
+    }
+
     if (!actorUserId) {
       billingAttribution = await withDatabaseReadRetry(
         () => resolveSystemBillingAttribution(workspaceId),
@@ -426,7 +515,7 @@ export async function preprocessExecution(
       triggerType,
       workspaceId,
       workflowUserId: workflowRecord.userId,
-      authenticatedUserId: userId,
+      authenticatedUserId: deployedApiCallerUserId ?? userId,
       apiKeyId,
       apiKeyType,
       webhookId,

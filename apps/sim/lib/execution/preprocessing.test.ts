@@ -17,6 +17,8 @@ const {
   mockReserveExecutionSlot,
   mockResolveBillingAttribution,
   mockResolveSystemBillingAttribution,
+  mockResolveCallerOrganizationBillingAttribution,
+  mockGetApiKeyOwnerUserId,
 } = vi.hoisted(() => ({
   mockGetWorkspaceBilledAccountUserId: vi.fn(),
   mockGetScheduleExecutionActorUserId: vi.fn(),
@@ -27,6 +29,8 @@ const {
   mockReserveExecutionSlot: vi.fn(),
   mockResolveBillingAttribution: vi.fn(),
   mockResolveSystemBillingAttribution: vi.fn(),
+  mockResolveCallerOrganizationBillingAttribution: vi.fn(),
+  mockGetApiKeyOwnerUserId: vi.fn(),
 }))
 
 vi.mock('@sim/utils/helpers', () => ({
@@ -52,7 +56,9 @@ vi.mock('@/lib/billing/core/billing-attribution', () => ({
   assertBillingAttributionSnapshot: vi.fn((value) => value),
   checkAttributedUsageLimits: mockCheckAttributedUsageLimits,
   resolveBillingAttribution: mockResolveBillingAttribution,
+  resolveCallerOrganizationBillingAttribution: mockResolveCallerOrganizationBillingAttribution,
   resolveSystemBillingAttribution: mockResolveSystemBillingAttribution,
+  getApiKeyOwnerUserId: mockGetApiKeyOwnerUserId,
 }))
 vi.mock('@/lib/billing/core/subscription', () => ({
   getHighestPrioritySubscription: vi.fn(),
@@ -124,6 +130,8 @@ beforeEach(() => {
     billedAccountUserId: 'billed-account-1',
     workspaceId,
   }))
+  mockResolveCallerOrganizationBillingAttribution.mockResolvedValue(null)
+  mockGetApiKeyOwnerUserId.mockResolvedValue(null)
   mockCheckAttributedUsageLimits.mockResolvedValue({
     isExceeded: false,
     payerUsage: { currentUsage: 1, limit: 10 },
@@ -741,6 +749,169 @@ describe('preprocessExecution billing attribution', () => {
       plan: 'team_25000',
       currentUsage: 1,
       limit: 10,
+    })
+    expect(mockResolveCallerOrganizationBillingAttribution).toHaveBeenCalledWith({
+      actorUserId,
+      workspaceId: 'workspace-1',
+    })
+  })
+
+  it('bills a deployed API call to the caller organization', async () => {
+    const callerAttribution = {
+      ...ORGANIZATION_ATTRIBUTION,
+      actorUserId: 'personal-key-owner',
+      billedAccountUserId: 'caller-org-owner',
+      organizationId: 'caller-org',
+      billingEntity: { type: 'organization' as const, id: 'caller-org' },
+      workspaceId: 'workspace-1',
+    }
+    mockResolveCallerOrganizationBillingAttribution.mockResolvedValueOnce(callerAttribution)
+
+    const result = await preprocessExecution({
+      ...baseOptions,
+      userId: 'personal-key-owner',
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      actorUserId: 'personal-key-owner',
+      billingAttribution: callerAttribution,
+    })
+    expect(mockResolveBillingAttribution).not.toHaveBeenCalled()
+    expect(mockResolveSystemBillingAttribution).not.toHaveBeenCalled()
+    expect(mockReserveExecutionSlot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingEntity: { type: 'organization', id: 'caller-org' },
+      })
+    )
+  })
+
+  it('bills a deployed workspace API key to the key owner organization', async () => {
+    const callerAttribution = {
+      ...ORGANIZATION_ATTRIBUTION,
+      actorUserId: 'key-owner',
+      billedAccountUserId: 'caller-org-owner',
+      organizationId: 'caller-org',
+      billingEntity: { type: 'organization' as const, id: 'caller-org' },
+      workspaceId: 'workspace-1',
+    }
+    mockGetApiKeyOwnerUserId.mockResolvedValueOnce('key-owner')
+    mockResolveCallerOrganizationBillingAttribution.mockResolvedValueOnce(callerAttribution)
+
+    const result = await preprocessExecution({
+      ...baseOptions,
+      userId: 'workspace-billed-account',
+      useAuthenticatedUserAsActor: false,
+      apiKeyId: 'key-1',
+      apiKeyType: 'workspace',
+    })
+
+    expect(mockGetApiKeyOwnerUserId).toHaveBeenCalledWith('key-1')
+    expect(mockResolveCallerOrganizationBillingAttribution).toHaveBeenCalledWith({
+      actorUserId: 'key-owner',
+      workspaceId: 'workspace-1',
+    })
+    expect(result).toMatchObject({
+      success: true,
+      actorUserId: 'key-owner',
+      billingAttribution: callerAttribution,
+    })
+    expect(mockResolveBillingAttribution).not.toHaveBeenCalled()
+    expect(mockResolveSystemBillingAttribution).not.toHaveBeenCalled()
+  })
+
+  it('keeps the workflow organization for a manual run of a deployed workflow', async () => {
+    const result = await preprocessExecution({
+      ...baseOptions,
+      triggerType: 'manual',
+      userId: 'editor-user',
+      useAuthenticatedUserAsActor: true,
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      actorUserId: 'editor-user',
+      billingAttribution: expect.objectContaining({
+        billingEntity: { type: 'organization', id: 'org-1' },
+      }),
+    })
+    expect(mockResolveCallerOrganizationBillingAttribution).not.toHaveBeenCalled()
+    expect(mockResolveBillingAttribution).toHaveBeenCalledWith({
+      actorUserId: 'editor-user',
+      workspaceId: 'workspace-1',
+    })
+  })
+
+  it('keeps the workflow organization when the API caller has no organization', async () => {
+    mockResolveCallerOrganizationBillingAttribution.mockResolvedValueOnce(null)
+
+    const result = await preprocessExecution({
+      ...baseOptions,
+      userId: 'personal-key-owner',
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      actorUserId: 'personal-key-owner',
+      billingAttribution: expect.objectContaining({
+        billingEntity: { type: 'organization', id: 'org-1' },
+      }),
+    })
+    expect(mockResolveBillingAttribution).toHaveBeenCalledWith({
+      actorUserId: 'personal-key-owner',
+      workspaceId: 'workspace-1',
+    })
+  })
+
+  it('bills a deployed app or chat run to the signed-in user organization', async () => {
+    const callerAttribution = {
+      ...ORGANIZATION_ATTRIBUTION,
+      actorUserId: 'fiff-user',
+      billedAccountUserId: 'fiff-org-owner',
+      organizationId: 'fiff-org',
+      billingEntity: { type: 'organization' as const, id: 'fiff-org' },
+      workspaceId: 'workspace-1',
+    }
+    mockResolveCallerOrganizationBillingAttribution.mockResolvedValueOnce(callerAttribution)
+
+    const result = await preprocessExecution({
+      ...baseOptions,
+      triggerType: 'chat',
+      userId: 'position2-deployer',
+      userIdIsStoredReference: true,
+      useAuthenticatedUserAsActor: false,
+      billingCallerUserId: 'fiff-user',
+    })
+
+    expect(mockResolveCallerOrganizationBillingAttribution).toHaveBeenCalledWith({
+      actorUserId: 'fiff-user',
+      workspaceId: 'workspace-1',
+    })
+    expect(result).toMatchObject({
+      success: true,
+      actorUserId: 'fiff-user',
+      billingAttribution: callerAttribution,
+    })
+    expect(mockResolveBillingAttribution).not.toHaveBeenCalled()
+    expect(mockResolveSystemBillingAttribution).not.toHaveBeenCalled()
+  })
+
+  it('keeps the workflow organization when an app visitor is anonymous', async () => {
+    const result = await preprocessExecution({
+      ...baseOptions,
+      triggerType: 'chat',
+      userId: 'position2-deployer',
+      userIdIsStoredReference: true,
+      useAuthenticatedUserAsActor: false,
+    })
+
+    expect(mockResolveCallerOrganizationBillingAttribution).not.toHaveBeenCalled()
+    expect(mockResolveSystemBillingAttribution).toHaveBeenCalled()
+    expect(result).toMatchObject({
+      success: true,
+      billingAttribution: expect.objectContaining({
+        billingEntity: { type: 'organization', id: 'org-1' },
+      }),
     })
   })
 
