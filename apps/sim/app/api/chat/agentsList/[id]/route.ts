@@ -6,6 +6,10 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import { hasAgentEmailAccess } from '@/lib/chat/agent-email-access'
 import { getAgentDepartmentLabel } from '@/lib/chat/arena-departments'
+import {
+  isVideoBuilderAgentUrl,
+  withLoggedInEmailOnVideoAgentUrl,
+} from '@/lib/chat/video-agent-redirect'
 import { getUniqueBlockNamesByWorkflowId } from '@/lib/chat/workflow-block-names'
 import { getBaseUrl } from '@/lib/core/utils/urls'
 
@@ -15,7 +19,10 @@ const logger = createLogger('DeployedChatAgentDetailAPI')
  * GET /api/chat/agentsList/[id]
  * Returns a single agent (chat deployment) by id, using the same response shape
  * as one item from GET /api/chat/agentsList. Auth matches the list endpoint.
- * Requires `emailId` so `disabled` matches list behavior:
+ * `emailId` is required, except for the video builder app. When the saved redirect
+ * host is video-builder-agent.vercel.app and emailId is missing, the agent is still
+ * returned and the saved URL is unchanged so Arena can add the logged-in email.
+ * When emailId is present, `disabled` matches list behavior:
  * `false` when emailId or the user's domain is in allowedEmails, otherwise `true`.
  * Chat deployments remain fetchable even when the workflow also has an active
  * schedule or webhook.
@@ -33,10 +40,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!agentId) {
       return NextResponse.json({ success: false, error: 'id is required' }, { status: 400 })
-    }
-
-    if (!emailId) {
-      return NextResponse.json({ success: false, error: 'emailId is required' }, { status: 400 })
     }
 
     const rows = await db
@@ -63,12 +66,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .limit(1)
 
     if (rows.length === 0) {
+      if (!emailId) {
+        return NextResponse.json({ success: false, error: 'emailId is required' }, { status: 400 })
+      }
       logger.warn(`Agent not found for id: ${agentId}`)
       return NextResponse.json({ success: false, error: 'Agent not found' }, { status: 404 })
     }
 
     const row = rows[0]
     const appRedirectUrl = row.deploymentType === 'app' && row.redirectUrl ? row.redirectUrl : null
+    if (!emailId && !isVideoBuilderAgentUrl(appRedirectUrl)) {
+      return NextResponse.json({ success: false, error: 'emailId is required' }, { status: 400 })
+    }
     const blockNamesByWorkflowId = await getUniqueBlockNamesByWorkflowId([row.workflowId])
 
     const agent = {
@@ -84,12 +93,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       status: 'published',
       identifier: row.identifier,
       deployment_type: row.deploymentType === 'app' ? 'app' : 'chat',
-      redirect_url:
-        appRedirectUrl ??
-        `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
+      redirect_url: appRedirectUrl
+        ? withLoggedInEmailOnVideoAgentUrl(appRedirectUrl, emailId)
+        : `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
       arena_path: row.arenaPath?.trim() || null,
       block_names: blockNamesByWorkflowId.get(row.workflowId) ?? [],
-      disabled: !hasAgentEmailAccess(row.allowedEmails, emailId),
+      disabled: !hasAgentEmailAccess(row.allowedEmails, emailId ?? ''),
     }
 
     return NextResponse.json({ success: true, agent }, { status: 200 })
