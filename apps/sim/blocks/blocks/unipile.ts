@@ -23,16 +23,17 @@ type UnipileCommentMentionRow = { name: string; profile_id: string; is_company?:
 
 /** Credential id or legacy raw Unipile account id from block params (resolved at execution). */
 function unipileAccountIdFromParams(params: Record<string, unknown>): string {
-  const cred =
-    typeof params.unipileCredential === 'string'
-      ? params.unipileCredential.trim()
-      : typeof params.credential === 'string'
-        ? params.credential.trim()
-        : typeof params.oauthCredential === 'string'
-          ? params.oauthCredential.trim()
-          : ''
-  const legacy = typeof params.account_id === 'string' ? params.account_id.trim() : ''
-  return cred || legacy
+  for (const key of [
+    'unipileCredential',
+    'manualCredential',
+    'credential',
+    'oauthCredential',
+    'account_id',
+  ] as const) {
+    const value = params[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return ''
 }
 
 /** Same row shape as Start block `input-format` fields (id, name, type, value, description). */
