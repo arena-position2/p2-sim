@@ -43,13 +43,13 @@ export const MAX_RESEARCH_SEARCH_CONTINUATION_ROUNDS = 1
  * sequential edits — the soft nudge asks the model to wrap up without stripping
  * tools yet.
  */
-export const MAX_POPULATE_EDITS = 8
+export const MAX_POPULATE_EDITS = 16
 
 /**
  * Absolute ceiling on successful populate edits this turn. Past this, tools are
  * restricted to final_only / oauth_only so the turn cannot thrash forever.
  */
-export const MAX_POPULATE_EDITS_HARD_LOCK = 12
+export const MAX_POPULATE_EDITS_HARD_LOCK = 20
 
 /**
  * Extra model rounds after create_workflow when populate somehow never queued —
