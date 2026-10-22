@@ -843,10 +843,11 @@ async function injectUnipileAccountIdFromCredentialIfNeeded(
 ): Promise<void> {
   const pick = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
   const raw =
-    pick(params.account_id) ||
     pick(params.unipileCredential) ||
+    pick(params.manualCredential) ||
+    pick(params.credential) ||
     pick(params.oauthCredential) ||
-    pick(params.credential)
+    pick(params.account_id)
   if (!raw) return
 
   if (!isValidUuid(raw)) {
@@ -859,6 +860,7 @@ async function injectUnipileAccountIdFromCredentialIfNeeded(
     logger.warn(`[${requestId}] Could not resolve Unipile account for credential`, {
       credentialId: raw,
     })
+    params.account_id = raw
     return
   }
 
@@ -2222,6 +2224,10 @@ async function executeToolImplementation(
       )
     }
 
+    if (tool && normalizedToolId.startsWith('unipile_')) {
+      await injectUnipileAccountIdFromCredentialIfNeeded(contextParams, requestId)
+    }
+
     // Validate the tool and its parameters
     validateRequiredParametersAfterMerge(toolId, tool, contextParams)
 
@@ -2234,10 +2240,6 @@ async function executeToolImplementation(
     normalizeCopilotCredentialParams(contextParams)
     enforceCopilotCredentialSelection(toolId, tool, contextParams, scope)
     await resolveToolEnvReferences(tool, contextParams, scope, resolvedSecretTraceRegistry)
-
-    if (normalizedToolId.startsWith('unipile_')) {
-      await injectUnipileAccountIdFromCredentialIfNeeded(contextParams, requestId)
-    }
 
     // Inject hosted API key if tool supports it and user didn't provide one
     const hostedKeyInfo = await injectHostedKeyIfNeeded(
