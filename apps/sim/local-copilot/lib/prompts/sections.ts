@@ -72,7 +72,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   - Call \`get_blocks_metadata\` **once** with every block type you need in that call (e.g. \`{ "blockIds": ["agent","start_trigger","gmail"] }\`). Do not re-fetch the same types.
   - Prefer one \`edit_workflow\` that adds all blocks and wires connections when it fits. For multi-agent graphs you may use up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls (one agent or review block per call). Only extra edits beyond that when the result reports skippedItems, inputValidationErrors, needsFollowUpEdit, or real lint errors.
   - After create + populate is complete (all requested blocks added, no repair needed): **STOP**. One final reply. Do NOT re-open the workflow, re-fetch metadata, or restate the same completion summary. App-owned verification may run automatically — do not claim the workflow is verified unless a verification result says so.
-  - Missing OAuth only: call \`oauth_get_auth_link\` once, share the link, then stop.
+  - Missing OAuth only: call \`oauth_get_auth_link\` once for each missing provider in this response, then stop.
 - Similar existing workflows:
   - If the user asked to run or edit something that already exists in \`workspaceWorkflows\`, use that workflow.
   - If they asked to create a new named workflow, call \`create_workflow\` and build it.
@@ -172,7 +172,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   {
     id: 'workflowEditRetry',
     /** How to react to skippedItems / lint / deferred connections. */
-    content: `- When edit_workflow returns skippedItems, inputValidationErrors, needsFollowUpEdit, or a non-credential workflowLintMessage, call edit_workflow again with corrected operations. If the only lint is a missing OAuth credential (needsOAuthConnect), call oauth_get_auth_link once and stop — do not re-edit.
+    content: `- When edit_workflow returns skippedItems, inputValidationErrors, needsFollowUpEdit, or a non-credential workflowLintMessage, call edit_workflow again with corrected operations. If the only lint is a missing OAuth credential (needsOAuthConnect), call oauth_get_auth_link once for each missing provider in this response, then stop — do not re-edit.
 - deferredConnections in edit_workflow results are normal — the engine wires them when target blocks exist. Do not re-issue deferred edges unless the target id was a typo.`,
   },
   {
@@ -300,7 +300,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
     /** oauth_get_auth_link and manage_credential. */
     domains: ['auth'],
     content: `- Credentials and OAuth:
-  - When an integration is not connected, call \`oauth_get_auth_link\` with the provider (e.g. google-email, slack) and share the returned link — never ask the user to paste an API key for OAuth providers.
+  - When an integration is not connected, call \`oauth_get_auth_link\` once for each missing provider in this response (e.g. google-email, slack), then stop — never ask the user to paste an API key for OAuth providers.
   - \`manage_credential\` renames or deletes stored credentials (delete only on explicit request). \`oauth_request_access\` asks another member to share their connection.`,
   },
   {

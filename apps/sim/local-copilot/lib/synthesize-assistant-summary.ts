@@ -684,7 +684,7 @@ export function synthesizeAssistantSummaryFromTools(records: ToolTurnRecord[]): 
     if (record.name === 'oauth_get_auth_link') {
       const control = buildOAuthConnectControl(record.result)
       if (control) {
-        parts.push(`Connect ${control.provider} to finish setup.`)
+        parts.push(`Connect ${control.provider}, then continue.`)
       } else {
         const payload = asRecord(record.result)
         const message = typeof payload.message === 'string' ? payload.message.trim() : ''

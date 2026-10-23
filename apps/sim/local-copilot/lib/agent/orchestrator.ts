@@ -134,7 +134,10 @@ import {
   DEFAULT_LOCAL_COPILOT_CATALOG_ID,
   type LocalCopilotCatalogId,
 } from '@/local-copilot/lib/model-catalog'
-import { buildOAuthConnectControl } from '@/local-copilot/lib/oauth-connect-text'
+import {
+  buildOAuthConnectControl,
+  type OAuthConnectControl,
+} from '@/local-copilot/lib/oauth-connect-text'
 import { auditLocalOpsEvent } from '@/local-copilot/lib/ops/audit-metrics'
 import { LOCAL_OPS_COUNTERS, recordLocalOpsEvent } from '@/local-copilot/lib/ops/metrics'
 import {
@@ -159,7 +162,11 @@ import {
   waitForLocalToolConfirmation,
 } from '@/local-copilot/lib/security/request-tool-confirmation'
 import { classifyLocalToolConfirmation } from '@/local-copilot/lib/security/tool-confirmation-policy'
-import { buildGeneratedApiKeyControl } from '@/local-copilot/lib/security/trusted-controls'
+import {
+  buildGeneratedApiKeyControl,
+  formatTrustedControl,
+  type LocalTrustedControl,
+} from '@/local-copilot/lib/security/trusted-controls'
 import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
@@ -976,6 +983,8 @@ export async function* runLocalCopilotAgent(
   let createdWorkflowThisTurn = false
   let postBuildToolMode: PostBuildToolMode = 'all'
   let endTurnAfterThisRound = false
+  const pendingOAuthControls: OAuthConnectControl[] = []
+  let pendingOAuthToolCallId: string | undefined
   /** Full user-visible prose streamed this turn (survives per-round assistantText resets). */
   let streamedUserFacingText = ''
   /**
@@ -2505,16 +2514,13 @@ export async function* runLocalCopilotAgent(
         endTurnAfterThisRound = true
         const control = buildOAuthConnectControl(toolResult.result)
         if (control) {
-          yield {
-            type: 'trusted_control',
-            toolCallId: call.id,
-            control,
-          }
+          pendingOAuthControls.push(control)
+          pendingOAuthToolCallId ??= call.id
         }
         deferredSystemMessages.push({
           role: 'system',
           content:
-            '[System] Auth link was shown to the user as a Connect control. Stop. Do not call more tools or restate the completion.',
+            '[System] Auth links for this response will be shown together as one Connect control. Stop. Do not call more tools or restate the completion.',
         })
       }
 
@@ -2884,6 +2890,22 @@ export async function* runLocalCopilotAgent(
         streamedUserFacingText += chunk
         yield { type: 'text_delta', content: chunk }
       }
+    }
+  }
+
+  if (pendingOAuthControls.length > 0 && pendingOAuthToolCallId) {
+    const control: LocalTrustedControl =
+      pendingOAuthControls.length === 1
+        ? pendingOAuthControls[0]
+        : { type: 'credential_links', links: pendingOAuthControls }
+    const text = formatTrustedControl(control)
+    const chunk = streamedUserFacingText.trim() ? `\n\n${text}` : text
+    streamedUserFacingText += chunk
+    assistantText = streamedUserFacingText
+    yield {
+      type: 'trusted_control',
+      toolCallId: pendingOAuthToolCallId,
+      control,
     }
   }
 

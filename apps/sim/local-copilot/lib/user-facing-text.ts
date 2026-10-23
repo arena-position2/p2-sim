@@ -126,7 +126,7 @@ export function stripIdsFromUserFacingText(text: string): string {
 export function buildWorkflowBuildCompleteSystemMessage(mode: PostBuildToolMode): string {
   if (mode === 'oauth_only') {
     return (
-      '[System] Workflow populate succeeded. Call oauth_get_auth_link once for the missing provider, ' +
+      '[System] Workflow populate succeeded. Call oauth_get_auth_link once for each missing provider in this response, ' +
       'then STOP. Do not validate, re-edit, or re-fetch metadata. ' +
       'The Connect control is shown automatically from the tool result — do not invent URLs.'
     )

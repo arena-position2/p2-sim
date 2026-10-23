@@ -12,7 +12,10 @@ import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { isBrowserAgentAvailable, sendBrowserPanelAction } from '@/lib/browser-agent/transport'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
 import { isSafeHttpUrl } from '@/lib/core/utils/urls'
-import { readLatestOAuthChatAttempt } from '@/lib/credentials/oauth-chat-attempt'
+import {
+  hasOAuthCredentialForTarget,
+  readLatestOAuthChatAttempt,
+} from '@/lib/credentials/oauth-chat-attempt'
 import { getDesktopBridge } from '@/lib/desktop'
 import { desktopChatScopeId } from '@/lib/desktop/chat-scope'
 import { resolveCredentialDisplay } from '@/lib/integrations/credential-display'
@@ -29,7 +32,12 @@ import {
   searchConnectionTargetSchema,
 } from '@/lib/knowledge/search/connection-target'
 import { OAUTH_PROVIDERS } from '@/lib/oauth/oauth'
-import { getServiceConfigByProviderId } from '@/lib/oauth/utils'
+import type { OAuthProvider } from '@/lib/oauth/types'
+import {
+  getServiceConfigByProviderId,
+  parseProvider,
+  providerIdsForService,
+} from '@/lib/oauth/utils'
 import { finishTerminalHandoff, isTerminalAvailable } from '@/lib/terminal/transport'
 import { useChatSurface } from '@/app/workspace/[workspaceId]/home/components/chat-surface-context'
 import { ContextMentionIcon } from '@/app/workspace/[workspaceId]/home/components/context-mention-icon'
@@ -3041,6 +3049,13 @@ function CredentialInputCard({
     organizationId?: string
   }>()
   const { data: session } = useSession()
+  const reportsLiveOAuthStatus =
+    requestMode !== 'assistant' && data.length > 0 && data.every((item) => item.type === 'link')
+  const oauthCredentialsQuery = useWorkspaceCredentials({
+    workspaceId,
+    type: 'oauth',
+    enabled: reportsLiveOAuthStatus,
+  })
   const { canEdit } = useUserPermissionsContext()
   const upsertWorkspace = useUpsertWorkspaceEnvironment()
   const savePersonal = useSavePersonalEnvironment()
@@ -3189,6 +3204,55 @@ function CredentialInputCard({
   const submitCredentialSetup = async (): Promise<boolean> => {
     if (!onContinue) return false
 
+    if (reportsLiveOAuthStatus) {
+      try {
+        const { data: latest } = await oauthCredentialsQuery.refetch()
+        const records = (latest ?? []).flatMap((credential) =>
+          credential.providerId
+            ? [
+                {
+                  id: credential.id,
+                  providerId: credential.providerId,
+                  updatedAt: credential.updatedAt,
+                },
+              ]
+            : []
+        )
+        const connectedIntegrationIndexes = new Set<number>()
+        let integrationIndex = 0
+        for (const item of data) {
+          if (item.type !== 'link' && item.type !== 'service_account') continue
+          const index = integrationIndex
+          integrationIndex += 1
+          if (item.type !== 'link') continue
+          const target = resolveOAuthChipTarget(item.value, item.provider)
+          if (!target.providerId) continue
+          const matched = hasOAuthCredentialForTarget(
+            {
+              providerId: target.providerId,
+              baseProviderId: parseProvider(target.providerId as OAuthProvider).baseProvider,
+              ...(target.reconnectCredentialId
+                ? { credentialId: target.reconnectCredentialId }
+                : {}),
+              additionalProviderIds: providerIdsForService(target.providerId),
+            },
+            records
+          )
+          if (matched) connectedIntegrationIndexes.add(index)
+        }
+        onContinue(
+          formatCredentialSubmissionMessage(data, {
+            connectedIntegrationIndexes,
+            savedSecretIndexes: new Set(),
+          })
+        )
+        return true
+      } catch {
+        toast.error(`Couldn't check which integrations are connected. Please try again.`)
+        return false
+      }
+    }
+
     const workspaceVariables: Record<string, string> = {}
     const personalVariables: Record<string, string> = {}
     const enteredSecretIndexes: number[] = []
@@ -3290,11 +3354,18 @@ function CredentialInputCard({
       <div className='flex flex-col'>
         {rows}
         {needsContinuation && onContinue && (
-          <InteractionCardActionRow
-            label='Submit'
-            disabled={isSubmitting}
-            onClick={() => void handleSubmit()}
-          />
+          <>
+            {reportsLiveOAuthStatus && (
+              <p className='px-4 pb-2 text-[13px] text-[var(--text-secondary)] leading-[20px]'>
+                Connect these, then continue.
+              </p>
+            )}
+            <InteractionCardActionRow
+              label={reportsLiveOAuthStatus ? 'Continue' : 'Submit'}
+              disabled={isSubmitting}
+              onClick={() => void handleSubmit()}
+            />
+          </>
         )}
       </div>
     </InteractionCard>

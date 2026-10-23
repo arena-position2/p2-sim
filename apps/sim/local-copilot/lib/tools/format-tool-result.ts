@@ -746,7 +746,7 @@ export function formatToolResultForLlm(
     } else if (isOAuthOnlyEditResult(record)) {
       next.needsOAuthConnect = true
       next.followUpHint =
-        'Workflow structure is complete. The only remaining lint is a missing OAuth credential — call oauth_get_auth_link once, share the link, then STOP. Do not re-edit; edits cannot clear credential lint.'
+        'Workflow structure is complete. The only remaining lint is a missing OAuth credential — call oauth_get_auth_link once for each missing provider in this response, then STOP. Do not re-edit; edits cannot clear credential lint.'
     }
 
     if (
@@ -945,7 +945,7 @@ function detectMandatoryFollowUpFromRecord(
       id: 'edit_workflow:oauth',
       hint:
         hint ??
-        'Missing OAuth credential. Call oauth_get_auth_link once, share the link, then stop.',
+        'Missing OAuth credential. Call oauth_get_auth_link once for each missing provider in this response, then stop.',
       resolveWith: ['oauth_get_auth_link'],
     }
   }
