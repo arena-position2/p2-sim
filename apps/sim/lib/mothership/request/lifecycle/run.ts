@@ -1223,9 +1223,9 @@ async function runCheckpointLoop(
   if (getSimConnection().mode === 'checkpoint') {
     await ensureSimReceiverForBaseURL(mothershipBaseURL)
   }
-  // Go's ChatRequest rejects keys it does not declare. Drop the deployment flag
-  // and Arena's catalog id before the body leaves this process.
-  payload = omit(payload, ['isHosted', 'model'])
+  // Hosted topology is `simConnection` + billing headers. Go's ChatRequest
+  // schema rejects unknown keys — `isHosted` on the JSON body is a hard 400.
+  payload = omit(payload, ['isHosted'])
   const lifecycleWorkspaceId = nonBlankString(options.workspaceId)
   const lifecycleOrganizationId = nonBlankString(execContext.organizationId)
   const mothershipRequestId = nonBlankString(options.simRequestId) ?? generateId()

@@ -12,15 +12,10 @@ export const BillingAdmissionSchema = z
 
 export type BillingAdmission = z.infer<typeof BillingAdmissionSchema>
 
-/**
- * Start intent excludes transport credentials and receipts; takeover resolves those afresh.
- * `model` is the Arena Copilot catalog id. Hosted ChatRequest uses `modelSelection` and
- * rejects this key, so the Go dispatch drops it before the body leaves this process.
- */
+/** Start intent excludes transport credentials and receipts; takeover resolves those afresh. */
 export const DurableChatRequestSchema = ChatPayloadSchema.safeExtend({
   messageId: z.uuid(),
   chatId: z.uuid(),
-  model: z.string().min(1).max(100).optional(),
 }).transform(
   ({ byokApiKey, delegationToken, receivedTextChars, receivedActivity, ...request }) => request
 )
