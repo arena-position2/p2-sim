@@ -130,6 +130,60 @@ export function turnHasWorkflowMutationTools(records: ToolTurnRecord[]): boolean
 }
 
 /**
+ * True for the create_workflow populate instruction. After an edit was attempted
+ * that hint is stale — the closer should report the edit failure instead.
+ */
+function isCreateWorkflowPopulateHint(hint: string): boolean {
+  return /New workflow created/i.test(hint)
+}
+
+function firstRecordDetail(value: unknown, keys: string[]): string | null {
+  if (!Array.isArray(value)) return null
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim()) return item.trim()
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    for (const key of keys) {
+      const text = record[key]
+      if (typeof text === 'string' && text.trim()) return text.trim()
+    }
+  }
+  return null
+}
+
+/**
+ * Plain-language reason the latest edit_workflow did not finish the graph.
+ */
+export function describeEditWorkflowFailure(record: ToolTurnRecord): string | null {
+  const payload = asRecord(record.result)
+  const validation = firstRecordDetail(payload.inputValidationErrors, ['error', 'message'])
+  if (validation) return `An input was rejected: ${truncate(validation, 280, '…')}`
+
+  const skipped = firstRecordDetail(payload.skippedItems, ['reason', 'message', 'error'])
+  if (skipped) return `Some operations were skipped: ${truncate(skipped, 280, '…')}`
+
+  const errorText =
+    (typeof record.error === 'string' && record.error.trim()) ||
+    (typeof payload.error === 'string' && payload.error.trim()) ||
+    (typeof payload.message === 'string' && payload.message.trim()) ||
+    ''
+  if (payload.editPrecondition === 'metadata' || /get_blocks_metadata/i.test(errorText)) {
+    return 'The edit was blocked until block metadata was loaded for the types being added.'
+  }
+
+  const lint =
+    typeof payload.workflowLintMessage === 'string' ? payload.workflowLintMessage.trim() : ''
+  if (lint) return `The workflow still has a configuration issue: ${truncate(lint, 280, '…')}`
+
+  if (errorText && record.success === false) return truncate(errorText, 280, '…')
+
+  const followUp = typeof payload.followUpHint === 'string' ? payload.followUpHint.trim() : ''
+  if (followUp && !isCreateWorkflowPopulateHint(followUp)) return truncate(followUp, 280, '…')
+
+  return null
+}
+
+/**
  * Closing prose when a workflow build turn would otherwise settle incomplete or blank.
  */
 export function buildWorkflowBuildChatAppendix(
@@ -143,8 +197,17 @@ export function buildWorkflowBuildChatAppendix(
   const createdWithoutPopulate =
     options?.createdWorkflowThisTurn === true && (options.successfulPopulateEdits ?? 0) === 0
 
-  if (options?.unresolvedFollowUpHint?.trim()) {
-    return `I made partial progress but still need to finish: ${options.unresolvedFollowUpHint.trim()}`
+  const hint = options?.unresolvedFollowUpHint?.trim() ?? ''
+  const lastEdit = [...records].reverse().find((record) => record.name === 'edit_workflow')
+  if (lastEdit && isCreateWorkflowPopulateHint(hint)) {
+    const detail = describeEditWorkflowFailure(lastEdit)
+    return detail
+      ? `I created the workflow, but the last edit did not add the blocks. ${detail}`
+      : 'I created the workflow, but the edits did not add the requested blocks. Continue so I can apply them.'
+  }
+
+  if (hint) {
+    return `I made partial progress but still need to finish: ${hint}`
   }
 
   if (createdWithoutPopulate) {

@@ -225,8 +225,34 @@ const toolsByIdMock: Record<string, unknown> = {
   },
 }
 
+const gmailBlockConfig = {
+  type: 'gmail',
+  name: 'Gmail (Legacy)',
+  hideFromToolbar: true,
+  sunset: { status: 'legacy', replacedBy: 'gmail_v2' },
+  outputs: {},
+  subBlocks: [],
+  tools: { access: ['gmail_search'] },
+}
+
+const gmailV2BlockConfig = {
+  type: 'gmail_v2',
+  name: 'Gmail',
+  outputs: {},
+  subBlocks: [
+    {
+      id: 'operation',
+      type: 'dropdown',
+      options: [{ id: 'search_gmail', label: 'Search' }],
+    },
+  ],
+  tools: { access: ['gmail_search'] },
+}
+
 const blockConfigsByType: Record<string, unknown> = {
   condition: conditionBlockConfig,
+  gmail: gmailBlockConfig,
+  gmail_v2: gmailV2BlockConfig,
   slack: oauthBlockConfig,
   table: tableBlockConfig,
   router_v2: routerBlockConfig,
@@ -1400,6 +1426,16 @@ describe('validateInputsForBlock - agent tools (tool-input)', () => {
 
     expect(result.validInputs.tools).toBeUndefined()
     expect(result.errors[0]?.error).toContain('unavailable in this deployment')
+  })
+
+  it('rewrites a sunset tool type to its current successor', () => {
+    const tools = [
+      { type: 'gmail', title: 'Gmail', operation: 'search_gmail', usageControl: 'auto' },
+    ]
+    const result = validateInputsForBlock('agent', { tools }, 'agent-1')
+
+    expect(result.errors).toEqual([])
+    expect(tools[0]?.type).toBe('gmail_v2')
   })
 
   it('rejects an unrecognized tool type', () => {

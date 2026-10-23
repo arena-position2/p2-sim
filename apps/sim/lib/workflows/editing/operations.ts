@@ -30,6 +30,7 @@ import { logSkippedItem } from './types'
 import {
   findBlockWithDuplicateNormalizedName,
   isBlockTypeAllowed,
+  resolveCurrentBlockType,
   validateInputsForBlock,
 } from './validation'
 
@@ -609,6 +610,9 @@ export function handleEditOperation(op: EditWorkflowOperation, ctx: OperationCon
 
   // Update basic properties
   if (params?.type !== undefined) {
+    if (typeof params.type === 'string') {
+      params.type = resolveCurrentBlockType(params.type)
+    }
     // Special container types (loop, parallel) are not in the block registry but are valid
     const isContainerType = params.type === 'loop' || params.type === 'parallel'
 
@@ -803,6 +807,10 @@ export function handleAddOperation(op: EditWorkflowOperation, ctx: OperationCont
     return
   }
 
+  if (typeof params.type === 'string') {
+    params.type = resolveCurrentBlockType(params.type)
+  }
+
   // Special container types (loop, parallel) are not in the block registry but are valid
   const isContainerType = params.type === 'loop' || params.type === 'parallel'
 
@@ -913,6 +921,10 @@ export function handleInsertIntoSubflowOperation(
       },
     })
     return
+  }
+
+  if (typeof params.type === 'string') {
+    params.type = resolveCurrentBlockType(params.type)
   }
 
   const subflowBlock = modifiedState.blocks[subflowId]

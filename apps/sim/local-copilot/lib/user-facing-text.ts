@@ -3,6 +3,10 @@
  * after a successful workflow build.
  */
 
+import {
+  MAX_PRE_POPULATE_DISCOVERY_CALLS,
+  MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS,
+} from '@/local-copilot/lib/agent/limits'
 import { stripOptionsTagsForDisplay } from '@/local-copilot/lib/format-options-tag'
 import { stripUntrustedSecurityControls } from '@/local-copilot/lib/security/trusted-controls'
 
@@ -140,8 +144,9 @@ export function buildWorkflowBuildCompleteSystemMessage(mode: PostBuildToolMode)
 export function buildBlocksMetadataReuseSystemMessage(): string {
   return (
     '[System] Block metadata was already fetched this turn. ' +
-    'Reuse that result. Call get_blocks_metadata again ONLY for new block types not covered yet — ' +
-    'prefer one call with every type you need (e.g. agent, start_trigger, gmail).'
+    'Reuse that result. Do not call get_blocks_metadata or load_copilot_artifact again unless a specific field id is missing. ' +
+    'Call edit_workflow now. A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". ' +
+    'Omit Agent model unless that metadata lists the exact current id.'
   )
 }
 
@@ -357,8 +362,65 @@ export function buildWorkflowBuildContinuationMessage(): string {
 export function buildIncompleteWorkflowPopulateContinuationMessage(): string {
   return (
     '[System] create_workflow already succeeded this turn but edit_workflow has not populated it yet. ' +
-    'Call get_blocks_metadata (if needed) then edit_workflow NOW to add the requested blocks and connections. ' +
-    'Do not create another workflow and do not stop on an empty shell.'
+    'Call edit_workflow NOW. Do not call get_blocks_metadata or load_copilot_artifact again if metadata was already returned. ' +
+    'A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". ' +
+    'Omit Agent model unless metadata lists that exact current id. Do not create another workflow.'
+  )
+}
+
+/** Tools that only re-fetch block schemas and must not consume the populate budget. */
+const PRE_POPULATE_DISCOVERY_TOOLS = new Set(['get_blocks_metadata', 'load_copilot_artifact'])
+
+/**
+ * True for metadata / artifact reloads that run before the first successful populate edit.
+ */
+export function isPrePopulateDiscoveryTool(toolName: string): boolean {
+  return PRE_POPULATE_DISCOVERY_TOOLS.has(toolName)
+}
+
+/**
+ * Whether a discovery call may run before the first successful populate edit.
+ * `ignore` means the cap does not apply (not a discovery tool, or populate already started).
+ */
+export function admitPrePopulateDiscovery(options: {
+  createdWorkflowThisTurn: boolean
+  successfulPopulateEdits: number
+  discoveryCallsSoFar: number
+  toolName: string
+}): 'allow' | 'reject' | 'ignore' {
+  if (!isPrePopulateDiscoveryTool(options.toolName)) return 'ignore'
+  if (!options.createdWorkflowThisTurn || options.successfulPopulateEdits > 0) return 'ignore'
+  if (options.discoveryCallsSoFar >= MAX_PRE_POPULATE_DISCOVERY_CALLS) return 'reject'
+  return 'allow'
+}
+
+/**
+ * True when a discovery-only round should not consume a tool-iteration slot.
+ * Rejected discovery rounds are not refunded, so a model that ignores the block cannot loop forever.
+ */
+export function shouldRefundPrePopulateDiscoveryRound(options: {
+  createdWorkflowThisTurn: boolean
+  successfulPopulateEdits: number
+  roundToolNames: string[]
+  refundsSoFar: number
+  hadRejectedDiscovery: boolean
+}): boolean {
+  if (options.hadRejectedDiscovery) return false
+  if (!options.createdWorkflowThisTurn || options.successfulPopulateEdits > 0) return false
+  if (options.refundsSoFar >= MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS) return false
+  if (options.roundToolNames.length === 0) return false
+  return options.roundToolNames.every((name) => isPrePopulateDiscoveryTool(name))
+}
+
+/**
+ * Instruction returned when further metadata / artifact reloads are blocked.
+ */
+export function buildPrePopulateDiscoveryBlockedMessage(): string {
+  return (
+    'Block metadata for this new workflow is already loaded. ' +
+    'Do not call get_blocks_metadata or load_copilot_artifact again. Call edit_workflow now. ' +
+    'A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". ' +
+    'Omit Agent model unless the metadata you already have lists that exact current id.'
   )
 }
 

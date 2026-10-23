@@ -759,7 +759,7 @@ export function formatToolResultForLlm(
       // offload. The model already has workflowId + startBlockId.
       next.copilotSanitizedWorkflowState = undefined
       next.needsFollowUpPopulate = true
-      next.followUpHint = `New workflow created. Do NOT create_workflow or get_workflow_context again. Call get_blocks_metadata once with every type you will add (e.g. { blockIds: ["agent","human_in_the_loop"] }), then edit_workflow using startBlockId. Up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls are OK. Human review uses type human_in_the_loop.`
+      next.followUpHint = `New workflow created. Do NOT create_workflow or get_workflow_context again. Call get_blocks_metadata once with every type you will add (e.g. { blockIds: ["agent","schedule","human_in_the_loop"] }), then edit_workflow using startBlockId. Do not load_copilot_artifact to re-read that metadata. Up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls are OK. Human review uses type human_in_the_loop. A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". Put triggerMode next to inputs, not inside inputs. A named fetch-and-send sequence is canvas blocks of the current types (google_calendar_v2, gmail_v2, slack) wired in order, not Agent.tools. Omit Agent model unless metadata lists that exact current id.`
     }
 
     formatted = next
