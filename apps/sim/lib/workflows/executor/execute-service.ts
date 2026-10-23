@@ -88,8 +88,8 @@ export interface ExecuteWorkflowServiceParams {
   upstreamBillingAttribution?: BillingAttributionSnapshot
   /**
    * Caller-named payer for this run (see
-   * {@link PreprocessExecutionOptions.billingPayerEmail}). Absent on every
-   * surface that does not expose the billing-email header.
+   * {@link PreprocessExecutionOptions.billingPayerEmail}). Required by the v2
+   * execute route; absent on every surface that does not expose the header.
    */
   billingPayerEmail?: string
   /** Pin execution to a specific deployment version (MCP bridge). */

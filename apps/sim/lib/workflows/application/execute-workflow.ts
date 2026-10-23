@@ -29,8 +29,9 @@ export interface ExecuteWorkflowInput {
   callChain?: string[]
   /**
    * Email of the Sim user whose organization (or personal plan) pays for this
-   * run instead of the workflow workspace. Absent when the caller did not send
-   * the billing-email header, in which case the workspace payer applies.
+   * run instead of the workflow workspace. The v2 execute surface requires it;
+   * other callers of this use case may omit it, in which case the workspace
+   * payer applies.
    */
   billingPayerEmail?: string
 }

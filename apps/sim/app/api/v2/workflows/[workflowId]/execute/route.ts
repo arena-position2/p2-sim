@@ -434,7 +434,7 @@ export const POST = withRouteHandler(
       if (runIdHeader !== undefined && !isPublicApiAccess) {
         requestedExecutionId = runIdHeader
       }
-      /** Caller-named payer; absent means the workflow workspace pays as before. */
+      /** Required caller-named payer; the contract has already rejected a missing header. */
       const billingPayerEmail = parsed.data.headers['x-sim-email']
 
       let result: ExecuteWorkflowServiceResult
