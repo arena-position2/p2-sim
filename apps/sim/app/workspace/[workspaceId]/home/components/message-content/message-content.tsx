@@ -1162,6 +1162,11 @@ interface MessageContentProps {
   onQuestionDismiss?: () => void
   onPhaseChange?: (phase: MessagePhase) => void
   /**
+   * Virtualizer row identity. Text runs append their segment id and pass it to
+   * ChatContent so a scrolled-away reply keeps the parser it streamed with.
+   */
+  parserSessionKey?: string
+  /**
    * The message's actions row (copy/thumbs). Rendered here, in the thinking
    * slot's position, so at settle the shimmer and the actions trade places in
    * one render — a single tiny reflow instead of a collapse the buttons ride
@@ -1186,6 +1191,7 @@ function MessageContentInner({
   onOptionSelect,
   onQuestionDismiss,
   onPhaseChange,
+  parserSessionKey,
   actions,
 }: MessageContentProps) {
   const { onWorkspaceResourceSelect, onViewSources } = useChatSurface()
@@ -1369,6 +1375,9 @@ function MessageContentInner({
                   }
                   onPendingTagChange={
                     i === revealTailIndex ? handleTrailingPendingTagChange : undefined
+                  }
+                  parserSessionKey={
+                    parserSessionKey !== undefined ? `${parserSessionKey}:${segment.id}` : undefined
                   }
                 />
               )
