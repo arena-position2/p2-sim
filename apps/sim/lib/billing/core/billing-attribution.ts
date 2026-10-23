@@ -1,8 +1,8 @@
 import { db } from '@sim/db'
-import { member, workspace } from '@sim/db/schema'
+import { member, user, workspace } from '@sim/db/schema'
 import { generateId, isValidUuid } from '@sim/utils/id'
 import { isRecordLike } from '@sim/utils/object'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import {
   checkBillingBlocked,
   checkBillingEntityBlocked,
@@ -764,6 +764,61 @@ export async function resolveOrganizationBillingAttribution(input: {
     actorUserId: input.actorUserId,
     workspaceId: null,
     ...payer,
+  })
+}
+
+/**
+ * Finds the Sim user a caller-supplied billing email names, matching
+ * case-insensitively. Returns `null` when no account uses that email.
+ */
+export async function resolveBillingPayerUserIdByEmail(email: string): Promise<string | null> {
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail) return null
+  const [row] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(sql`lower(${user.email}) = ${normalizedEmail}`)
+    .limit(1)
+  return row?.id ?? null
+}
+
+/**
+ * Re-routes a workspace run's payer to a specific user's organization, or to
+ * that user's personal plan when they belong to no organization, while the
+ * run's actor and workspace stay exactly as the execution boundary resolved
+ * them. Used when a deployed-API caller names who should pay for the call.
+ */
+export async function resolveBillingAttributionForPayerUser(input: {
+  actorUserId: string
+  workspaceId: string
+  payerUserId: string
+}): Promise<BillingAttributionSnapshot> {
+  const { actorUserId, workspaceId, payerUserId } = input
+  const [membership] = await db
+    .select({ organizationId: member.organizationId })
+    .from(member)
+    .where(eq(member.userId, payerUserId))
+    .limit(1)
+
+  if (membership?.organizationId) {
+    const payer = await resolveOrganizationBillingPayer(membership.organizationId)
+    return buildBillingAttributionSnapshot({ actorUserId, workspaceId, ...payer })
+  }
+
+  const payerSubscription = await getHighestPriorityPersonalSubscription(payerUserId, {
+    onError: 'throw',
+  })
+  if (payerSubscription && payerSubscription.referenceId !== payerUserId) {
+    throw new Error(
+      `Resolved subscription ${payerSubscription.id} does not belong to billing payer ${payerUserId}`
+    )
+  }
+  return buildBillingAttributionSnapshot({
+    actorUserId,
+    workspaceId,
+    billedAccountUserId: payerUserId,
+    organizationId: null,
+    payerSubscription,
   })
 }
 

@@ -434,6 +434,8 @@ export const POST = withRouteHandler(
       if (runIdHeader !== undefined && !isPublicApiAccess) {
         requestedExecutionId = runIdHeader
       }
+      /** Caller-named payer; absent means the workflow workspace pays as before. */
+      const billingPayerEmail = parsed.data.headers['x-sim-email']
 
       let result: ExecuteWorkflowServiceResult
       if (apiKeyPrincipal) {
@@ -480,6 +482,7 @@ export const POST = withRouteHandler(
             input: {
               ...commonInput,
               input: body.input ?? {},
+              billingPayerEmail,
               requestedTimeoutSeconds: body.executionTimeoutSeconds,
               mode: body.async
                 ? 'async'
@@ -531,6 +534,7 @@ export const POST = withRouteHandler(
           triggerType: 'api',
           requestId,
           workflowRecord: workflowAuthorization.workflow,
+          billingPayerEmail,
           includeFileBase64: body.includeFileBase64,
           base64MaxBytes: body.base64MaxBytes,
           selectedOutputs: body.selectedOutputs,

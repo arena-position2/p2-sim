@@ -8,6 +8,7 @@ import {
   resolveBillingAttribution,
 } from '@/lib/billing/core/billing-attribution'
 import type { AsyncExecutionCorrelation } from '@/lib/core/async-jobs/types'
+import type { ExecutionActor } from '@/lib/execution/actor-resolution'
 import { resolveChildExecutionLineage } from '@/lib/execution/lineage'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { captureServerEvent } from '@/lib/posthog/server'
@@ -144,6 +145,8 @@ export interface ExecuteWorkflowOptions {
   isPublicApiAccess?: boolean
   /** Immutable actor/payer decision captured by preprocessing. */
   billingAttribution?: BillingAttributionSnapshot
+  /** Resolved actor identity for `actor_user_id`/`actor_type` on usage and execution logs. */
+  executionActor?: ExecutionActor
   /** Server-issued run identity persisted with the execution log and snapshot. */
   trustedExecutionCorrelation?: AsyncExecutionCorrelation
   /** Deployed-chat thinking policy; persisted on the snapshot for resume. */
@@ -256,6 +259,7 @@ export async function executeWorkflow(
       isClientSession: Boolean(sessionUserId),
       enforceCredentialAccess: streamConfig?.enforceCredentialAccess ?? false,
       isPublicApiAccess: streamConfig?.isPublicApiAccess ?? false,
+      executionActor: streamConfig?.executionActor,
       largeValueExecutionIds: Array.from(new Set([executionId])),
       largeValueKeys: streamConfig?.largeValueKeys,
       fileKeys: streamConfig?.fileKeys,

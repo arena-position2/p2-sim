@@ -13,7 +13,7 @@ import { validateCallChain } from '@/lib/execution/call-chain'
 import { processInputFileFields } from '@/lib/execution/files'
 import { containsLargeValueRef } from '@/lib/execution/payloads/large-value-ref'
 import { compactExecutionPayload } from '@/lib/execution/payloads/serializer'
-import { preprocessExecution } from '@/lib/execution/preprocessing'
+import { type PreprocessExecutionOptions, preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { MAX_MCP_WORKFLOW_RESPONSE_BYTES } from '@/lib/mcp/constants'
 import { hydrateUserFilesWithBase64 } from '@/lib/uploads/utils/user-file-base64.server'
@@ -86,6 +86,12 @@ export interface ExecuteWorkflowServiceParams {
   /** Pre-fetched workflow row (already authorized by the caller). */
   workflowRecord?: WorkflowRecord
   upstreamBillingAttribution?: BillingAttributionSnapshot
+  /**
+   * Caller-named payer for this run (see
+   * {@link PreprocessExecutionOptions.billingPayerEmail}). Absent on every
+   * surface that does not expose the billing-email header.
+   */
+  billingPayerEmail?: string
   /** Pin execution to a specific deployment version (MCP bridge). */
   deploymentVersionId?: string
   includeFileBase64?: boolean
@@ -199,6 +205,24 @@ function failure(f: ExecuteWorkflowServiceFailure): ExecuteWorkflowServiceFailur
   return { ok: false, failure: f }
 }
 
+/**
+ * API-key identity for actor resolution, mirroring the v1 execute route so a
+ * workspace key records `api_key` + its key id and a personal key records its
+ * owner. Pure branch on the principal; kept local so the service does not pull
+ * in the hybrid auth module.
+ */
+function apiKeyAttributionFromPrincipal(
+  principal: WorkflowExecutionPrincipal | undefined
+): Pick<PreprocessExecutionOptions, 'apiKeyId' | 'apiKeyType'> {
+  if (principal?.kind === 'personal_api_key') {
+    return { apiKeyId: principal.keyId, apiKeyType: 'personal' }
+  }
+  if (principal?.kind === 'workspace_api_key') {
+    return { apiKeyId: principal.keyId, apiKeyType: 'workspace' }
+  }
+  return {}
+}
+
 async function compactServiceOutput<T>(
   value: T,
   context: {
@@ -257,6 +281,7 @@ export async function executeWorkflowService(
     isPublicApiAccess = false,
     workflowRecord,
     upstreamBillingAttribution,
+    billingPayerEmail,
     deploymentVersionId,
     includeFileBase64 = true,
     base64MaxBytes,
@@ -381,8 +406,10 @@ export async function executeWorkflowService(
       rateLimitCounter,
       loggingSession,
       useAuthenticatedUserAsActor,
+      ...apiKeyAttributionFromPrincipal(principal),
       workflowRecord,
       billingAttribution: upstreamBillingAttribution,
+      billingPayerEmail,
       executionType: mode === 'async' ? 'async' : 'sync',
       requestedTimeoutSeconds,
     })
@@ -409,6 +436,7 @@ export async function executeWorkflowService(
     const actorUserId = preprocessResult.actorUserId
     const workflow = preprocessResult.workflowRecord
     const billingAttribution = preprocessResult.billingAttribution
+    const executionActor = preprocessResult.executionActor
     const workspaceId = workflow.workspaceId
     if (!workspaceId) {
       await releaseExecutionSlot(executionId)
@@ -427,6 +455,7 @@ export async function executeWorkflowService(
         principal,
         userId: actorUserId,
         billingAttribution,
+        executionActor,
         workspaceId,
         input,
         triggerType,
@@ -615,6 +644,7 @@ export async function executeWorkflowService(
               enforceCredentialAccess: useAuthenticatedUserAsActor,
               isPublicApiAccess,
               billingAttribution,
+              executionActor,
               largeValueKeys: [],
               fileKeys: [],
               includeThinking,
@@ -648,6 +678,7 @@ export async function executeWorkflowService(
       userId: actorUserId,
       principal,
       billingAttribution,
+      executionActor,
       workflowUserId: workflow.userId,
       triggerType,
       triggerBlockId,
