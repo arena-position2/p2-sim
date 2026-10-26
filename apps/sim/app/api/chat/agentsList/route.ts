@@ -14,6 +14,7 @@ import {
   labelFromDepartmentMap,
   resolveAgentDepartmentValue,
 } from '@/lib/chat/arena-departments'
+import { withLoggedInEmailOnVideoAgentUrl } from '@/lib/chat/video-agent-redirect'
 import { getUniqueBlockNamesByWorkflowId } from '@/lib/chat/workflow-block-names'
 import { getBaseUrl } from '@/lib/core/utils/urls'
 
@@ -40,7 +41,8 @@ interface AgentChatRow {
 function toAgentListItem(
   row: AgentChatRow,
   departmentLabelMap: Map<string, string>,
-  blockNames: string[]
+  blockNames: string[],
+  viewerEmail: string
 ) {
   const appRedirectUrl = row.deploymentType === 'app' && row.redirectUrl ? row.redirectUrl : null
   return {
@@ -56,9 +58,9 @@ function toAgentListItem(
     status: 'published',
     identifier: row.identifier,
     deployment_type: row.deploymentType === 'app' ? 'app' : 'chat',
-    redirect_url:
-      appRedirectUrl ??
-      `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
+    redirect_url: appRedirectUrl
+      ? withLoggedInEmailOnVideoAgentUrl(appRedirectUrl, viewerEmail)
+      : `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
     arena_path: row.arenaPath?.trim() || null,
     block_names: blockNames,
     // allowedEmails: row.allowedEmails,
@@ -88,13 +90,19 @@ function parseGenericAgentsWorkspaceIds(raw: string | null): string[] {
 /** Maps chat rows to list items, attaching unique workflow block types in one query. */
 async function toAgentListItems(
   rows: AgentChatRow[],
-  departmentLabelMap: Map<string, string>
+  departmentLabelMap: Map<string, string>,
+  viewerEmail: string
 ): Promise<AgentListItem[]> {
   const blockNamesByWorkflowId = await getUniqueBlockNamesByWorkflowId(
     rows.map((row) => row.workflowId)
   )
   return rows.map((row) =>
-    toAgentListItem(row, departmentLabelMap, blockNamesByWorkflowId.get(row.workflowId) ?? [])
+    toAgentListItem(
+      row,
+      departmentLabelMap,
+      blockNamesByWorkflowId.get(row.workflowId) ?? [],
+      viewerEmail
+    )
   )
 }
 
@@ -267,7 +275,7 @@ async function getMyAgentsList(emailId: string): Promise<NextResponse> {
 
   const departmentLabelMap = await getAgentDepartmentLabelMap()
   const agentList = await sortAgentListByRecentUsage(
-    await toAgentListItems(accessibleChats, departmentLabelMap),
+    await toAgentListItems(accessibleChats, departmentLabelMap, emailId),
     creatorUserId
   )
 
@@ -315,7 +323,7 @@ async function getSharedWithMeAgentsList(emailId: string): Promise<NextResponse>
 
   const sharedChats = await fetchSharedWithMeChats(emailId, userRecord[0].id)
   const departmentLabelMap = await getAgentDepartmentLabelMap()
-  const agentList = await toAgentListItems(sharedChats, departmentLabelMap)
+  const agentList = await toAgentListItems(sharedChats, departmentLabelMap, emailId)
 
   logger.info(
     `agentsList (sharedwithme): returning ${agentList.length} chats for ${emailId} (in allowedEmails, not created by user)`
@@ -369,11 +377,12 @@ async function getGlobalAgentsList(
     globalChats.filter((row) =>
       hasAllowedEmailStartingWithAtSymbol(row.allowedEmails, userEmailDomain)
     ),
-    departmentLabelMap
+    departmentLabelMap,
+    emailId
   )
 
   const sharedChats = await fetchSharedWithMeChats(emailId, userId, departmentValue)
-  const sharedAgentList = await toAgentListItems(sharedChats, departmentLabelMap)
+  const sharedAgentList = await toAgentListItems(sharedChats, departmentLabelMap, emailId)
 
   const mergedAgentList = mergeAgentListsById(globalAgentList, sharedAgentList)
   let agentList: AgentListItem[] | AgentListItemWithDisabled[] = await sortAgentListByRecentUsage(
@@ -392,7 +401,7 @@ async function getGlobalAgentsList(
       allowedEmailsByChatId.set(row.chatId, row.allowedEmails)
     }
 
-    const genericAgentList = await toAgentListItems(genericRows, departmentLabelMap)
+    const genericAgentList = await toAgentListItems(genericRows, departmentLabelMap, emailId)
     const mergedWithGeneric = mergeAgentListsById(mergedAgentList, genericAgentList)
     const sortedMerged = await sortAgentListByRecentUsage(mergedWithGeneric, userId)
 
