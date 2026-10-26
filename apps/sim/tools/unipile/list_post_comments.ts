@@ -53,6 +53,13 @@ export const unipileListPostCommentsTool: ToolConfig<
       visibility: 'user-or-llm',
       description: 'Optional: list replies for this comment id (LinkedIn: from comments list)',
     },
+    max_items: {
+      type: 'number',
+      required: false,
+      visibility: 'user-or-llm',
+      description:
+        'Stop after this many comments, following pages if needed. Omit to return one page.',
+    },
   },
 
   request: {
@@ -79,6 +86,13 @@ export const unipileListPostCommentsTool: ToolConfig<
       }
       if (typeof params.comment_id === 'string' && params.comment_id.trim() !== '') {
         out.comment_id = params.comment_id.trim()
+      }
+      if (
+        params.max_items !== undefined &&
+        params.max_items !== null &&
+        Number.isFinite(Number(params.max_items))
+      ) {
+        out.max_items = Number(params.max_items)
       }
       return out
     },

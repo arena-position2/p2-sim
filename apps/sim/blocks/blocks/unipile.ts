@@ -490,6 +490,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       mode: 'advanced',
     },
     {
+      id: 'post_comments_max',
+      title: 'Max comments',
+      type: 'short-input',
+      placeholder: 'Stop after this many (e.g. 100). Empty returns one page.',
+      dependsOn: ['operation'],
+      condition: { field: 'operation', value: 'list_post_comments' },
+      mode: 'advanced',
+    },
+    {
       id: 'post_comments_sort',
       title: 'Sort comments by',
       type: 'dropdown',
@@ -1241,6 +1250,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
           ) {
             out.comment_id = params.post_comments_thread_comment_id.trim()
           }
+          const maxRaw = params.post_comments_max
+          if (typeof maxRaw === 'string' && maxRaw.trim() !== '') {
+            const n = Number.parseInt(maxRaw.trim(), 10)
+            if (Number.isFinite(n)) {
+              out.max_items = n
+            }
+          } else if (typeof maxRaw === 'number' && Number.isFinite(maxRaw)) {
+            out.max_items = Math.trunc(maxRaw)
+          }
           return out
         }
         if (op === 'list_post_reactions') {
@@ -1591,6 +1609,10 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
     post_comments_limit: {
       type: 'string',
       description: 'List post comments: optional limit 1–100 for the request page',
+    },
+    post_comments_max: {
+      type: 'string',
+      description: 'List post comments: stop after this many comments. Empty returns one page.',
     },
     post_comments_sort: {
       type: 'string',
