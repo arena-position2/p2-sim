@@ -16,6 +16,10 @@ describe('resolveBedrockThinkingAdditionalFields', () => {
       thinking: { type: 'adaptive' },
       output_config: { effort: 'medium' },
     })
+    expect(resolveBedrockThinkingAdditionalFields('anthropic.claude-fable-5-1', 'high')).toEqual({
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high' },
+    })
   })
 
   it('enables budget thinking for Claude 4.6', () => {

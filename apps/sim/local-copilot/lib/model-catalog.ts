@@ -47,6 +47,27 @@ export const LOCAL_COPILOT_CATALOG = [
     model: 'gemini-3.8-flash',
   },
   {
+    id: 'bedrock-claude-fable-5-1',
+    providerGroup: 'bedrock',
+    label: 'Claude Fable 5.1',
+    provider: 'bedrock',
+    model: 'anthropic.claude-fable-5-1',
+  },
+  {
+    id: 'bedrock-gpt-6-astra',
+    providerGroup: 'bedrock',
+    label: 'GPT-6 Astra',
+    provider: 'bedrock',
+    model: 'openai.gpt-6-astra',
+  },
+  {
+    id: 'bedrock-gpt-5.5',
+    providerGroup: 'bedrock',
+    label: 'GPT-5.5',
+    provider: 'bedrock',
+    model: 'openai.gpt-5.5',
+  },
+  {
     id: 'bedrock-claude-opus-5',
     providerGroup: 'bedrock',
     label: 'Claude Opus 5',

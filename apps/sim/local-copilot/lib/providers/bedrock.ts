@@ -63,7 +63,7 @@ export function resolveBedrockThinkingAdditionalFields(
   const normalized = thinkingLevel.trim().toLowerCase()
   // Adaptive-only Claude generations reject manual budget_tokens on Bedrock.
   if (
-    /claude-(?:opus|sonnet)-5(?:$|[^0-9])/i.test(model) ||
+    /claude-(?:opus|sonnet|fable)-5(?:$|[^0-9])/i.test(model) ||
     /claude-opus-4(?:\.|-)(?:7|8)/i.test(model)
   ) {
     return {

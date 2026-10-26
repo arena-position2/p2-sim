@@ -46,6 +46,13 @@ describe('getBedrockInferenceProfileId', () => {
     expect(getBedrockInferenceProfileId('bedrock/openai.gpt-5.6-sol', 'us-east-1')).toBe(
       'us.openai.gpt-5.6-sol'
     )
+    expect(getBedrockInferenceProfileId('anthropic.claude-fable-5-1', 'us-east-1')).toBe(
+      'us.anthropic.claude-fable-5-1'
+    )
+    expect(getBedrockInferenceProfileId('openai.gpt-6-astra', 'us-east-1')).toBe(
+      'us.openai.gpt-6-astra'
+    )
+    expect(getBedrockInferenceProfileId('openai.gpt-5.5', 'us-east-1')).toBe('us.openai.gpt-5.5')
     expect(() => getBedrockInferenceProfileId('bedrock/openai.gpt-5.6-sol', 'eu-west-1')).toThrow(
       'Supply an explicit bedrock/global.'
     )
