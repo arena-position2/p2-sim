@@ -2,6 +2,7 @@ import { dbReplica } from '@sim/db'
 import {
   copilotChats,
   copilotRuns,
+  member,
   usageLog,
   workflow,
   workflowExecutionLogs,
@@ -800,9 +801,13 @@ export async function getUserUsageAnalytics(
         )
       )
 
+    const homeOrganizations = await dbReplica
+      .selectDistinct({ organizationId: member.organizationId })
+      .from(member)
+      .where(eq(member.userId, userId))
     const byApi = await listExternalApiUsage({
       payerCondition: eq(usageLog.actorUserId, userId),
-      workspaceIds: allWorkspaces.map((ws) => ws.id),
+      homeOrganizationIds: homeOrganizations.map((row) => row.organizationId),
       period,
     })
 

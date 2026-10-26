@@ -83,11 +83,13 @@ export const organizationUsageAnalyticsResponseSchema = z.object({
   ),
   /**
    * API runs billed to this organization whose workflow lives in another
-   * organization's workspace. Kept apart from `byWorkspace`, which only
-   * sums rows that ran inside this organization's own workspaces.
+   * organization. Kept apart from `byWorkspace`, which only sums rows that
+   * ran inside this organization's own workspaces.
    */
   byApi: z.array(
     costBucketSchema.extend({
+      organizationId: z.string(),
+      organizationName: z.string(),
       workspaceId: z.string(),
       workspaceName: z.string(),
       workflowId: z.string(),

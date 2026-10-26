@@ -2,6 +2,7 @@ import { dbReplica } from '@sim/db'
 import {
   copilotChats,
   copilotRuns,
+  organization,
   usageLog,
   workflow,
   workflowExecutionLogs,
@@ -212,6 +213,8 @@ export function ledgerCostSelect() {
 }
 
 export interface ExternalApiUsageRow {
+  organizationId: string
+  organizationName: string
   workspaceId: string
   workspaceName: string
   workflowId: string
@@ -225,21 +228,30 @@ export interface ExternalApiUsageRow {
 }
 
 /**
- * API-triggered workflow cost charged outside the viewer's own workspaces.
- * `payerCondition` selects who was charged (an organization billing entity, or
- * one actor). Rows whose workspace is in `workspaceIds` stay in the normal
- * workspace rollup and are excluded here.
+ * API runs whose workflow lives in another organization.
+ *
+ * `payerCondition` selects who was charged, or who the actor was. `homeOrganizationIds`
+ * are the organizations the viewer belongs to. A workspace in one of those
+ * organizations stays in the normal workspace rollup. Belonging to the workspace
+ * itself does not hide the row: only organization membership does.
  */
 export async function listExternalApiUsage(params: {
   payerCondition: SQL
-  workspaceIds: string[]
+  homeOrganizationIds: string[]
   period: ResolvedPeriod
 }): Promise<ExternalApiUsageRow[]> {
-  const { payerCondition, workspaceIds, period } = params
-  if (workspaceIds.length === 0) return []
+  const { payerCondition, homeOrganizationIds, period } = params
+  const otherOrganization = and(
+    isNotNull(workspace.organizationId),
+    homeOrganizationIds.length > 0
+      ? notInArray(workspace.organizationId, homeOrganizationIds)
+      : undefined
+  )
 
   const rows = await dbReplica
     .select({
+      organizationId: organization.id,
+      organizationName: organization.name,
       workspaceId: usageLog.workspaceId,
       workspaceName: workspace.name,
       workflowId: usageLog.workflowId,
@@ -257,19 +269,21 @@ export async function listExternalApiUsage(params: {
         eq(workflowExecutionLogs.trigger, 'api')
       )
     )
-    .leftJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .innerJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .innerJoin(organization, eq(organization.id, workspace.organizationId))
     .leftJoin(workflow, eq(workflow.id, usageLog.workflowId))
     .where(
       and(
         payerCondition,
+        otherOrganization,
         eq(usageLog.billable, true),
-        isNotNull(usageLog.workspaceId),
         isNotNull(usageLog.workflowId),
-        notInArray(usageLog.workspaceId, workspaceIds),
         ...ledgerPeriodBounds(period)
       )
     )
     .groupBy(
+      organization.id,
+      organization.name,
       usageLog.workspaceId,
       workspace.name,
       usageLog.workflowId,
@@ -279,9 +293,11 @@ export async function listExternalApiUsage(params: {
 
   return sortByBillableCostDesc(
     rows.flatMap((row) => {
-      if (!row.workspaceId || !row.workflowId) return []
+      if (!row.organizationId || !row.workspaceId || !row.workflowId) return []
       return [
         {
+          organizationId: row.organizationId,
+          organizationName: row.organizationName ?? row.organizationId,
           workspaceId: row.workspaceId,
           workspaceName: row.workspaceName ?? row.workspaceId,
           workflowId: row.workflowId,

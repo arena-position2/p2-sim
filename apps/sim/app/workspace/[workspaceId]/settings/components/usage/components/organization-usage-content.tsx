@@ -228,17 +228,24 @@ export function OrganizationUsageContent({
         {showWorkflow && data.byApi.length > 0 && (
           <SettingsSection label='By API'>
             <p className='mb-4 text-[var(--text-secondary)] text-small'>
-              API runs billed to this organization from a workspace outside it.
+              API workflows from another organization, run by a member of this organization.
             </p>
             <CostBreakdownTable
               rows={data.byApi}
-              getRowKey={(row) => `${row.workspaceId}:${row.workflowId}:${row.actorUserId ?? ''}`}
+              getRowKey={(row) =>
+                `${row.organizationId}:${row.workspaceId}:${row.workflowId}:${row.actorUserId ?? ''}`
+              }
               emptyMessage='No external API cost in this period.'
               columns={[
                 {
                   key: 'workflow',
                   header: 'Workflow',
                   render: (row) => row.workflowName ?? row.workflowId,
+                },
+                {
+                  key: 'organization',
+                  header: 'Organization',
+                  render: (row) => row.organizationName,
                 },
                 {
                   key: 'workspace',

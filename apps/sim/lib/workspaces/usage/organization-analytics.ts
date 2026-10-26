@@ -698,7 +698,7 @@ export async function getOrganizationUsageAnalytics(
     const byApi = externalApiPayer
       ? await listExternalApiUsage({
           payerCondition: externalApiPayer,
-          workspaceIds: allWorkspaces.map((ws) => ws.id),
+          homeOrganizationIds: [organizationId],
           period,
         })
       : []
