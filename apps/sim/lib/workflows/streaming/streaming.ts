@@ -6,6 +6,7 @@ import {
   extractChartsFromData,
   hasRenderableChartDeployOutput,
 } from '@/lib/chart-generation/echarts-option'
+import { formatChatImageFileText } from '@/lib/chat/assistant-assets'
 import { createTimeoutAbortController, getTimeoutErrorMessage } from '@/lib/core/execution-limits'
 import {
   extractBlockIdFromOutputId,
@@ -1066,10 +1067,12 @@ export async function createStreamingResponse(
                 state.processedOutputs.add(selectedOutputBlockId)
                 continue
               }
+              const imageFileText =
+                typeof hydratedOutput === 'string' ? null : formatChatImageFileText(hydratedOutput)
               const formattedOutput =
                 typeof hydratedOutput === 'string'
                   ? hydratedOutput
-                  : JSON.stringify(hydratedOutput, null, 2)
+                  : (imageFileText ?? JSON.stringify(hydratedOutput, null, 2))
               const selectedOutputBytes = Math.max(
                 getInlineJsonByteLength(hydratedOutput) ?? 0,
                 Buffer.byteLength(formattedOutput, 'utf8')

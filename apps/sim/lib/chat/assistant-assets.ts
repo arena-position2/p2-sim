@@ -1,4 +1,4 @@
-import { isUserFileWithMetadata } from '@/lib/core/utils/user-file'
+import { isUserFileDisplayMetadata, isUserFileWithMetadata } from '@/lib/core/utils/user-file'
 import {
   extractStorageKey,
   inferContextFromKey,
@@ -198,21 +198,101 @@ export function toAssistantChatFile(value: AssistantChatFile): AssistantChatFile
   }
 }
 
+const IMAGE_FILE_NAME = /\.(png|jpe?g|gif|webp)$/i
+
+function hasSafeStorageKey(key: string): boolean {
+  const parts = key.split('/')
+  return parts.every((part) => part.length > 0 && part !== '.' && part !== '..')
+}
+
+function looksLikeImageFile(value: { name: string; key: string; type: string }): boolean {
+  return (
+    value.type.startsWith('image/') ||
+    IMAGE_FILE_NAME.test(value.name) ||
+    IMAGE_FILE_NAME.test(value.key)
+  )
+}
+
+/**
+ * Serve URL for an image file record.
+ *
+ * Image Generator stores the picture as an execution file. The record that
+ * reaches chat can have an empty `url` and `type: application/octet-stream`.
+ * Printing that record shows a JSON blob above the picture. The storage key
+ * is enough to render it.
+ */
+function isRenderableStoredUrl(url: string): boolean {
+  return (
+    url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/api/files/serve/')
+  )
+}
+
+export function chatDisplayUrlForImageFile(value: unknown): string | null {
+  if (isUserFileWithMetadata(value) && looksLikeImageFile(value)) {
+    const url = value.url.trim()
+    if (isRenderableStoredUrl(url)) {
+      return url
+    }
+
+    if (hasSafeStorageKey(value.key) && IMAGE_FILE_NAME.test(value.key)) {
+      return `/api/files/serve/${encodeURIComponent(value.key)}`
+    }
+  }
+
+  if (!isUserFileDisplayMetadata(value)) {
+    return null
+  }
+
+  const file = value as { name?: string; type?: string; url?: string }
+  const type = typeof file.type === 'string' ? file.type : ''
+  const name = typeof file.name === 'string' ? file.name : ''
+  if (!type.startsWith('image/') && !IMAGE_FILE_NAME.test(name)) {
+    return null
+  }
+
+  const url = typeof file.url === 'string' ? file.url.trim() : ''
+  return isRenderableStoredUrl(url) ? url : null
+}
+
+/** One image file, or a list of them, as the text chat already knows how to render. */
+export function formatChatImageFileText(value: unknown): string | null {
+  const single = chatDisplayUrlForImageFile(value)
+  if (single) {
+    return single
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    return null
+  }
+
+  const urls: string[] = []
+  for (const item of value) {
+    const url = chatDisplayUrlForImageFile(item)
+    if (!url) {
+      return null
+    }
+    urls.push(url)
+  }
+
+  return urls.join('\n\n')
+}
+
 /**
  * Converts a UserFile into a generated image entry when it is an image.
  */
 export function toAssistantGeneratedImage(
   value: AssistantChatFile
 ): AssistantGeneratedImage | undefined {
-  if (!value.type.startsWith('image/')) {
+  const url = chatDisplayUrlForImageFile(value)
+  if (!url) {
     return undefined
   }
 
   return {
     id: value.id,
     name: value.name,
-    url: value.url,
-    type: value.type,
+    url,
+    type: value.type.startsWith('image/') ? value.type : inferImageMimeTypeFromUrl(value.name),
     key: value.key,
     size: value.size,
     context: value.context,

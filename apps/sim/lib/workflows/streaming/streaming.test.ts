@@ -267,7 +267,10 @@ describe('createStreamingResponse', () => {
         expect(events).toContainEqual({ blockId: 'block', event: 'output', data: [] })
         expect(events.some((event) => 'chunk' in event)).toBe(false)
       } else {
-        expect(events).toContainEqual({ blockId: 'block', chunk: JSON.stringify(files, null, 2) })
+        expect(events).toContainEqual({
+          blockId: 'block',
+          chunk: '/api/files/serve/execution%2Fimage.png',
+        })
         expect(events).toContainEqual({ blockId: 'block', chunk: '\n\n[]' })
         expect(events.some((event) => event.event === 'output')).toBe(false)
       }
