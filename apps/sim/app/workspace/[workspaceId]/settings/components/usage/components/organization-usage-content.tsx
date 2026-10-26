@@ -224,6 +224,51 @@ export function OrganizationUsageContent({
             />
           </SettingsSection>
         )}
+
+        {showWorkflow && data.byApi.length > 0 && (
+          <SettingsSection label='By API'>
+            <p className='mb-4 text-[var(--text-secondary)] text-small'>
+              API runs billed to this organization from a workspace outside it.
+            </p>
+            <CostBreakdownTable
+              rows={data.byApi}
+              getRowKey={(row) => `${row.workspaceId}:${row.workflowId}:${row.actorUserId ?? ''}`}
+              emptyMessage='No external API cost in this period.'
+              columns={[
+                {
+                  key: 'workflow',
+                  header: 'Workflow',
+                  render: (row) => row.workflowName ?? row.workflowId,
+                },
+                {
+                  key: 'workspace',
+                  header: 'Workspace',
+                  render: (row) => row.workspaceName,
+                },
+                {
+                  key: 'actor',
+                  header: 'Actor',
+                  render: (row) =>
+                    row.actorUserId ? (userNameById.get(row.actorUserId) ?? row.actorUserId) : '—',
+                },
+                {
+                  key: 'runs',
+                  header: 'Runs',
+                  align: 'right',
+                  render: (row) => row.executionCount.toLocaleString(),
+                },
+                {
+                  key: 'cost',
+                  header: 'Credits',
+                  align: 'right',
+                  render: (row) => (
+                    <CostCell billableCost={row.billableCost} rawCost={row.rawCost} />
+                  ),
+                },
+              ]}
+            />
+          </SettingsSection>
+        )}
       </UsageCollapsibleGroup>
 
       {showWorkflow && (

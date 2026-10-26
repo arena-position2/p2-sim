@@ -7,7 +7,17 @@ import {
   workflowExecutionLogs,
   workspace,
 } from '@sim/db/schema'
-import { and, eq, inArray, isNotNull, or, type SQL, type SQLWrapper, sql } from 'drizzle-orm'
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  notInArray,
+  or,
+  type SQL,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm'
 import {
   type UsageChargeTypeValue,
   type UsageLogSourceValue,
@@ -199,6 +209,93 @@ export function ledgerCostSelect() {
     rawCost: sql<string>`coalesce(sum(coalesce(${usageLog.rawCost}, ${usageLog.cost})::numeric), 0)`,
     count: sql<number>`count(*)::int`,
   }
+}
+
+export interface ExternalApiUsageRow {
+  workspaceId: string
+  workspaceName: string
+  workflowId: string
+  workflowName: string | null
+  actorUserId: string | null
+  executionCount: number
+  billableCost: number
+  rawCost: number
+  count: number
+  usage: UsageMetrics
+}
+
+/**
+ * API-triggered workflow cost charged outside the viewer's own workspaces.
+ * `payerCondition` selects who was charged (an organization billing entity, or
+ * one actor). Rows whose workspace is in `workspaceIds` stay in the normal
+ * workspace rollup and are excluded here.
+ */
+export async function listExternalApiUsage(params: {
+  payerCondition: SQL
+  workspaceIds: string[]
+  period: ResolvedPeriod
+}): Promise<ExternalApiUsageRow[]> {
+  const { payerCondition, workspaceIds, period } = params
+  if (workspaceIds.length === 0) return []
+
+  const rows = await dbReplica
+    .select({
+      workspaceId: usageLog.workspaceId,
+      workspaceName: workspace.name,
+      workflowId: usageLog.workflowId,
+      workflowName: workflow.name,
+      actorUserId: usageLog.actorUserId,
+      executionCount: sql<number>`count(distinct ${usageLog.executionId})::int`,
+      ...ledgerCostSelect(),
+      ...usageMetricsSelect(),
+    })
+    .from(usageLog)
+    .innerJoin(
+      workflowExecutionLogs,
+      and(
+        eq(workflowExecutionLogs.executionId, usageLog.executionId),
+        eq(workflowExecutionLogs.trigger, 'api')
+      )
+    )
+    .leftJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .leftJoin(workflow, eq(workflow.id, usageLog.workflowId))
+    .where(
+      and(
+        payerCondition,
+        eq(usageLog.billable, true),
+        isNotNull(usageLog.workspaceId),
+        isNotNull(usageLog.workflowId),
+        notInArray(usageLog.workspaceId, workspaceIds),
+        ...ledgerPeriodBounds(period)
+      )
+    )
+    .groupBy(
+      usageLog.workspaceId,
+      workspace.name,
+      usageLog.workflowId,
+      workflow.name,
+      usageLog.actorUserId
+    )
+
+  return sortByBillableCostDesc(
+    rows.flatMap((row) => {
+      if (!row.workspaceId || !row.workflowId) return []
+      return [
+        {
+          workspaceId: row.workspaceId,
+          workspaceName: row.workspaceName ?? row.workspaceId,
+          workflowId: row.workflowId,
+          workflowName: row.workflowName,
+          actorUserId: row.actorUserId,
+          executionCount: parseIntMetric(row.executionCount),
+          billableCost: parseDecimal(row.billableCost),
+          rawCost: parseDecimal(row.rawCost),
+          count: parseIntMetric(row.count),
+          usage: mapUsageMetrics(row),
+        },
+      ]
+    })
+  )
 }
 
 /**
