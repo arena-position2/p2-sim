@@ -228,12 +228,12 @@ export interface ExternalApiUsageRow {
 }
 
 /**
- * API runs whose workflow lives in another organization.
+ * API runs billed to an organization other than the one that owns the workflow.
  *
- * `payerCondition` selects who was charged, or who the actor was. `homeOrganizationIds`
- * are the organizations the viewer belongs to. A workspace in one of those
- * organizations stays in the normal workspace rollup. Belonging to the workspace
- * itself does not hide the row: only organization membership does.
+ * `payerCondition` selects which billed rows the viewer may see. The workflow's
+ * organization must differ from the billed organization, so the owning
+ * organization keeps those runs in its normal workflow rollup. `homeOrganizationIds`
+ * additionally drops workflows from organizations the viewer belongs to.
  */
 export async function listExternalApiUsage(params: {
   payerCondition: SQL
@@ -243,6 +243,8 @@ export async function listExternalApiUsage(params: {
   const { payerCondition, homeOrganizationIds, period } = params
   const otherOrganization = and(
     isNotNull(workspace.organizationId),
+    eq(usageLog.billingEntityType, 'organization'),
+    sql`${workspace.organizationId} <> ${usageLog.billingEntityId}`,
     homeOrganizationIds.length > 0
       ? notInArray(workspace.organizationId, homeOrganizationIds)
       : undefined

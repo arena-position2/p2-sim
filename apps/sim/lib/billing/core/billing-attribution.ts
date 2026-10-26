@@ -805,9 +805,10 @@ export async function resolveBillingAttributionForPayerUser(input: {
     return buildBillingAttributionSnapshot({ actorUserId, workspaceId, ...payer })
   }
 
-  const payerSubscription = await getHighestPriorityPersonalSubscription(payerUserId, {
-    onError: 'throw',
-  })
+  const payerSubscription: ResolvedPayerSubscription = await getHighestPriorityPersonalSubscription(
+    payerUserId,
+    { onError: 'throw' }
+  )
   if (payerSubscription && payerSubscription.referenceId !== payerUserId) {
     throw new Error(
       `Resolved subscription ${payerSubscription.id} does not belong to billing payer ${payerUserId}`

@@ -13,7 +13,7 @@ import { validateCallChain } from '@/lib/execution/call-chain'
 import { processInputFileFields } from '@/lib/execution/files'
 import { containsLargeValueRef } from '@/lib/execution/payloads/large-value-ref'
 import { compactExecutionPayload } from '@/lib/execution/payloads/serializer'
-import { type PreprocessExecutionOptions, preprocessExecution } from '@/lib/execution/preprocessing'
+import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { MAX_MCP_WORKFLOW_RESPONSE_BYTES } from '@/lib/mcp/constants'
 import { hydrateUserFilesWithBase64 } from '@/lib/uploads/utils/user-file-base64.server'
@@ -87,9 +87,8 @@ export interface ExecuteWorkflowServiceParams {
   workflowRecord?: WorkflowRecord
   upstreamBillingAttribution?: BillingAttributionSnapshot
   /**
-   * Caller-named payer for this run (see
-   * {@link PreprocessExecutionOptions.billingPayerEmail}). Required by the v2
-   * execute route; absent on every surface that does not expose the header.
+   * Caller-named payer for this run, resolved in `preprocessExecution`. Required
+   * by the v2 execute route; absent on every surface that does not expose the header.
    */
   billingPayerEmail?: string
   /** Pin execution to a specific deployment version (MCP bridge). */
@@ -203,24 +202,6 @@ export type ExecuteWorkflowServiceImmediateResult = Exclude<
 
 function failure(f: ExecuteWorkflowServiceFailure): ExecuteWorkflowServiceFailureResult {
   return { ok: false, failure: f }
-}
-
-/**
- * API-key identity for actor resolution, mirroring the v1 execute route so a
- * workspace key records `api_key` + its key id and a personal key records its
- * owner. Pure branch on the principal; kept local so the service does not pull
- * in the hybrid auth module.
- */
-function apiKeyAttributionFromPrincipal(
-  principal: WorkflowExecutionPrincipal | undefined
-): Pick<PreprocessExecutionOptions, 'apiKeyId' | 'apiKeyType'> {
-  if (principal?.kind === 'personal_api_key') {
-    return { apiKeyId: principal.keyId, apiKeyType: 'personal' }
-  }
-  if (principal?.kind === 'workspace_api_key') {
-    return { apiKeyId: principal.keyId, apiKeyType: 'workspace' }
-  }
-  return {}
 }
 
 async function compactServiceOutput<T>(
@@ -406,7 +387,6 @@ export async function executeWorkflowService(
       rateLimitCounter,
       loggingSession,
       useAuthenticatedUserAsActor,
-      ...apiKeyAttributionFromPrincipal(principal),
       workflowRecord,
       billingAttribution: upstreamBillingAttribution,
       billingPayerEmail,

@@ -102,11 +102,11 @@ export function UserMemberUsageContent({
           rows={apiRows}
           getRowKey={(row) => `${row.organizationId}:${row.workspaceId}:${row.workflowId}`}
           getBillableCost={(row) => row.billableCost}
-          emptyMessage='No external API usage in this period.'
+          emptyMessage='No external agent usage in this period.'
           columns={[
             {
               key: 'name',
-              header: 'By API',
+              header: 'By Agent',
               render: (row) => (
                 <div className='flex flex-col'>
                   <span className='font-medium'>{row.workflowName?.trim() || row.workflowId}</span>

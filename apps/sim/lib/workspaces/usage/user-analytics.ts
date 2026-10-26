@@ -6,10 +6,11 @@ import {
   usageLog,
   workflow,
   workflowExecutionLogs,
+  workspace,
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
-import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, notInArray, or, type SQL, sql } from 'drizzle-orm'
 import type { UserUsageAnalytics } from '@/lib/api/contracts/user-usage'
 import type { UsageChargeTypeValue } from '@/lib/api/contracts/workspace-usage'
 import type { UsageLogSource } from '@/lib/billing/core/usage-log'
@@ -801,15 +802,30 @@ export async function getUserUsageAnalytics(
         )
       )
 
-    const homeOrganizations = await dbReplica
-      .selectDistinct({ organizationId: member.organizationId })
-      .from(member)
-      .where(eq(member.userId, userId))
-    const byApi = await listExternalApiUsage({
-      payerCondition: eq(usageLog.actorUserId, userId),
-      homeOrganizationIds: homeOrganizations.map((row) => row.organizationId),
-      period,
-    })
+    const [homeOrganizations, scopedOrganizations] = await Promise.all([
+      dbReplica
+        .selectDistinct({ organizationId: member.organizationId })
+        .from(member)
+        .where(eq(member.userId, userId)),
+      dbReplica
+        .selectDistinct({ organizationId: workspace.organizationId })
+        .from(workspace)
+        .where(inArray(workspace.id, workspaceIds)),
+    ])
+    const billedOrganizationIds = scopedOrganizations.flatMap((row) =>
+      row.organizationId ? [row.organizationId] : []
+    )
+    const byApi =
+      billedOrganizationIds.length > 0
+        ? await listExternalApiUsage({
+            payerCondition: and(
+              eq(usageLog.actorUserId, userId),
+              inArray(usageLog.billingEntityId, billedOrganizationIds)
+            ) as SQL,
+            homeOrganizationIds: homeOrganizations.map((row) => row.organizationId),
+            period,
+          })
+        : []
 
     const embeddedToolSplit = computeEmbeddedToolVirtualSplit(modelMetadataRows)
 
