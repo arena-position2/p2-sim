@@ -277,7 +277,9 @@ const CLAUDE_GEO_PROFILE_MODEL_IDS = new Set([
 const US_GEO_PROFILE_MODEL_IDS = new Set([
   'openai.gpt-6.1-sol',
   'anthropic.claude-fable-5',
+  'anthropic.claude-fable-5-1',
   'openai.gpt-6-astra',
+  'openai.gpt-5.5',
   'openai.gpt-5.6-sol',
   'openai.gpt-5.6-terra',
   'openai.gpt-5.6-luna',
