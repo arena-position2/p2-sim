@@ -11,7 +11,7 @@ const MAX_USER_EMAIL_BATCH = 1000
  * settings row exists yet.
  */
 export const defaultUserSettings: UserSettingsApi = {
-  theme: 'system',
+  theme: 'light',
   autoConnect: true,
   telemetryEnabled: true,
   emailPreferences: {},

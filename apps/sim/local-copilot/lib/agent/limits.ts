@@ -56,3 +56,16 @@ export const MAX_POPULATE_EDITS_HARD_LOCK = 20
  * keeps the turn from settling on an empty shell.
  */
 export const MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS = 2
+
+/**
+ * `get_blocks_metadata` / `load_copilot_artifact` calls allowed after
+ * create_workflow and before the first successful populate edit. Further
+ * discovery calls are rejected so the model must edit_workflow.
+ */
+export const MAX_PRE_POPULATE_DISCOVERY_CALLS = 2
+
+/**
+ * Discovery-only rounds refunded against `MAX_TOOL_ITERATIONS` before the first
+ * successful populate edit. Rejected discovery rounds are not refunded.
+ */
+export const MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS = 2

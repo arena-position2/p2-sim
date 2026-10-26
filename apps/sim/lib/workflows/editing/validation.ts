@@ -50,6 +50,20 @@ const validationLogger = createLogger('EditWorkflowValidation')
 const agentToolLintLogger = createLogger('EditWorkflowAgentToolLint')
 
 /**
+ * Maps a toolbar-hidden sunset block id to the successor new writes should store.
+ * Legacy ids stay registered so existing workflows keep loading.
+ */
+export function resolveCurrentBlockType(blockType: string): string {
+  const direct = getBlock(blockType)
+  if (!direct?.hideFromToolbar) return blockType
+  const successorId = direct.sunset?.replacedBy
+  if (typeof successorId !== 'string' || successorId.length === 0) return blockType
+  const successor = getBlock(successorId)
+  if (!successor || successor.hideFromToolbar) return blockType
+  return successorId
+}
+
+/**
  * Finds an existing block with the same normalized name.
  */
 export function findBlockWithDuplicateNormalizedName(
@@ -419,15 +433,19 @@ function validateAgentToolEntry(item: any, index: number): string | null {
   // itself) can't attach as an agent tool, so the addition would not apply
   // correctly even though the type "exists".
   if (!KNOWN_NON_BLOCK_TOOL_TYPES.has(type)) {
-    const block = getBlock(type)
+    const currentType = typeof type === 'string' ? resolveCurrentBlockType(type) : type
+    if (currentType !== type) {
+      item.type = currentType
+    }
+    const block = getBlock(currentType)
     if (!block) {
-      return `${where} has unrecognized tool type "${type}". Use "custom-tool" for custom tools, "mcp" for MCP tools, or a valid integration block type`
+      return `${where} has unrecognized tool type "${currentType}". Use "custom-tool" for custom tools, "mcp" for MCP tools, or a valid integration block type`
     }
     if (!Array.isArray(block.tools?.access) || block.tools.access.length === 0) {
-      return `${where} block type "${type}" cannot be attached as an agent tool (it exposes no callable tools)`
+      return `${where} block type "${currentType}" cannot be attached as an agent tool (it exposes no callable tools)`
     }
-    if (!isIntegrationDeploymentAvailableForVisibility(type, overlayVisibility())) {
-      return `${where} block type "${type}" is unavailable in this deployment`
+    if (!isIntegrationDeploymentAvailableForVisibility(currentType, overlayVisibility())) {
+      return `${where} block type "${currentType}" is unavailable in this deployment`
     }
 
     const operationConfig = block.subBlocks?.find((subBlock) => subBlock.id === 'operation')
@@ -440,7 +458,7 @@ function validateAgentToolEntry(item: any, index: number): string | null {
             : operationConfig.options
         validOperations = options.map((option) => option.id)
       } catch (error) {
-        return `${where} could not validate operations for block type "${type}": ${toError(error).message}`
+        return `${where} could not validate operations for block type "${currentType}": ${toError(error).message}`
       }
 
       const operation = item.operation
@@ -448,13 +466,13 @@ function validateAgentToolEntry(item: any, index: number): string | null {
         validOperations.length > 1 &&
         (typeof operation !== 'string' || operation.trim() === '')
       ) {
-        return `${where} block type "${type}" requires an operation. Valid operations: ${validOperations.join(', ')}`
+        return `${where} block type "${currentType}" requires an operation. Valid operations: ${validOperations.join(', ')}`
       }
       if (
         operation !== undefined &&
         (typeof operation !== 'string' || !validOperations.includes(operation))
       ) {
-        return `${where} block type "${type}" has invalid operation "${String(operation)}". Valid operations: ${validOperations.join(', ')}. Use one of the block operation ids above; it may differ from the underlying tool id.`
+        return `${where} block type "${currentType}" has invalid operation "${String(operation)}". Valid operations: ${validOperations.join(', ')}. Use one of the block operation ids above; it may differ from the underlying tool id.`
       }
     }
   }
