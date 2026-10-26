@@ -1,0 +1,55 @@
+---
+title: Facebook Ads
+description: Query Facebook Ads data with natural language
+integration:
+  type: "facebook_ads"
+  color: "#1877F2"
+---
+
+
+## OAuth scopes [#oauth-scopes]
+
+Sim requests these scopes when someone connects a Facebook Ads account. For a self-hosted deployment, register your own app with the provider using the settings below. See [Integrations and OAuth](/platform/self-hosting/integrations-oauth) for setup.
+
+| Setting | Value |
+| ------- | ----- |
+| Redirect URI | `<NEXT_PUBLIC_APP_URL>/api/auth/oauth2/callback/facebook-ads` |
+| Environment variables | `FB_CLIENT_ID`, `FB_CLIENT_SECRET` |
+
+| Scope | Description |
+| ----- | ----------- |
+| `ads_read` | Read Facebook Ads account and campaign data |
+| `read_insights` | Read Facebook Ads performance insights |
+| `business_management` | Access Business Manager ad accounts |
+
+## Use the block [#usage-instructions]
+
+Connect to Facebook Ads API and query campaign performance, ad set metrics, and account insights using natural language. Supports all 22 Position2 Facebook ad accounts with AI-powered query parsing.
+
+## Actions
+
+### Facebook Ads Query
+
+Query Facebook Ads API for campaign performance, ad set metrics, and account insights using natural language. Supports all Position2 Facebook ad accounts.
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account` | string | Yes | Facebook ad account key from the workspace account catalog |
+| `query` | string | Yes | Natural language query about Facebook Ads data |
+| `workspaceId` | string | No | Workspace ID for admin vs user credential routing |
+| `oauthCredential` | string | No | Facebook Ads OAuth credential \(non-admin workspaces\) |
+| `accountId` | string | No | Facebook ad account ID \(non-admin workspaces\) |
+| `adAccountId` | string | No | Facebook ad account ID \(non-admin workspaces\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `data` | json | Facebook Ads performance data |
+| `account_id` | string | Facebook ad account ID |
+| `account_name` | string | Facebook ad account name |
+| `query` | string | Original query |
+
+

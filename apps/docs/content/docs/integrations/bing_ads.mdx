@@ -1,0 +1,37 @@
+---
+title: Bing Ads
+description: Query Microsoft Advertising (Bing Ads) data with natural language
+integration:
+  type: "bing_ads"
+  color: "#00A4EF"
+---
+
+
+## Use the block [#usage-instructions]
+
+Connect to Microsoft Advertising (Bing Ads) API and query campaign performance, ad metrics, and account insights using natural language. Supports all Position2 Bing Ads accounts with AI-powered query parsing.
+
+## Actions
+
+### Bing Ads Query
+
+Query Microsoft Advertising (Bing Ads) API for campaign performance, ad metrics, and account insights using natural language. Supports all Position2 Bing Ads accounts.
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account` | string | Yes | Bing Ads account identifier |
+| `query` | string | Yes | Natural language query about Bing Ads data |
+| `workspaceId` | string | No | Workspace ID used to scope the visible Bing Ads account catalog |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `data` | json | Bing Ads performance data |
+| `account_id` | string | Bing Ads account ID |
+| `account_name` | string | Bing Ads account name |
+| `query` | string | Original query |
+
+
