@@ -227,50 +227,6 @@ export function UserUsageContent({
             />
           </SettingsSection>
         )}
-
-        {showWorkflow && data.byApi.length > 0 && (
-          <SettingsSection label='By API'>
-            <p className='mb-4 text-[var(--text-secondary)] text-small'>
-              API workflows you ran in an organization you do not belong to.
-            </p>
-            <CostBreakdownTable
-              rows={data.byApi}
-              getRowKey={(row) => `${row.organizationId}:${row.workspaceId}:${row.workflowId}`}
-              emptyMessage='No external API cost in this period.'
-              columns={[
-                {
-                  key: 'workflow',
-                  header: 'Workflow',
-                  render: (row) => row.workflowName ?? row.workflowId,
-                },
-                {
-                  key: 'organization',
-                  header: 'Organization',
-                  render: (row) => row.organizationName,
-                },
-                {
-                  key: 'workspace',
-                  header: 'Workspace',
-                  render: (row) => row.workspaceName,
-                },
-                {
-                  key: 'runs',
-                  header: 'Runs',
-                  align: 'right',
-                  render: (row) => row.executionCount.toLocaleString(),
-                },
-                {
-                  key: 'cost',
-                  header: 'Credits',
-                  align: 'right',
-                  render: (row) => (
-                    <CostCell billableCost={row.billableCost} rawCost={row.rawCost} />
-                  ),
-                },
-              ]}
-            />
-          </SettingsSection>
-        )}
       </UsageCollapsibleGroup>
 
       {showWorkflow && (
