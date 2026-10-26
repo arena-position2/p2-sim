@@ -263,6 +263,8 @@ export interface UnipileListPostCommentsParams {
   sort_by?: string
   /** When set, returns replies for this comment (LinkedIn: id from comments list). */
   comment_id?: string
+  /** Stop after this many comments. Omit to return one page. */
+  max_items?: number
 }
 
 export type UnipileListPostCommentsToolResponse = ToolResponse & {
