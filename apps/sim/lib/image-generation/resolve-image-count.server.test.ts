@@ -80,6 +80,17 @@ describe('resolveImageGenerationCount', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('counts distinct variations as separate images', async () => {
+    const originalPrompt = 'Create 3 distinct variations of this street market scene'
+    mockSlmImageCount(1)
+
+    const result = await resolveImageGenerationCount({ prompt: originalPrompt })
+
+    expect(result.imageCount).toBe(3)
+    expect(result.singleImagePrompts).toHaveLength(3)
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
   it('counts separate variations even when the SLM would return 1', async () => {
     const originalPrompt = 'Give me three separate variations of this logo'
     mockSlmImageCount(1)
