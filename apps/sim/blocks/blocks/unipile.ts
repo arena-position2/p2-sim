@@ -461,6 +461,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       mode: 'advanced',
     },
     {
+      id: 'reactions_max',
+      title: 'Max reactions',
+      type: 'short-input',
+      placeholder: 'Stop after this many (e.g. 100). Empty loads every page.',
+      dependsOn: ['operation'],
+      condition: { field: 'operation', value: 'list_post_reactions' },
+      mode: 'advanced',
+    },
+    {
       id: 'post_comments_thread_comment_id',
       title: 'Comment ID (replies)',
       type: 'short-input',
@@ -1254,6 +1263,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
           } else if (typeof limRaw === 'number' && Number.isFinite(limRaw)) {
             out.limit = Math.trunc(limRaw)
           }
+          const maxRaw = params.reactions_max
+          if (typeof maxRaw === 'string' && maxRaw.trim() !== '') {
+            const n = Number.parseInt(maxRaw.trim(), 10)
+            if (Number.isFinite(n)) {
+              out.max_items = n
+            }
+          } else if (typeof maxRaw === 'number' && Number.isFinite(maxRaw)) {
+            out.max_items = Math.trunc(maxRaw)
+          }
           return out
         }
         if (op === 'get_linkedin_search_parameters') {
@@ -1582,6 +1600,10 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       type: 'string',
       description:
         'List post reactions: optional 1–100 page size per upstream request (default 100); server still loads every page',
+    },
+    reactions_max: {
+      type: 'string',
+      description: 'List post reactions: stop after this many reactions. Empty loads every page.',
     },
     chat_id: { type: 'string', description: 'Chat id' },
     list_chats_account_ids_csv: {

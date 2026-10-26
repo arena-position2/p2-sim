@@ -304,6 +304,8 @@ export interface UnipileListPostReactionsParams {
   comment_id?: string
   /** Optional page size per upstream request (1–100, default 100). Server aggregates all pages. */
   limit?: number
+  /** Stop after this many reactions. Omit to load every page. */
+  max_items?: number
 }
 
 export type UnipileListPostReactionsToolResponse = ToolResponse & {
