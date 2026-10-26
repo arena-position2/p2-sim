@@ -1,4 +1,5 @@
 import { AuditAction, AuditResourceType } from '@sim/audit'
+import { requirePrincipalSubjectUserId } from '@sim/auth/principal'
 import { db } from '@sim/db'
 import { member, permissions, project, workspace } from '@sim/db/schema'
 import { ORG_ADMIN_ROLES } from '@sim/platform-authz/workspace'
@@ -6,6 +7,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { recordProjectedUseCaseAuditEntries } from '@/lib/core/application/authorized-workspace-use-case'
 import type { OperationUseCase } from '@/lib/core/application/operation'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
+import { deliverRunStops } from '@/lib/mothership/request/application/stop-delivery'
 import {
   type AuthorizedProject,
   authorizeProject,
@@ -13,6 +15,7 @@ import {
   type ProjectAuthorizationInput,
   requireProjectPrincipal,
 } from '@/lib/projects/application/authorization'
+import { resolveCopilotProjectScope } from '@/lib/projects/application/discovery'
 import { projectOperations } from '@/lib/projects/application/operations'
 import { archiveProjectInTransaction, finishProjectArchive } from '@/lib/projects/lifecycle'
 import { requireProjectApiEnabled } from '@/lib/projects/rollout.server'
@@ -83,24 +86,31 @@ export const getProjectIssueAccess: OperationUseCase<
 
 export const listProjects: OperationUseCase<
   typeof projectOperations.list,
-  { organizationId?: string; cursor?: string; limit: number },
+  { organizationId?: string; projectId?: string; cursor?: string; limit: number },
   { projects: ReturnType<typeof presentProject>[]; nextCursor: string | null }
 > = {
   operation: projectOperations.list,
   async execute({ principal, input }) {
     requireProjectPrincipal(principal, projectOperations.list)
     await requireProjectApiEnabled()
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
+      throw new OrchestrationError('validation', 'Limit must be between 1 and 100')
+    const userId = requirePrincipalSubjectUserId(principal)
+    const scope =
+      principal.kind === 'resource_delegated'
+        ? await resolveCopilotProjectScope(principal, input.organizationId)
+        : { organizationId: input.organizationId }
     return db.transaction(async (tx) => {
       /** Driven from the caller's grants and admin organization, so cost tracks their reach. */
       const candidates = await tx.execute<{ id: string }>(sql`
         WITH accessible AS (
           SELECT ${permissions.entityId} AS workspace_id FROM ${permissions}
-          WHERE ${permissions.userId} = ${principal.userId}
+          WHERE ${permissions.userId} = ${userId}
             AND ${permissions.entityType} = 'workspace'
           UNION
           SELECT ${workspace.id} FROM ${member}
           JOIN ${workspace} ON ${workspace.organizationId} = ${member.organizationId}
-          WHERE ${member.userId} = ${principal.userId} AND ${inArray(member.role, ORG_ADMIN_ROLES)}
+          WHERE ${member.userId} = ${userId} AND ${inArray(member.role, ORG_ADMIN_ROLES)}
         )
         SELECT DISTINCT ${workspace.projectId} AS id
         FROM accessible
@@ -109,7 +119,8 @@ export const listProjects: OperationUseCase<
         JOIN ${project}
           ON ${project.id} = ${workspace.projectId} AND ${project.archivedAt} IS NULL
         WHERE TRUE
-          ${input.organizationId ? sql`AND ${project.organizationId} = ${input.organizationId}` : sql``}
+          ${scope.organizationId !== undefined ? sql`AND ${project.organizationId} IS NOT DISTINCT FROM ${scope.organizationId}` : sql``}
+          ${input.projectId !== undefined ? sql`AND ${project.id} = ${input.projectId}` : sql``}
           ${input.cursor ? sql`AND ${workspace.projectId} > ${input.cursor}` : sql``}
         ORDER BY 1
         LIMIT ${input.limit + 1}
@@ -200,6 +211,7 @@ export const archiveProject: OperationUseCase<
         ],
         result.context.record.organizationId ?? undefined
       )
+    deliverRunStops(result.effects.flatMap((environment) => environment.stoppedRuns))
     await finishProjectArchive(result.effects, `project:${input.projectId}`)
     return { id: input.projectId, archived: true }
   },
@@ -221,7 +233,7 @@ export const getWorkspaceProject: OperationUseCase<
         .from(workspace)
         .where(eq(workspace.id, input.workspaceId))
         .limit(1)
-      if (!membership?.projectId) throw new OrchestrationError('not_found', 'Project not found')
+      if (!membership) throw new OrchestrationError('not_found', 'Project not found')
       return {
         project: presentProject(
           await authorizeProject(
@@ -236,6 +248,41 @@ export const getWorkspaceProject: OperationUseCase<
           )
         ),
       }
+    }, READ_SNAPSHOT)
+  },
+}
+
+/** Discovers the canonical invocation workspace's parent without depending on discovery ordering. */
+export const getCurrentWorkspaceProject: OperationUseCase<
+  typeof projectOperations.list,
+  Record<string, never>,
+  { project: ReturnType<typeof presentProject> | null }
+> = {
+  operation: projectOperations.list,
+  async execute({ principal }) {
+    requireProjectPrincipal(principal, projectOperations.list)
+    await requireProjectApiEnabled()
+    if (principal.kind !== 'resource_delegated')
+      throw new OrchestrationError('forbidden', 'Current Project discovery requires an invocation')
+    const scope = await resolveCopilotProjectScope(principal)
+    const workspaceId = scope.workspaceId
+    if (!workspaceId) return { project: null }
+    return db.transaction(async (tx) => {
+      const [membership] = await tx
+        .select({ projectId: workspace.projectId })
+        .from(workspace)
+        .where(eq(workspace.id, workspaceId))
+        .limit(1)
+      if (!membership?.projectId) return { project: null }
+      const [context] = await authorizeProjectsForRead(tx, principal, [membership.projectId])
+      if (
+        !context ||
+        context.record.archivedAt ||
+        context.record.organizationId !== scope.organizationId ||
+        !context.environments.some((environment) => environment.id === workspaceId)
+      )
+        throw new OrchestrationError('not_found', 'Project not found')
+      return { project: presentProject(context) }
     }, READ_SNAPSHOT)
   },
 }

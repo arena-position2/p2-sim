@@ -1,7 +1,7 @@
 # ========================================
 # Base Stage: runtime-only dependencies (inherited by the final image)
 # ========================================
-FROM oven/bun:1.4.2-slim AS base
+FROM oven/bun:1.4.4-slim AS base
 
 # Install Node.js 24 (Active LTS) and the runtime dependencies once in base.
 # Node runs the isolated-vm sandbox worker and the Oracle Database worker (the
@@ -13,12 +13,21 @@ FROM oven/bun:1.4.2-slim AS base
 # subprocess adapter; python3 is the node-gyp interpreter and is kept because
 # build-base inherits from this stage. The compiler toolchain lives in build-base
 # so the runner does not ship it.
+#
+# The OS trust store then drops the two roots that chain to the compromised
+# eMudhra intermediates (https://emudhra.we-have-a-problem.com), both already
+# out of Mozilla's store; Bun's fetch, curl, and python3 read it. The final
+# grep matches a signature line of each root (AAA, then emSign ECC G3), so the
+# build fails if the edit ever stops removing them.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 curl ca-certificates bash ffmpeg \
     && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs
+    && apt-get install -y nodejs \
+    && sed -i -E 's#^mozilla/(emSign_ECC_Root_CA_-_G3|Comodo_AAA_Services_root)\.crt$#!&#' /etc/ca-certificates.conf \
+    && update-ca-certificates \
+    && ! grep -qF -e 'l2D4kF501KKaU73yqWjgom7C12yxow+ev+to51byrvLjKzg6CYG1a4XXvi3tPxq3' -e 'CUfvO6wIBHxcmbHtRwfSAjEAnbpV/KlK6O3t5nYBQnvI+GDZjVGLVTv7jHvrZQnD' /etc/ssl/certs/ca-certificates.crt
 
 # ========================================
 # Build Base: adds the native toolchain the isolated-vm rebuild needs
@@ -203,6 +212,18 @@ COPY --from=deps --chown=nextjs:nodejs /app/node_modules/@napi-rs ./node_modules
 
 # Copy the isolated-vm worker script
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/execution/isolated-vm-worker.cjs ./apps/sim/lib/execution/isolated-vm-worker.cjs
+
+# The same image runs as the dedicated worker host with
+# `node apps/sim/lib/execution/isolated-vm-host.cjs`. The host requires `ws`
+# directly, so copy the complete package rather than relying on the tracer.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/execution/isolated-vm-host.cjs ./apps/sim/lib/execution/isolated-vm-host.cjs
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/ws ./node_modules/ws
+
+# Spreadsheet parse worker bundle (build:xlsx-worker, run by `bun run build`;
+# under the build task's declared `dist/**` output so a Turbo cache hit restores it).
+# Without it parsing falls back in-process, so a missing file fails the image
+# build here instead of silently putting XLSX parsing back on the event loop.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/dist/xlsx-worker.mjs ./apps/sim/dist/xlsx-worker.mjs
 
 # Copy the pre-built sandbox library bundles (pptxgenjs, docx, pdf-lib) that
 # run inside the V8 isolate. Committed into the repo; see

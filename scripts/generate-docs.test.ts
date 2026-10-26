@@ -51,6 +51,21 @@ describe('documentation editor icon metadata', () => {
 })
 
 describe('documentation tool metadata', () => {
+  it('does not publish unrelated block fields for operations with no response body', () => {
+    const page = fs.readFileSync(
+      path.resolve(import.meta.dirname, '../apps/docs/content/docs/integrations/greenhouse.mdx'),
+      'utf8'
+    )
+    for (const operation of ['Hire', 'Move', 'Reject', 'Unreject']) {
+      const action = page.split(`### Greenhouse ${operation} Application\n`)[1]?.split('\n### ')[0]
+      expect(action).toBeDefined()
+      const output = action?.split('#### Output\n')[1]
+      expect(output).toContain('No output fields')
+      expect(output).not.toContain('| `candidate_id` |')
+      expect(output).not.toContain('| `nextCursor` |')
+    }
+  })
+
   it('preserves nested fields referenced by private constants in the same module', () => {
     const source = `
       const MONEY_FIELDS = {
@@ -112,6 +127,23 @@ describe('documentation tool metadata', () => {
     expect(
       type === 'array' ? parsed.products.items.properties : parsed.products.properties
     ).toEqual(expected)
+  })
+
+  it('preserves versioned inherited tools when the access array appends another operation', () => {
+    const [block] = extractAllBlockConfigs(`
+      export const ExampleBlock: BlockConfig = {
+        type: 'example', name: 'Example', category: 'tools', hideFromToolbar: true,
+        tools: { access: ['example_read', 'example_list'] },
+      }
+      export const ExampleV2Block: BlockConfig = {
+        ...ExampleBlock, type: 'example_v2', hideFromToolbar: false,
+        tools: { access: [
+          ...(ExampleBlock.tools?.access || []).map((toolId) => \`\${toolId}_v2\`),
+          'example_comments',
+        ] },
+      }
+    `)
+    expect(block.tools?.access).toEqual(['example_read_v2', 'example_list_v2', 'example_comments'])
   })
 
   it('preserves a satisfies block and replaces only the versioned download operation', () => {
