@@ -35,6 +35,7 @@ export function UserMemberUsageContent({
   filters,
 }: UserMemberUsageContentProps) {
   const workflowRows = useMemo(() => data.workflow.byWorkflow, [data.workflow.byWorkflow])
+  const apiRows = useMemo(() => data.byApi, [data.byApi])
   const toolRows = useMemo(() => aggregateUsageToolsByFamily(data.byTool), [data.byTool])
   const modelSpend = data.copilot.modelSpend
   const mothershipCopilotModelRows =
@@ -95,6 +96,41 @@ export function UserMemberUsageContent({
           },
         ]}
       />
+
+      {apiRows.length > 0 && (
+        <UsageRankTable
+          rows={apiRows}
+          getRowKey={(row) => `${row.organizationId}:${row.workspaceId}:${row.workflowId}`}
+          getBillableCost={(row) => row.billableCost}
+          emptyMessage='No external API usage in this period.'
+          columns={[
+            {
+              key: 'name',
+              header: 'By API',
+              render: (row) => (
+                <div className='flex flex-col'>
+                  <span className='font-medium'>{row.workflowName?.trim() || row.workflowId}</span>
+                  <span className='text-[var(--text-muted)] text-caption'>
+                    {row.organizationName} · {row.workspaceName}
+                  </span>
+                </div>
+              ),
+            },
+            {
+              key: 'runs',
+              header: 'Runs',
+              align: 'right',
+              render: (row) => row.executionCount.toLocaleString(),
+            },
+            {
+              key: 'credits',
+              header: 'Credits',
+              align: 'right',
+              render: (row) => <UsageRankCreditsCell billableCost={row.billableCost} />,
+            },
+          ]}
+        />
+      )}
 
       <UsageRankTable
         rows={toolRows}
