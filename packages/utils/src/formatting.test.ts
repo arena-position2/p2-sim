@@ -4,6 +4,7 @@ import {
   formatDateTime,
   formatDuration,
   formatInUserTimezone,
+  formatLowerBound,
   formatUserDateTime,
   getTimezoneAbbreviation,
 } from './formatting.js'
@@ -77,5 +78,17 @@ describe('formatDuration', () => {
   it('formats sub-millisecond durations', () => {
     expect(formatDuration(0.5)).toBe('0.50ms')
     expect(formatDuration(0.001)).toBe('0ms')
+  })
+})
+
+describe('formatLowerBound', () => {
+  it('keeps counts under 100 exact', () => {
+    expect(formatLowerBound(0)).toBe('0+')
+    expect(formatLowerBound(66)).toBe('66+')
+  })
+
+  it('rounds down to two significant figures, never up', () => {
+    expect(formatLowerBound(999)).toBe('990+')
+    expect(formatLowerBound(5499)).toBe('5,400+')
   })
 })

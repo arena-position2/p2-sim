@@ -1,177 +1,64 @@
 'use client'
 
-import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
+import { useState } from 'react'
 import { usePathname } from 'next/navigation'
-import {
-  LIGHT_MODE_SEGMENTS,
-  SIM_THEME_STORAGE_KEY,
-} from '@/app/_shell/providers/light-forced-segments'
-
-type ColorScheme = 'light' | 'dark'
-type ThemeSetting = ColorScheme | 'system'
-
-interface ThemeContextValue {
-  theme: ThemeSetting
-  resolvedTheme: ColorScheme
-  setTheme: (theme: ThemeSetting) => void
-  forcedTheme?: ColorScheme
-  themes: ColorScheme[]
-  systemTheme?: ColorScheme
-}
-
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
-
-const defaultContext: ThemeContextValue = {
-  theme: 'light',
-  resolvedTheme: 'light',
-  setTheme: () => {},
-  themes: ['light', 'dark'],
-}
-
-const COLOR_SCHEMES: ColorScheme[] = ['light', 'dark']
-
-function isThemeSetting(value: string | null): value is ThemeSetting {
-  return value === 'light' || value === 'dark' || value === 'system'
-}
-
-function getSystemTheme(): ColorScheme {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function readStoredTheme(): ThemeSetting {
-  try {
-    const stored = localStorage.getItem(SIM_THEME_STORAGE_KEY)
-    if (isThemeSetting(stored)) return stored
-  } catch {
-    return 'light'
-  }
-  return 'light'
-}
-
-function persistTheme(theme: ThemeSetting) {
-  try {
-    localStorage.setItem(SIM_THEME_STORAGE_KEY, theme)
-  } catch {
-    return
-  }
-}
-
-function applyThemeClass(theme: ColorScheme) {
-  const root = document.documentElement
-  root.classList.remove('light', 'dark')
-  root.classList.add(theme)
-  root.style.colorScheme = theme
-}
-
-function disableTransitions() {
-  const css = document.createElement('style')
-  css.appendChild(
-    document.createTextNode(
-      '*,*::before,*::after{-webkit-transition:none!important;-moz-transition:none!important;-o-transition:none!important;-ms-transition:none!important;transition:none!important}'
-    )
-  )
-  document.head.appendChild(css)
-  return () => {
-    window.getComputedStyle(document.body)
-    setTimeout(() => {
-      document.head.removeChild(css)
-    }, 1)
-  }
-}
+import type { ThemeProviderProps } from 'next-themes'
+import { ThemeProvider as NextThemesProvider, useTheme } from 'next-themes'
+import { isLandingPath } from '@/lib/landing/routes'
+import { NON_LANDING_LIGHT_SEGMENTS } from '@/app/_shell/providers/light-forced-segments'
 
 /**
- * Reads the document theme for consumers that need light/dark chrome
- * (file previews, terminal, browser session). Returns defaults when rendered
- * outside {@link ThemeProvider}.
- */
-export function useTheme(): ThemeContextValue {
-  return useContext(ThemeContext) ?? defaultContext
-}
-
-interface ThemeProviderProps {
-  children: ReactNode
-}
-
-/**
- * Applies the document theme from the account-synced `sim-theme` store
- * (written by user settings / the database via {@link syncThemeToNextThemes}).
- * Landing and auth surfaces force light so portaled chrome matches those pages.
+ * Path segments rendered light regardless of the visitor's theme.
  *
- * Do not use `next-themes`'s `<ThemeProvider>` here. It injects an inline
- * `<script>` as a sibling of `children`; React 19 / Next then places
- * `<script id="_R_">` next to it, so the server HTML at AuthShell is a script
- * while the client hydrates a `div`. First paint is handled by the root layout
- * `beforeInteractive` script instead.
+ * `AuthShell` and the rest pin `light` on a wrapper *inside* the page, which
+ * leaves `<html>` on the visitor's theme. Forcing the theme here puts the same
+ * layer on `<html>`, so root-level chrome — scrollbars, `color-scheme`, and
+ * anything portalled to `<body>` such as the cookie consent banner — matches
+ * the page it sits on instead of contradicting it.
  */
-export function ThemeProvider({ children }: ThemeProviderProps) {
+const LIGHT_MODE_SEGMENTS: ReadonlySet<string> = new Set(NON_LANDING_LIGHT_SEGMENTS)
+
+const APP_SURFACE = { defaultTheme: 'system', storageKey: 'sim-theme' } as const
+
+/**
+ * The marketing surface: the root plus every `app/(landing)` segment. These
+ * pages keep their own stored theme, written only by the landing footer's
+ * toggle, so a visitor who has never chosen one there gets light, the landing
+ * family's design baseline. The app's `sim-theme` key cannot serve: the
+ * workspace's settings sync writes the account default (`system`) into it for
+ * every signed-in user, which would render the marketing site in the OS theme
+ * and overwrite any choice the footer toggle made.
+ */
+const LANDING_SURFACE = { defaultTheme: 'light', storageKey: 'sim-landing-theme' } as const
+
+export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
   const pathname = usePathname()
-  const firstSegment = pathname.split('/')[1]
-  const forcedTheme: ColorScheme | undefined =
-    firstSegment === '' || LIGHT_MODE_SEGMENTS.has(firstSegment) ? 'light' : undefined
 
-  const [theme, setThemeState] = useState<ThemeSetting>('light')
-  const [systemTheme, setSystemTheme] = useState<ColorScheme>('light')
-  const [storageReady, setStorageReady] = useState(false)
+  /**
+   * next-themes reads `storageKey` and `defaultTheme` once, at mount and in its
+   * pre-hydration script, so both are fixed from the document's first path.
+   * Every entry into the marketing surface from another shell is a document
+   * navigation (`AuthShell`, `LogoShell`, the invite pages, post-auth
+   * redirects), so the choice never needs to change within one document. The
+   * provider is not keyed on the surface on purpose: it wraps the query and
+   * session providers, which must survive client-side navigation.
+   */
+  const [surface] = useState(() => (isLandingPath(pathname) ? LANDING_SURFACE : APP_SURFACE))
+  const forcedTheme = LIGHT_MODE_SEGMENTS.has(pathname.split('/')[1]) ? 'light' : undefined
 
-  useEffect(() => {
-    setThemeState(readStoredTheme())
-    setSystemTheme(getSystemTheme())
-    setStorageReady(true)
-  }, [])
-
-  const setTheme = useCallback((next: ThemeSetting) => {
-    setThemeState(next)
-    persistTheme(next)
-  }, [])
-
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => setSystemTheme(getSystemTheme())
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
-  }, [])
-
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== SIM_THEME_STORAGE_KEY) return
-      if (isThemeSetting(event.newValue)) {
-        setThemeState(event.newValue)
-        return
-      }
-      if (!event.newValue) setThemeState('light')
-    }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [])
-
-  const resolvedTheme: ColorScheme = forcedTheme ?? (theme === 'system' ? systemTheme : theme)
-
-  useEffect(() => {
-    if (!storageReady) return
-    const restore = disableTransitions()
-    applyThemeClass(resolvedTheme)
-    restore()
-  }, [resolvedTheme, storageReady])
-
-  const value = useMemo(
-    () => ({
-      theme,
-      resolvedTheme,
-      setTheme,
-      forcedTheme,
-      themes: COLOR_SCHEMES,
-      systemTheme,
-    }),
-    [theme, resolvedTheme, setTheme, forcedTheme, systemTheme]
+  return (
+    <NextThemesProvider
+      attribute='class'
+      defaultTheme={surface.defaultTheme}
+      enableSystem
+      disableTransitionOnChange
+      storageKey={surface.storageKey}
+      forcedTheme={forcedTheme}
+      {...props}
+    >
+      {children}
+    </NextThemesProvider>
   )
-
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
+
+export { useTheme }

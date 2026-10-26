@@ -43,7 +43,7 @@ import { createLogger } from '@sim/logger'
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { usePostHog } from 'posthog-js/react'
 import type { DesktopChatActivity } from '@/lib/api/contracts/desktop-executor'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { focusVisibleBrowserOmnibox } from '@/lib/browser-agent/renderer-shortcuts'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
 import { isStatusNoticePreviewEnabled } from '@/lib/core/config/env-flags'
@@ -62,7 +62,7 @@ import { useRegisterGlobalCommands } from '@/app/workspace/[workspaceId]/provide
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import type { SettingsSection } from '@/app/workspace/[workspaceId]/settings/navigation'
-import { createCommands } from '@/app/workspace/[workspaceId]/utils/commands-utils'
+import { createCommands } from '@/app/workspace/[workspaceId]/utils/commands'
 import {
   ChatNavigationLink,
   CollapsedChatFlyoutItem,

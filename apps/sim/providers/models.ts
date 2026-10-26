@@ -90,7 +90,8 @@ export interface ModelCapabilities {
     streamed?: ThinkingStreamVisibility
     /**
      * Explicit API mode for the pickers' `none` level on models that think by
-     * default. Omitted, `none` sends no thinking config.
+     * default. Omitted, `none` sends no thinking config, except on Gemini 3+, which
+     * has no off switch and sends its lowest declared level instead.
      */
     noneMode?: 'between_tools' | 'disabled'
     /** Whether forced tool choice can be combined with configured thinking. */
@@ -705,7 +706,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         contextWindow: 1047576,
         releaseDate: '2025-04-14',
-        sunset: { status: 'legacy' },
+        sunset: { status: 'deprecated' },
       },
       // GPT-5.6 family
       {

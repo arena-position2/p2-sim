@@ -9,6 +9,7 @@ import {
 import { AgentBlock } from '@/blocks/blocks/agent'
 import { ImageFusionBlock } from '@/blocks/blocks/image_fusion'
 import { ImageGeneratorV2Block } from '@/blocks/blocks/image_generator'
+import { VideoGeneratorV3Block } from '@/blocks/blocks/video_generator'
 import { START_FILES_REF } from '@/executor/constants'
 
 describe('isAgentToolPickerBlock', () => {
@@ -75,6 +76,10 @@ describe('isAgentToolBlock', () => {
 
   it('includes image_fusion as a tools-category block', () => {
     expect(isAgentToolBlock(ImageFusionBlock)).toBe(true)
+  })
+
+  it('includes video_generator_v3 by its base type', () => {
+    expect(isAgentToolBlock(VideoGeneratorV3Block)).toBe(true)
   })
 
   it('includes the current File block', () => {

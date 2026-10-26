@@ -6,7 +6,6 @@ const withMDX = createMDX()
 
 const config: NextConfig = {
   reactStrictMode: true,
-  productionBrowserSourceMaps: true,
   transpilePackages: ['@sim/emcn', '@sim/workflow-renderer'],
   images: {
     unoptimized: true,
@@ -34,6 +33,10 @@ const config: NextConfig = {
     return [
       {
         source: '/:path*.mdx',
+        destination: '/llms.mdx/:path*',
+      },
+      {
+        source: '/:path*.md',
         destination: '/llms.mdx/:path*',
       },
     ]

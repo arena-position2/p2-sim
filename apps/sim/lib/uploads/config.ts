@@ -227,9 +227,11 @@ function getS3Config(context: StorageContext): StorageConfig {
       }
     case 'mothership':
     case 'workspace':
+    case 'project':
     case 'test':
     case 'changelog':
     case 'table-import':
+    case 'knowledge-import':
       return {
         bucket: S3_CONFIG.bucket,
         region: S3_CONFIG.region,
@@ -298,9 +300,11 @@ function getBlobConfig(context: StorageContext): StorageConfig {
       }
     case 'mothership':
     case 'workspace':
+    case 'project':
     case 'test':
     case 'changelog':
     case 'table-import':
+    case 'knowledge-import':
       return {
         accountName: BLOB_CONFIG.accountName,
         accountKey: BLOB_CONFIG.accountKey,
@@ -361,9 +365,11 @@ function getGcsConfig(context: StorageContext): StorageConfig {
       return { bucket: GCS_EXECUTION_FILES_CONFIG.bucket || GCS_CONFIG.bucket }
     case 'mothership':
     case 'workspace':
+    case 'project':
     case 'test':
     case 'changelog':
     case 'table-import':
+    case 'knowledge-import':
       return { bucket: GCS_CONFIG.bucket }
     case 'profile-pictures':
       return { bucket: GCS_PROFILE_PICTURES_CONFIG.bucket || GCS_CONFIG.bucket }

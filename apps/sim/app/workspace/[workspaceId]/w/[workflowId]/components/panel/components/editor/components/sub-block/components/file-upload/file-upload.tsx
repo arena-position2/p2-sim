@@ -8,7 +8,6 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
 import { randomFloat } from '@sim/utils/random'
 import { useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'next/navigation'
 import { Progress } from '@/components/ui/progress'
 import { isApiClientError } from '@/lib/api/client/errors'
 import { requestJson } from '@/lib/api/client/request'
@@ -30,11 +29,12 @@ import {
   type ParsedReferenceFileValue,
   parseReferenceFileValue,
 } from '@/lib/image-generation/reference-files'
-import { formatFileSize, getExtensionFromMimeType } from '@/lib/uploads/utils/file-utils'
+import { formatFileSize, getExtensionFromMimeType } from '@/lib/uploads/utils/file'
 import { containsReference } from '@/lib/workflows/sanitization/references'
 import { parseWorkspaceFileFolderDisplayPath } from '@/lib/workspace-files/folder-display-path'
 import { isFileInFolderScope } from '@/lib/workspace-files/folder-path-selection'
 import { findSelectedWorkspaceFile } from '@/lib/workspace-files/selection'
+import { useWorkflowScope } from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import {
   ConversationImagePicker,
   ConversationImagePickerActions,
@@ -316,8 +316,7 @@ export function FileUpload({
 
   const activeWorkflowId = useWorkflowRegistry((state) => state.activeWorkflowId)
   const chatMessages = useChatStore((state) => state.messages)
-  const params = useParams()
-  const workspaceId = params?.workspaceId as string
+  const { workspaceId } = useWorkflowScope()
 
   const useCombinedChatReferenceMode = allowStartFilesReference && multiple
 

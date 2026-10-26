@@ -9,7 +9,7 @@ import { getDocumentIcon } from '@/components/icons/document-icons'
 import type { AssistantChatFile as ChatFile } from '@/lib/chat/assistant-assets'
 import { isSafeHttpUrl } from '@/lib/core/utils/urls'
 import { saveBlob } from '@/lib/uploads/client/download'
-import { tryInferContextFromKey } from '@/lib/uploads/utils/file-utils'
+import { tryInferContextFromKey } from '@/lib/uploads/utils/file'
 
 const logger = createLogger('ChatFileDownload')
 

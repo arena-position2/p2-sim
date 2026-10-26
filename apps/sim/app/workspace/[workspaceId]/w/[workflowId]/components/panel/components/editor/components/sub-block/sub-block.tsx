@@ -9,9 +9,10 @@ import {
   TriangleAlert,
 } from '@sim/emcn/icons'
 import { isEqual } from 'es-toolkit'
-import { useParams } from 'next/navigation'
 import type { FilterRule, SortRule } from '@/lib/table/query-builder/constants'
 import type { FallbackModelEntry } from '@/lib/workflows/blocks/fallback-models'
+import { buildSubBlockValues } from '@/lib/workflows/subblocks/visibility'
+import { useWorkflowScope } from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import {
   CheckboxList,
   Code,
@@ -134,33 +135,6 @@ interface SubBlockProps {
 }
 
 /**
- * Builds a flat map of field values for conditional `required` checks.
- * Merges tool-input `dependencyContext` (flat) with store-shaped `subBlockValues` ({ value } cells).
- *
- * @param subBlockValues - Sub-block store snapshot (optional)
- * @param dependencyContext - Flat sibling values (e.g. agent tool params)
- */
-function mergeConditionContextForRequired(
-  subBlockValues?: Record<string, any>,
-  dependencyContext?: Record<string, unknown>
-): Record<string, any> {
-  const merged: Record<string, any> = {}
-  if (dependencyContext) {
-    Object.assign(merged, dependencyContext)
-  }
-  if (subBlockValues) {
-    for (const [key, cell] of Object.entries(subBlockValues)) {
-      const v =
-        cell && typeof cell === 'object' && cell !== null && 'value' in cell
-          ? (cell as { value: unknown }).value
-          : cell
-      merged[key] = v
-    }
-  }
-  return merged
-}
-
-/**
  * Returns whether the field is required for validation.
  *
  * @remarks
@@ -168,13 +142,10 @@ function mergeConditionContextForRequired(
  * Supports boolean, condition objects, and functions that return conditions.
  *
  * @param config - The sub-block configuration containing requirement rules
- * @param conditionValues - Flat field values for condition evaluation (store and/or tool context)
+ * @param values - Flat sibling values for condition evaluation
  * @returns `true` if the field is required based on current context
  */
-const isFieldRequired = (
-  config: SubBlockConfig,
-  conditionValues?: Record<string, any>
-): boolean => {
+const isFieldRequired = (config: SubBlockConfig, values?: Record<string, any>): boolean => {
   if (!config.required) return false
   if (typeof config.required === 'boolean') return config.required
 
@@ -219,8 +190,9 @@ const isFieldRequired = (
     return match
   }
 
-  const condition = typeof config.required === 'function' ? config.required() : config.required
-  return evalCond(condition, conditionValues || {})
+  const condition =
+    typeof config.required === 'function' ? config.required(values) : config.required
+  return evalCond(condition, values || {})
 }
 
 /**
@@ -249,19 +221,18 @@ const getPreviewValue = (
  *
  * @param config - The sub-block configuration defining the label content
  * @param isValidJson - Whether the JSON content is valid (for code blocks)
- * @param subBlockValues - Current values of all subblocks for evaluating conditional requirements
+ * @param requiredValues - Flat sibling values for evaluating conditional requirements
  * @param wandState - State and handlers for the inline AI generate feature
  * @param canonicalToggle - Metadata and handlers for the basic/advanced mode toggle
  * @param canonicalToggleIsDisabled - Whether the canonical toggle is disabled (includes dependsOn gating)
  * @param copyState - State and handler for the copy-to-clipboard button
  * @param labelSuffix - Additional content rendered after the label text
- * @param dependencyContext - Flat sibling values for conditional labels in tool-input context
  * @returns The label JSX element, or `null` for switch types or when no title is defined
  */
 const renderLabel = (
   config: SubBlockConfig,
   isValidJson: boolean,
-  subBlockValues?: Record<string, any>,
+  requiredValues?: Record<string, any>,
   wandState?: {
     isSearchActive: boolean
     searchQuery: string
@@ -292,16 +263,12 @@ const renderLabel = (
     show: boolean
     onClick: () => void
     tooltip: string
-  },
-  dependencyContext?: Record<string, unknown>
+  }
 ): JSX.Element | null => {
   if (config.type === 'switch') return null
   if (!config.title) return null
 
-  const required = isFieldRequired(
-    config,
-    mergeConditionContextForRequired(subBlockValues, dependencyContext)
-  )
+  const required = isFieldRequired(config, requiredValues)
   const showWand = wandState?.isWandEnabled && !wandState.isPreview && !wandState.disabled
   const showCanonicalToggle = !!canonicalToggle && !wandState?.isPreview
   const showCopy = copyState?.showCopyButton && !wandState?.isPreview
@@ -528,8 +495,7 @@ function SubBlockComponent({
   labelSuffix,
   dependencyContext,
 }: SubBlockProps): JSX.Element {
-  const params = useParams()
-  const workspaceId = params.workspaceId as string
+  const { workspaceId } = useWorkflowScope()
 
   const [isValidJson, setIsValidJson] = useState(true)
   const [isSearchActive, setIsSearchActive] = useState(false)
@@ -675,6 +641,12 @@ function SubBlockComponent({
     | null
     | undefined
 
+  const requiredValues =
+    !isPreview && dependencyContext
+      ? dependencyContext
+      : subBlockValues
+        ? buildSubBlockValues(subBlockValues)
+        : undefined
   const contextValues = dependencyContext ?? (isPreview ? subBlockValues : undefined)
 
   const { finalDisabled: gatedDisabled } = useDependsOnGate(blockId, config, {
@@ -1073,7 +1045,7 @@ function SubBlockComponent({
               blockId={blockId}
               subBlock={config}
               disabled={isDisabled}
-              required={isFieldRequired(config, subBlockValues)}
+              required={isFieldRequired(config, requiredValues)}
               isPreview={isPreview}
               previewValue={previewValue}
             />
@@ -1485,7 +1457,7 @@ function SubBlockComponent({
       {renderLabel(
         config,
         isValidJson,
-        subBlockValues,
+        requiredValues,
         {
           isSearchActive,
           searchQuery,
@@ -1510,8 +1482,7 @@ function SubBlockComponent({
           onCopy: handleCopy,
         },
         labelSuffix,
-        externalLink,
-        dependencyContext
+        externalLink
       )}
       {renderInput()}
     </div>

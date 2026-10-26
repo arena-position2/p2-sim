@@ -195,22 +195,37 @@ export async function waitForToolConfirmation(
       return true
     }
 
-    const pollDurable = async () => {
-      if (settled) return
+    const checkDurableConfirmation = async (source: 'subscribe' | 'pubsub' | 'poll') => {
       if (options.executionScope) {
         try {
-          await revokeExpiredSimToolExecutions(options.executionScope)
+          await revokeExpiredSimToolExecutions({ ...options.executionScope, toolCallId })
         } catch (error) {
           logger.warn('Could not verify retained tool execution ownership', {
             toolCallId,
             error: toError(error).message,
           })
+          return false
         }
       }
+      if (options.settleOverdue) {
+        try {
+          await options.settleOverdue()
+        } catch (error) {
+          logger.warn('Could not settle an overdue tool call; checking again on the next poll', {
+            toolCallId,
+            error: toError(error).message,
+          })
+        }
+      }
+      if (settled) return true
+      return tryAccept(await getToolConfirmation(toolCallId), source)
+    }
+
+    const pollDurable = async () => {
+      if (settled) return
       const fromRedis = await getRedisToolConfirmation(toolCallId)
       if (tryAccept(fromRedis, 'redis')) return
-      const fromDb = await getToolConfirmation(toolCallId)
-      if (tryAccept(fromDb, 'db-poll')) return
+      if (await checkDurableConfirmation('poll')) return
       if (settled) return
       pollTimer = setTimeout(() => {
         void pollDurable()
@@ -239,9 +254,7 @@ export async function waitForToolConfirmation(
         })
         return
       }
-      void getToolConfirmation(toolCallId).then((latest) => {
-        tryAccept(latest, 'pubsub-db')
-      })
+      void checkDurableConfirmation('pubsub')
     })
 
     if (timeoutMs !== null) timeoutId = setTimeout(() => settle(null), timeoutMs)
@@ -251,6 +264,8 @@ export async function waitForToolConfirmation(
     }
     abortSignal?.addEventListener('abort', onAbort, { once: true })
 
-    void pollDurable()
+    void checkDurableConfirmation('subscribe').then(() => {
+      if (!settled) void pollDurable()
+    })
   })
 }

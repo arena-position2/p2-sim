@@ -18,9 +18,7 @@ const AGENT_TOOLS_SKIP_LLM_DEFAULT_SEEDING = new Set(['image_generator_v2'])
 /**
  * Core blocks the agent tool picker offers even though they are not
  * `category: 'tools'`. Stored as BASE types and matched after stripping the
- * `_vN` suffix, so a superseded version never has to be re-listed here at
- * cutover time. Naming a specific version instead is what kept `table_v2` out
- * of the picker while the toolbar had already moved to it.
+ * `_vN` suffix, so a new version never has to be re-listed here.
  */
 const CORE_AGENT_TOOL_TYPES = new Set([
   'api',
@@ -33,6 +31,7 @@ const CORE_AGENT_TOOL_TYPES = new Set([
   'file',
   'image_generator',
   'chart_generator',
+  'video_generator',
 ])
 
 /**
@@ -95,6 +94,14 @@ export function isAgentToolBlock(
 ): boolean {
   if (block.hideFromToolbar) return false
   if (block.category === 'tools') return true
+  return isCoreAgentToolBlock(block)
+}
+
+/**
+ * Checks whether a block is one of the platform's core agent tools, which the
+ * picker lists under "Built-in Tools" rather than "Integrations".
+ */
+export function isCoreAgentToolBlock(block: Pick<BlockConfig, 'type'>): boolean {
   return CORE_AGENT_TOOL_TYPES.has(stripVersionSuffix(block.type))
 }
 

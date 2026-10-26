@@ -292,10 +292,7 @@ function HomeContent({ chatId, userName, userId }: HomeProps) {
     const contexts = handoff.contexts ?? []
     for (const context of contexts) handleContextAdd(context)
     addMothershipContexts(contexts)
-    // `handleContextAdd` is a body function, so it is a new value every render;
-    // listing it would re-run this drain on every render. Omitted deliberately to
-    // keep it one-shot — and harmless either way, since `consume` clears the entry
-    // atomically and any re-run would find nothing.
+    // `handleContextAdd` is omitted: it is a new function every render.
   }, [chatId, workspaceId, prepareResourceViewForAgentTurn, sendMessage])
 
   function resolveResourceFromContext(
@@ -352,7 +349,7 @@ function HomeContent({ chatId, userName, userId }: HomeProps) {
       return otherResolved?.type === resolved.type && otherResolved.id === resolved.id
     })
     if (stillReferenced) return
-    removeResource(resolved.type, resolved.id)
+    removeResource(resolved)
   }
 
   function openWorkspaceResource(resource: MothershipResource) {

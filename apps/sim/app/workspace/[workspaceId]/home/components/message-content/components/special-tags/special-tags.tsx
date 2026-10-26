@@ -32,7 +32,7 @@ import { isRecordLike, omit } from '@sim/utils/object'
 import { useParams } from 'next/navigation'
 import { getOrganizationSettingsHref } from '@/components/settings/navigation'
 import { ThinkingLoader } from '@/components/ui/thinking-loader'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { buildHostedUpgradeUrl, HOSTED_BILLING_SETTINGS_URL } from '@/lib/billing/upgrade-reasons'
 import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { isBrowserAgentAvailable, sendBrowserPanelAction } from '@/lib/browser-agent/transport'
@@ -2096,7 +2096,7 @@ function OptionsDisplay({ data, onSelect }: OptionsDisplayProps) {
           />
         </button>
       ) : (
-        <span className='text-[var(--text-body)] text-sm'>Suggested follow-ups</span>
+        <span className='block text-[var(--text-body)] text-sm'>Suggested follow-ups</span>
       )}
       <Expandable expanded={expanded}>
         <ExpandableContent className='mt-1.5'>
@@ -3712,6 +3712,47 @@ function MothershipErrorDisplay({ data }: { data: MothershipErrorTagData }) {
 }
 
 function UsageUpgradeDisplay({ data }: { data: UsageUpgradeTagData }) {
+  return data.reason === 'job_run_budget' ? (
+    <JobRunBudgetDisplay message={data.message} />
+  ) : (
+    <PlanUsageLimitDisplay data={data} />
+  )
+}
+
+/**
+ * A scheduled job's run reached its own spend cap. The cap belongs to the job, not to the
+ * account, so the card offers no billing action: the next run starts with a fresh cap.
+ */
+interface JobRunBudgetDisplayProps {
+  message: string
+}
+
+function JobRunBudgetDisplay({ message }: JobRunBudgetDisplayProps) {
+  return (
+    <InteractionCard
+      title={
+        <span className='inline-flex items-center gap-2'>
+          <TriangleAlert
+            aria-hidden
+            className='size-[14px] shrink-0 text-[var(--badge-amber-text)]'
+          />
+          Run Spend Limit Reached
+        </span>
+      }
+    >
+      <div className='px-2 pb-2'>
+        <p className='text-[var(--text-body)] text-small leading-5'>{message}</p>
+      </div>
+    </InteractionCard>
+  )
+}
+
+interface PlanUsageLimitDisplayProps {
+  data: UsageUpgradeTagData
+}
+
+/** The payer's plan limit: the card links to where the plan or the limit can change. */
+function PlanUsageLimitDisplay({ data }: PlanUsageLimitDisplayProps) {
   const { data: session } = useSession()
   const hostContext = useOptionalWorkspaceHostContext()
   const organizationContext = useOptionalOrganizationContext()

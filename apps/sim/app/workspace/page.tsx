@@ -13,8 +13,8 @@ import {
   ARENA_SSO_SESSION_REQUIRED_PATH,
   buildArenaSimResumeUrl,
 } from '@/lib/auth/arena-sim-resume'
-import { useSession } from '@/lib/auth/auth-client'
-// import { recoverFromStaleSession } from '@/lib/auth/stale-session-recovery'
+import { useSession } from '@/lib/auth/client'
+import { recoverFromStaleSession } from '@/lib/auth/stale-session-recovery'
 import {
   buildUpgradeHref,
   isUpgradeReason,
@@ -30,6 +30,17 @@ const logger = createLogger('WorkspacePage')
 
 /** Bounds the one-shot reload after a creation-vs-membership 409. */
 const WORKSPACE_RACE_RETRY_KEY = 'workspaceRaceRetry'
+
+/**
+ * A 401 while the session claims we're authenticated means the auth cookies
+ * are stale or inconsistent (e.g. after an impersonation session expired or
+ * was switched). The only reliable recovery is a full sign-out, which clears
+ * every auth cookie server-side — matching what "clear browser cache" did
+ * manually — followed by a clean login.
+ */
+function isStaleSessionError(error: unknown): boolean {
+  return isApiClientError(error) && error.status === 401
+}
 
 interface WorkspaceStatusCardProps {
   title: string
@@ -59,6 +70,7 @@ function WorkspaceStatusCard({
           <Chip variant='primary' onClick={onPrimary}>
             {primaryLabel}
           </Chip>
+          <Chip onClick={() => void recoverFromStaleSession()}>Sign out</Chip>
         </div>
       </div>
     </main>
@@ -70,6 +82,7 @@ export default function WorkspacePage() {
   const { data: session, isPending: isSessionPending, error: sessionError } = useSession()
   const isAuthenticated = !isSessionPending && !!session?.user
   const hasRedirectedRef = useRef(false)
+  const isRecoveringRef = useRef(false)
   const blockedLoggedRef = useRef(false)
   const [recoveryFailed, setRecoveryFailed] = useState(false)
 
@@ -79,20 +92,34 @@ export default function WorkspacePage() {
     error: workspacesError,
   } = useWorkspacesWithMetadata(isAuthenticated)
 
-  // Do not auto sign-out on stale/401 session here — that races session recovery
-  // when profile/session briefly fails.
-
   useEffect(() => {
     fetchUserProfileSetPeopleMP()
   }, [])
 
   useEffect(() => {
+    if (!isAuthenticated || !isStaleSessionError(workspacesError) || isRecoveringRef.current) return
+    isRecoveringRef.current = true
+    logger.warn('Session cookies are stale (authenticated session but 401 API); signing out')
+    void recoverFromStaleSession().then((recovered) => {
+      if (recovered) return
+      isRecoveringRef.current = false
+      setRecoveryFailed(true)
+    })
+  }, [isAuthenticated, workspacesError])
+
+  useEffect(() => {
     if (isSessionPending || hasRedirectedRef.current) return
 
     if (!session?.user) {
+      // Indeterminate auth (errored session query, no cached identity): show
+      // the error card — /login would bounce back while a session cookie exists.
+      if (sessionError) return
+      hasRedirectedRef.current = true
       if (isLocalLoginEnabled) {
-        logger.info('User not authenticated, redirecting to login')
-        router.replace('/login')
+        logger.info('User not authenticated, signing out stale cookies and redirecting to login')
+        void recoverFromStaleSession().then((recovered) => {
+          if (!recovered) setRecoveryFailed(true)
+        })
         return
       }
       logger.info('User not authenticated, redirecting to Arena SSO resume')
@@ -151,7 +178,7 @@ export default function WorkspacePage() {
 
     logger.info(`Redirecting to workspace: ${targetWorkspace.id}`)
     router.replace(destinationFor(targetWorkspace.id))
-  }, [session, isSessionPending, isWorkspacesLoading, workspacesError, data, router])
+  }, [session, isSessionPending, sessionError, isWorkspacesLoading, workspacesError, data, router])
 
   const blockedPolicy =
     isAuthenticated &&
@@ -184,13 +211,13 @@ export default function WorkspacePage() {
   const failedToLoad =
     recoveryFailed ||
     (Boolean(sessionError) && !session?.user) ||
-    (isAuthenticated && Boolean(workspacesError))
+    (isAuthenticated && Boolean(workspacesError) && !isStaleSessionError(workspacesError))
 
   if (failedToLoad) {
     return (
       <WorkspaceStatusCard
         title='Could not load your workspaces'
-        description='Something went wrong while loading your account. Try again.'
+        description='Something went wrong while loading your account. Try again, or sign out and log back in.'
         primaryLabel='Try again'
         onPrimary={() => window.location.reload()}
       />

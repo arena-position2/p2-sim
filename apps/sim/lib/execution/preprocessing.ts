@@ -11,7 +11,7 @@ import {
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
   resolveSystemBillingAttribution,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import type { HighestPrioritySubscription } from '@/lib/billing/core/plan'
 import { getHighestPrioritySubscription } from '@/lib/billing/core/subscription'
 import { checkExecutionUsageLimits } from '@/lib/billing/core/usage-gate-cache'
@@ -164,6 +164,11 @@ export interface PreprocessExecutionError {
    */
   retryAfterMs?: number
   cause?: Record<string, unknown>
+  /**
+   * Set when the workflow's own state refused the run; see {@link isWorkflowStateRejection}.
+   * Internal: unlike `code`, no surface copies it onto a response.
+   */
+  workflowState?: 'not_found' | 'not_attached' | 'not_deployed'
 }
 
 /**
@@ -182,6 +187,20 @@ function retryAfterMsFrom(retryAfterSeconds: number | undefined): { retryAfterMs
 }
 
 export const WORKFLOW_NOT_DEPLOYED_CODE = 'WORKFLOW_NOT_DEPLOYED'
+
+/** A rate-limit quota denial, distinct from the retryable concurrency-slot 429. */
+export const RATE_LIMIT_EXCEEDED_CODE = 'RATE_LIMIT_EXCEEDED'
+
+/**
+ * Whether the workflow's own state refused the run: deleted or archived, not attached to a
+ * workspace, or not deployed. Produced only after a successful read (a failed read is a 5xx), and
+ * these rejections write no execution log by design, so callers need not wait for one.
+ */
+export function isWorkflowStateRejection(
+  error: Pick<PreprocessExecutionError, 'workflowState'>
+): boolean {
+  return error.workflowState !== undefined
+}
 
 export interface PreprocessExecutionSuccess {
   success: true
@@ -476,6 +495,7 @@ export async function preprocessExecution(
           error: {
             message: 'Workflow not found',
             statusCode: 404,
+            workflowState: 'not_found',
           },
         }
       }
@@ -511,6 +531,7 @@ export async function preprocessExecution(
       error: {
         message: 'Workflow not found',
         statusCode: 404,
+        workflowState: 'not_found',
       },
     }
   } else {
@@ -524,6 +545,7 @@ export async function preprocessExecution(
         error: {
           message: 'Workflow not found',
           statusCode: 404,
+          workflowState: 'not_found',
         },
       }
     }
@@ -540,6 +562,7 @@ export async function preprocessExecution(
         message:
           'This workflow is not attached to a workspace. Personal workflows are deprecated and cannot execute.',
         statusCode: 403,
+        workflowState: 'not_attached',
       },
     }
   }
@@ -554,6 +577,7 @@ export async function preprocessExecution(
         message: 'Workflow is not deployed',
         statusCode: 403,
         code: WORKFLOW_NOT_DEPLOYED_CODE,
+        workflowState: 'not_deployed',
       },
     }
   }
@@ -817,7 +841,7 @@ export async function preprocessExecution(
                 statusCode: 402,
                 // An unreadable ledger fails closed; that is no verdict on the payer, so senders retry.
                 ...(usageCheck.reason === 'usage_unavailable'
-                  ? {}
+                  ? { retryable: true }
                   : { code: ADMISSION_REJECTION_CODE.USAGE_LIMIT_EXCEEDED }),
               },
             },
@@ -920,7 +944,7 @@ export async function preprocessExecution(
                * (`EXECUTION_CONCURRENCY_LIMIT`, retryable in seconds) — the two
                * need different caller behavior.
                */
-              code: 'RATE_LIMIT_EXCEEDED',
+              code: RATE_LIMIT_EXCEEDED_CODE,
               retryAfterMs: info.retryAfterMs ?? Math.max(0, info.resetAt.getTime() - Date.now()),
             },
           },

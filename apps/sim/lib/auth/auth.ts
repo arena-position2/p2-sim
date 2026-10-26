@@ -38,6 +38,7 @@ import { readAttributionProperties } from '@/lib/analytics/attribution'
 import { FREEBUFF_CLICK_ID_COOKIE } from '@/lib/analytics/freebuff'
 import { reportFreebuffConversion } from '@/lib/analytics/freebuff.server'
 import { getAccessControlConfig, isEmailBlockedByAccessControl } from '@/lib/auth/access-control'
+import { holdAdminRemovalStops, stopAdminRemovedRuns } from '@/lib/auth/admin-removal-stops'
 import { createAnonymousSession, ensureAnonymousUserExists } from '@/lib/auth/anonymous'
 import { buildConnectorProviders } from '@/lib/auth/connectors/providers'
 import {
@@ -53,7 +54,7 @@ import {
   recordAuthenticationSecurityAudit,
   recordPasswordResetAudit,
 } from '@/lib/auth/lifecycle-audit'
-import { hashOAuthToken } from '@/lib/auth/oauth-access-token'
+import { hashOAuthToken, revokeUserOAuthGrants } from '@/lib/auth/oauth-access-token'
 import {
   consentRequestNamesClient,
   OAUTH_ACCESS_TOKEN_PREFIX,
@@ -74,7 +75,6 @@ import { createSimAuthAdapter } from '@/lib/auth/sim-auth-adapter'
 import { admitSsoUser } from '@/lib/auth/sso/application/admit-sso-user'
 import { resolveSsoCallbackProviderId } from '@/lib/auth/sso/callback-provider'
 import { configuredSsoPlugin } from '@/lib/auth/sso/plugin'
-import { sendPlanWelcomeEmail } from '@/lib/billing'
 import { supersedeStarterSubscriptions } from '@/lib/billing/arena/supersede-starter'
 import {
   assertPersonalCheckoutAllowed,
@@ -91,17 +91,22 @@ import { invalidateReportingUsagePrefixes } from '@/lib/billing/core/reporting-u
 import {
   ensureSubscriptionStripeCustomerId,
   getOrganizationIdForSubscriptionReference,
+  sendPlanWelcomeEmail,
   syncSubscriptionPlan,
   writeBillingInterval,
 } from '@/lib/billing/core/subscription'
-import { handleNewUser } from '@/lib/billing/core/usage'
+import { handleNewSignInAccount, handleNewUser } from '@/lib/billing/core/usage'
 import {
   ensureOrganizationForTeamSubscription,
   syncSubscriptionUsageLimits,
 } from '@/lib/billing/organization'
 import { pauseProSubscriptionForOrgCoverage } from '@/lib/billing/organizations/membership'
-import { isPro, isTeam } from '@/lib/billing/plan-helpers'
-import { getPlans, resolvePlanFromStripeSubscription } from '@/lib/billing/plans'
+import { isEnterprise, isLegacyPlan, isPro, isTeam } from '@/lib/billing/plan-helpers'
+import {
+  didSubscriptionPriceChange,
+  getPlans,
+  resolvePlanFromStripeSubscription,
+} from '@/lib/billing/plans'
 import { syncSeatsFromStripeQuantity } from '@/lib/billing/validation/seat-management'
 import { handleAbandonedCheckout } from '@/lib/billing/webhooks/checkout'
 import { handleChargeDispute, handleDisputeClosed } from '@/lib/billing/webhooks/disputes'
@@ -186,6 +191,26 @@ import { SSO_TRUSTED_PROVIDERS } from '@/ee/sso/constants'
 
 const logger = createLogger('Auth')
 
+/**
+ * A Stripe price that maps to no catalog plan leaves the stored plan in place. That is expected
+ * for enterprise (priced per customer) and for a legacy plan still on the price it was sold at;
+ * a catalog plan, or a legacy plan moved to a new price, means a price env var is missing or wrong.
+ */
+function logUnresolvedStripePlan(
+  hook: 'onSubscriptionComplete' | 'onSubscriptionUpdate',
+  details: { subscriptionId: string; dbPlan: string | null; priceId: string | undefined },
+  priceChanged: boolean
+): void {
+  if (isEnterprise(details.dbPlan) || (isLegacyPlan(details.dbPlan) && !priceChanged)) {
+    logger.info(`[${hook}] Off-catalog Stripe price; keeping the stored plan`, details)
+    return
+  }
+  logger.error(
+    `[${hook}] Could not resolve plan from Stripe price; keeping the stored plan — check env var configuration`,
+    details
+  )
+}
+
 function buildSsoAdmissionErrorUrl(code: string, callbackLocation?: string | null): string {
   const callbackUrl =
     callbackLocation && validateCallbackUrl(callbackLocation) ? callbackLocation : APP_ENTRY_PATH
@@ -221,13 +246,24 @@ if (env.NODE_ENV === 'production') {
   }
 }
 
-const validStripeKey = env.STRIPE_SECRET_KEY
-
-let stripeClient = null
-if (validStripeKey) {
-  stripeClient = new Stripe(env.STRIPE_SECRET_KEY || '', {
-    apiVersion: '2025-08-27.basil',
-  })
+/**
+ * Resolves the Stripe billing plugin's client and webhook signing secret, or `null` when the plugin
+ * must not register. Stripe's verifier accepts a signature computed with an empty key, so a missing
+ * `STRIPE_WEBHOOK_SECRET` disables the plugin rather than exposing a forgeable webhook receiver.
+ */
+function resolveStripeBilling() {
+  if (!isBillingEnabled || !env.STRIPE_SECRET_KEY) return null
+  const webhookSecret = env.STRIPE_WEBHOOK_SECRET
+  if (!webhookSecret?.trim()) {
+    logger.error(
+      'BILLING_ENABLED and STRIPE_SECRET_KEY are set but STRIPE_WEBHOOK_SECRET is not; the Stripe billing plugin is disabled until it is configured'
+    )
+    return null
+  }
+  return {
+    client: new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2025-08-27.basil' }),
+    webhookSecret,
+  }
 }
 
 const arenaV3OAuthCallbackTrustedOrigins = env.ARENA_V3_OAUTH_CALLBACK_ORIGINS
@@ -267,6 +303,8 @@ function resolveArenaHubTrustedOrigin(): string | null {
 }
 
 const arenaHubTrustedOrigin = resolveArenaHubTrustedOrigin()
+const stripeBilling = resolveStripeBilling()
+
 /**
  * Resolves the org's API instance URL for a freshly linked Salesforce account.
  *
@@ -434,7 +472,7 @@ export const auth = betterAuth({
           }
 
           try {
-            await handleNewUser(user.id)
+            await handleNewUser(user.id, context)
           } catch (error) {
             logger.error('[databaseHooks.user.create.after] Failed to initialize user stats', {
               userId: user.id,
@@ -499,11 +537,15 @@ export const auth = betterAuth({
       },
       /**
        * The admin plugin's `/admin/remove-user` deletes the user row through Better Auth, so its
-       * usage rows cascade away without `deleteUserAccount`. Better Auth runs this once the delete
-       * commits, which is when the stored reporting prefixes that counted them must be discarded.
+       * usage rows cascade away without `deleteUserAccount`. Better Auth runs `after` once the
+       * delete commits, which is when the stored reporting prefixes that counted them must be
+       * discarded, and when the runs the cascade orphaned are stopped: in-flight ones at once,
+       * queued ones by the outbox worker, since this module cannot load that delivery.
        */
       delete: {
-        after: async () => {
+        before: holdAdminRemovalStops,
+        after: async (user) => {
+          await stopAdminRemovedRuns(user)
           await invalidateReportingUsagePrefixes()
         },
       },
@@ -676,11 +718,20 @@ export const auth = betterAuth({
 
           try {
             const { ensureUserStatsExists } = await import('@/lib/billing/core/usage')
-            await ensureUserStatsExists(account.userId)
+            await ensureUserStatsExists(account.userId, context)
           } catch (error) {
             logger.error('[databaseHooks.account.create.after] Failed to ensure user stats', {
               userId: account.userId,
               accountId: account.id,
+              error,
+            })
+          }
+
+          try {
+            await handleNewSignInAccount(account, context)
+          } catch (error) {
+            logger.error('[databaseHooks.account.create.after] Deleted-identity check failed', {
+              userId: account.userId,
               error,
             })
           }
@@ -985,7 +1036,7 @@ export const auth = betterAuth({
       banned: false,
       banReason: null,
       banExpires: null,
-      ...(isBillingEnabled && stripeClient ? { stripeCustomerId: null } : {}),
+      ...(stripeBilling ? { stripeCustomerId: null } : {}),
       ...additionalFields,
       id,
     }),
@@ -1006,7 +1057,19 @@ export const auth = betterAuth({
         throw new Error(`Failed to send reset password email: ${result.message}`)
       }
     },
+    /**
+     * Re-sweeps sessions after `onPasswordReset`, catching one created while it ran (e.g. a social
+     * sign-in). Cookie-cached sessions survive until `cookieCache.maxAge`.
+     */
+    revokeSessionsOnPasswordReset: true,
+    /**
+     * Sessions go first: OAuth issuance references its session, so once they are deleted no new
+     * grant can be minted behind the sweep. A failure fails the reset, and the retry from a new
+     * link redoes the revocation.
+     */
     onPasswordReset: async ({ user: resetUser }, request) => {
+      await db.delete(schema.session).where(eq(schema.session.userId, resetUser.id))
+      await revokeUserOAuthGrants(resetUser.id)
       await recordPasswordResetAudit({ kind: 'completed', userId: resetUser.id, request })
     },
   },
@@ -1583,11 +1646,11 @@ export const auth = betterAuth({
      * SSO provider behind it.
      */
     ...(isSsoEnabled ? [configuredSsoPlugin] : []),
-    ...(isBillingEnabled && stripeClient
+    ...(stripeBilling
       ? [
           stripe({
-            stripeClient,
-            stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
+            stripeClient: stripeBilling.client,
+            stripeWebhookSecret: stripeBilling.webhookSecret,
             createCustomerOnSignUp: true,
             onCustomerCreate: async ({ stripeCustomer, user }) => {
               logger.info('[onCustomerCreate] Stripe customer created', {
@@ -1640,9 +1703,10 @@ export const auth = betterAuth({
                 })
 
                 if (!planFromStripe) {
-                  logger.error(
-                    '[onSubscriptionComplete] Could not resolve plan from Stripe price — check env var configuration',
-                    { subscriptionId: subscription.id, dbPlan: subscription.plan, priceId }
+                  logUnresolvedStripePlan(
+                    'onSubscriptionComplete',
+                    { subscriptionId: subscription.id, dbPlan: subscription.plan, priceId },
+                    false
                   )
                 }
 
@@ -1733,17 +1797,6 @@ export const auth = betterAuth({
                 const { priceId, planFromStripe, isTeamPlan, isAnnual } =
                   resolvePlanFromStripeSubscription(stripeSubscription)
 
-                if (priceId && !planFromStripe) {
-                  logger.warn(
-                    '[onSubscriptionUpdate] Could not determine plan from Stripe price ID',
-                    {
-                      subscriptionId: subscription.id,
-                      priceId,
-                      dbPlan: subscription.plan,
-                    }
-                  )
-                }
-
                 const referenceOrganizationId = await getOrganizationIdForSubscriptionReference(
                   subscription.referenceId
                 )
@@ -1762,9 +1815,10 @@ export const auth = betterAuth({
                 })
 
                 if (!planFromStripe) {
-                  logger.error(
-                    '[onSubscriptionUpdate] Could not resolve plan from Stripe price — org creation may be skipped for team upgrades',
-                    { subscriptionId: subscription.id, dbPlan: subscription.plan }
+                  logUnresolvedStripePlan(
+                    'onSubscriptionUpdate',
+                    { subscriptionId: subscription.id, dbPlan: subscription.plan, priceId },
+                    didSubscriptionPriceChange(stripeSubscription, event.data.previous_attributes)
                   )
                 }
 

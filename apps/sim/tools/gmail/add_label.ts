@@ -91,7 +91,7 @@ interface GmailModifyV2Response {
 export const gmailAddLabelV2Tool: InternalToolConfig<GmailLabelParams, GmailModifyV2Response> = {
   id: 'gmail_add_label_v2',
   name: 'Gmail Add Label',
-  description: 'Add label(s) to a Gmail message',
+  description: 'Add label(s) to a Gmail message.',
   version: '2.0.0',
   oauth: gmailAddLabelTool.oauth,
   params: gmailAddLabelTool.params,

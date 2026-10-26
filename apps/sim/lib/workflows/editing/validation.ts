@@ -45,6 +45,7 @@ import {
   getModelSunsetStatus,
   isAutoModel,
   isCustomModelId,
+  isEvaluationModel,
   isKnownModelId,
   suggestModelIdsForUnknownModel,
 } from '@/providers/models'
@@ -611,6 +612,9 @@ function validateFallbackModelEntry(item: any, index: number): string | null {
   }
   if (isAutoModel(model)) {
     return `${where}: sim-auto cannot be a fallback model; it already routes and falls back on its own`
+  }
+  if (isEvaluationModel(model)) {
+    return `${where}: ${model} is an evaluation model and cannot serve as a chat fallback`
   }
   if (!isKnownModelId(model) && !isCustomModelId(model)) {
     const suggestions = suggestModelIdsForUnknownModel(model)

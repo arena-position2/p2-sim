@@ -1,4 +1,4 @@
-import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/attribution'
 import { knowledgeExecutorContext } from '@/lib/internal/knowledge/executor-context'
 import { createExecutorPrincipalFromExecutionContext } from '@/lib/internal/principals/executor'
 import type { InternalToolOperationContext } from '@/lib/internal/tool-operations/types'

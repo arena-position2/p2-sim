@@ -55,6 +55,7 @@ export function capabilityGovernedPrincipalUserId(principal: Principal): string 
     case 'slack_installation':
     case 'slack_app':
       return null
+    case 'resource_delegated':
     case 'organization_delegated':
       return principal.subjectUserId
     case 'delegated': {
@@ -196,7 +197,10 @@ export function requireAllowedWorkspacePrincipal<O extends WorkspaceOperation>(
   }
 }
 
-function requirePermission(permission: PermissionType | null, required: PermissionType): void {
+function requirePermission(
+  permission: PermissionType | null,
+  required: PermissionType
+): asserts permission is PermissionType {
   if (permission === null) {
     throw new NoWorkspaceAccessError()
   }
@@ -329,7 +333,7 @@ export async function requireCurrentHumanRole<C extends WorkspaceAuthorizationCo
   context: C,
   required: PermissionType,
   options?: WorkspaceAuthorizationOptions<C>
-): Promise<void> {
+): Promise<PermissionType> {
   const permission = await resolveEffectiveWorkspacePermission(
     userId,
     context.workspaceId,
@@ -338,6 +342,7 @@ export async function requireCurrentHumanRole<C extends WorkspaceAuthorizationCo
     { forUpdate: options?.forUpdate }
   )
   requirePermission(permission, required)
+  return permission
 }
 
 /**
@@ -431,6 +436,7 @@ export async function authorizeWorkspaceOperation<C extends WorkspaceAuthorizati
         throw new WorkspaceApiKeyAuthorizationError()
       }
       return
+    case 'resource_delegated':
     case 'organization_delegated':
       throw new PrincipalKindAuthorizationError(principal.kind, operation.id)
     case 'delegated': {

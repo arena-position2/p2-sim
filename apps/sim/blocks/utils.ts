@@ -706,34 +706,10 @@ export const AGENT_TOOL_BLOCK_TYPES = new Set([
   'function',
   'table',
   'image_generator_v2',
-  'chart_generator',
-])
-
-/**
- * Block types that are built-in to the platform (as opposed to third-party integrations).
- * Used to categorize tools in the tool selection dropdown.
- */
-export const BUILT_IN_TOOL_TYPES = new Set([
-  'api',
-  'file_v5',
-  'function',
-  'knowledge',
-  'search',
-  'thinking',
-  'image_generator',
-  'image_generator_v2',
   'image_fusion',
   'video_generator',
   'video_generator_v2',
   'video_generator_v3',
-  'vision',
-  'translate',
-  'tts',
-  'stt',
-  'memory',
-  'table_v2',
-  'webhook_request',
-  'workflow',
   'chart_generator',
 ])
 

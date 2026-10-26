@@ -14,7 +14,7 @@ import {
   MothershipStreamV1ToolOutcome,
 } from '@/lib/mothership/generated/mothership-stream-v1'
 import { isToolHiddenInUi } from '@/lib/mothership/tools/client/hidden-tools'
-import { normalizeToolActivityDescription } from '@/lib/mothership/tools/tool-display'
+import { normalizeToolActivityDescription } from '@/lib/mothership/tools/display'
 import {
   type ChatContextKind,
   type ChatMessage,
@@ -56,6 +56,7 @@ function toToolCallInfo(block: PersistedContentBlock, stored: boolean): ToolCall
     status,
     displayTitle: status === ToolCallStatus.cancelled ? 'Stopped by user' : tc.display?.title,
     ...(activityDescription ? { activityDescription } : {}),
+    ...(tc.activity ? { activity: tc.activity } : {}),
     params: tc.params,
     calledBy: tc.calledBy,
     result: tc.result,
@@ -230,6 +231,7 @@ export function toDisplayMessage(msg: PersistedMessage): ChatMessage {
   const attachments = toDisplayAttachment(msg.fileAttachments)
   if (attachments.length > 0) {
     display.attachments = attachments
+    display.fileAttachments = msg.fileAttachments
   }
 
   display.contexts = toDisplayContexts(msg.contexts)
