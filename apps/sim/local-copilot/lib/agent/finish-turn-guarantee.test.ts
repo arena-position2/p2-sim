@@ -10,10 +10,74 @@ import {
   synthesizeAssistantSummaryFromTools,
 } from '@/local-copilot/lib/synthesize-assistant-summary'
 import {
+  admitPrePopulateDiscovery,
   shouldEnsureWorkflowBuildClosingMessage,
   shouldForceIncompleteWorkflowPopulateContinuation,
+  shouldRefundPrePopulateDiscoveryRound,
   shouldSynthesizeAssistantSummary,
 } from '@/local-copilot/lib/user-facing-text'
+
+describe('pre-populate discovery budget', () => {
+  it('allows two metadata or artifact calls, then rejects further ones', () => {
+    expect(
+      admitPrePopulateDiscovery({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        discoveryCallsSoFar: 0,
+        toolName: 'get_blocks_metadata',
+      })
+    ).toBe('allow')
+    expect(
+      admitPrePopulateDiscovery({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        discoveryCallsSoFar: 2,
+        toolName: 'load_copilot_artifact',
+      })
+    ).toBe('reject')
+  })
+
+  it('ignores the cap once a populate edit has succeeded', () => {
+    expect(
+      admitPrePopulateDiscovery({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 1,
+        discoveryCallsSoFar: 4,
+        toolName: 'get_blocks_metadata',
+      })
+    ).toBe('ignore')
+  })
+
+  it('refunds a discovery-only round and does not refund a rejected one', () => {
+    expect(
+      shouldRefundPrePopulateDiscoveryRound({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        roundToolNames: ['get_blocks_metadata', 'load_copilot_artifact'],
+        refundsSoFar: 0,
+        hadRejectedDiscovery: false,
+      })
+    ).toBe(true)
+    expect(
+      shouldRefundPrePopulateDiscoveryRound({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        roundToolNames: ['get_blocks_metadata'],
+        refundsSoFar: 0,
+        hadRejectedDiscovery: true,
+      })
+    ).toBe(false)
+    expect(
+      shouldRefundPrePopulateDiscoveryRound({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        roundToolNames: ['get_blocks_metadata', 'edit_workflow'],
+        refundsSoFar: 0,
+        hadRejectedDiscovery: false,
+      })
+    ).toBe(false)
+  })
+})
 
 describe('shouldForceIncompleteWorkflowPopulateContinuation', () => {
   it('forces when create ran with no populate and no pending follow-ups', () => {
@@ -150,6 +214,58 @@ describe('buildWorkflowBuildChatAppendix', () => {
     )
     expect(appendix).toMatch(/empty workflow/i)
     expect(appendix).toMatch(/still need to be added/i)
+  })
+
+  it('reports the last edit failure instead of the create hint after an edit was attempted', () => {
+    const appendix = buildWorkflowBuildChatAppendix(
+      [
+        {
+          name: 'create_workflow',
+          success: true,
+          result: { workflowId: 'wf-1', workflowName: 'Daily Briefing' },
+        },
+        {
+          name: 'edit_workflow',
+          success: false,
+          error: 'Call get_blocks_metadata before editing schedule_trigger.',
+          result: {
+            success: false,
+            editPrecondition: 'metadata',
+            error: 'Call get_blocks_metadata before editing schedule_trigger.',
+          },
+        },
+      ],
+      {
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        unresolvedFollowUpHint:
+          'New workflow created. Do NOT create_workflow or get_workflow_context again.',
+      }
+    )
+    expect(appendix).toMatch(/last edit did not add the blocks/i)
+    expect(appendix).toMatch(/block metadata/i)
+    expect(appendix).not.toMatch(/Do NOT create_workflow/i)
+  })
+
+  it('reports skipped operations from the last edit', () => {
+    const appendix = buildWorkflowBuildChatAppendix(
+      [
+        {
+          name: 'edit_workflow',
+          success: true,
+          result: {
+            skippedItems: [{ reason: 'Unknown block type "schedule_trigger".' }],
+          },
+        },
+      ],
+      {
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        unresolvedFollowUpHint: 'New workflow created. Call edit_workflow.',
+      }
+    )
+    expect(appendix).toMatch(/schedule_trigger/)
+    expect(appendix).toMatch(/skipped/i)
   })
 
   it('surfaces unresolved follow-up hint', () => {

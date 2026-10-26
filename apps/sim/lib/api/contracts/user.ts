@@ -136,7 +136,7 @@ export const ianaTimezoneSchema = z.string().refine(
 )
 
 export const userSettingsSchema = z.object({
-  theme: z.enum(['system', 'light', 'dark']).default('system'),
+  theme: z.enum(['system', 'light', 'dark']).default('light'),
   autoConnect: z.boolean().default(true),
   telemetryEnabled: z.boolean().default(true),
   emailPreferences: userSettingsEmailPreferencesSchema.optional().default({}),

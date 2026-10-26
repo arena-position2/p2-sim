@@ -93,13 +93,29 @@ export function createIntegrationCredentialVisibility({
     })
   }
 
+  /**
+   * Connect-link availability. An unrevealed preview still has a Connect button
+   * on the Integrations page, so issuing an authorize URL follows that page:
+   * allowed, not kill-switched, and deployment OAuth ready. Toolbar hiding and
+   * disabled blocks stay excluded. Managed grants and service accounts keep
+   * {@link visibleAvailability}, which still hides unrevealed previews.
+   */
+  const oauthConnectAvailability = (service: OAuthServiceMetadata) => {
+    return getIntegrationTypesForOAuthServiceId(service.serviceId).flatMap((blockType) => {
+      const block = getBlock(blockType)
+      if (!block || block.hideFromToolbar || blockVisibility?.disabled.has(block.type)) return []
+      const availability = availabilityByType.get(blockType.toLowerCase())
+      return availability ? [availability] : []
+    })
+  }
+
   const isOAuthServiceVisible = (service: OAuthServiceMetadata): boolean => {
     if (service.authType !== 'oauth' || !isServiceAllowed(service)) return false
     const integrationTypes = getIntegrationTypesForOAuthServiceId(service.serviceId)
     if (integrationTypes.length === 0) {
       return isOAuthServiceDeploymentAvailable(service.providerId)
     }
-    return visibleAvailability(service).some(
+    return oauthConnectAvailability(service).some(
       (availability) => availability.state === 'ready' && availability.oauthAvailable
     )
   }

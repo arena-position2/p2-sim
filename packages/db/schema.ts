@@ -1148,7 +1148,7 @@ export const settings = pgTable('settings', {
     .references(() => user.id, { onDelete: 'cascade' })
     .unique(),
 
-  theme: text('theme').notNull().default('system'),
+  theme: text('theme').notNull().default('light'),
   autoConnect: boolean('auto_connect').notNull().default(true),
 
   telemetryEnabled: boolean('telemetry_enabled').notNull().default(true),

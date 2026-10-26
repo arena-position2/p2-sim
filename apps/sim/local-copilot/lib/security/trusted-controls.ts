@@ -1,5 +1,7 @@
 import {
+  formatOAuthConnectBatch,
   formatOAuthConnectCredentialTag,
+  type OAuthConnectBatchControl,
   type OAuthConnectControl,
 } from '@/local-copilot/lib/oauth-connect-text'
 import { LOCAL_OPS_COUNTERS, recordLocalOpsEvent } from '@/local-copilot/lib/ops/metrics'
@@ -16,7 +18,10 @@ export interface GeneratedApiKeyControl {
   value: string
 }
 
-export type LocalTrustedControl = OAuthConnectControl | GeneratedApiKeyControl
+export type LocalTrustedControl =
+  | OAuthConnectControl
+  | OAuthConnectBatchControl
+  | GeneratedApiKeyControl
 
 /**
  * Builds a one-time API key control from a successful generate_api_key result.
@@ -33,6 +38,9 @@ export function buildGeneratedApiKeyControl(result: unknown): GeneratedApiKeyCon
 export function formatTrustedControl(control: LocalTrustedControl): string {
   if (control.type === 'credential_link') {
     return formatOAuthConnectCredentialTag(control)
+  }
+  if (control.type === 'credential_links') {
+    return formatOAuthConnectBatch(control.links)
   }
   return `<credential>${JSON.stringify({ type: 'sim_key', value: control.value })}</credential>`
 }

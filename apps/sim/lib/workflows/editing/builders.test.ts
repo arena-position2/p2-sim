@@ -152,6 +152,34 @@ const imageGeneratorV2BlockConfig = {
   ],
 }
 
+const gmailBlockConfig = {
+  type: 'gmail',
+  name: 'Gmail (Legacy)',
+  hideFromToolbar: true,
+  sunset: { status: 'legacy', replacedBy: 'gmail_v2' },
+  outputs: {},
+  subBlocks: [],
+}
+
+const gmailV2BlockConfig = {
+  type: 'gmail_v2',
+  name: 'Gmail',
+  outputs: {},
+  subBlocks: [{ id: 'operation', type: 'dropdown' }],
+}
+
+const scheduleBlockConfig = {
+  type: 'schedule',
+  name: 'Schedule',
+  category: 'triggers',
+  outputs: {},
+  subBlocks: [
+    { id: 'scheduleType', type: 'dropdown', mode: 'trigger' },
+    { id: 'dailyTime', type: 'time-input', mode: 'trigger' },
+    { id: 'timezone', type: 'dropdown', mode: 'trigger' },
+  ],
+}
+
 const blocksByType: Record<string, unknown> = {
   api: apiBlockConfig,
   agent: agentBlockConfig,
@@ -168,6 +196,9 @@ const blocksByType: Record<string, unknown> = {
   generic_webhook: webhookBlockConfig,
   gated: gatedOperationBlockConfig,
   image_generator_v2: imageGeneratorV2BlockConfig,
+  gmail: gmailBlockConfig,
+  gmail_v2: gmailV2BlockConfig,
+  schedule: scheduleBlockConfig,
 }
 
 describe('createBlockFromParams', () => {
@@ -233,6 +264,34 @@ describe('createBlockFromParams', () => {
       'claude-sonnet-5-5'
     )
   })
+
+  it('creates a schedule block in trigger mode so its fields are visible', () => {
+    const block = createBlockFromParams('sched-1', {
+      type: 'schedule',
+      name: 'Daily 9AM IST',
+      inputs: {
+        scheduleType: 'daily',
+        dailyTime: '09:00',
+        timezone: 'Asia/Kolkata',
+      },
+    })
+
+    expect(block.type).toBe('schedule')
+    expect(block.triggerMode).toBe(true)
+    expect(block.subBlocks.scheduleType.value).toBe('daily')
+    expect(block.subBlocks.dailyTime.value).toBe('09:00')
+    expect(block.subBlocks.timezone.value).toBe('Asia/Kolkata')
+  })
+
+  it('stores the current successor when adding a sunset block type', () => {
+    const block = createBlockFromParams('mail-1', {
+      type: 'gmail',
+      name: 'Gmail',
+    })
+
+    expect(block.type).toBe('gmail_v2')
+  })
+
   it('derives agent outputs from responseFormat when outputs are not provided', () => {
     const block = createBlockFromParams('b-agent', {
       type: 'agent',

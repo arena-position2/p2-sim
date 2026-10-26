@@ -36,6 +36,7 @@ import { TRIGGER_RUNTIME_SUBBLOCK_IDS } from '@/triggers/constants'
 import type { EditWorkflowOperation, SkippedItem, ValidationError } from './types'
 import { logSkippedItem } from './types'
 import {
+  resolveCurrentBlockType,
   validateInputsForBlock,
   validateSourceHandleForBlock,
   validateTargetHandle,
@@ -163,6 +164,9 @@ export function createBlockFromParams(
   skippedItems?: SkippedItem[],
   enforceToolBindingContract = false
 ): any {
+  if (typeof params?.type === 'string') {
+    params.type = resolveCurrentBlockType(params.type)
+  }
   const blockConfig = getBlock(params.type)
 
   // Validate inputs against block configuration
@@ -181,8 +185,8 @@ export function createBlockFromParams(
     }
   }
 
-  // Determine outputs based on trigger mode
-  const triggerMode = params.triggerMode || false
+  // Trigger-category blocks (Schedule) only show their fields when triggerMode is on.
+  const triggerMode = blockConfig?.category === 'triggers' ? true : Boolean(params.triggerMode)
   const isTriggerCapable = blockConfig ? hasTriggerCapability(blockConfig) : false
   const effectiveTriggerMode = Boolean(triggerMode && isTriggerCapable)
 

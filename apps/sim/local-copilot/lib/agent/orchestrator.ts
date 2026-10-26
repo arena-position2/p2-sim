@@ -134,7 +134,10 @@ import {
   DEFAULT_LOCAL_COPILOT_CATALOG_ID,
   type LocalCopilotCatalogId,
 } from '@/local-copilot/lib/model-catalog'
-import { buildOAuthConnectControl } from '@/local-copilot/lib/oauth-connect-text'
+import {
+  buildOAuthConnectControl,
+  type OAuthConnectControl,
+} from '@/local-copilot/lib/oauth-connect-text'
 import { auditLocalOpsEvent } from '@/local-copilot/lib/ops/audit-metrics'
 import { LOCAL_OPS_COUNTERS, recordLocalOpsEvent } from '@/local-copilot/lib/ops/metrics'
 import {
@@ -159,7 +162,11 @@ import {
   waitForLocalToolConfirmation,
 } from '@/local-copilot/lib/security/request-tool-confirmation'
 import { classifyLocalToolConfirmation } from '@/local-copilot/lib/security/tool-confirmation-policy'
-import { buildGeneratedApiKeyControl } from '@/local-copilot/lib/security/trusted-controls'
+import {
+  buildGeneratedApiKeyControl,
+  formatTrustedControl,
+  type LocalTrustedControl,
+} from '@/local-copilot/lib/security/trusted-controls'
 import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
@@ -200,10 +207,12 @@ import {
 } from '@/local-copilot/lib/tools/parallel-reads'
 import type { LocalCopilotStreamEvent, WorkflowPatch } from '@/local-copilot/lib/types'
 import {
+  admitPrePopulateDiscovery,
   buildBlocksMetadataReuseSystemMessage,
   buildDebugExplanationContinuationMessage,
   buildFileEditContinuationMessage,
   buildIncompleteWorkflowPopulateContinuationMessage,
+  buildPrePopulateDiscoveryBlockedMessage,
   buildResearchSearchContinuationMessage,
   buildUnfulfilledIntentContinuationMessage,
   buildUnresolvedFollowUpClosingMessage,
@@ -227,6 +236,7 @@ import {
   shouldForceIncompleteWorkflowPopulateContinuation,
   shouldForceResearchSearchContinuation,
   shouldForceWorkflowBuildContinuation,
+  shouldRefundPrePopulateDiscoveryRound,
   shouldSynthesizeAssistantSummary,
   stripIdsFromUserFacingText,
 } from '@/local-copilot/lib/user-facing-text'
@@ -975,6 +985,8 @@ export async function* runLocalCopilotAgent(
   let createdWorkflowThisTurn = false
   let postBuildToolMode: PostBuildToolMode = 'all'
   let endTurnAfterThisRound = false
+  const pendingOAuthControls: OAuthConnectControl[] = []
+  let pendingOAuthToolCallId: string | undefined
   /** Full user-visible prose streamed this turn (survives per-round assistantText resets). */
   let streamedUserFacingText = ''
   /**
@@ -995,6 +1007,11 @@ export async function* runLocalCopilotAgent(
   let forcedIncompletePopulateContinuations = 0
   let forcedFileEditContinuations = 0
   let forcedResearchSearchContinuations = 0
+  /** Metadata / artifact calls after create and before the first successful edit. */
+  let prePopulateDiscoveryCalls = 0
+  let refundedPrePopulateDiscoveryRounds = 0
+  let roundToolNames: string[] = []
+  let roundHadRejectedDiscovery = false
   let turnHasLiveWebSearch = false
   let turnInputTokens = 0
   let turnOutputTokens = 0
@@ -1002,6 +1019,28 @@ export async function* runLocalCopilotAgent(
   let stagnationStopMessage: string | null = null
 
   const needsLiveSearch = intent.primary === 'research' || intent.secondary.includes('research')
+
+  const gatePrePopulateDiscovery = (toolName: string): ToolExecutionResult | null => {
+    const decision = admitPrePopulateDiscovery({
+      createdWorkflowThisTurn,
+      successfulPopulateEdits,
+      discoveryCallsSoFar: prePopulateDiscoveryCalls,
+      toolName,
+    })
+    if (decision === 'allow') {
+      prePopulateDiscoveryCalls += 1
+      return null
+    }
+    if (decision !== 'reject') return null
+    roundHadRejectedDiscovery = true
+    const message = buildPrePopulateDiscoveryBlockedMessage()
+    return {
+      toolName,
+      success: false,
+      error: message,
+      result: { success: false, error: message, message },
+    }
+  }
 
   // Overflow past maxToolRounds is reserved for write-critical follow-ups
   // (workspace_file → edit_content) so prepare-without-apply cannot stall on
@@ -1020,6 +1059,9 @@ export async function* runLocalCopilotAgent(
     ) {
       break
     }
+
+    roundToolNames = []
+    roundHadRejectedDiscovery = false
 
     const midTurnSpend = assertSpendCapAllows({
       isExceeded: usageLimits.isExceeded,
@@ -1664,6 +1706,7 @@ export async function* runLocalCopilotAgent(
 
     for (let callIndex = 0; callIndex < orderedToolCalls.length; callIndex++) {
       const call = orderedToolCalls[callIndex]
+      roundToolNames.push(call.name)
       let parsedArgs: Record<string, unknown> = {}
       try {
         parsedArgs = JSON.parse(call.arguments || '{}') as Record<string, unknown>
@@ -1848,30 +1891,60 @@ export async function* runLocalCopilotAgent(
             memory: getLocalCopilotMemorySnapshot(),
           })
 
-          const parallelResults = await Promise.all(
-            prepared.map(async (item) => {
-              const toolStartedAt = Date.now()
-              try {
-                const toolResult = await executeLocalCopilotTool(item.call.name, item.parsedArgs, {
-                  ...toolCtx,
-                  activeToolCallId: item.call.id,
+          for (const extra of parallelCalls.slice(1)) roundToolNames.push(extra.name)
+
+          const executable: typeof prepared = []
+          const rejectedDiscovery: Array<{
+            call: (typeof prepared)[number]['call']
+            parsedArgs: Record<string, unknown>
+            toolResult: ToolExecutionResult
+            toolStartedAt: number
+          }> = []
+          for (const item of prepared) {
+            const blocked = gatePrePopulateDiscovery(item.call.name)
+            if (blocked) {
+              rejectedDiscovery.push({
+                call: item.call,
+                parsedArgs: item.parsedArgs,
+                toolResult: blocked,
+                toolStartedAt: Date.now(),
+              })
+            } else {
+              executable.push(item)
+            }
+          }
+
+          const executed = executable.length
+            ? await Promise.all(
+                executable.map(async (item) => {
+                  const toolStartedAt = Date.now()
+                  try {
+                    const toolResult = await executeLocalCopilotTool(
+                      item.call.name,
+                      item.parsedArgs,
+                      {
+                        ...toolCtx,
+                        activeToolCallId: item.call.id,
+                      }
+                    )
+                    return { ...item, toolResult, toolStartedAt }
+                  } catch (error) {
+                    const message = getErrorMessage(error, 'Tool execution failed')
+                    return {
+                      ...item,
+                      toolResult: {
+                        toolName: item.call.name,
+                        success: false as const,
+                        result: { success: false, message },
+                        error: message,
+                      },
+                      toolStartedAt,
+                    }
+                  }
                 })
-                return { ...item, toolResult, toolStartedAt }
-              } catch (error) {
-                const message = getErrorMessage(error, 'Tool execution failed')
-                return {
-                  ...item,
-                  toolResult: {
-                    toolName: item.call.name,
-                    success: false as const,
-                    result: { success: false, message },
-                    error: message,
-                  },
-                  toolStartedAt,
-                }
-              }
-            })
-          )
+              )
+            : []
+          const parallelResults = [...rejectedDiscovery, ...executed]
 
           logger.info('Arena Copilot parallel read tools finished', {
             count: parallelResults.length,
@@ -2045,8 +2118,9 @@ export async function* runLocalCopilotAgent(
 
       const { executeLocalCopilotTool, refreshToolContext } = await getToolExecutor()
       const confirmationRequirement = classifyLocalToolConfirmation(call.name, parsedArgs)
-      let toolResult: ToolExecutionResult | undefined
-      if (confirmationRequirement) {
+      let toolResult: ToolExecutionResult | undefined =
+        gatePrePopulateDiscovery(call.name) ?? undefined
+      if (!toolResult && confirmationRequirement) {
         const confirmationReady = await prepareLocalToolConfirmation({
           runId: params.runId,
           toolCallId: call.id,
@@ -2450,16 +2524,13 @@ export async function* runLocalCopilotAgent(
         endTurnAfterThisRound = true
         const control = buildOAuthConnectControl(toolResult.result)
         if (control) {
-          yield {
-            type: 'trusted_control',
-            toolCallId: call.id,
-            control,
-          }
+          pendingOAuthControls.push(control)
+          pendingOAuthToolCallId ??= call.id
         }
         deferredSystemMessages.push({
           role: 'system',
           content:
-            '[System] Auth link was shown to the user as a Connect control. Stop. Do not call more tools or restate the completion.',
+            '[System] Auth links for this response will be shown together as one Connect control. Stop. Do not call more tools or restate the completion.',
         })
       }
 
@@ -2548,8 +2619,31 @@ export async function* runLocalCopilotAgent(
         }),
       })
     }
+    if (roundHadRejectedDiscovery) {
+      deferredSystemMessages.push({
+        role: 'system',
+        content: `[System] ${buildPrePopulateDiscoveryBlockedMessage()}`,
+      })
+    }
     for (const deferred of deferredSystemMessages) {
       messages.push(deferred)
+    }
+
+    if (
+      shouldRefundPrePopulateDiscoveryRound({
+        createdWorkflowThisTurn,
+        successfulPopulateEdits,
+        roundToolNames,
+        refundsSoFar: refundedPrePopulateDiscoveryRounds,
+        hadRejectedDiscovery: roundHadRejectedDiscovery,
+      })
+    ) {
+      refundedPrePopulateDiscoveryRounds += 1
+      round -= 1
+      logger.info('Arena Copilot refunded pre-populate discovery round', {
+        refundedPrePopulateDiscoveryRounds,
+        prePopulateDiscoveryCalls,
+      })
     }
 
     if (!stagnationStopMessage && !endTurnAfterThisRound) {
@@ -2806,6 +2900,22 @@ export async function* runLocalCopilotAgent(
         streamedUserFacingText += chunk
         yield { type: 'text_delta', content: chunk }
       }
+    }
+  }
+
+  if (pendingOAuthControls.length > 0 && pendingOAuthToolCallId) {
+    const control: LocalTrustedControl =
+      pendingOAuthControls.length === 1
+        ? pendingOAuthControls[0]
+        : { type: 'credential_links', links: pendingOAuthControls }
+    const text = formatTrustedControl(control)
+    const chunk = streamedUserFacingText.trim() ? `\n\n${text}` : text
+    streamedUserFacingText += chunk
+    assistantText = streamedUserFacingText
+    yield {
+      type: 'trusted_control',
+      toolCallId: pendingOAuthToolCallId,
+      control,
     }
   }
 
