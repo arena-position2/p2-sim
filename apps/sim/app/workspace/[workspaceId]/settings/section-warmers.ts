@@ -63,6 +63,7 @@ export const SECTION_MODULES = {
   'data-drains': () => import('@/ee/data-drains/components/data-drains-settings'),
   security: () => import('@/components/settings/organization-security'),
   usage: () => import('@/ee/organization-usage/components/usage-monitoring'),
+  'arena-usage': () => import('@/app/workspace/[workspaceId]/settings/components/usage/usage'),
   desktop: () => import('@/app/workspace/[workspaceId]/settings/components/desktop/desktop'),
   browser: () => import('@/app/workspace/[workspaceId]/settings/components/browser/browser'),
   terminal: () => import('@/app/workspace/[workspaceId]/settings/components/terminal/terminal'),

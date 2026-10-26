@@ -57,7 +57,7 @@ export function resolveSettingsHref({
     hostContext &&
     !canManageWorkspaceBilling(hostContext, viewerUserId)
   ) {
-    return `/workspace/${workspaceId}/settings/usage`
+    return `/workspace/${workspaceId}/settings/arena-usage`
   }
 
   const searchParams = new URLSearchParams()

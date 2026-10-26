@@ -258,7 +258,7 @@ describe('authorizeWorkspaceSettingsSection', () => {
     mocks.isOrganizationOnEnterprisePlan.mockResolvedValue(false)
     mocks.isOrganizationSettingsSectionAvailable.mockReturnValue(false)
 
-    await expect(authorize('usage')).resolves.toEqual({ allowed: true })
+    await expect(authorize('arena-usage')).resolves.toEqual({ allowed: true })
     expect(mocks.canOpenOrganizationSettingsSection).not.toHaveBeenCalled()
     expect(mocks.isOrganizationOnEnterprisePlan).not.toHaveBeenCalled()
   })

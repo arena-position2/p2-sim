@@ -99,13 +99,11 @@ async function canOpenOrganizationSection(
   }
 ): Promise<boolean> {
   /**
-   * Arena Subscription → Usage shares unified id `usage` with enterprise
-   * Organization → Usage tracking, so `UNIFIED_TO_ORGANIZATION_SECTION` maps
-   * this URL through the org-admin / enterprise gate. The page always renders
-   * Arena analytics (`<Usage />`); members who cannot manage billing are sent
-   * here on purpose. Org-admin + usage-monitoring stay on `/settings/usage/events`.
+   * Arena Subscription → Usage is open to every workspace member. People who
+   * cannot manage billing are sent here for remaining-credits analytics.
+   * Organization Insights stays on `usage` and keeps the org-admin gate.
    */
-  if (input.section === 'usage') return true
+  if (input.section === 'arena-usage') return true
 
   const organizationSection = UNIFIED_TO_ORGANIZATION_SECTION[input.section]
   if (!organizationSection) return true

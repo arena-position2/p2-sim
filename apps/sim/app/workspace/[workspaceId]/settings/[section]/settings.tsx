@@ -70,6 +70,7 @@ const OrganizationSecuritySettings = dynamic(() =>
   SECTION_MODULES.security().then((m) => m.OrganizationSecuritySettings)
 )
 const UsageMonitoring = dynamic(() => SECTION_MODULES.usage().then((m) => m.UsageMonitoring))
+const Usage = dynamic(() => SECTION_MODULES['arena-usage']().then((m) => m.Usage))
 const Desktop = dynamic(() => SECTION_MODULES.desktop().then((m) => m.Desktop))
 const Browser = dynamic(() => SECTION_MODULES.browser().then((m) => m.Browser))
 const Terminal = dynamic(() => SECTION_MODULES.terminal().then((m) => m.Terminal))
@@ -112,7 +113,7 @@ function SettingsPageContent({ section }: SettingsPageProps) {
     !billingEnabled && normalizedSection === 'billing'
       ? 'general'
       : billingRedirectToUsage
-        ? 'usage'
+        ? 'arena-usage'
         : isPlatformAdminSettingsSection(normalizedSection) && !sessionLoading && !isAdminRole
           ? 'general'
           : isPlatformAdminEmailSettingsSection(normalizedSection) &&
@@ -171,6 +172,7 @@ function SettingsPageContent({ section }: SettingsPageProps) {
           auditLogsHref={`/workspace/${hostContext.workspace.id}/settings/audit-logs`}
         />
       )}
+      {effectiveSection === 'arena-usage' && <Usage />}
       {effectiveSection === 'apikeys' && <ApiKeys scope='combined' />}
       {billingEnabled && effectiveSection === 'billing' && (
         <Billing

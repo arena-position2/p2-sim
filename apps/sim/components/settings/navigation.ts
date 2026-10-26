@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import {
   BookOpen,
+  ChartColumn,
   ClipboardList,
   Credit,
   Database,
@@ -126,6 +127,7 @@ export type UnifiedSettingsSection =
   | 'byok'
   | 'billing'
   | 'arena-billing'
+  | 'arena-usage'
   | 'usage'
   | 'teammates'
   | 'organization'
@@ -403,7 +405,7 @@ const arenaAgentsUsage: SettingsSectionRegistryEntry = {
   label: 'Usage',
   icon: Credit,
   unified: {
-    id: 'usage',
+    id: 'arena-usage',
     description:
       'View remaining credits and token/cost analytics for your activity, workspace, or organization.',
     group: 'subscription',
@@ -579,6 +581,26 @@ export const SETTINGS_SECTION_REGISTRY: readonly SettingsSectionRegistryEntry[] 
       group: 'organization',
       order: 0,
       organizationSection: 'members',
+    },
+  },
+  {
+    label: 'Insights',
+    icon: ChartColumn,
+    unified: {
+      id: 'usage',
+      description: 'Explore usage and activity across your organization.',
+      group: 'organization',
+      order: 1,
+      /**
+       * Do not add `hideWhenBillingDisabled`: the sidebar applies it before
+       * `selfHostedOverride`, which would hide usage monitoring on self-hosted
+       * deployments with billing disabled. Hosted deployments require the plan;
+       * self-hosted deployments require the feature flag.
+       */
+      requiresHosted: true,
+      requiresEnterprise: true,
+      selfHostedOverride: 'usageMonitoring',
+      organizationSection: 'usage',
     },
   },
   {
@@ -1116,16 +1138,6 @@ export const ORGANIZATION_SETTINGS_ITEMS: SettingsNavigationItem<OrganizationSet
       label: 'Sim Search in Slack',
       description: 'Let members search their sources by messaging a Slack bot.',
       icon: SlackIcon,
-      group,
-    }
-  }
-  if (id === 'usage') {
-    return {
-      id,
-      label: 'Usage',
-      description:
-        'View remaining credits and token/cost analytics for your activity, workspace, or organization.',
-      icon: Credit,
       group,
     }
   }

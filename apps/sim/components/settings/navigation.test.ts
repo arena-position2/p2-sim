@@ -87,9 +87,10 @@ describe('settings navigation boundaries', () => {
       'audit-logs',
       'billing',
       'arena-billing',
-      'usage',
+      'arena-usage',
       'teammates',
       'organization',
+      'usage',
       'oauth-apps',
       'secrets',
       'connected-accounts',
@@ -108,6 +109,7 @@ describe('settings navigation boundaries', () => {
       'docs',
       'admin',
       'skill-share',
+      'agent-access-request',
     ])
     expect(ACCOUNT_SETTINGS_ITEMS.map(({ id }) => id)).toEqual([
       'general',
@@ -286,6 +288,7 @@ describe('settings navigation boundaries', () => {
       'organization',
       'security',
       'sso',
+      'usage',
       'whitelabeling',
     ])
   })
@@ -304,6 +307,7 @@ describe('settings navigation boundaries', () => {
       security: 'security',
       'data-retention': 'data-retention',
       'data-drains': 'data-drains',
+      usage: 'usage',
       whitelabeling: 'whitelabeling',
     })
     expect(Object.keys(UNIFIED_TO_ORGANIZATION_SECTION).sort()).toEqual(

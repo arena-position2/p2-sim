@@ -82,7 +82,7 @@ describe('resolveSettingsHref unified settings navigation', () => {
         hostContext: HOST_CONTEXT,
         viewerUserId: 'external-a',
       })
-    ).toBe('/workspace/workspace-b/settings/usage')
+    ).toBe('/workspace/workspace-b/settings/arena-usage')
   })
 
   it('sends non-admin org members away from arena billing to usage', () => {
@@ -93,7 +93,7 @@ describe('resolveSettingsHref unified settings navigation', () => {
         hostContext: HOST_CONTEXT,
         viewerUserId: 'external-a',
       })
-    ).toBe('/workspace/workspace-b/settings/usage')
+    ).toBe('/workspace/workspace-b/settings/arena-usage')
   })
 
   it('maps billing to arena-billing for Arena admins who can manage the payer', () => {
