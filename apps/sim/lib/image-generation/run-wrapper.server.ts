@@ -8,6 +8,7 @@ import {
   applyNanoBananaPromptImageParams,
   normalizeOptionalString,
 } from '@/lib/image-generation/nano-banana-inputs'
+import { resolveImageGenerationCount } from '@/lib/image-generation/resolve-image-count.server'
 import type { InternalToolOperationContext } from '@/lib/internal/tool-operations/types'
 import type { ExecutionContext } from '@/executor/types'
 
@@ -19,6 +20,15 @@ export const INLINE_IMAGE_PAYLOAD_ERROR =
 
 /** Maximum concurrent base-tool executions per wrapper request. */
 const MAX_CONCURRENT_GENERATIONS = 2
+
+/**
+ * One provider call paints every variation into a single frame.
+ * When the prompt asks for several images, each call must be one variation.
+ */
+function promptForOutputImage(prompt: string, index: number, imageCount: number): string {
+  if (imageCount <= 1) return prompt
+  return `Generate exactly one image. This is variation ${index + 1} of ${imageCount}. Do not combine multiple variations, panels, or scenes into one image.\n\n${prompt}`
+}
 
 const ImageGenerationWrapperSchema = z.object({
   baseToolId: z.enum(['openai_image', 'google_imagen', 'google_nano_banana', 'image_generate']),
@@ -269,10 +279,12 @@ export async function runImageGenerationWrapper(
   executeOptions?: ImageGenerationWrapperExecuteOptions
 ): Promise<ImageGenerationWrapperResult> {
   const validated = ImageGenerationWrapperSchema.parse(input)
-  const imageCount = 1
   const { inputImageUrl, ...baseParams } = validated.params
   const inputImageWarning = normalizeOptionalString(validated.params.inputImageWarning)
   const originalPrompt = String(baseParams.prompt ?? '')
+  const imageCount = originalPrompt
+    ? (await resolveImageGenerationCount({ prompt: originalPrompt })).imageCount
+    : 1
   const requestedModel = getStringParam(validated.params, 'model') ?? ''
   const isGptImage2 = requestedModel === GPT_IMAGE_2_MODEL
   const executionToolId = resolveExecutionToolId(validated.baseToolId, validated.params)
@@ -347,7 +359,9 @@ export async function runImageGenerationWrapper(
       try {
         const executionParams: Record<string, unknown> = {
           ...buildExecutionParams(executionToolId, resolvedBaseParams),
-          ...(originalPrompt ? { prompt: originalPrompt } : {}),
+          ...(originalPrompt
+            ? { prompt: promptForOutputImage(originalPrompt, index, imageCount) }
+            : {}),
         }
         if (isGptImage2) {
           logGptImage2Wrapper('tool execution starting', {

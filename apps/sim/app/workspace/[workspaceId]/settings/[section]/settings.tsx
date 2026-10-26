@@ -98,9 +98,13 @@ function SettingsPageContent({ section }: SettingsPageProps) {
 
   const isAdminRole = session?.user?.role === 'admin'
   const isListedPlatformAdminEmail = isPlatformAdminEmail(session?.user?.email)
+  /**
+   * `arena-billing` is the sidebar's Billing row. It uses the same panel as
+   * `billing`; leaving it as its own section rendered the heading and no body.
+   */
   const normalizedSection: SettingsSection =
-    (section as string) === 'subscription' ? 'billing' : section
-  const isBillingSection = normalizedSection === 'billing' || normalizedSection === 'arena-billing'
+    (section as string) === 'subscription' || section === 'arena-billing' ? 'billing' : section
+  const isBillingSection = normalizedSection === 'billing'
   const canManageBilling = canManageWorkspaceBilling(hostContext, session?.user?.id)
   const billingRedirectToUsage =
     billingEnabled && isBillingSection && !sessionLoading && !canManageBilling

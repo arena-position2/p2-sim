@@ -581,7 +581,22 @@ interface ChatContentProps {
   onPendingTagChange?: (pending: boolean) => void
   /** The turn's retrieved sources by URL, which title the answer's plain links to them. */
   linkSources?: ReadonlyMap<string, SourceTagData>
+  /**
+   * Stable id for this text run across virtualizer unmounts. When present, a
+   * reply that streamed keeps the streaming parser after it scrolls away, so
+   * the remount does not re-parse an unbalanced marker as bold.
+   */
+  parserSessionKey?: string
 }
+
+/**
+ * Text runs that streamed in this session, keyed by the virtualizer row plus
+ * segment id. The row unmounts when it scrolls out of the window, and a fresh
+ * mount would otherwise parse as finished markdown (`mode='static'`), which
+ * pairs a stray `*` into `<strong>`. The set is written from an effect so a
+ * discarded render cannot drop a key.
+ */
+const streamedParserSessions = new Set<string>()
 
 /** Explicit options keep Streamdown's processor cache scoped to this chat and turn. */
 function privateImageUrls({
@@ -622,6 +637,7 @@ function ChatContentInner({
   onStreamActivityChange,
   onPendingTagChange,
   linkSources,
+  parserSessionKey,
 }: ChatContentProps) {
   const { chatId } = useChatSurface()
   const imageRehypePlugins = useMemo<
@@ -688,8 +704,13 @@ function ChatContentInner({
    * mounts a fresh animate plugin with no prev-content tracking, which would
    * re-fade the entire already-visible message.
    */
-  const [streamedThisSession, setStreamedThisSession] = useState(false)
-  const [animationDrained, setAnimationDrained] = useState(false)
+  // A remount of a reply that already streamed must open on the drained
+  // streaming parser: same remend tree, no fade. Re-arming the animate plugin
+  // would fade the whole message again.
+  const resumeSettledParser =
+    parserSessionKey !== undefined && streamedParserSessions.has(parserSessionKey) && !isStreaming
+  const [streamedThisSession, setStreamedThisSession] = useState(resumeSettledParser)
+  const [animationDrained, setAnimationDrained] = useState(resumeSettledParser)
   const [fadeCutoff, setFadeCutoff] = useState(false)
 
   /**
@@ -720,22 +741,36 @@ function ChatContentInner({
   if (isStreaming && !streamedThisSession) setStreamedThisSession(true)
 
   useEffect(() => {
+    if (!parserSessionKey) return
+    if (streamedThisSession) {
+      streamedParserSessions.add(parserSessionKey)
+      return
+    }
+    // History mounts here too, and deleting an absent key is a no-op. A content
+    // replacement clears both latches; drop the session so the remount follows
+    // that reset instead of restoring the previous reply's parser.
+    if (!animationDrained) streamedParserSessions.delete(parserSessionKey)
+  }, [parserSessionKey, streamedThisSession, animationDrained])
+
+  useEffect(() => {
     if (isRevealing || animationDrained || !streamedThisSession) return
     const timeout = setTimeout(() => setAnimationDrained(true), ANIMATION_DRAIN_MS)
     return () => clearTimeout(timeout)
   }, [isRevealing, animationDrained, streamedThisSession])
 
   /**
-   * `parserTree` (drives `mode`) stays latched for the mount's life: streaming
-   * mode is the only one that applies remend/incomplete-markdown repair and
-   * block-split parsing, so a settled message must KEEP the streaming parser —
-   * swapping to `mode='static'` at drain re-parses the same source through a
-   * different pipeline (no remend, whole-doc parse) and visibly flashes on any
-   * reply with unbalanced markdown. `streamingTree` (drives the remount key
-   * and animation props) additionally drops at drain, so the settled instance
+   * `parserTree` (drives `mode`) stays latched for the reply, including after
+   * the virtualizer unmounts it: streaming mode is the only one that applies
+   * remend/incomplete-markdown repair and block-split parsing, so a settled
+   * message must KEEP the streaming parser — swapping to `mode='static'` at
+   * drain, or on the remount when the row scrolls back, re-parses the same
+   * source through a different pipeline (no remend, whole-doc parse) and turns
+   * an unbalanced `*` into bold. `streamingTree` (drives the remount key and
+   * animation props) additionally drops at drain, so the settled instance
    * re-renders through the SAME parser minus the per-word animation spans —
    * byte-identical pixels. Only never-streamed mounts (reloaded history)
-   * render static.
+   * render static. The session set above is what lets a remount tell those
+   * apart.
    */
   const parserTree = isRevealing || streamedThisSession
   const streamingTree = parserTree && !animationDrained

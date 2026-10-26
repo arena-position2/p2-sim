@@ -3,8 +3,10 @@
 import { type SyntheticEvent, useCallback, useEffect, useState } from 'react'
 import { Button, Modal, ModalBody, ModalContent, ModalHeader } from '@sim/emcn'
 import { AlertTriangle, Check, Download, Expand, X } from 'lucide-react'
-import { normalizeImageUrlForCompare } from '@/lib/chat/assistant-assets'
-import { isUserFileDisplayMetadata, isUserFileWithMetadata } from '@/lib/core/utils/user-file'
+import {
+  chatDisplayUrlForImageFile,
+  normalizeImageUrlForCompare,
+} from '@/lib/chat/assistant-assets'
 
 export { normalizeImageUrlForCompare } from '@/lib/chat/assistant-assets'
 
@@ -1529,15 +1531,7 @@ export function isImageUrlLine(s: string): boolean {
 }
 
 function chatImageFileUrl(value: unknown): string | null {
-  if (!isUserFileWithMetadata(value) && !isUserFileDisplayMetadata(value)) {
-    return null
-  }
-  const file = value as { type: string; url: string }
-  if (!file.type.startsWith('image/')) {
-    return null
-  }
-  const url = file.url.trim()
-  return url || null
+  return chatDisplayUrlForImageFile(value)
 }
 
 /** A selected `image` file, or an `images` array of them, is shown as pictures only. */
@@ -1566,9 +1560,95 @@ function chatImageFileUrls(value: unknown): string[] | null {
  * (2) JSON payloads `{ content, image, metadata }`, (3) single URL lines.
  * Image URLs inside fenced code stay in the prose so sample HTML is not previewed as a chat image.
  */
+function balancedJsonObjectEnd(text: string, start: number): number {
+  if (text[start] !== '{') return -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      continue
+    }
+    if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+  return -1
+}
+
+/** Drops image file records that were stringified into the answer. */
+function stripImageFileRecordObjects(text: string): { text: string; urls: string[] } {
+  const urls: string[] = []
+  let result = ''
+  let index = 0
+  while (index < text.length) {
+    const start = text.indexOf('{', index)
+    if (start === -1) {
+      result += text.slice(index)
+      break
+    }
+    const end = balancedJsonObjectEnd(text, start)
+    if (end === -1) {
+      result += text.slice(start)
+      break
+    }
+    const slice = text.slice(start, end)
+    let displayUrl: string | null = null
+    let hasStoredUrl = false
+    try {
+      const parsed = JSON.parse(slice) as { url?: unknown }
+      hasStoredUrl = typeof parsed.url === 'string' && parsed.url.trim().length > 0
+      displayUrl = hasStoredUrl ? null : chatDisplayUrlForImageFile(parsed)
+    } catch {
+      displayUrl = null
+    }
+    if (!displayUrl) {
+      result += text.slice(index, end)
+      index = end
+      continue
+    }
+    result += text.slice(index, start)
+    urls.push(displayUrl)
+    index = end
+  }
+  return {
+    text: result
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/^\n+|\n+$/g, '')
+      .trim(),
+    urls,
+  }
+}
+
 export function resolveMessageImagesAndProse(raw: string): { urls: string[]; prose: string } {
   if (!raw || typeof raw !== 'string') {
     return { urls: [], prose: '' }
+  }
+
+  const strippedRecords = stripImageFileRecordObjects(raw)
+  if (strippedRecords.urls.length > 0) {
+    const resolved = resolveMessageImagesAndProse(strippedRecords.text)
+    const urls: string[] = []
+    const seen = new Set<string>()
+    for (const url of strippedRecords.urls) addUniqueImageUrl(url, seen, urls)
+    for (const url of resolved.urls) addUniqueImageUrl(url, seen, urls)
+    return { urls, prose: resolved.prose }
   }
 
   const t = raw.trim()
@@ -1997,8 +2077,9 @@ export function mergeToolOutputImageUrls(
         continue
       }
 
-      if (isUserFileWithMetadata(value) && value.type.startsWith('image/') && value.url) {
-        add(value.url)
+      const fileUrl = chatDisplayUrlForImageFile(value)
+      if (fileUrl) {
+        add(fileUrl)
       }
     }
   }

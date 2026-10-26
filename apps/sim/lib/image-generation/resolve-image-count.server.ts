@@ -31,11 +31,11 @@ const NUMBER_WORDS = {
 } as const
 
 const REQUESTED_OUTPUT_COUNT_REGEX =
-  /\b(?:(?:generate|create|make|give|provide|show|produce|render)\s+(?:me\s+)?)?(?<count>[1-5]|one|two|three|four|five)\s+(?:(?:different|separate)\s+)*(?:variations?|versions?|options?|alternatives?|separate\s+images?|images?|pictures?|renders?|outputs?)\b/i
+  /\b(?:(?:generate|create|make|give|provide|show|produce|render)\s+(?:me\s+)?)?(?<count>[1-5]|one|two|three|four|five)\s+(?:(?:different|separate|distinct)\s+)*(?:variations?|versions?|options?|alternatives?|separate\s+images?|images?|pictures?|renders?|outputs?)\b/i
 
 /** Fallback when the primary pattern misses count tokens before "variations". */
 const VARIATION_COUNT_FALLBACK_REGEX =
-  /\b(?<count>[1-5]|one|two|three|four|five)\s+(?:(?:different|separate)\s+)*variations?\b/i
+  /\b(?<count>[1-5]|one|two|three|four|five)\s+(?:(?:different|separate|distinct)\s+)*variations?\b/i
 
 /**
  * Prompt asks for multiple concepts merged into one output file (collage/grid/side-by-side),

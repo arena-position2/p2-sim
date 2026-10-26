@@ -205,6 +205,30 @@ describe('resolveMessageImagesAndProse', () => {
     expect(prose).toBe('Updated the sky.')
   })
 
+  it('renders an execution image file record as the picture, not JSON', () => {
+    const key =
+      'execution/347b4522-46e3-45ac-a850-277f1a78ff60/760767d3-9144-4ecd-90e1-6275f71950b2/5d1b54d4-d52e-413c-8af7-d3796092a3df/7510eb0c-be7c-40b4-926a-e0fe33722b60/generated-image.png'
+    const raw = JSON.stringify(
+      {
+        id: 'file_1792990794515_zrn6qoc',
+        name: 'generated-image.png',
+        size: 287761,
+        type: 'application/octet-stream',
+        url: '',
+        key,
+        context: 'execution',
+      },
+      null,
+      2
+    )
+
+    const { urls, prose } = resolveMessageImagesAndProse(`${raw}\n\nUse this image.`)
+
+    expect(prose).toBe('Use this image.')
+    expect(urls).toEqual([`/api/files/serve/${encodeURIComponent(key)}`])
+    expect(prose).not.toContain('generated-image.png')
+  })
+
   it('extracts image URLs from JSON content payloads', () => {
     const raw = JSON.stringify({
       content: `Here are options:\n- ${IMAGE_URL}\n- ${IMAGE_URL_2}`,

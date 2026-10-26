@@ -3,6 +3,7 @@ import { isPayloadSizeLimitError } from '@/lib/core/utils/stream-limits'
 import { processExecutionFiles } from '@/lib/execution/files'
 import { uploadExecutionFile } from '@/lib/uploads/contexts/execution/execution-file-manager'
 import { downloadFile } from '@/lib/uploads/core/storage-service'
+import type { StorageContext } from '@/lib/uploads/shared/types'
 import { isInternalFileUrl, parseInternalFileUrl } from '@/lib/uploads/utils/file-utils'
 import type { UserFile } from '@/executor/types'
 
@@ -34,40 +35,66 @@ function toAbsoluteInternalUrl(fileUrl: string): string {
   return `${baseUrl}${fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`}`
 }
 
-/**
- * Storage key for a generated image of this workflow.
- *
- * Chat runs as a public principal, so a stored key from another file is refused later.
- * Only an image this workflow already produced may be copied into the current execution.
- * The key prefix is the check; a `context` query on the URL is ignored.
- */
-function workflowGeneratedImageKey(fileUrl: string, workflowId: string): string | null {
-  if (!workflowId || workflowId.includes('/') || !isInternalFileUrl(fileUrl)) {
-    return null
-  }
-
-  let key: string
+function internalStorageKey(fileUrl: string): string | null {
+  if (!isInternalFileUrl(fileUrl)) return null
   try {
-    key = parseInternalFileUrl(fileUrl).key
+    return parseInternalFileUrl(fileUrl).key
   } catch {
     return null
   }
+}
 
-  const parts = key.split('/')
-  if (
-    parts.length < 4 ||
-    parts[0] !== 'agent-generated-images' ||
-    parts[1] !== workflowId ||
-    parts.some((part) => part.length === 0 || part === '.' || part === '..')
-  ) {
+function hasSafeKeyParts(parts: string[]): boolean {
+  return parts.every((part) => part.length > 0 && part !== '.' && part !== '..')
+}
+
+/**
+ * Storage key for an image this workflow already produced.
+ *
+ * Chat runs as a public principal, so a stored key from another file is refused later.
+ * Two stores are allowed: `agent-generated-images/{workflowId}/...`, and an image file
+ * under `execution/{workspaceId}/{workflowId}/...` from an earlier run of this same
+ * workflow. Image Generator saves the picture the chat shows into that execution path
+ * (`generated-image.png`). A later edit starts a new execution, and the previous key
+ * is not this run's file — copying it here is what lets the edit use the picture.
+ * The key prefix is the check; a `context` query on the URL is ignored.
+ */
+function reusableWorkflowImageKey(
+  fileUrl: string,
+  executionContext: ChatExecutionContext
+): { key: string; context: StorageContext } | null {
+  const { workflowId, workspaceId } = executionContext
+  if (!workflowId || workflowId.includes('/') || !workspaceId || workspaceId.includes('/')) {
     return null
   }
 
-  return key
+  const key = internalStorageKey(fileUrl)
+  if (!key) return null
+
+  const parts = key.split('/')
+  if (!hasSafeKeyParts(parts)) return null
+
+  if (parts.length >= 4 && parts[0] === 'agent-generated-images' && parts[1] === workflowId) {
+    return { key, context: 'agent-generated-images' }
+  }
+
+  const fileName = parts[parts.length - 1] ?? ''
+  if (
+    parts.length >= 5 &&
+    parts[0] === 'execution' &&
+    parts[1] === workspaceId &&
+    parts[2] === workflowId &&
+    /\.(png|jpe?g|gif|webp)$/i.test(fileName)
+  ) {
+    return { key, context: 'execution' }
+  }
+
+  return null
 }
 
-async function copyWorkflowGeneratedImage(
+async function copyReusableWorkflowImage(
   key: string,
+  context: StorageContext,
   name: string,
   mime: string,
   executionContext: ChatExecutionContext,
@@ -77,7 +104,7 @@ async function copyWorkflowGeneratedImage(
   try {
     buffer = await downloadFile({
       key,
-      context: 'agent-generated-images',
+      context,
       maxBytes: MAX_REUSED_IMAGE_BYTES,
     })
   } catch (error) {
@@ -109,7 +136,7 @@ async function copyWorkflowGeneratedImage(
  * Handles three input formats:
  * 1. Base64 dataUrl - File content encoded as data URL (uploaded from client)
  * 2. Direct URL - Pass-through URL to existing file (already uploaded)
- * 3. Internal serve URL for an image this workflow generated - copied into this execution
+ * 3. Internal serve URL for an image this workflow already stored - copied into this execution
  *
  * Fresh uploads and reused generated images are stored under the current execution.
  * Any other stored reference is left for the execution-scope check to refuse.
@@ -149,13 +176,14 @@ export async function processChatFiles(
       directUrl ||
       (inlineData && isInternalFileUrl(inlineData) ? toAbsoluteInternalUrl(inlineData) : '')
 
-    const generatedImageKey = internalUrl
-      ? workflowGeneratedImageKey(internalUrl, executionContext.workflowId)
+    const reusableImage = internalUrl
+      ? reusableWorkflowImageKey(internalUrl, executionContext)
       : null
-    if (generatedImageKey) {
+    if (reusableImage) {
       copiedFiles.push(
-        await copyWorkflowGeneratedImage(
-          generatedImageKey,
+        await copyReusableWorkflowImage(
+          reusableImage.key,
+          reusableImage.context,
           file.name,
           file.type,
           executionContext,

@@ -78,6 +78,123 @@ describe('processChatFiles', () => {
     expect(files[0]?.context).toBe('execution')
   })
 
+  it('copies an image this workflow stored on a previous execution', async () => {
+    const previousKey =
+      'execution/workspace-1/workflow-1/previous-execution/file-1/generated-image.png'
+    const files = await processChatFiles(
+      [
+        {
+          url: `https://dev-agent.thearena.ai/api/files/serve/${encodeURIComponent(previousKey)}`,
+          name: 'Generated image',
+          type: 'image/png',
+        },
+      ],
+      executionContext,
+      'request-1',
+      'user-1'
+    )
+
+    expect(mockProcessExecutionFiles).not.toHaveBeenCalled()
+    expect(mockDownloadFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: previousKey,
+        context: 'execution',
+      })
+    )
+    expect(mockUploadExecutionFile).toHaveBeenCalledWith(
+      executionContext,
+      expect.any(Buffer),
+      'Generated image',
+      'image/png',
+      'user-1'
+    )
+    expect(files).toHaveLength(1)
+  })
+
+  it('does not copy an execution image from another workflow', async () => {
+    await processChatFiles(
+      [
+        {
+          url: 'https://dev-agent.thearena.ai/api/files/serve/execution%2Fworkspace-1%2Fother-workflow%2Fold-execution%2Ffile%2Fgenerated-image.png',
+          name: 'Generated image',
+          type: 'image/png',
+        },
+      ],
+      executionContext,
+      'request-1'
+    )
+
+    expect(mockDownloadFile).not.toHaveBeenCalled()
+    expect(mockUploadExecutionFile).not.toHaveBeenCalled()
+    expect(mockProcessExecutionFiles).toHaveBeenCalledOnce()
+  })
+
+  it('does not copy a non-image file from a previous execution', async () => {
+    await processChatFiles(
+      [
+        {
+          url: 'https://dev-agent.thearena.ai/api/files/serve/execution%2Fworkspace-1%2Fworkflow-1%2Fold-execution%2Ffile%2Fnotes.json',
+          name: 'notes.json',
+          type: 'application/json',
+        },
+      ],
+      executionContext,
+      'request-1'
+    )
+
+    expect(mockDownloadFile).not.toHaveBeenCalled()
+    expect(mockProcessExecutionFiles).toHaveBeenCalledOnce()
+  })
+
+  it('copies a previous execution image from this workflow into the current execution', async () => {
+    const files = await processChatFiles(
+      [
+        {
+          url: 'https://dev-agent.thearena.ai/api/files/serve/execution%2Fworkspace-1%2Fworkflow-1%2Fprevious-execution%2Ffile-1%2Fgenerated-image.png',
+          name: 'Generated image',
+          type: 'image/png',
+        },
+      ],
+      executionContext,
+      'request-1',
+      'user-1'
+    )
+
+    expect(mockProcessExecutionFiles).not.toHaveBeenCalled()
+    expect(mockDownloadFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'execution/workspace-1/workflow-1/previous-execution/file-1/generated-image.png',
+        context: 'execution',
+      })
+    )
+    expect(mockUploadExecutionFile).toHaveBeenCalledWith(
+      executionContext,
+      expect.any(Buffer),
+      'Generated image',
+      'image/png',
+      'user-1'
+    )
+    expect(files[0]?.context).toBe('execution')
+  })
+
+  it('does not copy an execution file from another workflow', async () => {
+    await processChatFiles(
+      [
+        {
+          url: 'http://localhost:3000/api/files/serve/execution%2Fworkspace-1%2Fother-workflow%2Fprevious-execution%2Ffile-1%2Fgenerated-image.png',
+          name: 'Generated image',
+          type: 'image/png',
+        },
+      ],
+      executionContext,
+      'request-1'
+    )
+
+    expect(mockDownloadFile).not.toHaveBeenCalled()
+    expect(mockUploadExecutionFile).not.toHaveBeenCalled()
+    expect(mockProcessExecutionFiles).toHaveBeenCalledOnce()
+  })
+
   it('does not copy a generated image from another workflow', async () => {
     await processChatFiles(
       [

@@ -263,6 +263,8 @@ interface AssistantMessageRowProps {
   rowClassName: string
   onOptionSelect?: (id: string) => void
   onAnimatingChange?: (animating: boolean) => void
+  /** Stable virtualizer row id. Survives the live-to-persisted message id swap. */
+  parserSessionKey?: string
 }
 
 const AssistantMessageRow = memo(function AssistantMessageRow({
@@ -278,6 +280,7 @@ const AssistantMessageRow = memo(function AssistantMessageRow({
   rowClassName,
   onOptionSelect,
   onAnimatingChange,
+  parserSessionKey,
 }: AssistantMessageRowProps) {
   const permissions = useOptionalWorkspacePermissionsContext()
   const canEdit = permissions?.userPermissions.canEdit ?? false
@@ -350,6 +353,7 @@ const AssistantMessageRow = memo(function AssistantMessageRow({
         onOptionSelect={onOptionSelect}
         onQuestionDismiss={handleQuestionDismiss}
         onPhaseChange={setPhase}
+        parserSessionKey={parserSessionKey}
         actions={
           actionsEligible ? (
             <MessageActions
@@ -975,6 +979,7 @@ export function MothershipChat({
                           rowClassName={cn(styles.assistantRow, styles.rowGap)}
                           onOptionSelect={isLast ? stableOnOptionSelect : undefined}
                           onAnimatingChange={isLast ? setLastRowAnimating : undefined}
+                          parserSessionKey={rowKeyByIndex[index]}
                         />
                       )}
                     </div>
