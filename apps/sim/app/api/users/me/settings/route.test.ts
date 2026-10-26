@@ -67,7 +67,7 @@ describe('GET /api/users/me/settings', () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({
-      data: { theme: 'system', autoConnect: true, telemetryEnabled: false },
+      data: { theme: 'light', autoConnect: true, telemetryEnabled: false },
     })
     expect(dbChainMockFns.select).not.toHaveBeenCalled()
   })
