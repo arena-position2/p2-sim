@@ -42,6 +42,12 @@ export const unipileListPostReactionsTool: ToolConfig<
       visibility: 'user-or-llm',
       description: 'Optional page size per upstream request (1–100, default 100).',
     },
+    max_items: {
+      type: 'number',
+      required: false,
+      visibility: 'user-or-llm',
+      description: 'Stop after this many reactions. Omit to load every page.',
+    },
   },
 
   request: {
@@ -62,6 +68,13 @@ export const unipileListPostReactionsTool: ToolConfig<
         Number.isFinite(Number(params.limit))
       ) {
         out.limit = Number(params.limit)
+      }
+      if (
+        params.max_items !== undefined &&
+        params.max_items !== null &&
+        Number.isFinite(Number(params.max_items))
+      ) {
+        out.max_items = Number(params.max_items)
       }
       return out
     },
