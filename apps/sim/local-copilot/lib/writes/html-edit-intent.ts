@@ -123,6 +123,22 @@ export function buildHtmlEditGrepNudgeMessage(tokens: string[]): string {
   )
 }
 
+const FILE_INSPECTION_TOOL_NAMES = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
+
+/**
+ * Counts successful file-inspection tool calls this turn.
+ */
+export function countSuccessfulFileInspections(
+  records: ReadonlyArray<{ name: string; success: boolean }>
+): number {
+  return records.filter((record) => record.success && FILE_INSPECTION_TOOL_NAMES.has(record.name))
+    .length
+}
+
+function isHtmlEditBridgeNarration(text: string): boolean {
+  return isFileInspectionBridgeNarration(text) || isBridgingAssistantNarration(text)
+}
+
 /**
  * Soft orchestration: edit-intent turn inspected with read only (no grep yet).
  */
@@ -149,12 +165,121 @@ export function shouldForceHtmlEditGrepNudge(options: {
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (!options.hasSuccessfulRead || options.hasSuccessfulGrep) return false
 
-  const isBridge = (text: string) =>
-    isFileInspectionBridgeNarration(text) || isBridgingAssistantNarration(text)
   const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isBridge(streamed)) return false
+  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
   const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isBridge(roundDisplay)) return false
+  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
 
   return true
+}
+
+/**
+ * After enough inspections on an HTML edit turn, force workspace_file instead of more paging.
+ */
+export function shouldForceHtmlEditWriteNudge(options: {
+  postBuildToolMode: string
+  forcedHtmlEditWriteNudges: number
+  maxForcedHtmlEditWriteNudges: number
+  inspectionsBeforeWriteNudge: number
+  inspectionCount: number
+  round: number
+  maxToolRounds: number
+  userMessage: string
+  hasHtmlContext: boolean
+  hasFileMutationTools: boolean
+  streamedUserFacingText: string
+  roundDisplayText: string
+}): boolean {
+  if (options.postBuildToolMode !== 'all') return false
+  if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
+  if (options.round >= options.maxToolRounds - 1) return false
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (options.inspectionCount < options.inspectionsBeforeWriteNudge) return false
+
+  const streamed = options.streamedUserFacingText.trim()
+  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
+  const roundDisplay = options.roundDisplayText.trim()
+  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
+
+  return true
+}
+
+/**
+ * True when write nudges are exhausted and the turn should stop without more explore.
+ */
+export function shouldStopHtmlEditWithoutWrite(options: {
+  forcedHtmlEditWriteNudges: number
+  maxForcedHtmlEditWriteNudges: number
+  inspectionsBeforeWriteNudge: number
+  inspectionCount: number
+  userMessage: string
+  hasHtmlContext: boolean
+  hasFileMutationTools: boolean
+}): boolean {
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (options.inspectionCount < options.inspectionsBeforeWriteNudge) return false
+  return options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges
+}
+
+/**
+ * System nudge: stop inspecting; call workspace_file patch now.
+ */
+export function buildHtmlEditWriteNudgeMessage(options: {
+  tokens: string[]
+  preferredPath?: string | null
+  attempt: number
+  maxAttempts: number
+}): string {
+  const pathHint = options.preferredPath?.trim() ? ` on ${options.preferredPath.trim()}` : ''
+  const tokenHint =
+    options.tokens.length > 0
+      ? `Reuse a short live substring involving: ${options.tokens
+          .map((token) => JSON.stringify(token))
+          .join(', ')}.`
+      : 'Copy a short unique live substring from your last grep/read (id, class, function name, or button label).'
+
+  const lastAttempt =
+    options.attempt >= options.maxAttempts
+      ? ' This is the last forced write attempt — if you still cannot patch, stop and ask the user which label/function to change.'
+      : ''
+
+  return (
+    `[System] HTML edit write nudge (${options.attempt}/${options.maxAttempts}): you already inspected the file enough${pathHint}. ` +
+    'Do NOT call read, grep, glob, or load_copilot_artifact again this round. ' +
+    `Call workspace_file operation=patch with search_replace NOW (${tokenHint}), then edit_content with only the replacement. ` +
+    'One targeted patch for the user ask (e.g. stepper clickability OR validation) — not a full rewrite.' +
+    lastAttempt
+  )
+}
+
+/**
+ * User-facing closer when HTML edit write nudges are exhausted with no mutation.
+ */
+export function buildHtmlEditWriteGiveUpMessage(options: {
+  tokens: string[]
+  preferredPath?: string | null
+  userMessage: string
+}): string {
+  const pathHint = options.preferredPath?.trim() ? ` in ${options.preferredPath.trim()}` : ''
+  const focus =
+    options.tokens.length > 0
+      ? options.tokens.slice(0, 3).join(', ')
+      : summarizeHtmlEditAsk(options.userMessage)
+  return (
+    `I inspected the HTML${pathHint} but did not finish applying the edit for: ${focus}. ` +
+    'The file was left unchanged — reply with the exact button label, heading, or function name to patch ' +
+    '(for example `go` / stepper tabs / Next button), or ask me to apply only one of those fixes.'
+  )
+}
+
+function summarizeHtmlEditAsk(message: string): string {
+  const trimmed = message.replace(/\s+/g, ' ').trim()
+  if (trimmed.length <= 80) return trimmed || 'your requested UX fix'
+  return `${trimmed.slice(0, 77)}…`
 }

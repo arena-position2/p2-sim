@@ -38,17 +38,30 @@ export const MAX_FILE_EDIT_CONTINUATION_ROUNDS = 3
 export const MAX_HTML_EDIT_GREP_NUDGE_ROUNDS = 1
 
 /**
+ * Successful file inspections (read/grep/glob/artifact) before an HTML edit
+ * turn is forced to call workspace_file instead of paging further.
+ */
+export const HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE = 6
+
+/**
+ * Forced "patch now" rounds after the inspection threshold. After this budget
+ * is exhausted with still no write, the turn stops with a clear user closer.
+ */
+export const MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS = 5
+
+/**
  * Successful read/grep/glob/load_copilot_artifact calls on the same path
  * (offset/limit ignored) before hard-stopping when no file mutation ran.
  * Caps endless HTML paging that never reaches workspace_file / edit_content.
  */
-export const MAX_FILE_EXPLORE_WITHOUT_MUTATION = 8
+export const MAX_FILE_EXPLORE_WITHOUT_MUTATION = 16
 
 /**
  * Turn-wide cap on file-inspection tools without any successful file mutation.
- * Catches mixed read + artifact loops that never share one path key.
+ * Kept above {@link MAX_FILE_EXPLORE_WITHOUT_MUTATION} so the path ceiling can
+ * actually fire (both counters increment on every inspection).
  */
-export const MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION = 12
+export const MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION = 24
 
 /**
  * When research/factual intent ends with no live web search tool call, force

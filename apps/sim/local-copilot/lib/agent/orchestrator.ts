@@ -9,10 +9,12 @@ import {
 import type { VfsSnapshotV1 } from '@/lib/copilot/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
+  HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
   MAX_FORCED_FOLLOW_UP_ROUNDS,
   MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
+  MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
   MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS,
   MAX_INTENT_CONTINUATION_ROUNDS,
   MAX_POPULATE_EDITS,
@@ -255,9 +257,14 @@ import { runPostMutationVerification } from '@/local-copilot/lib/verification/ru
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
 import {
   buildHtmlEditGrepNudgeMessage,
+  buildHtmlEditWriteGiveUpMessage,
+  buildHtmlEditWriteNudgeMessage,
+  countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
   hasHtmlEditContext,
   shouldForceHtmlEditGrepNudge,
+  shouldForceHtmlEditWriteNudge,
+  shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
 import { createTurnMutations } from '@/local-copilot/lib/writes/turn-mutations'
 import { MAX_TOOL_ITERATIONS } from '@/providers'
@@ -1036,6 +1043,7 @@ export async function* runLocalCopilotAgent(
   let forcedIncompletePopulateContinuations = 0
   let forcedFileEditContinuations = 0
   let forcedHtmlEditGrepNudges = 0
+  let forcedHtmlEditWriteNudges = 0
   let forcedResearchSearchContinuations = 0
   /** Metadata / artifact calls after create and before the first successful edit. */
   let prePopulateDiscoveryCalls = 0
@@ -1639,6 +1647,15 @@ export async function* runLocalCopilotAgent(
       const hasSuccessfulGrep = turnToolRecords.some(
         (record) => record.name === 'grep' && record.success
       )
+      const htmlEditContext = hasHtmlEditContext({
+        userMessage: userTurnText,
+        preferredPath: activeEditTarget.preferredPath,
+        candidatePaths: activeEditTarget.candidates,
+      })
+      const fileInspectionCount = countSuccessfulFileInspections(turnToolRecords)
+      const hasFileMutations = turnHasFileMutationTools(turnToolRecords)
+      const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+
       const canForceHtmlEditGrep = shouldForceHtmlEditGrepNudge({
         postBuildToolMode,
         forcedHtmlEditGrepNudges,
@@ -1646,14 +1663,10 @@ export async function* runLocalCopilotAgent(
         round,
         maxToolRounds,
         userMessage: userTurnText,
-        hasHtmlContext: hasHtmlEditContext({
-          userMessage: userTurnText,
-          preferredPath: activeEditTarget.preferredPath,
-          candidatePaths: activeEditTarget.candidates,
-        }),
+        hasHtmlContext: htmlEditContext,
         hasSuccessfulRead,
         hasSuccessfulGrep,
-        hasFileMutationTools: turnHasFileMutationTools(turnToolRecords),
+        hasFileMutationTools: hasFileMutations,
         streamedUserFacingText,
         roundDisplayText: intentDisplay,
       })
@@ -1664,18 +1677,82 @@ export async function* runLocalCopilotAgent(
           messages.push({ role: 'assistant', content: intentDisplay })
           assistantText = ''
         }
-        const grepTokens = extractHtmlEditGrepTokens(userTurnText)
         messages.push({
           role: 'system',
-          content: buildHtmlEditGrepNudgeMessage(grepTokens),
+          content: buildHtmlEditGrepNudgeMessage(htmlEditGrepTokens),
         })
         logger.info('Arena Copilot forcing HTML edit grep nudge', {
           round,
           forcedHtmlEditGrepNudges,
-          grepTokens,
+          grepTokens: htmlEditGrepTokens,
           preferredPath: activeEditTarget.preferredPath,
         })
         continue
+      }
+
+      const canForceHtmlEditWrite = shouldForceHtmlEditWriteNudge({
+        postBuildToolMode,
+        forcedHtmlEditWriteNudges,
+        maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        inspectionCount: fileInspectionCount,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasFileMutationTools: hasFileMutations,
+        streamedUserFacingText,
+        roundDisplayText: intentDisplay,
+      })
+
+      if (canForceHtmlEditWrite) {
+        forcedHtmlEditWriteNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'system',
+          content: buildHtmlEditWriteNudgeMessage({
+            tokens: htmlEditGrepTokens,
+            preferredPath: activeEditTarget.preferredPath,
+            attempt: forcedHtmlEditWriteNudges,
+            maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML edit write nudge', {
+          round,
+          forcedHtmlEditWriteNudges,
+          fileInspectionCount,
+          grepTokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
+      if (
+        shouldStopHtmlEditWithoutWrite({
+          forcedHtmlEditWriteNudges,
+          maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+          inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+          inspectionCount: fileInspectionCount,
+          userMessage: userTurnText,
+          hasHtmlContext: htmlEditContext,
+          hasFileMutationTools: hasFileMutations,
+        })
+      ) {
+        stagnationStopMessage = buildHtmlEditWriteGiveUpMessage({
+          tokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+          userMessage: userTurnText,
+        })
+        logger.info('Arena Copilot stopping HTML edit without write after write nudges', {
+          round,
+          forcedHtmlEditWriteNudges,
+          fileInspectionCount,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        break
       }
 
       const canForceFileEdit = shouldForceFileEditContinuation({
@@ -1685,7 +1762,7 @@ export async function* runLocalCopilotAgent(
         round,
         maxToolRounds,
         hasFileInspectionTools: turnHasFileInspectionTools(turnToolRecords),
-        hasFileMutationTools: turnHasFileMutationTools(turnToolRecords),
+        hasFileMutationTools: hasFileMutations,
         streamedUserFacingText,
         roundDisplayText: intentDisplay,
       })

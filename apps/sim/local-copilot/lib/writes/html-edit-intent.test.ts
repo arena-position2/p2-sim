@@ -2,14 +2,23 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import { MAX_HTML_EDIT_GREP_NUDGE_ROUNDS } from '@/local-copilot/lib/agent/limits'
+import {
+  HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
+  MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+} from '@/local-copilot/lib/agent/limits'
 import {
   buildHtmlEditGrepNudgeMessage,
+  buildHtmlEditWriteGiveUpMessage,
+  buildHtmlEditWriteNudgeMessage,
+  countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
   hasHtmlEditContext,
   looksLikeHtmlAnalysisOnly,
   looksLikeHtmlEditIntent,
   shouldForceHtmlEditGrepNudge,
+  shouldForceHtmlEditWriteNudge,
+  shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
 
 describe('looksLikeHtmlEditIntent / analysis-only', () => {
@@ -118,5 +127,89 @@ describe('buildHtmlEditGrepNudgeMessage', () => {
 
   it('falls back when no tokens were extracted', () => {
     expect(buildHtmlEditGrepNudgeMessage([])).toMatch(/distinctive label/i)
+  })
+})
+
+describe('HTML edit write nudge', () => {
+  const writeBase = {
+    postBuildToolMode: 'all',
+    forcedHtmlEditWriteNudges: 0,
+    maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+    inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+    inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+    round: 3,
+    maxToolRounds: 20,
+    userMessage: 'Apply the validation and clickable-stepper fixes',
+    hasHtmlContext: true,
+    hasFileMutationTools: false,
+    streamedUserFacingText: 'Let me grep the go() handler next.',
+    roundDisplayText: '',
+  }
+
+  it('counts successful file inspections only', () => {
+    expect(
+      countSuccessfulFileInspections([
+        { name: 'read', success: true },
+        { name: 'grep', success: true },
+        { name: 'grep', success: false },
+        { name: 'workspace_file', success: true },
+        { name: 'glob', success: true },
+      ])
+    ).toBe(3)
+  })
+
+  it('forces a write nudge after enough inspections with no mutation', () => {
+    expect(shouldForceHtmlEditWriteNudge(writeBase)).toBe(true)
+  })
+
+  it('does not force before the inspection threshold', () => {
+    expect(
+      shouldForceHtmlEditWriteNudge({
+        ...writeBase,
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE - 1,
+      })
+    ).toBe(false)
+  })
+
+  it('does not force after a successful file mutation or on analysis-only asks', () => {
+    expect(shouldForceHtmlEditWriteNudge({ ...writeBase, hasFileMutationTools: true })).toBe(false)
+    expect(
+      shouldForceHtmlEditWriteNudge({
+        ...writeBase,
+        userMessage: 'Read the HTML carefully, and give me the UX suggestions for this?',
+      })
+    ).toBe(false)
+  })
+
+  it('stops with a give-up closer after write nudges are exhausted', () => {
+    expect(
+      shouldStopHtmlEditWithoutWrite({
+        forcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        userMessage: 'Apply the validation and clickable-stepper fixes',
+        hasHtmlContext: true,
+        hasFileMutationTools: false,
+      })
+    ).toBe(true)
+
+    const message = buildHtmlEditWriteNudgeMessage({
+      tokens: ['stepper'],
+      preferredPath: 'files/ad-generator.html',
+      attempt: 1,
+      maxAttempts: 2,
+    })
+    expect(message).toMatch(/workspace_file operation=patch/i)
+    expect(message).toMatch(/Do NOT call read, grep/i)
+    expect(message).toContain('files/ad-generator.html')
+
+    const giveUp = buildHtmlEditWriteGiveUpMessage({
+      tokens: [],
+      preferredPath: 'files/ad-generator.html',
+      userMessage: 'Apply the validation and clickable-stepper fixes',
+    })
+    expect(giveUp).toMatch(/left unchanged/i)
+    expect(giveUp).toMatch(/exact button label|function name/i)
   })
 })
