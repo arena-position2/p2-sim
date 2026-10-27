@@ -6,7 +6,7 @@ import { sql } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { recordUsage, stableEventKey } from '@/lib/billing/core/usage-log'
-import { checkInternalApiKey, createUnauthorizedResponse } from '@/lib/copilot/request/http'
+import { checkInternalApiKey, createUnauthorizedResponse } from '@/lib/mothership/request/http'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { getFalApiKey } from '@/lib/media/falai'
 import {
