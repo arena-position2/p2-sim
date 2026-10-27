@@ -22,6 +22,7 @@ import {
   type WriteWorkspaceFileByPathResult,
 } from '@/lib/workspace-files/application/write-workspace-file-by-path'
 import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
+import { rejectHtmlCreateContent } from './html-edit-size-guards'
 
 const logger = createLogger('CreateFileServerTool')
 const CREATE_FILE_TOOL_ID = 'create_empty_file'
@@ -39,6 +40,8 @@ interface CreateFileArgs {
 interface CreateFileResult {
   success: boolean
   message: string
+  /** Structured failure class for Local Copilot follow-ups (e.g. oversized HTML). */
+  errorType?: 'html_create_too_large'
   data?: {
     id: string
     name: string
@@ -103,6 +106,21 @@ export const createFileServerTool: BaseServerTool<CreateFileArgs, CreateFileResu
         success: false,
         message:
           'create_file content is only supported for text files (.md, .txt, .json, .csv, .html). For DOCX/PPTX/PDF use create_file (empty shell) → workspace_file update → edit_content.',
+      }
+    }
+
+    if (content !== undefined) {
+      const htmlCreateBlock = rejectHtmlCreateContent({
+        fileName: outputPath,
+        content,
+        contentType,
+      })
+      if (htmlCreateBlock) {
+        return {
+          success: false,
+          errorType: htmlCreateBlock.errorType,
+          message: htmlCreateBlock.message,
+        }
       }
     }
 

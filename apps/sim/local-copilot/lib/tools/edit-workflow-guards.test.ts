@@ -247,6 +247,35 @@ describe('recoverable workspace_file patch failures', () => {
     expect(followUp?.id).toBe('workspace_file:patch-repair')
     expect(followUp?.resolveWith).toEqual(['read', 'grep'])
   })
+
+  it('steers html_full_update_too_large toward patch, not another update', () => {
+    const formatted = formatToolResultForLlm('workspace_file', {
+      success: false,
+      errorType: 'html_full_update_too_large',
+      recoverable: true,
+      message: 'Full update blocked for "dashboard.html"',
+      data: {
+        operation: 'update',
+        name: 'dashboard.html',
+        suggestedNextTools: ['grep', 'read', 'workspace_file'],
+      },
+    })
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    expect(parsed.needsFollowUpPatchRepair).toBe(true)
+    expect(String(parsed.followUpHint)).toMatch(/operation=patch/i)
+    expect(String(parsed.followUpHint)).toMatch(/Do not retry operation=update/i)
+  })
+
+  it('steers html_create_too_large toward a lean shell or patch', () => {
+    const formatted = formatToolResultForLlm('create_file', {
+      success: false,
+      errorType: 'html_create_too_large',
+      message: 'create_file HTML body is too large',
+    })
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    expect(String(parsed.followUpHint)).toMatch(/lean shell/i)
+    expect(String(parsed.followUpHint)).toMatch(/operation=patch/i)
+  })
 })
 
 describe('workspace_file patch-repair resolution', () => {

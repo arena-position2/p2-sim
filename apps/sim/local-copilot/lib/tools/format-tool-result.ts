@@ -317,10 +317,14 @@ const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
   'search_looks_truncated',
   'search_too_long',
   'search_repeated',
+  'html_full_update_too_large',
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_HINT =
   'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search (well under 600 chars), then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+
+const HTML_FULL_UPDATE_FOLLOW_UP_HINT =
+  'Full HTML update was blocked because the file is too large. Call grep (or a tight read) for the region to change, then workspace_file operation=patch with search_replace and a short unique live substring, then edit_content with only the replacement. Do not retry operation=update and do not create_file a full rewrite of this page.'
 
 /** User-facing closer. The model hint stays on {@link PATCH_REPAIR_FOLLOW_UP_HINT}. */
 export const PATCH_REPAIR_USER_HINT =
@@ -634,10 +638,13 @@ export function formatToolResultForLlm(
     const data = asRecord(record.data)
     const size = typeof data.size === 'number' ? data.size : 0
     if (record.success === false) {
+      const createErrorType = typeof record.errorType === 'string' ? record.errorType : ''
       formatted = {
         ...record,
         followUpHint:
-          'create_file failed — fix the args and call create_file again (fileName for office shells; fileName + content for html/md/txt/json/csv). Do NOT switch to manage_sandbox, function_execute, or python-pptx, and do not tell the user office tools are unavailable.',
+          createErrorType === 'html_create_too_large'
+            ? 'HTML create_file body was too large. create_file a lean shell under 100KB (semantic HTML + small CSS, CDN icons) or patch the existing large file with workspace_file operation=patch. Do NOT retry the same megabyte dump, and do not switch to manage_sandbox or python-pptx.'
+            : 'create_file failed — fix the args and call create_file again (fileName for office shells; fileName + content for html/md/txt/json/csv). Do NOT switch to manage_sandbox, function_execute, or python-pptx, and do not tell the user office tools are unavailable.',
       }
     } else if (size === 0) {
       const filePath =
@@ -695,11 +702,15 @@ export function formatToolResultForLlm(
       record.success === false &&
       (record.recoverable === true || RECOVERABLE_PATCH_ERROR_TYPES.has(errorType))
     ) {
+      const followUpHint =
+        errorType === 'html_full_update_too_large'
+          ? HTML_FULL_UPDATE_FOLLOW_UP_HINT
+          : PATCH_REPAIR_FOLLOW_UP_HINT
       formatted = {
         ...record,
         recoverable: true,
         needsFollowUpPatchRepair: true,
-        followUpHint: PATCH_REPAIR_FOLLOW_UP_HINT,
+        followUpHint,
       }
     } else if (
       record.success !== false &&

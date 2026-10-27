@@ -46,6 +46,7 @@ const WORKSPACE_FILE_PATCH_FAILURE_TYPES = new Set([
   'search_looks_truncated',
   'search_too_long',
   'search_repeated',
+  'html_full_update_too_large',
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_ID = 'workspace_file:patch-repair'

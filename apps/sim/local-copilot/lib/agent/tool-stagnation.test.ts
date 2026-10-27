@@ -50,6 +50,15 @@ describe('workspace_file patch stagnation', () => {
     expect(tracker.record('workspace_file', tooLong.args, false, tooLong.result)).not.toBeNull()
   })
 
+  it('stops after two html_full_update_too_large failures on the same path', () => {
+    const tracker = createToolStagnationTracker()
+    const blocked = miss('n/a', 'html_full_update_too_large')
+    expect(tracker.record('workspace_file', blocked.args, false, blocked.result)).toBeNull()
+    const hit = tracker.record('workspace_file', blocked.args, false, blocked.result)
+    expect(hit?.count).toBe(2)
+    expect(resolveStagnationAction(hit!, ['workspace_file:patch-repair']).stop).toBe(true)
+  })
+
   it('keeps search_not_found and search_repeated in different buckets', () => {
     const notFound = miss('<div class="drop">', 'search_not_found')
     const repeated = miss('<div class="drop">', 'search_repeated')
