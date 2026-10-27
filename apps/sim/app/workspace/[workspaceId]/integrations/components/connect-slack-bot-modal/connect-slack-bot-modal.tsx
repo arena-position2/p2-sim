@@ -39,7 +39,7 @@ import { buildSlackCustomBotRequestUrl } from '@/triggers/webhook-url'
 
 const logger = createLogger('ConnectSlackBotModal')
 
-const DEFAULT_APP_NAME = 'Sim Bot'
+const DEFAULT_APP_NAME = 'Arena Bot'
 const DONE_STEP = 4
 
 const CUSTOM_BOT_CAPABILITIES = [

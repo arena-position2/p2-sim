@@ -421,10 +421,10 @@ export function buildSlackManifest(
     ]),
   ].sort()
   const events = [...new Set([...SLACK_AGENT_EVENTS, ...active.flatMap((c) => c.events)])].sort()
-  const displayName = appName.trim() || 'Sim Workflow Bot'
+  const displayName = appName.trim() || 'Arena Workflow Bot'
   const trimmedDescription = description?.trim() || ''
   const isInteractive = active.some((c) => c.interactivity)
-  const agentDescription = trimmedDescription || `${displayName} — an AI agent powered by Sim.`
+  const agentDescription = trimmedDescription || `${displayName} — an AI agent powered by Arena.`
 
   if (agentDescription.length > 300) {
     throw new Error('Slack agent description must be 300 characters or fewer')

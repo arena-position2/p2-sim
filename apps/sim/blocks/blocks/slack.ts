@@ -392,9 +392,9 @@ export const SlackBlock: BlockConfig = {
       title: 'Authentication Method',
       type: 'dropdown',
       description:
-        'Sim Bot uses the workspace OAuth bot token (bot/app actions). Custom Bot uses a user token (user-level actions). If the task is “as a user” (DMs, user conversations), prefer Custom Bot; otherwise prefer Sim Bot.',
+        'Arena Bot uses the workspace OAuth bot token (bot/app actions). Custom Bot uses a user token (user-level actions). If the task is “as a user” (DMs, user conversations), prefer Custom Bot; otherwise prefer Arena Bot.',
       options: [
-        { label: 'Sim Bot (bot token)', id: 'oauth' },
+        { label: 'Arena Bot (bot token)', id: 'oauth' },
         { label: 'Custom Bot (user token)', id: 'bot_token' },
       ],
       value: () => 'bot_token',
@@ -3567,8 +3567,8 @@ function adaptSubBlockForV2(sb: SubBlockConfig): SubBlockConfig {
       credentialKind: 'any',
       placeholder: 'Select Slack account or bot',
       credentialLabels: {
-        oauthGroup: 'Sim app',
-        oauthConnect: 'Connect the Sim app',
+        oauthGroup: 'Arena app',
+        oauthConnect: 'Connect the Arena app',
         serviceAccountGroup: 'Custom bots',
         serviceAccountConnect: 'Set up a custom bot',
       },
@@ -4173,7 +4173,7 @@ export const SlackV2Block: BlockConfig = {
   type: 'slack_v2',
   description: 'Manage Slack messages, channels, users, files, Lists, canvases, and Agent Sessions',
   longDescription:
-    'Build Slack workflows with messages, conversations, files, reactions, pins, bookmarks, user groups, profiles, Lists, canvases, and Agent Sessions. Operations that need additional app scopes use custom Slack bots. Lists require lists:read/lists:write and a paid Slack plan. Native Sim connections retain their existing permissions. Page through list outputs explicitly.',
+    'Build Slack workflows with messages, conversations, files, reactions, pins, bookmarks, user groups, profiles, Lists, canvases, and Agent Sessions. Operations that need additional app scopes use custom Slack bots. Lists require lists:read/lists:write and a paid Slack plan. Native Arena connections retain their existing permissions. Page through list outputs explicitly.',
   hideFromToolbar: false,
   sunset: undefined,
   canvasPresentation: {

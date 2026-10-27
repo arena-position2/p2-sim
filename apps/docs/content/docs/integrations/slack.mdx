@@ -17,11 +17,11 @@ Use [Slack](https://www.slack.com/) to send and manage messages, work with canva
 
 Select an operation in the **Slack** block. Custom bots support the expanded channel, file, bookmark, pin, user-group, profile, workspace, List, and Canvas actions. The custom-app manifest selects all available capabilities by default. Existing apps need the updated manifest and a reinstall to grant newly added scopes.
 
-The native Sim Slack app keeps its existing permissions. **Set Bot Presence** changes the selected custom bot’s presence. **Mark Conversation Read** moves the selected account or bot’s read cursor. Neither action changes another workspace member’s state.
+The native Arena Slack app keeps its existing permissions. **Set Bot Presence** changes the selected custom bot’s presence. **Mark Conversation Read** moves the selected account or bot’s read cursor. Neither action changes another workspace member’s state.
 
 List actions return one page. Use the returned cursor or page information to continue. **Update User Group Members** replaces the complete member list. **Start List Export** returns a job ID; pass it to **Get List Export** with the same export options. Canvas access changes apply to standalone canvases and require the link to have been shared with the recipient first.
 
-User-token-only search, profile updates, and notification controls, Slack’s retired reminders APIs, and Enterprise administration APIs are not included. Use scheduled messages or a scheduled Sim workflow for reminders.
+User-token-only search, profile updates, and notification controls, Slack’s retired reminders APIs, and Enterprise administration APIs are not included. Use scheduled messages or a scheduled Arena workflow for reminders.
 
 ## Stream Trigger Responses
 
@@ -34,7 +34,7 @@ Custom-bot Slack triggers can stream workflow outputs directly back into the con
 - Optional thinking and tool-call updates appear as Slack tasks in a timeline or plan.
 - Slack Agent Sessions remain in processing state for the run, return to active when it finishes, and the native Slack stop button cancels active workflow executions.
 
-Automatic trigger responses require a custom bot created by the Slack setup wizard. They are not available with the shared Sim Slack app. Where the deployment enables shared-app triggers, the Sim app can receive its subscribed event subset without automatic streaming.
+Automatic trigger responses require a custom bot created by the Slack setup wizard. They are not available with the shared Arena Slack app. Where the deployment enables shared-app triggers, the Arena app can receive its subscribed event subset without automatic streaming.
 
 The **Set Assistant Status** (`set_status`) action changes the assistant-thread indicator; it does not enable agent-session streaming. A separate Send Message action for an output already selected on the trigger sends an additional message.
 
@@ -42,7 +42,7 @@ Testing a block with sample input verifies its logic. To verify a Slack integrat
 
 ## AI-Generated Content
 
-Sim workflows may use AI models to generate messages and responses sent to Slack. AI-generated content may be inaccurate or contain errors. Always review automated outputs, especially for critical communications.
+Arena workflows may use AI models to generate messages and responses sent to Slack. AI-generated content may be inaccurate or contain errors. Always review automated outputs, especially for critical communications.
 
 For help with the Slack integration, contact [help@sim.ai](mailto:help@sim.ai).
 {/* MANUAL-CONTENT-END */}
@@ -50,7 +50,7 @@ For help with the Slack integration, contact [help@sim.ai](mailto:help@sim.ai).
 
 ## Usage Instructions
 
-Build Slack workflows with messages, conversations, files, reactions, pins, bookmarks, user groups, profiles, Lists, canvases, and Agent Sessions. Operations that need additional app scopes use custom Slack bots. Lists require lists:read/lists:write and a paid Slack plan. Native Sim connections retain their existing permissions. Page through list outputs explicitly.
+Build Slack workflows with messages, conversations, files, reactions, pins, bookmarks, user groups, profiles, Lists, canvases, and Agent Sessions. Operations that need additional app scopes use custom Slack bots. Lists require lists:read/lists:write and a paid Slack plan. Native Arena connections retain their existing permissions. Page through list outputs explicitly.
 
 
 

@@ -1370,8 +1370,8 @@ export function getSlackWorkflowSubBlocks(): SubBlockConfig[] {
         credentialKind: auth === 'bot' ? 'service-account' : 'any',
         requiredScopes: getScopesForService('slack'),
         credentialLabels: {
-          oauthGroup: 'Sim app',
-          oauthConnect: 'Connect the Sim app',
+          oauthGroup: 'Arena app',
+          oauthConnect: 'Connect the Arena app',
           serviceAccountGroup: 'Custom bots',
           serviceAccountConnect: 'Set up a custom bot',
         },

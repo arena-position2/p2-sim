@@ -464,7 +464,7 @@ export async function resolveWebhookConfigForBlock(input: {
           success: false,
           error: {
             message:
-              'Legacy Assistant events require a native Sim Slack connection. Choose an Agent View event for a custom bot.',
+              'Legacy Assistant events require a native Arena Slack connection. Choose an Agent View event for a custom bot.',
             status: 400,
           },
         }
@@ -530,7 +530,7 @@ export async function resolveWebhookConfigForBlock(input: {
           success: false,
           error: {
             message:
-              'The Sim Slack app trigger is disabled for this deployment. Select a custom bot.',
+              'The Arena Slack app trigger is disabled for this deployment. Select a custom bot.',
             status: 400,
           },
         }
@@ -540,7 +540,7 @@ export async function resolveWebhookConfigForBlock(input: {
           success: false,
           error: {
             message:
-              'The Sim Slack app trigger is not configured for this deployment. Configure its signing secret or select a custom bot.',
+              'The Arena Slack app trigger is not configured for this deployment. Configure its signing secret or select a custom bot.',
             status: 400,
           },
         }
@@ -581,7 +581,7 @@ export async function resolveWebhookConfigForBlock(input: {
           success: false,
           error: {
             message:
-              'This event is not available on the Sim Slack app. Use a custom bot or choose a supported event.',
+              'This event is not available on the Arena Slack app. Use a custom bot or choose a supported event.',
             status: 400,
           },
         }

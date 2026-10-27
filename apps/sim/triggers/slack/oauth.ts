@@ -75,15 +75,15 @@ export function getSlackTriggerCredentialSubBlock(extendedScopesEnabled: boolean
     serviceId: 'slack',
     credentialKind: 'any',
     credentialLabels: {
-      oauthGroup: 'Sim app',
-      oauthConnect: 'Connect the Sim app',
+      oauthGroup: 'Arena app',
+      oauthConnect: 'Connect the Arena app',
       serviceAccountGroup: 'Custom bots',
       serviceAccountConnect: 'Set up a custom bot',
     },
     requiredScopes: getScopesForService('slack'),
     placeholder: 'Select Slack account or bot',
     description:
-      'Connect the native Sim Slack app, or choose a custom Slack bot you set up once and reuse across triggers and actions.',
+      'Connect the native Arena Slack app, or choose a custom Slack bot you set up once and reuse across triggers and actions.',
     required: true,
     mode: 'trigger',
   }

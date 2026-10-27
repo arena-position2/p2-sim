@@ -324,7 +324,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     if (result?.success) throw new Error('expected failure')
     expect(result?.error).toEqual({
       message:
-        'Legacy Assistant events require a native Sim Slack connection. Choose an Agent View event for a custom bot.',
+        'Legacy Assistant events require a native Arena Slack connection. Choose an Agent View event for a custom bot.',
       status: 400,
     })
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
@@ -358,7 +358,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(result?.success).toBe(false)
     if (result?.success) throw new Error('expected failure')
     expect(result?.error).toEqual({
-      message: 'The Sim Slack app trigger is disabled for this deployment. Select a custom bot.',
+      message: 'The Arena Slack app trigger is disabled for this deployment. Select a custom bot.',
       status: 400,
     })
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
@@ -409,7 +409,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(result?.success).toBe(false)
     if (result?.success) throw new Error('expected failure')
     expect(result?.error?.status).toBe(400)
-    expect(result?.error?.message).toContain('not available on the Sim Slack app')
+    expect(result?.error?.message).toContain('not available on the Arena Slack app')
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
   })
 })

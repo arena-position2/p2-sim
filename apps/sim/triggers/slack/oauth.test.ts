@@ -15,13 +15,13 @@ describe('Slack trigger extended-scope capability', () => {
     expect(credential.placeholder).toBe('Select custom bot')
   })
 
-  it('offers the Sim app and custom bots when the capability is enabled', () => {
+  it('offers the Arena app and custom bots when the capability is enabled', () => {
     const credential = getSlackTriggerCredentialSubBlock(true)
 
     expect(credential.credentialKind).toBe('any')
     expect(credential.credentialLabels).toMatchObject({
-      oauthGroup: 'Sim app',
-      oauthConnect: 'Connect the Sim app',
+      oauthGroup: 'Arena app',
+      oauthConnect: 'Connect the Arena app',
       serviceAccountGroup: 'Custom bots',
       serviceAccountConnect: 'Set up a custom bot',
     })
