@@ -301,7 +301,8 @@ describe('buildWorkflowBuildChatAppendix', () => {
   })
 
   it('shows the patch-repair user sentence instead of the model hint', () => {
-    const userHint = 'The edit did not match the file, so the file was left unchanged.'
+    const userHint =
+      'I could not find that exact text in the file, so nothing was changed. Tell me the button label, heading, or section to update and I will try again.'
     const modelHint = 'Call read or grep NOW. Do not tell the user the file is missing.'
     expect(
       buildWorkflowBuildChatAppendix([], {

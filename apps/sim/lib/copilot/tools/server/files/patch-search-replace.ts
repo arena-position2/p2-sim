@@ -68,9 +68,9 @@ export function normalizePatchSearchForRetry(search: string): string {
 }
 
 /**
- * Pulls id, class, quoted text, and text nodes out of a missed search.
+ * Pulls id, class, quoted text, and text nodes out of a missed search or a live line.
  */
-function extractPatchSearchTokens(search: string): string[] {
+export function extractPatchSearchTokens(search: string): string[] {
   const tokens: string[] = []
   const seen = new Set<string>()
   const add = (raw: string) => {
@@ -90,6 +90,61 @@ function extractPatchSearchTokens(search: string): string[] {
   for (const match of search.matchAll(/["']([^"']{4,})["']/g)) add(match[1])
   for (const match of search.matchAll(/>([^<]{8,})</g)) add(match[1])
   return tokens
+}
+
+/**
+ * Live tokens from a patch-miss excerpt so the next search must overlap the file.
+ * Empty when the excerpt had no hit lines (nothing safe to require).
+ */
+export function extractLiveTokensFromPatchMissExcerpt(excerpt: string): string[] {
+  const trimmed = excerpt.trim()
+  if (!trimmed) return []
+  if (
+    /^None of these tokens occur/i.test(trimmed) ||
+    /^No id, class, or text tokens/i.test(trimmed)
+  ) {
+    return []
+  }
+
+  const tokens: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string) => {
+    const token = raw.replace(/\s+/g, ' ').trim()
+    if (token.length < 4 || token.length > EXCERPT_TOKEN_MAX_CHARS) return
+    if (token.includes('<') || token.includes('>')) return
+    const key = token.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    tokens.push(token)
+  }
+
+  const header = trimmed.match(/^Live lines containing ([^\n]+):/i)
+  if (header?.[1]) {
+    for (const part of header[1].split(',')) add(part)
+  }
+  for (const line of trimmed.split('\n')) {
+    const body = line.replace(/^\d+:\s*/, '')
+    for (const token of extractPatchSearchTokens(body)) add(token)
+  }
+  return tokens.slice(0, EXCERPT_MAX_TOKENS)
+}
+
+/**
+ * True when `search` shares at least one token with the live excerpt set
+ * (substring match or extracted id/class/text token).
+ */
+export function patchSearchOverlapsLiveTokens(
+  search: string,
+  liveTokens: Iterable<string>
+): boolean {
+  const live = [...liveTokens]
+  if (live.length === 0) return true
+  const normalized = normalizePatchSearchForRetry(search).toLowerCase()
+  if (!normalized) return false
+  if (live.some((token) => normalized.includes(token.toLowerCase()))) return true
+  const searchTokens = extractPatchSearchTokens(search)
+  const searchKeys = new Set(searchTokens.map((token) => token.toLowerCase()))
+  return live.some((token) => searchKeys.has(token.toLowerCase()))
 }
 
 /**

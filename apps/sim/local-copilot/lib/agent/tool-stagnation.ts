@@ -46,6 +46,7 @@ const WORKSPACE_FILE_PATCH_FAILURE_TYPES = new Set([
   'search_looks_truncated',
   'search_too_long',
   'search_repeated',
+  'search_ignores_live_excerpt',
   'html_full_update_too_large',
 ])
 

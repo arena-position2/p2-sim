@@ -241,7 +241,7 @@ describe('recoverable workspace_file patch failures', () => {
     })
     const parsed = JSON.parse(formatted) as Record<string, unknown>
     expect(parsed.needsFollowUpPatchRepair).toBe(true)
-    expect(String(parsed.followUpHint)).toMatch(/short unique live substring/i)
+    expect(String(parsed.followUpHint)).toMatch(/short unique substring from the live excerpt/i)
 
     const followUp = detectMandatoryFollowUp('workspace_file', formatted)
     expect(followUp?.id).toBe('workspace_file:patch-repair')

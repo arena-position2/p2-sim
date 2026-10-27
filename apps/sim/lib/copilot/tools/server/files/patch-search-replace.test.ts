@@ -3,7 +3,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  extractLiveTokensFromPatchMissExcerpt,
   MAX_PATCH_SEARCH_CHARS,
+  patchSearchOverlapsLiveTokens,
   searchLooksTruncated,
   validateSearchReplaceForPatch,
 } from '@/lib/copilot/tools/server/files/patch-search-replace'
@@ -167,5 +169,28 @@ describe('validateSearchReplaceForPatch', () => {
       expect(result.excerpt).not.toContain('<p>Other</p>')
       expect(result.message).toContain(result.excerpt)
     }
+  })
+})
+
+describe('live excerpt tokens for patch repair', () => {
+  it('extracts tokens from a live-lines excerpt', () => {
+    const excerpt =
+      'Live lines containing generateBtn, Generate:\n1: <div class="drop-zone" id="generateBtn">Generate</div>'
+    expect(extractLiveTokensFromPatchMissExcerpt(excerpt)).toEqual(
+      expect.arrayContaining(['generateBtn', 'Generate'])
+    )
+  })
+
+  it('returns no tokens when the excerpt had no hits', () => {
+    expect(
+      extractLiveTokensFromPatchMissExcerpt('None of these tokens occur in the file: foo, bar')
+    ).toEqual([])
+  })
+
+  it('requires the next search to overlap live tokens', () => {
+    const live = new Set(['generateBtn', 'Generate'])
+    expect(patchSearchOverlapsLiveTokens('id="generateBtn"', live)).toBe(true)
+    expect(patchSearchOverlapsLiveTokens('<button>Generate</button>', live)).toBe(true)
+    expect(patchSearchOverlapsLiveTokens('<div class="invented">Nope</div>', live)).toBe(false)
   })
 })

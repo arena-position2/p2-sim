@@ -847,6 +847,7 @@ export async function* runLocalCopilotAgent(
     listedIntegrationToolIds: new Set(),
     readVfsPaths: new Set(),
     failedPatchSearches: new Map(),
+    livePatchExcerptTokens: new Map(),
     allowedWorkflowIds: new Set(),
     blocksMetadataByType: new Map(),
     artifactStore: createArtifactStore(),

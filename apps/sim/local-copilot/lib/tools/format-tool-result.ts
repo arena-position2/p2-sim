@@ -317,18 +317,19 @@ const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
   'search_looks_truncated',
   'search_too_long',
   'search_repeated',
+  'search_ignores_live_excerpt',
   'html_full_update_too_large',
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_HINT =
-  'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search (well under 600 chars), then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+  'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated/invented search — file is still there). Call read or grep on the file path NOW, copy a short unique substring from the live excerpt into search (well under 600 chars; must reuse a live token), then workspace_file operation=patch once. Do not reuse the previous search and do not invent new markup. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
 
 const HTML_FULL_UPDATE_FOLLOW_UP_HINT =
   'Full HTML update was blocked because the file is too large. Call grep (or a tight read) for the region to change, then workspace_file operation=patch with search_replace and a short unique live substring, then edit_content with only the replacement. Do not retry operation=update and do not create_file a full rewrite of this page.'
 
 /** User-facing closer. The model hint stays on {@link PATCH_REPAIR_FOLLOW_UP_HINT}. */
 export const PATCH_REPAIR_USER_HINT =
-  'The edit did not match the file, so the file was left unchanged.'
+  'I could not find that exact text in the file, so nothing was changed. Tell me the button label, heading, or section to update and I will try again.'
 
 /**
  * Copies mandatory-follow-up flags onto an artifact stub so offload cannot

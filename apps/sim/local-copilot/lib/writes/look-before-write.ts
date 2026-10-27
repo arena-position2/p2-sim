@@ -1,5 +1,9 @@
 import { isPlainTextWorkspaceFileName } from '@/lib/copilot/chat/document-format-guidance'
-import { normalizePatchSearchForRetry } from '@/lib/copilot/tools/server/files/patch-search-replace'
+import {
+  extractLiveTokensFromPatchMissExcerpt,
+  normalizePatchSearchForRetry,
+  patchSearchOverlapsLiveTokens,
+} from '@/lib/copilot/tools/server/files/patch-search-replace'
 import { hasToolId } from '@/tools/tool-ids'
 
 const BOOTSTRAP_BLOCK_TYPES = new Set(['start_trigger', 'starter', 'start'])
@@ -183,6 +187,9 @@ const RECORDED_PATCH_MISS_TYPES = new Set([
 export const PATCH_SEARCH_REPEATED_MESSAGE =
   'Patch search was already tried on this file and did not match. Call read with offset and limit, or grep, copy a short unique live substring, and patch with a different search. Do not send the previous search again.'
 
+export const PATCH_SEARCH_IGNORES_LIVE_EXCERPT_MESSAGE =
+  'Patch search does not use any token from the live file excerpt returned on the previous miss. Copy a short unique substring from that excerpt (or from a fresh grep/read hit) into search — do not invent new markup. Then call edit_content with only the replacement.'
+
 function searchReplacePatchSearch(args: Record<string, unknown>): string | null {
   const operation = typeof args.operation === 'string' ? args.operation.trim().toLowerCase() : ''
   if (operation !== 'patch') return null
@@ -224,6 +231,40 @@ export function rejectRepeatedPatchSearch(params: {
 }
 
 /**
+ * After a miss with a live excerpt, the next search must share a token with that excerpt.
+ */
+export function rejectPatchSearchIgnoringLiveExcerpt(params: {
+  args: Record<string, unknown>
+  livePatchExcerptTokens?: Map<string, Set<string>>
+}): { message: string; result: Record<string, unknown> } | null {
+  const search = searchReplacePatchSearch(params.args)
+  if (search === null) return null
+  const canonical = normalizeWorkspaceFileReadPath(workspaceFileTargetPath(params.args))
+  if (!canonical) return null
+  const live = params.livePatchExcerptTokens?.get(canonical)
+  if (!live || live.size === 0) return null
+  if (patchSearchOverlapsLiveTokens(search, live)) return null
+
+  const sample = [...live].slice(0, 4).join(', ')
+  const message = `${PATCH_SEARCH_IGNORES_LIVE_EXCERPT_MESSAGE} Live tokens to reuse: ${sample}.`
+  return {
+    message,
+    result: {
+      success: false,
+      errorType: 'search_ignores_live_excerpt',
+      recoverable: true,
+      message,
+      data: {
+        vfsPath: canonical,
+        operation: 'patch',
+        suggestedNextTools: ['read', 'grep'],
+        liveTokens: [...live],
+      },
+    },
+  }
+}
+
+/**
  * Records a recoverable patch miss so the next identical search is rejected locally.
  */
 export function rememberFailedPatchSearch(
@@ -248,4 +289,43 @@ export function rememberFailedPatchSearch(
   const seen = store.get(canonical) ?? new Set<string>()
   seen.add(normalized)
   store.set(canonical, seen)
+}
+
+/**
+ * Stores live excerpt tokens from a patch miss so the next search must overlap them.
+ */
+export function rememberLivePatchExcerptTokens(
+  store: Map<string, Set<string>>,
+  args: Record<string, unknown>,
+  result: unknown
+): void {
+  const record = result && typeof result === 'object' ? (result as Record<string, unknown>) : null
+  const errorType = typeof record?.errorType === 'string' ? record.errorType : ''
+  if (!RECORDED_PATCH_MISS_TYPES.has(errorType)) return
+  const data =
+    record?.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : null
+  const excerpt =
+    (typeof data?.excerpt === 'string' && data.excerpt) ||
+    (typeof record?.excerpt === 'string' && record.excerpt) ||
+    ''
+  const tokens = extractLiveTokensFromPatchMissExcerpt(excerpt)
+  if (tokens.length === 0) return
+  const vfsPath = typeof data?.vfsPath === 'string' ? data.vfsPath : workspaceFileTargetPath(args)
+  const canonical = normalizeWorkspaceFileReadPath(vfsPath)
+  if (!canonical) return
+  store.set(canonical, new Set(tokens))
+}
+
+/**
+ * Clears live excerpt tokens after a successful patch prepare (search matched).
+ */
+export function clearLivePatchExcerptTokens(
+  store: Map<string, Set<string>>,
+  args: Record<string, unknown>
+): void {
+  const canonical = normalizeWorkspaceFileReadPath(workspaceFileTargetPath(args))
+  if (!canonical) return
+  store.delete(canonical)
 }

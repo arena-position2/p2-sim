@@ -6,8 +6,11 @@ import {
   AGENT_TOOLS_NOT_CANVAS_ADD_ERROR,
   assertAgentToolsNotAddedAsCanvasBlocks,
   assertEditWorkflowLookBeforeWrite,
+  clearLivePatchExcerptTokens,
+  rejectPatchSearchIgnoringLiveExcerpt,
   rejectRepeatedPatchSearch,
   rememberFailedPatchSearch,
+  rememberLivePatchExcerptTokens,
 } from '@/local-copilot/lib/writes/look-before-write'
 
 describe('assertAgentToolsNotAddedAsCanvasBlocks', () => {
@@ -180,5 +183,57 @@ describe('repeated patch searches', () => {
       failedPatchSearches: failed,
     })
     expect(repeated?.result.errorType).toBe('search_repeated')
+  })
+})
+
+describe('live excerpt token gate after patch miss', () => {
+  const args = {
+    operation: 'patch',
+    target: { path: 'files/ad-generator (10).html' },
+    edit: {
+      strategy: 'search_replace' as const,
+      search: '<div class="invented">Nope</div>',
+    },
+  }
+
+  it('rejects a next search that ignores live excerpt tokens', () => {
+    const live = new Map<string, Set<string>>()
+    rememberLivePatchExcerptTokens(live, args, {
+      errorType: 'search_not_found',
+      data: {
+        vfsPath: 'files/ad-generator (10).html',
+        excerpt:
+          'Live lines containing generateBtn, Generate:\n1: <button id="generateBtn">Generate</button>',
+      },
+    })
+
+    const ignored = rejectPatchSearchIgnoringLiveExcerpt({
+      args,
+      livePatchExcerptTokens: live,
+    })
+    expect(ignored?.result.errorType).toBe('search_ignores_live_excerpt')
+
+    const ok = rejectPatchSearchIgnoringLiveExcerpt({
+      args: {
+        ...args,
+        edit: { strategy: 'search_replace', search: 'id="generateBtn"' },
+      },
+      livePatchExcerptTokens: live,
+    })
+    expect(ok).toBeNull()
+  })
+
+  it('clears live tokens after a successful patch prepare', () => {
+    const live = new Map<string, Set<string>>()
+    rememberLivePatchExcerptTokens(live, args, {
+      errorType: 'search_not_found',
+      data: {
+        vfsPath: 'files/ad-generator (10).html',
+        excerpt: 'Live lines containing generateBtn:\n1: id="generateBtn"',
+      },
+    })
+    expect(live.size).toBe(1)
+    clearLivePatchExcerptTokens(live, args)
+    expect(live.size).toBe(0)
   })
 })

@@ -140,6 +140,11 @@ export interface ToolExecutionContext {
    * search is rejected before the file is opened.
    */
   failedPatchSearches?: Map<string, Set<string>>
+  /**
+   * Canonical `files/...` path → live excerpt tokens from the last patch miss.
+   * The next patch search must overlap these tokens (copied from the live file).
+   */
+  livePatchExcerptTokens?: Map<string, Set<string>>
   /** Workflow ids created earlier in this turn (membership bypass until refresh). */
   allowedWorkflowIds?: Set<string>
   /** Active tool_use id for idempotency keying. */
@@ -367,6 +372,7 @@ async function executeLocalCopilotToolInner(
   ctx.listedIntegrationToolIds ??= new Set()
   ctx.readVfsPaths ??= new Set()
   ctx.failedPatchSearches ??= new Map()
+  ctx.livePatchExcerptTokens ??= new Map()
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
 
