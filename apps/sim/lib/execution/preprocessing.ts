@@ -1060,7 +1060,8 @@ export async function preprocessExecution(
           ? {
               member: {
                 organizationId: billingAttribution.organizationId,
-                actorUserId: billingAttribution.actorUserId,
+                actorUserId:
+                  billingAttribution.cappedMemberUserId ?? billingAttribution.actorUserId,
                 currentUsage: usageSnapshot.memberUsage.currentUsage,
                 limit: usageSnapshot.memberUsage.limit,
               },

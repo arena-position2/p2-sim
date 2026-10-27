@@ -46,8 +46,9 @@ const gateCache = new LRUCache<string, AttributedUsageLimitsResult>({
 /**
  * The gate depends on who pays, for which period (and how that period was
  * derived), under which plan, and which member acts: the payer pool, its limit
- * and the per-member cap are all part of the answer. The workspace is not, so
- * every workspace of one payer shares an entry.
+ * and the per-member cap are all part of the answer. A deployed API names that
+ * member apart from the credential actor, so both ids are in the key. The
+ * workspace is not, so every workspace of one payer shares an entry.
  */
 function gateKey(attribution: BillingAttributionSnapshot): string {
   const subscription = attribution.payerSubscription
@@ -59,6 +60,7 @@ function gateKey(attribution: BillingAttributionSnapshot): string {
     attribution.billingPeriod.source ?? '',
     attribution.billedAccountUserId,
     attribution.actorUserId,
+    attribution.cappedMemberUserId ?? '',
     subscription?.id ?? '',
     subscription?.plan ?? '',
     subscription?.status ?? '',

@@ -75,6 +75,11 @@ export interface BillingPeriodSnapshot {
  */
 export interface BillingAttributionSnapshot {
   readonly actorUserId: string
+  /**
+   * Organization member whose allocation this run consumes when a deployed API
+   * names the payer by email. The credential identity stays on `actorUserId`.
+   */
+  readonly cappedMemberUserId?: string
   readonly workspaceId: string | null
   readonly organizationId: string | null
   readonly billedAccountUserId: string
@@ -365,8 +370,14 @@ export function assertBillingAttributionSnapshot(value: unknown): BillingAttribu
     }
   }
 
+  const cappedMemberUserId = raw.cappedMemberUserId
+  if (cappedMemberUserId !== undefined && !isNonEmptyString(cappedMemberUserId)) {
+    throw new Error('Billing attribution capped member must be a non-empty user id')
+  }
+
   return freezeBillingAttribution({
     actorUserId: raw.actorUserId,
+    ...(isNonEmptyString(cappedMemberUserId) ? { cappedMemberUserId } : {}),
     workspaceId: raw.workspaceId,
     organizationId,
     billedAccountUserId: raw.billedAccountUserId,
@@ -760,13 +771,19 @@ export async function refreshAttributionPeriod(
       `Resolved subscription ${payerSubscription.id} does not belong to payer ${expectedReferenceId}`
     )
   }
-  return buildBillingAttributionSnapshot({
+  const refreshed = buildBillingAttributionSnapshot({
     actorUserId: validated.actorUserId,
     workspaceId: validated.workspaceId,
     billedAccountUserId: validated.billedAccountUserId,
     organizationId: validated.organizationId,
     payerSubscription,
   })
+  return validated.cappedMemberUserId
+    ? freezeBillingAttribution({
+        ...refreshed,
+        cappedMemberUserId: validated.cappedMemberUserId,
+      })
+    : refreshed
 }
 
 /**
@@ -841,7 +858,10 @@ export async function resolveBillingAttributionForPayerUser(input: {
 
   if (membership?.organizationId) {
     const payer = await resolveOrganizationBillingPayer(membership.organizationId)
-    return buildBillingAttributionSnapshot({ actorUserId, workspaceId, ...payer })
+    return freezeBillingAttribution({
+      ...buildBillingAttributionSnapshot({ actorUserId, workspaceId, ...payer }),
+      cappedMemberUserId: payerUserId,
+    })
   }
 
   const payerSubscription: ResolvedPayerSubscription = await getHighestPriorityPersonalSubscription(
@@ -1071,7 +1091,7 @@ export async function checkAttributedUsageLimits(
 
   if (validatedAttribution.organizationId) {
     const memberUsage = await checkOrganizationMemberUsageLimit(
-      validatedAttribution.actorUserId,
+      validatedAttribution.cappedMemberUserId ?? validatedAttribution.actorUserId,
       validatedAttribution.organizationId,
       {
         start: new Date(validatedAttribution.billingPeriod.start),
