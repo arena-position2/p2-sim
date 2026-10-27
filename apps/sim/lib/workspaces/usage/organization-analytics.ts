@@ -40,11 +40,13 @@ import {
   ledgerCostSelect,
   ledgerOccurredAt,
   ledgerPeriodBounds,
+  listExternalApiCostBuckets,
   listExternalApiUsage,
   mapBySourceBucketRow,
   mapExpensiveCopilotChatRows,
   mapExpensiveWorkflowRows,
   mapUsageMetrics,
+  mergeExternalApiCostBuckets,
   normalizeBucketKey,
   parseActorType,
   parseChargeType,
@@ -695,13 +697,17 @@ export async function getOrganizationUsageAnalytics(
       eq(usageLog.billingEntityType, 'organization'),
       eq(usageLog.billingEntityId, organizationId)
     )
-    const byApi = externalApiPayer
-      ? await listExternalApiUsage({
+    const externalApiQuery = externalApiPayer
+      ? {
           payerCondition: externalApiPayer,
           homeOrganizationIds: [organizationId],
           period,
-        })
-      : []
+        }
+      : null
+    const [byApi, externalApiBuckets] = await Promise.all([
+      externalApiQuery ? listExternalApiUsage(externalApiQuery) : [],
+      externalApiQuery ? listExternalApiCostBuckets({ ...externalApiQuery, useHourlyBuckets }) : [],
+    ])
 
     const embeddedToolSplit = computeEmbeddedToolVirtualSplit(modelMetadataRows)
 
@@ -834,6 +840,8 @@ export async function getOrganizationUsageAnalytics(
         })
       }
     }
+
+    mergeExternalApiCostBuckets(timeSeries, externalApiBuckets)
 
     const densifiedTimeSeries = densifyTimeSeries(timeSeries, period, useHourlyBuckets)
 

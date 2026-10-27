@@ -1,8 +1,8 @@
 import { dbReplica } from '@sim/db'
-import { member, usageLog, user, workspace } from '@sim/db/schema'
+import { member, usageLog, user, workflowExecutionLogs, workspace } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { isOrgAdminRole } from '@sim/platform-authz/predicates'
-import { and, eq, inArray, type SQL, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, type SQL, sql } from 'drizzle-orm'
 import { ON_DEMAND_UNLIMITED } from '@/lib/billing/constants'
 import { getOrganizationSubscription } from '@/lib/billing/core/billing'
 import { defaultBillingPeriod } from '@/lib/billing/core/billing-period'
@@ -140,6 +140,47 @@ async function sumOrganizationWorkspaceUsageBySource(
     .where(and(...conditions))
 
   return Number.parseFloat(row?.cost ?? '0')
+}
+
+/**
+ * API runs billed to this organization whose workflow lives in another
+ * organization's workspace. The workspace sum above misses them, so the
+ * remaining-credit pool would ignore a charge the organization already paid.
+ */
+async function sumExternalApiBilledToOrganization(
+  organizationId: string,
+  window: { start: Date; end: Date },
+  executor: DbClient
+): Promise<{ total: number; workflow: number }> {
+  const [row] = await executor
+    .select({
+      total: sql<string>`COALESCE(SUM(${usageLog.cost}), 0)`,
+      workflow: sql<string>`COALESCE(SUM(${usageLog.cost}) FILTER (WHERE ${usageLog.source} = 'workflow'), 0)`,
+    })
+    .from(usageLog)
+    .innerJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .innerJoin(
+      workflowExecutionLogs,
+      and(
+        eq(workflowExecutionLogs.executionId, usageLog.executionId),
+        eq(workflowExecutionLogs.trigger, 'api')
+      )
+    )
+    .where(
+      and(
+        eq(usageLog.billingEntityType, 'organization'),
+        eq(usageLog.billingEntityId, organizationId),
+        eq(usageLog.billable, true),
+        isNotNull(workspace.organizationId),
+        sql`${workspace.organizationId} <> ${organizationId}`,
+        ...ledgerWindowBounds(window)
+      )
+    )
+
+  return {
+    total: Number.parseFloat(row?.total ?? '0'),
+    workflow: Number.parseFloat(row?.workflow ?? '0'),
+  }
 }
 
 /**
@@ -412,6 +453,7 @@ async function getOrganizationCreditUsageSummary(
     orgTotalLedger,
     orgMothershipLedger,
     orgWorkflowLedger,
+    externalApi,
   ] = await Promise.all([
     sumOrganizationWorkspaceUsageByUser(organizationId, billingPeriod, undefined, executor),
     sumOrganizationWorkspaceUsageByUser(
@@ -429,6 +471,7 @@ async function getOrganizationCreditUsageSummary(
       executor
     ),
     sumOrganizationWorkspaceUsageBySource(organizationId, billingPeriod, 'workflow', executor),
+    sumExternalApiBilledToOrganization(organizationId, billingPeriod, executor),
   ])
 
   const memberRows: MemberCreditUsageRow[] = membersWithStats.map((memberRecord) => {
@@ -459,9 +502,9 @@ async function getOrganizationCreditUsageSummary(
   const orgDollarBreakdown = buildDollarBreakdown({
     totalBaseline: 0,
     copilotBaseline: 0,
-    totalLedger: orgTotalLedger,
+    totalLedger: orgTotalLedger + externalApi.total,
     mothershipLedger: orgMothershipLedger,
-    workflowLedger: orgWorkflowLedger,
+    workflowLedger: orgWorkflowLedger + externalApi.workflow,
   })
 
   const refreshDeduction = await getRefreshDeductionForOrg(organizationId, subscription, executor)
