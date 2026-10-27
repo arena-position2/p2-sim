@@ -486,7 +486,7 @@ const FolderContentsInner: React.FC<FolderContentsProps> = ({
           >
             <OverflowText label={child.display} className='flex-1' />
             {childType && childType !== 'any' && (
-              <span className='ml-auto text-[var(--text-muted-inverse)] text-micro'>
+              <span className='ml-auto text-[var(--text-muted)] text-micro'>
                 {childType}
               </span>
             )}
@@ -521,7 +521,7 @@ const FolderContentsInner: React.FC<FolderContentsProps> = ({
             }}
           >
             <OverflowText label={nestedChild.display} className='flex-1' />
-            <span className='ml-auto text-[var(--text-muted-inverse)] text-micro'>{'>'}</span>
+            <span className='ml-auto text-[var(--text-muted)] text-micro'>{'>'}</span>
           </PopoverItem>
         )
       })}
@@ -677,7 +677,7 @@ const NestedTagRenderer: React.FC<NestedTagRendererProps> = ({
     >
       <OverflowText label={nestedTag.display} className='flex-1' />
       {tagDescription && tagDescription !== 'any' && (
-        <span className='ml-auto text-[var(--text-muted-inverse)] text-micro'>
+        <span className='ml-auto text-[var(--text-muted)] text-micro'>
           {tagDescription}
         </span>
       )}
@@ -750,7 +750,7 @@ const VariableTagItem: React.FC<{
         className='flex-1'
       />
       {variableInfo && (
-        <span className='ml-auto text-[var(--text-muted-inverse)] text-micro'>
+        <span className='ml-auto text-[var(--text-muted)] text-micro'>
           {variableInfo.type}
         </span>
       )}
@@ -1611,7 +1611,7 @@ export const TagDropdown: React.FC<TagDropdownProps> = ({
 
   return (
     <NestedNavigationContext.Provider value={nestedNavigationValue}>
-      <Popover open={visible} onOpenChange={(open) => !open && onClose?.()} colorScheme='inverted'>
+      <Popover open={visible} onOpenChange={(open) => !open && onClose?.()}>
         <PopoverContextCapture contextRef={popoverContextRef} />
         <PopoverAnchor asChild>
           <div
@@ -1651,7 +1651,7 @@ export const TagDropdown: React.FC<TagDropdownProps> = ({
           <PopoverScrollArea ref={scrollAreaRef}>
             <TagDropdownBackButton setSelectedIndex={setSelectedIndex} />
             {flatTagList.length === 0 ? (
-              <div className='px-1.5 py-2 text-[color-mix(in_srgb,var(--white)_60%,transparent)] text-caption'>
+              <div className='px-1.5 py-2 text-[var(--text-muted)] text-caption'>
                 No matching tags found
               </div>
             ) : (
