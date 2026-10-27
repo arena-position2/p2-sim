@@ -276,9 +276,18 @@ describe('CredentialDisplay link tag', () => {
     })
 
     const submitButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
+      (button) => button.textContent === 'Continue'
     )
     expect(submitButton?.disabled).toBe(false)
+    mockRefetchWorkspaceCredentials.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'cred-gmail',
+          providerId: 'google-email',
+          updatedAt: '2026-10-23T00:00:00.000Z',
+        },
+      ],
+    })
     act(() => {
       setOAuthChatAttemptStatus(attempt.id, 'connected')
     })
@@ -291,6 +300,52 @@ describe('CredentialDisplay link tag', () => {
     )
     expect(container.textContent).toContain('Gmail')
     expect(container.textContent).toContain('Connected')
+    act(() => root.unmount())
+  })
+
+  it('reports each requested provider from the refetched credential list', async () => {
+    mockRefetchWorkspaceCredentials.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'cred-gmail',
+          providerId: 'google-email',
+          updatedAt: '2026-10-23T00:00:00.000Z',
+        },
+      ],
+    })
+    const container = document.createElement('div')
+    const root: Root = createRoot(container)
+    const onOptionSelect = vi.fn()
+    const data: CredentialItemData[] = [
+      {
+        type: 'link',
+        provider: 'google-email',
+        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
+      },
+      {
+        type: 'link',
+        provider: 'google-calendar',
+        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-calendar',
+      },
+    ]
+
+    act(() => {
+      root.render(
+        <SpecialTags segment={{ type: 'credential', data }} onOptionSelect={onOptionSelect} />
+      )
+    })
+
+    const continueButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Continue'
+    )
+    expect(container.textContent).toContain('Connect these, then continue.')
+    await act(async () => {
+      continueButton?.click()
+    })
+
+    expect(onOptionSelect).toHaveBeenCalledWith(
+      'Credential setup submitted — {"integrations":[{"name":"google-email","status":"connected"},{"name":"google-calendar","status":"skipped"}],"secrets":[]}'
+    )
     act(() => root.unmount())
   })
 

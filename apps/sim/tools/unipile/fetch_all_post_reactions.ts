@@ -30,6 +30,8 @@ export interface FetchAllUnipilePostReactionsOptions {
   commentId?: string | null
   /** Per-request page size, clamped to 1–100 */
   limit?: number | null
+  /** Stop after this many reactions. Omit to load every page. */
+  maxItems?: number | null
 }
 
 export async function fetchAllUnipilePostReactionItems(
@@ -50,6 +52,15 @@ export async function fetchAllUnipilePostReactionItems(
       : UNIPILE_POST_REACTIONS_PAGE_LIMIT
   if (pageLimit < 1) pageLimit = 1
   if (pageLimit > UNIPILE_POST_REACTIONS_PAGE_LIMIT) pageLimit = UNIPILE_POST_REACTIONS_PAGE_LIMIT
+  const maxItems =
+    typeof options.maxItems === 'number' &&
+    Number.isFinite(options.maxItems) &&
+    options.maxItems >= 1
+      ? Math.min(
+          Math.trunc(options.maxItems),
+          MAX_REACTION_PAGES * UNIPILE_POST_REACTIONS_PAGE_LIMIT
+        )
+      : undefined
 
   const allItems: unknown[] = []
   let object: string | null = null
@@ -59,9 +70,13 @@ export async function fetchAllUnipilePostReactionItems(
   let pages = 0
   while (pages < MAX_REACTION_PAGES) {
     pages += 1
+    const requestLimit =
+      maxItems !== undefined
+        ? Math.min(pageLimit, Math.max(1, maxItems - allItems.length))
+        : pageLimit
     const qs = new URLSearchParams()
     qs.set('account_id', accountId)
-    qs.set('limit', String(pageLimit))
+    qs.set('limit', String(requestLimit))
     if (commentTrim) qs.set('comment_id', commentTrim)
     if (pageCursor) qs.set('cursor', pageCursor)
 
@@ -97,6 +112,10 @@ export async function fetchAllUnipilePostReactionItems(
 
     const pageItems = Array.isArray(parsed.items) ? parsed.items : []
     allItems.push(...pageItems)
+    if (maxItems !== undefined && allItems.length >= maxItems) {
+      allItems.length = maxItems
+      break
+    }
 
     const next = extractUnipilePostReactionsNextCursor(parsed)
     if (!next) {

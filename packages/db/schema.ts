@@ -1004,7 +1004,7 @@ export const settings = pgTable('settings', {
     .unique(), // One settings record per user
 
   // General settings
-  theme: text('theme').notNull().default('system'),
+  theme: text('theme').notNull().default('light'),
   autoConnect: boolean('auto_connect').notNull().default(true),
 
   // Privacy settings
@@ -4210,6 +4210,9 @@ export const localCopilotDefaultModelEnum = pgEnum('local_copilot_default_model'
   'gemini-2.5-pro',
   'gemini-3.1-pro',
   'vertex-gemini-3.8-flash',
+  'bedrock-claude-fable-5-1',
+  'bedrock-gpt-6-astra',
+  'bedrock-gpt-5.5',
   'bedrock-claude-opus-5',
   'bedrock-claude-sonnet-5',
   'bedrock-claude-opus-4-8',
