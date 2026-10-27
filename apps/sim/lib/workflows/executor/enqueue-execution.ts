@@ -7,6 +7,7 @@ import { getJobQueue, shouldExecuteInline } from '@/lib/core/async-jobs'
 import { isAsyncJobEnqueueError } from '@/lib/core/async-jobs/types'
 import { toTriggerMaxDurationSeconds } from '@/lib/core/execution-limits'
 import { captureRequestAttribution } from '@/lib/core/utils/request-attribution'
+import type { ExecutionActor } from '@/lib/execution/actor-resolution'
 import { WORKFLOW_EXECUTION_JOB_ID_PREFIX } from '@/lib/workflows/executor/execution-job-ids'
 import { executeWorkflowJob, type WorkflowExecutionPayload } from '@/background/workflow-execution'
 import type { ResolvedSecretTraceProvenanceV1 } from '@/executor/utils/resolved-secret-trace-registry'
@@ -27,6 +28,8 @@ export interface EnqueueWorkflowExecutionParams {
   principal: WorkflowExecutionPrincipal
   userId: string
   billingAttribution: BillingAttributionSnapshot
+  /** Actor resolved with the billing snapshot; carried so the worker logs the same actor. */
+  executionActor?: ExecutionActor
   workspaceId: string
   input: unknown
   triggerType: CoreTriggerType
@@ -75,6 +78,7 @@ export async function enqueueWorkflowExecution(
     principal,
     userId,
     billingAttribution,
+    executionActor,
     workspaceId,
     input,
     triggerType,
@@ -109,6 +113,7 @@ export async function enqueueWorkflowExecution(
     principal: serializePrincipal(principal),
     userId,
     billingAttribution,
+    ...(executionActor ? { executionActor } : {}),
     workspaceId,
     input,
     triggerType,

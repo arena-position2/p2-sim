@@ -10,6 +10,8 @@ import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
+  resolveBillingAttributionForPayerUser,
+  resolveBillingPayerUserIdByEmail,
   resolveSystemBillingAttribution,
 } from '@/lib/billing/core/billing-attribution'
 import type { HighestPrioritySubscription } from '@/lib/billing/core/plan'
@@ -144,6 +146,16 @@ export interface PreprocessExecutionOptions {
    * the previously captured snapshot before calling preprocessing.
    */
   billingAttribution?: BillingAttributionSnapshot
+  /**
+   * Email of the Sim user who pays for this run instead of the workflow's
+   * workspace. Their organization (or personal plan) becomes the payer and
+   * they are recorded as the execution actor; the credential identity that
+   * resolves secrets and environment is unchanged. An email matching no user
+   * fails with {@link BILLING_EMAIL_NOT_FOUND_CODE}. Ignored when a serialized
+   * `billingAttribution` is supplied, since that snapshot already carries the
+   * decision.
+   */
+  billingPayerEmail?: string
   /** Attempt type used to size its reservation and return the applicable timeout. */
   executionType?: 'sync' | 'async'
   /** Async API-only request cap in seconds. */
@@ -182,6 +194,7 @@ function retryAfterMsFrom(retryAfterSeconds: number | undefined): { retryAfterMs
 }
 
 export const WORKFLOW_NOT_DEPLOYED_CODE = 'WORKFLOW_NOT_DEPLOYED'
+export const BILLING_EMAIL_NOT_FOUND_CODE = 'BILLING_EMAIL_NOT_FOUND'
 
 export interface PreprocessExecutionSuccess {
   success: true
@@ -390,6 +403,7 @@ export async function preprocessExecution(
     userIdIsStoredReference = false,
     workflowRecord: prefetchedWorkflowRecord,
     billingAttribution: providedBillingAttribution,
+    billingPayerEmail,
     executionType = 'sync',
     requestedTimeoutSeconds,
     executionDeadlineAt,
@@ -651,6 +665,34 @@ export async function preprocessExecution(
 
     if (!billingAttribution) {
       billingAttribution = await admission.attributionFor(workspaceId)
+    }
+
+    if (billingPayerEmail && !providedBillingAttribution) {
+      const payerUserId = await withDatabaseReadRetry(
+        () => resolveBillingPayerUserIdByEmail(billingPayerEmail),
+        { label: 'resolveBillingPayerUserIdByEmail' }
+      )
+      if (!payerUserId) {
+        logger.warn(`[${requestId}] Billing email does not match any user`, { workflowId })
+        return {
+          success: false,
+          error: {
+            message: 'No Sim user matches the billing email header',
+            statusCode: 400,
+            code: BILLING_EMAIL_NOT_FOUND_CODE,
+          },
+        }
+      }
+      const payerInput = { actorUserId, workspaceId, payerUserId }
+      billingAttribution = await withDatabaseReadRetry(
+        () => resolveBillingAttributionForPayerUser(payerInput),
+        { label: 'resolveBillingAttributionForPayerUser' }
+      )
+      executionActor = { actorUserId: payerUserId, actorType: 'user' }
+      logger.info(`[${requestId}] Billing payer overridden by billing email`, {
+        payerUserId,
+        billingEntity: billingAttribution.billingEntity,
+      })
     }
   } catch (error) {
     logger.error(`[${requestId}] Error resolving billing attribution`, { error, workflowId })
@@ -1018,7 +1060,8 @@ export async function preprocessExecution(
           ? {
               member: {
                 organizationId: billingAttribution.organizationId,
-                actorUserId: billingAttribution.actorUserId,
+                actorUserId:
+                  billingAttribution.cappedMemberUserId ?? billingAttribution.actorUserId,
                 currentUsage: usageSnapshot.memberUsage.currentUsage,
                 limit: usageSnapshot.memberUsage.limit,
               },

@@ -29,6 +29,13 @@ interface WorkflowDeploymentInfo {
   isPublicApi?: boolean
 }
 
+const BILLING_EMAIL_HEADER = 'X-Sim-Email'
+const BILLING_EMAIL_SNIPPET = {
+  curl: `  -H "${BILLING_EMAIL_HEADER}: $SIM_USER_EMAIL" \\\n`,
+  python: `        "${BILLING_EMAIL_HEADER}": os.environ.get("SIM_USER_EMAIL"),\n`,
+  js: `    "${BILLING_EMAIL_HEADER}": process.env.SIM_USER_EMAIL,\n`,
+} as const
+
 interface ApiDeployProps {
   workflowId: string | null
   deploymentInfo: WorkflowDeploymentInfo | null
@@ -128,7 +135,7 @@ export function ApiDeploy({
     switch (language) {
       case 'curl':
         return `curl -X POST \\
-${isPublic ? '' : '  -H "X-API-Key: $SIM_API_KEY" \\\n'}  -H "Content-Type: application/json" \\
+${isPublic ? '' : '  -H "X-API-Key: $SIM_API_KEY" \\\n'}${BILLING_EMAIL_SNIPPET.curl}  -H "Content-Type: application/json" \\
   -d '${JSON.stringify(payload)}' \\
   ${endpoint}`
 
@@ -139,7 +146,7 @@ import requests
 response = requests.post(
     "${endpoint}",
     headers={
-${isPublic ? '' : '        "X-API-Key": os.environ.get("SIM_API_KEY"),\n'}        "Content-Type": "application/json"
+${isPublic ? '' : '        "X-API-Key": os.environ.get("SIM_API_KEY"),\n'}${BILLING_EMAIL_SNIPPET.python}        "Content-Type": "application/json"
     },
     json=${JSON.stringify(payload, null, 4).replace(/\n/g, '\n    ')}
 )
@@ -150,7 +157,7 @@ print(response.json())`
         return `const response = await fetch("${endpoint}", {
   method: "POST",
   headers: {
-${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}    "Content-Type": "application/json"
+${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}${BILLING_EMAIL_SNIPPET.js}    "Content-Type": "application/json"
   },
   body: JSON.stringify(${JSON.stringify(payload)})
 });
@@ -162,7 +169,7 @@ console.log(data);`
         return `const response = await fetch("${endpoint}", {
   method: "POST",
   headers: {
-${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}    "Content-Type": "application/json"
+${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}${BILLING_EMAIL_SNIPPET.js}    "Content-Type": "application/json"
   },
   body: JSON.stringify(${JSON.stringify(payload)})
 });
@@ -192,7 +199,7 @@ console.log(data);`
     switch (language) {
       case 'curl':
         return `curl -X POST \\
-${isPublic ? '' : '  -H "X-API-Key: $SIM_API_KEY" \\\n'}${protocol.curl}  -H "Content-Type: application/json" \\
+${isPublic ? '' : '  -H "X-API-Key: $SIM_API_KEY" \\\n'}${BILLING_EMAIL_SNIPPET.curl}${protocol.curl}  -H "Content-Type: application/json" \\
   -d '${JSON.stringify(payload)}' \\
   ${endpoint}`
 
@@ -203,7 +210,7 @@ import requests
 response = requests.post(
     "${endpoint}",
     headers={
-${isPublic ? '' : '        "X-API-Key": os.environ.get("SIM_API_KEY"),\n'}${protocol.python}        "Content-Type": "application/json"
+${isPublic ? '' : '        "X-API-Key": os.environ.get("SIM_API_KEY"),\n'}${BILLING_EMAIL_SNIPPET.python}${protocol.python}        "Content-Type": "application/json"
     },
     json=${JSON.stringify(payload, null, 4).replace(/\n/g, '\n    ')},
     stream=True
@@ -217,7 +224,7 @@ for line in response.iter_lines():
         return `const response = await fetch("${endpoint}", {
   method: "POST",
   headers: {
-${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}${protocol.js}    "Content-Type": "application/json"
+${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}${BILLING_EMAIL_SNIPPET.js}${protocol.js}    "Content-Type": "application/json"
   },
   body: JSON.stringify(${JSON.stringify(payload)})
 });
@@ -235,7 +242,7 @@ while (true) {
         return `const response = await fetch("${endpoint}", {
   method: "POST",
   headers: {
-${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}${protocol.js}    "Content-Type": "application/json"
+${isPublic ? '' : '    "X-API-Key": process.env.SIM_API_KEY,\n'}${BILLING_EMAIL_SNIPPET.js}${protocol.js}    "Content-Type": "application/json"
   },
   body: JSON.stringify(${JSON.stringify(payload)})
 });
@@ -272,7 +279,7 @@ while (true) {
           case 'curl':
             return `curl -X POST \\
   -H "X-API-Key: $SIM_API_KEY" \\
-  -H "Content-Type: application/json" \\
+${BILLING_EMAIL_SNIPPET.curl}  -H "Content-Type: application/json" \\
   -d '${JSON.stringify(payload)}' \\
   ${endpoint}`
 
@@ -284,6 +291,7 @@ response = requests.post(
     "${endpoint}",
     headers={
         "X-API-Key": os.environ.get("SIM_API_KEY"),
+        "${BILLING_EMAIL_HEADER}": os.environ.get("SIM_USER_EMAIL"),
         "Content-Type": "application/json",
     },
     json=${JSON.stringify(payload, null, 4).replace(/\n/g, '\n    ')}
@@ -297,6 +305,7 @@ print(execution)`
   method: "POST",
   headers: {
     "X-API-Key": process.env.SIM_API_KEY,
+    "${BILLING_EMAIL_HEADER}": process.env.SIM_USER_EMAIL,
     "Content-Type": "application/json",
   },
   body: JSON.stringify(${JSON.stringify(payload)})
@@ -310,6 +319,7 @@ console.log(execution);`
   method: "POST",
   headers: {
     "X-API-Key": process.env.SIM_API_KEY,
+    "${BILLING_EMAIL_HEADER}": process.env.SIM_USER_EMAIL,
     "Content-Type": "application/json",
   },
   body: JSON.stringify(${JSON.stringify(payload)})

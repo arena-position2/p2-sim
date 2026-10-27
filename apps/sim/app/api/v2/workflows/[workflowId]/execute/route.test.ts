@@ -185,6 +185,7 @@ function callExecute(body: Record<string, unknown>, headers: Record<string, stri
   const req = createMockRequest('POST', body, {
     'Content-Type': 'application/json',
     'X-API-Key': 'test-key',
+    'X-Sim-Email': 'payer@example.com',
     ...headers,
   })
   return POST(req, createRouteContext({ workflowId: 'workflow-1' }))
@@ -193,6 +194,7 @@ function callExecute(body: Record<string, unknown>, headers: Record<string, stri
 function callPublicExecute(body: Record<string, unknown>, headers: Record<string, string> = {}) {
   const req = createMockRequest('POST', body, {
     'Content-Type': 'application/json',
+    'X-Sim-Email': 'payer@example.com',
     ...headers,
   })
   return POST(req, createRouteContext({ workflowId: 'workflow-1' }))
@@ -202,6 +204,7 @@ function callOAuthExecute(body: Record<string, unknown>) {
   const req = createMockRequest('POST', body, {
     'Content-Type': 'application/json',
     Authorization: 'Bearer sim_oat_token',
+    'X-Sim-Email': 'payer@example.com',
   })
   return POST(req, createRouteContext({ workflowId: 'workflow-1' }))
 }

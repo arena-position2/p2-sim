@@ -37,6 +37,7 @@ export function OrganizationAdminUsageContent({
   filters,
 }: OrganizationAdminUsageContentProps) {
   const workflowRows = useMemo(() => data.workflow.byWorkflow, [data.workflow.byWorkflow])
+  const apiRows = useMemo(() => data.byApi, [data.byApi])
   const userRows = useMemo(() => data.byUser, [data.byUser])
   const toolRows = useMemo(() => aggregateUsageToolsByFamily(data.byTool), [data.byTool])
   const modelSpend = data.copilot.modelSpend
@@ -98,6 +99,49 @@ export function OrganizationAdminUsageContent({
           },
         ]}
       />
+
+      {apiRows.length > 0 && (
+        <UsageRankTable
+          rows={apiRows}
+          getRowKey={(row) =>
+            `${row.organizationId}:${row.workspaceId}:${row.workflowId}:${row.actorUserId ?? ''}`
+          }
+          getBillableCost={(row) => row.billableCost}
+          emptyMessage='No external agent usage in this period.'
+          columns={[
+            {
+              key: 'name',
+              header: 'By Agent',
+              render: (row) => (
+                <div className='flex flex-col'>
+                  <span className='font-medium'>{row.workflowName?.trim() || row.workflowId}</span>
+                  <span className='text-[var(--text-muted)] text-caption'>
+                    {row.organizationName} · {row.workspaceName}
+                  </span>
+                </div>
+              ),
+            },
+            {
+              key: 'actor',
+              header: 'Run by',
+              render: (row) =>
+                row.actorUserId ? (userLabelById.get(row.actorUserId) ?? row.actorUserId) : '—',
+            },
+            {
+              key: 'runs',
+              header: 'Runs',
+              align: 'right',
+              render: (row) => row.executionCount.toLocaleString(),
+            },
+            {
+              key: 'credits',
+              header: 'Credits',
+              align: 'right',
+              render: (row) => <UsageRankCreditsCell billableCost={row.billableCost} />,
+            },
+          ]}
+        />
+      )}
 
       <UsageRankTable
         rows={userRows}

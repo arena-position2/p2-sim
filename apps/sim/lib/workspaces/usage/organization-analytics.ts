@@ -40,10 +40,13 @@ import {
   ledgerCostSelect,
   ledgerOccurredAt,
   ledgerPeriodBounds,
+  listExternalApiCostBuckets,
+  listExternalApiUsage,
   mapBySourceBucketRow,
   mapExpensiveCopilotChatRows,
   mapExpensiveWorkflowRows,
   mapUsageMetrics,
+  mergeExternalApiCostBuckets,
   normalizeBucketKey,
   parseActorType,
   parseChargeType,
@@ -180,6 +183,7 @@ function emptyOrganizationAnalytics(
       count: 0,
       usage: { ...EMPTY_USAGE_METRICS },
     })),
+    byApi: [],
     byChargeType: [],
     attribution: {
       missingChatId: { billableCost: 0, rawCost: 0, count: 0 },
@@ -689,6 +693,22 @@ export async function getOrganizationUsageAnalytics(
         and(...ledgerConditions, eq(usageLog.category, 'model'), isNotNull(usageLog.executionId))
       )
 
+    const externalApiPayer = and(
+      eq(usageLog.billingEntityType, 'organization'),
+      eq(usageLog.billingEntityId, organizationId)
+    )
+    const externalApiQuery = externalApiPayer
+      ? {
+          payerCondition: externalApiPayer,
+          homeOrganizationIds: [organizationId],
+          period,
+        }
+      : null
+    const [byApi, externalApiBuckets] = await Promise.all([
+      externalApiQuery ? listExternalApiUsage(externalApiQuery) : [],
+      externalApiQuery ? listExternalApiCostBuckets({ ...externalApiQuery, useHourlyBuckets }) : [],
+    ])
+
     const embeddedToolSplit = computeEmbeddedToolVirtualSplit(modelMetadataRows)
 
     const bySource = sortByBillableCostDesc(
@@ -821,6 +841,8 @@ export async function getOrganizationUsageAnalytics(
       }
     }
 
+    mergeExternalApiCostBuckets(timeSeries, externalApiBuckets)
+
     const densifiedTimeSeries = densifyTimeSeries(timeSeries, period, useHourlyBuckets)
 
     const periodActiveUserCount = activeUserPeriodRows[0]?.activeUserCount ?? 0
@@ -904,6 +926,7 @@ export async function getOrganizationUsageAnalytics(
         usage: summaryUsage,
       },
       byWorkspace,
+      byApi,
       byChargeType,
       attribution: {
         missingChatId: {

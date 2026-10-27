@@ -27,6 +27,13 @@ export interface ExecuteWorkflowInput {
    * id by the surface adapter. Carries the recursion guard across API hops.
    */
   callChain?: string[]
+  /**
+   * Email of the Sim user whose organization (or personal plan) pays for this
+   * run instead of the workflow workspace. The v2 execute surface requires it;
+   * other callers of this use case may omit it, in which case the workspace
+   * payer applies.
+   */
+  billingPayerEmail?: string
 }
 
 function authenticatesExecutionCredentials(principal: Principal): boolean {
@@ -52,6 +59,7 @@ export const executeWorkflowOperation = defineAuthorizedWorkflowUseCase({
       callChain: input.callChain,
       useAuthenticatedUserAsActor: authenticatesExecutionCredentials(principal),
       workflowRecord: context.workflow,
+      billingPayerEmail: input.billingPayerEmail,
       includeFileBase64: input.includeFileBase64,
       base64MaxBytes: input.base64MaxBytes,
       selectedOutputs: input.selectedOutputs,

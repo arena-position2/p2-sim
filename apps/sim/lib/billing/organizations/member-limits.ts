@@ -8,7 +8,7 @@ import {
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
-import { and, eq, gte, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, eq, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import { ON_DEMAND_UNLIMITED } from '@/lib/billing/constants'
 import { getOrganizationSubscription } from '@/lib/billing/core/billing'
 import { defaultBillingPeriod } from '@/lib/billing/core/billing-period'
@@ -192,6 +192,11 @@ export async function setOrgMemberUsageLimit(
  * null billing attribution may use the workspace join only after that workspace
  * was assigned to the organization. The branches are disjoint, so an attributed
  * row can never be counted again through mutable workspace ownership.
+ *
+ * A deployed API run keeps the credential on `user_id` and the caller on
+ * `actor_user_id` with `actor_type = 'user'`. The caller's allocation includes
+ * that row. Rows with no actor, the same person on both columns, or a non-user
+ * actor type stay on `user_id`.
  */
 export async function getOrgMemberUsageForBillingPeriod(
   organizationId: string,
@@ -205,7 +210,22 @@ export async function getOrgMemberUsageForBillingPeriod(
       .leftJoin(workspace, eq(workspace.id, usageLog.workspaceId))
       .where(
         and(
-          eq(usageLog.userId, userId),
+          or(
+            and(
+              eq(usageLog.userId, userId),
+              or(
+                isNull(usageLog.actorUserId),
+                eq(usageLog.actorUserId, usageLog.userId),
+                isNull(usageLog.actorType),
+                ne(usageLog.actorType, 'user')
+              )
+            ),
+            and(
+              eq(usageLog.actorUserId, userId),
+              ne(usageLog.actorUserId, usageLog.userId),
+              eq(usageLog.actorType, 'user')
+            )
+          ),
           ...(billingPeriod.source === 'reporting'
             ? [
                 eq(usageLog.billingEntityType, 'organization'),
