@@ -32,6 +32,12 @@ export const MAX_WORKFLOW_BUILD_CONTINUATION_ROUNDS = 2
 export const MAX_FILE_EDIT_CONTINUATION_ROUNDS = 3
 
 /**
+ * When an HTML edit follow-up only `read`s (no grep yet), force at most one
+ * round that steers toward grep(user tokens) → patch instead of offset paging.
+ */
+export const MAX_HTML_EDIT_GREP_NUDGE_ROUNDS = 1
+
+/**
  * Successful read/grep/glob/load_copilot_artifact calls on the same path
  * (offset/limit ignored) before hard-stopping when no file mutation ran.
  * Caps endless HTML paging that never reaches workspace_file / edit_content.

@@ -12,6 +12,7 @@ import {
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
   MAX_FORCED_FOLLOW_UP_ROUNDS,
+  MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
   MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS,
   MAX_INTENT_CONTINUATION_ROUNDS,
   MAX_POPULATE_EDITS,
@@ -252,6 +253,12 @@ import { resolveTurnCompletion } from '@/local-copilot/lib/verification/completi
 import { mutationRequiresVerification } from '@/local-copilot/lib/verification/policy'
 import { runPostMutationVerification } from '@/local-copilot/lib/verification/run-verification'
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
+import {
+  buildHtmlEditGrepNudgeMessage,
+  extractHtmlEditGrepTokens,
+  hasHtmlEditContext,
+  shouldForceHtmlEditGrepNudge,
+} from '@/local-copilot/lib/writes/html-edit-intent'
 import { createTurnMutations } from '@/local-copilot/lib/writes/turn-mutations'
 import { MAX_TOOL_ITERATIONS } from '@/providers'
 
@@ -1027,6 +1034,7 @@ export async function* runLocalCopilotAgent(
   let forcedWorkflowBuildContinuations = 0
   let forcedIncompletePopulateContinuations = 0
   let forcedFileEditContinuations = 0
+  let forcedHtmlEditGrepNudges = 0
   let forcedResearchSearchContinuations = 0
   /** Metadata / artifact calls after create and before the first successful edit. */
   let prePopulateDiscoveryCalls = 0
@@ -1620,6 +1628,51 @@ export async function* runLocalCopilotAgent(
           forcedIncompletePopulateContinuations,
           createdWorkflowThisTurn,
           successfulPopulateEdits,
+        })
+        continue
+      }
+
+      const hasSuccessfulRead = turnToolRecords.some(
+        (record) => record.name === 'read' && record.success
+      )
+      const hasSuccessfulGrep = turnToolRecords.some(
+        (record) => record.name === 'grep' && record.success
+      )
+      const canForceHtmlEditGrep = shouldForceHtmlEditGrepNudge({
+        postBuildToolMode,
+        forcedHtmlEditGrepNudges,
+        maxForcedHtmlEditGrepNudges: MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: hasHtmlEditContext({
+          userMessage: userTurnText,
+          preferredPath: activeEditTarget.preferredPath,
+          candidatePaths: activeEditTarget.candidates,
+        }),
+        hasSuccessfulRead,
+        hasSuccessfulGrep,
+        hasFileMutationTools: turnHasFileMutationTools(turnToolRecords),
+        streamedUserFacingText,
+        roundDisplayText: intentDisplay,
+      })
+
+      if (canForceHtmlEditGrep) {
+        forcedHtmlEditGrepNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        const grepTokens = extractHtmlEditGrepTokens(userTurnText)
+        messages.push({
+          role: 'system',
+          content: buildHtmlEditGrepNudgeMessage(grepTokens),
+        })
+        logger.info('Arena Copilot forcing HTML edit grep nudge', {
+          round,
+          forcedHtmlEditGrepNudges,
+          grepTokens,
+          preferredPath: activeEditTarget.preferredPath,
         })
         continue
       }
