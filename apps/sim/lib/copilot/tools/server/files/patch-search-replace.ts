@@ -3,6 +3,7 @@ import { truncate } from '@sim/utils/string'
 /** Structured patch prepare failures the agent can recover from without aborting the turn. */
 export type SearchReplacePatchErrorType =
   | 'search_looks_truncated'
+  | 'search_too_long'
   | 'search_not_found'
   | 'search_ambiguous'
 
@@ -27,6 +28,13 @@ const TRUNCATION_MARKERS = [
   '...[truncated for Local Copilot',
   'mega inline SVG/CSS/base64',
 ] as const
+
+/**
+ * Soft ceiling for a search_replace `search` string. Longer needles are almost
+ * always invented or copied from a clamped mega-line and fail exact `indexOf`
+ * — force a short unique live substring instead.
+ */
+export const MAX_PATCH_SEARCH_CHARS = 600
 
 const EXCERPT_MAX_LINES = 12
 const EXCERPT_LINE_MAX_CHARS = 200
@@ -153,6 +161,16 @@ export function validateSearchReplaceForPatch(params: {
       ok: false,
       errorType: 'search_looks_truncated',
       message: `Patch failed: search string looks copied from a truncated read of "${fileName}". Call read/grep on the live file and use a short unique substring that does not contain truncation markers.`,
+    }
+  }
+
+  if (search.length > MAX_PATCH_SEARCH_CHARS) {
+    const excerpt = buildPatchSearchMissExcerpt(search, params.existingContent)
+    return {
+      ok: false,
+      errorType: 'search_too_long',
+      excerpt,
+      message: `Patch failed: search string is too long (${search.length} chars, max ${MAX_PATCH_SEARCH_CHARS}) for "${fileName}". Use a short unique live substring (id, class, button label, or one small tag) — not a multi-hundred-char HTML dump.\n${excerpt}`,
     }
   }
 

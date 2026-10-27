@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_PATCH_SEARCH_CHARS,
   searchLooksTruncated,
   validateSearchReplaceForPatch,
 } from '@/lib/copilot/tools/server/files/patch-search-replace'
@@ -66,6 +67,33 @@ describe('validateSearchReplaceForPatch', () => {
       expect(result.errorType).toBe('search_looks_truncated')
       expect(result.message).toMatch(/truncated read/i)
     }
+  })
+
+  it('rejects search longer than MAX_PATCH_SEARCH_CHARS before scanning the file', () => {
+    const search = `<button id="generateBtn">${'x'.repeat(MAX_PATCH_SEARCH_CHARS)}</button>`
+    const result = validateSearchReplaceForPatch({
+      search,
+      existingContent: `${search}<p>other</p>`,
+      fileName,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errorType).toBe('search_too_long')
+      expect(result.message).toMatch(/too long/i)
+      expect(result.message).toContain(String(MAX_PATCH_SEARCH_CHARS))
+      expect(result.excerpt).toBeTruthy()
+    }
+  })
+
+  it('accepts a unique search at the max length', () => {
+    const needle = 'a'.repeat(MAX_PATCH_SEARCH_CHARS)
+    expect(
+      validateSearchReplaceForPatch({
+        search: needle,
+        existingContent: `prefix ${needle} suffix`,
+        fileName,
+      })
+    ).toEqual({ ok: true, search: needle })
   })
 
   it('rejects search that is not in the file', () => {

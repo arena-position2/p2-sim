@@ -226,6 +226,27 @@ describe('recoverable workspace_file patch failures', () => {
     expect(followUp?.resolveWith).toContain('read')
     expect(followUp?.resolveWith).not.toContain('workspace_file')
   })
+
+  it('marks search_too_long as mandatory patch-repair follow-up', () => {
+    const formatted = formatToolResultForLlm('workspace_file', {
+      success: false,
+      errorType: 'search_too_long',
+      recoverable: true,
+      message: 'Patch failed: search string is too long (800 chars, max 600)',
+      data: {
+        operation: 'patch',
+        name: 'page.html',
+        suggestedNextTools: ['read', 'grep'],
+      },
+    })
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    expect(parsed.needsFollowUpPatchRepair).toBe(true)
+    expect(String(parsed.followUpHint)).toMatch(/short unique live substring/i)
+
+    const followUp = detectMandatoryFollowUp('workspace_file', formatted)
+    expect(followUp?.id).toBe('workspace_file:patch-repair')
+    expect(followUp?.resolveWith).toEqual(['read', 'grep'])
+  })
 })
 
 describe('workspace_file patch-repair resolution', () => {

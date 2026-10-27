@@ -156,4 +156,29 @@ describe('repeated patch searches', () => {
     })
     expect(next).toBeNull()
   })
+
+  it('records search_too_long misses so the same needle is rejected next', () => {
+    const failed = new Map<string, Set<string>>()
+    const longSearch = `<button id="generateBtn">${'x'.repeat(700)}</button>`
+    rememberFailedPatchSearch(
+      failed,
+      {
+        ...args,
+        edit: { strategy: 'search_replace', search: longSearch },
+      },
+      {
+        errorType: 'search_too_long',
+        data: { vfsPath: 'files/ad-generator (10).html' },
+      }
+    )
+
+    const repeated = rejectRepeatedPatchSearch({
+      args: {
+        ...args,
+        edit: { strategy: 'search_replace', search: longSearch },
+      },
+      failedPatchSearches: failed,
+    })
+    expect(repeated?.result.errorType).toBe('search_repeated')
+  })
 })

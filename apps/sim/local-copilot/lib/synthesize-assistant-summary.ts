@@ -89,6 +89,8 @@ const RECOVERABLE_WORKSPACE_FILE_PATCH_ERROR_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
   'search_looks_truncated',
+  'search_too_long',
+  'search_repeated',
 ])
 
 /**

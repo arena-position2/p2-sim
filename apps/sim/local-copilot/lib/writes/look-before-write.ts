@@ -177,6 +177,7 @@ const RECORDED_PATCH_MISS_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
   'search_looks_truncated',
+  'search_too_long',
 ])
 
 export const PATCH_SEARCH_REPEATED_MESSAGE =

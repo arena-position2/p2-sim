@@ -315,11 +315,12 @@ const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
   'search_looks_truncated',
+  'search_too_long',
   'search_repeated',
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_HINT =
-  'Patch search did not match the live file (stale/truncated/ambiguous search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search, then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+  'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search (well under 600 chars), then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
 
 /** User-facing closer. The model hint stays on {@link PATCH_REPAIR_FOLLOW_UP_HINT}. */
 export const PATCH_REPAIR_USER_HINT =

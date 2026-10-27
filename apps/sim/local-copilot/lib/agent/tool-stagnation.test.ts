@@ -41,6 +41,15 @@ describe('workspace_file patch stagnation', () => {
     )
   })
 
+  it('keeps search_not_found and search_too_long in different buckets', () => {
+    const tracker = createToolStagnationTracker()
+    const notFound = miss('<div class="drop">', 'search_not_found')
+    const tooLong = miss('<div class="drop">', 'search_too_long')
+    expect(tracker.record('workspace_file', notFound.args, false, notFound.result)).toBeNull()
+    expect(tracker.record('workspace_file', tooLong.args, false, tooLong.result)).toBeNull()
+    expect(tracker.record('workspace_file', tooLong.args, false, tooLong.result)).not.toBeNull()
+  })
+
   it('keeps search_not_found and search_repeated in different buckets', () => {
     const notFound = miss('<div class="drop">', 'search_not_found')
     const repeated = miss('<div class="drop">', 'search_repeated')
