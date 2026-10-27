@@ -317,7 +317,6 @@ export function CustomToolCodeField({
             onOpenChange={(open) => {
               if (!open) setShowSchemaParams(false)
             }}
-            colorScheme='inverted'
           >
             <PopoverAnchor asChild>
               <div
@@ -359,7 +358,7 @@ export function CustomToolCodeField({
                   >
                     <span className='flex-1 truncate'>{param.name}</span>
                     {param.type && param.type !== 'any' && (
-                      <span className='ml-auto text-[var(--text-muted-inverse)] text-micro'>
+                      <span className='ml-auto text-[var(--text-muted)] text-micro'>
                         {param.type}
                       </span>
                     )}

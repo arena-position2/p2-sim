@@ -785,7 +785,7 @@ html.sidebar-resizing .sidebar-shell-inner {
     --selection-muted: #1a5cf647;
     --warning: #ea580c;
 
-    /* Inverted surface (dark chrome on light page, e.g. tag dropdown) */
+    /* Inverted surface: dark chrome that stays dark in light mode */
     --surface-inverted: #1b1b1b;
     --surface-inverted-hover: #363636;
     --border-inverted: #363636;
