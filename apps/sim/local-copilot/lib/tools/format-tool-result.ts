@@ -315,10 +315,15 @@ const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
   'search_looks_truncated',
+  'search_repeated',
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_HINT =
   'Patch search did not match the live file (stale/truncated/ambiguous search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search, then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+
+/** User-facing closer. The model hint stays on {@link PATCH_REPAIR_FOLLOW_UP_HINT}. */
+export const PATCH_REPAIR_USER_HINT =
+  'The edit did not match the file, so the file was left unchanged.'
 
 /**
  * Copies mandatory-follow-up flags onto an artifact stub so offload cannot
@@ -338,7 +343,10 @@ function copyFollowUpFields(
 
 export interface MandatoryFollowUp {
   id: string
+  /** Instruction injected into the model continuation. */
   hint: string
+  /** Sentence shown in chat when the follow-up is still open at the end of the turn. */
+  userHint?: string
   resolveWith: string[]
 }
 
@@ -895,7 +903,8 @@ function detectMandatoryFollowUpFromRecord(
     return {
       id: 'workspace_file:patch-repair',
       hint: hint ?? PATCH_REPAIR_FOLLOW_UP_HINT,
-      resolveWith: ['read', 'grep', 'workspace_file'],
+      userHint: PATCH_REPAIR_USER_HINT,
+      resolveWith: ['read', 'grep'],
     }
   }
 
@@ -1066,6 +1075,10 @@ export function resolveMandatoryFollowUps(
       (item) =>
         item.id !== 'create_file:workspace-file' && item.id !== 'workspace_file:patch-repair'
     )
+  }
+
+  if (toolName === 'read' || toolName === 'grep') {
+    next = next.filter((item) => item.id !== 'workspace_file:patch-repair')
   }
 
   if (toolName === 'create_file') {

@@ -11,6 +11,7 @@ import {
 } from '@/local-copilot/lib/synthesize-assistant-summary'
 import {
   admitPrePopulateDiscovery,
+  buildUnresolvedFollowUpClosingMessage,
   shouldEnsureWorkflowBuildClosingMessage,
   shouldForceIncompleteWorkflowPopulateContinuation,
   shouldRefundPrePopulateDiscoveryRound,
@@ -296,6 +297,25 @@ describe('buildWorkflowBuildChatAppendix', () => {
     ]
     expect(buildWorkflowBuildChatAppendix(records)).toEqual(
       synthesizeAssistantSummaryFromTools(records)
+    )
+  })
+
+  it('shows the patch-repair user sentence instead of the model hint', () => {
+    const userHint = 'The edit did not match the file, so the file was left unchanged.'
+    const modelHint = 'Call read or grep NOW. Do not tell the user the file is missing.'
+    expect(
+      buildWorkflowBuildChatAppendix([], {
+        unresolvedFollowUpHint: modelHint,
+        unresolvedFollowUpUserHint: userHint,
+      })
+    ).toBe(userHint)
+    expect(
+      buildUnresolvedFollowUpClosingMessage([
+        { hint: modelHint, userHint, resolveWith: ['read', 'grep'] },
+      ])
+    ).toBe(userHint)
+    expect(buildUnresolvedFollowUpClosingMessage([{ hint: modelHint }])).toBe(
+      `I made partial progress but still need to finish: ${modelHint}`
     )
   })
 })

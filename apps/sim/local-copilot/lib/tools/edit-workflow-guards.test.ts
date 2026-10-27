@@ -40,6 +40,8 @@ import {
   formatToolResultForLlm,
   isAlreadyCopilotSanitizedWorkflowState,
   type MandatoryFollowUp,
+  PATCH_REPAIR_USER_HINT,
+  resolveMandatoryFollowUps,
 } from '@/local-copilot/lib/tools/format-tool-result'
 
 beforeEach(() => {
@@ -206,7 +208,8 @@ describe('recoverable workspace_file patch failures', () => {
 
     const followUp = detectMandatoryFollowUp('workspace_file', formatted)
     expect(followUp?.id).toBe('workspace_file:patch-repair')
-    expect(followUp?.resolveWith).toEqual(['read', 'grep', 'workspace_file'])
+    expect(followUp?.resolveWith).toEqual(['read', 'grep'])
+    expect(followUp?.userHint).toBe(PATCH_REPAIR_USER_HINT)
   })
 
   it('marks truncated search failures as patch-repair follow-up', () => {
@@ -221,6 +224,35 @@ describe('recoverable workspace_file patch failures', () => {
 
     const followUp = detectMandatoryFollowUp('workspace_file', formatted)
     expect(followUp?.resolveWith).toContain('read')
+    expect(followUp?.resolveWith).not.toContain('workspace_file')
+  })
+})
+
+describe('workspace_file patch-repair resolution', () => {
+  const pending: MandatoryFollowUp[] = [
+    {
+      id: 'workspace_file:patch-repair',
+      hint: 'Call read or grep, then patch with a new search.',
+      userHint: PATCH_REPAIR_USER_HINT,
+      resolveWith: ['read', 'grep'],
+    },
+  ]
+
+  it('clears patch-repair after a successful read or grep', () => {
+    expect(resolveMandatoryFollowUps(pending, 'read', true, { success: true })).toEqual([])
+    expect(resolveMandatoryFollowUps(pending, 'grep', true, { success: true })).toEqual([])
+  })
+
+  it('keeps patch-repair when the patch fails and clears it when a later patch succeeds', () => {
+    expect(
+      resolveMandatoryFollowUps(pending, 'workspace_file', false, {
+        success: false,
+        errorType: 'search_not_found',
+      })
+    ).toEqual(pending)
+    expect(resolveMandatoryFollowUps(pending, 'workspace_file', true, { success: true })).toEqual(
+      []
+    )
   })
 })
 

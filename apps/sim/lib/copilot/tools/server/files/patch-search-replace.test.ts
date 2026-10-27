@@ -40,7 +40,7 @@ describe('validateSearchReplaceForPatch', () => {
         existingContent,
         fileName,
       })
-    ).toEqual({ ok: true })
+    ).toEqual({ ok: true, search: '<title>Care Plan</title>' })
   })
 
   it('rejects empty search', () => {
@@ -78,6 +78,7 @@ describe('validateSearchReplaceForPatch', () => {
     if (!result.ok) {
       expect(result.errorType).toBe('search_not_found')
       expect(result.message).toContain('Stale Title')
+      expect(result.excerpt).toMatch(/None of these tokens occur/i)
     }
   })
 
@@ -100,6 +101,43 @@ describe('validateSearchReplaceForPatch', () => {
         replaceAll: true,
         fileName,
       })
-    ).toEqual({ ok: true })
+    ).toEqual({ ok: true, search: 'old' })
+  })
+
+  it('matches a unique unescaped search and stores the file bytes', () => {
+    const result = validateSearchReplaceForPatch({
+      search: '<button id=\\"generateBtn\\">Generate</button>',
+      existingContent: '<button id="generateBtn">Generate</button>',
+      fileName,
+    })
+    expect(result).toEqual({
+      ok: true,
+      search: '<button id="generateBtn">Generate</button>',
+    })
+  })
+
+  it('keeps a raw search that already matches backslash quotes', () => {
+    const raw = 'say \\"hi\\"'
+    const result = validateSearchReplaceForPatch({
+      search: raw,
+      existingContent: `before ${raw} after`,
+      fileName,
+    })
+    expect(result).toEqual({ ok: true, search: raw })
+  })
+
+  it('returns live lines when a search token occurs in the file', () => {
+    const result = validateSearchReplaceForPatch({
+      search: '<div class="drop" id="dropzone"><h4>Brand Logo</h4></div>',
+      existingContent: '<div class="drop-zone" id="generateBtn">Generate</div>\n<p>Other</p>',
+      fileName,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errorType).toBe('search_not_found')
+      expect(result.excerpt).toContain('1: <div class="drop-zone" id="generateBtn">Generate</div>')
+      expect(result.excerpt).not.toContain('<p>Other</p>')
+      expect(result.message).toContain(result.excerpt)
+    }
   })
 })

@@ -6,6 +6,8 @@ import {
   AGENT_TOOLS_NOT_CANVAS_ADD_ERROR,
   assertAgentToolsNotAddedAsCanvasBlocks,
   assertEditWorkflowLookBeforeWrite,
+  rejectRepeatedPatchSearch,
+  rememberFailedPatchSearch,
 } from '@/local-copilot/lib/writes/look-before-write'
 
 describe('assertAgentToolsNotAddedAsCanvasBlocks', () => {
@@ -113,5 +115,45 @@ describe('assertEditWorkflowLookBeforeWrite agent-tools gate', () => {
     if (!result.ok) {
       expect(result.error).toMatch(/Do not add image_generator_v2/)
     }
+  })
+})
+
+describe('repeated patch searches', () => {
+  const args = {
+    operation: 'patch',
+    target: { path: 'files/ad-generator (10).html' },
+    edit: {
+      strategy: 'search_replace' as const,
+      search: '<div class=\\"drop\\">\n  <h4>Brand Logo</h4>',
+    },
+  }
+
+  it('rejects the same normalized search and allows a different one', () => {
+    const failed = new Map<string, Set<string>>()
+    rememberFailedPatchSearch(failed, args, {
+      errorType: 'search_not_found',
+      data: { vfsPath: 'files/ad-generator (10).html' },
+    })
+
+    const repeated = rejectRepeatedPatchSearch({
+      args: {
+        ...args,
+        edit: {
+          strategy: 'search_replace',
+          search: '<div class="drop"> <h4>Brand Logo</h4>',
+        },
+      },
+      failedPatchSearches: failed,
+    })
+    expect(repeated?.result.errorType).toBe('search_repeated')
+
+    const next = rejectRepeatedPatchSearch({
+      args: {
+        ...args,
+        edit: { strategy: 'search_replace', search: 'id="generateBtn"' },
+      },
+      failedPatchSearches: failed,
+    })
+    expect(next).toBeNull()
   })
 })

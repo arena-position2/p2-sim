@@ -610,9 +610,11 @@ export function shouldEnsureWorkflowBuildClosingMessage(options: {
  * Closing copy when the turn still has unresolved mandatory follow-ups.
  */
 export function buildUnresolvedFollowUpClosingMessage(
-  pending: Array<{ hint: string }>
+  pending: Array<{ hint: string; userHint?: string }>
 ): string | null {
   if (pending.length === 0) return null
+  const userHint = pending[0]?.userHint?.trim()
+  if (userHint) return userHint
   const hint = pending[0]?.hint?.trim()
   if (hint) {
     return `I made partial progress but still need to finish: ${hint}`

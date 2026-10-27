@@ -35,7 +35,11 @@ import {
   toServerRegistryToolName,
 } from '@/local-copilot/lib/tools/resolve-tool-name-alias'
 import type { LocalCopilotStructuredContext } from '@/local-copilot/lib/types'
-import { assertWorkspaceFileLookBeforeWrite } from '@/local-copilot/lib/writes/look-before-write'
+import {
+  assertWorkspaceFileLookBeforeWrite,
+  rejectRepeatedPatchSearch,
+  rememberFailedPatchSearch,
+} from '@/local-copilot/lib/writes/look-before-write'
 
 export {
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
@@ -427,6 +431,19 @@ export async function executeMothershipDelegatedTool(
 
   if (toolName === 'workspace_file') {
     enrichWorkspaceFileArgs(enrichedArgs)
+    ctx.failedPatchSearches ??= new Map()
+    const repeated = rejectRepeatedPatchSearch({
+      args: enrichedArgs,
+      failedPatchSearches: ctx.failedPatchSearches,
+    })
+    if (repeated) {
+      return {
+        toolName,
+        success: false,
+        error: repeated.message,
+        result: repeated.result,
+      }
+    }
     const lookBefore = assertWorkspaceFileLookBeforeWrite({
       args: enrichedArgs,
       readVfsPaths: ctx.readVfsPaths,
@@ -468,6 +485,10 @@ export async function executeMothershipDelegatedTool(
     const result = await executeCopilotServerTool(toolName, enrichedArgs, ctx, workflowId)
     if (!result.success) {
       logger.warn('Copilot server tool failed', { toolName, serverToolName, error: result.error })
+    }
+    if (toolName === 'workspace_file' && !result.success) {
+      ctx.failedPatchSearches ??= new Map()
+      rememberFailedPatchSearch(ctx.failedPatchSearches, enrichedArgs, result.result)
     }
     if (toolName === 'list_integration_tools' && result.success) {
       const { adaptListIntegrationToolsForLocal } = await import(

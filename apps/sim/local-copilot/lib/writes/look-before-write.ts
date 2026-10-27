@@ -1,4 +1,5 @@
 import { isPlainTextWorkspaceFileName } from '@/lib/copilot/chat/document-format-guidance'
+import { normalizePatchSearchForRetry } from '@/lib/copilot/tools/server/files/patch-search-replace'
 import { hasToolId } from '@/tools/tool-ids'
 
 const BOOTSTRAP_BLOCK_TYPES = new Set(['start_trigger', 'starter', 'start'])
@@ -170,4 +171,80 @@ export function assertWorkspaceFileLookBeforeWrite(params: {
     ok: false,
     error: `Call read("${canonical}/content") first so the edit starts from the current file. For a small change (title, heading, one string) use operation=patch with search_replace instead of update — update replaces the entire file.`,
   }
+}
+
+const RECORDED_PATCH_MISS_TYPES = new Set([
+  'search_not_found',
+  'search_ambiguous',
+  'search_looks_truncated',
+])
+
+export const PATCH_SEARCH_REPEATED_MESSAGE =
+  'Patch search was already tried on this file and did not match. Call read with offset and limit, or grep, copy a short unique live substring, and patch with a different search. Do not send the previous search again.'
+
+function searchReplacePatchSearch(args: Record<string, unknown>): string | null {
+  const operation = typeof args.operation === 'string' ? args.operation.trim().toLowerCase() : ''
+  if (operation !== 'patch') return null
+  const edit = args.edit
+  if (!edit || typeof edit !== 'object' || Array.isArray(edit)) return null
+  const editRecord = edit as Record<string, unknown>
+  if (editRecord.strategy !== 'search_replace') return null
+  return typeof editRecord.search === 'string' ? editRecord.search : ''
+}
+
+/**
+ * Rejects a patch whose normalized search already missed on this file during the turn.
+ * A different search is still allowed. The file is not opened.
+ */
+export function rejectRepeatedPatchSearch(params: {
+  args: Record<string, unknown>
+  failedPatchSearches?: Map<string, Set<string>>
+}): { message: string; result: Record<string, unknown> } | null {
+  const search = searchReplacePatchSearch(params.args)
+  if (search === null) return null
+  const normalized = normalizePatchSearchForRetry(search)
+  if (!normalized) return null
+  const canonical = normalizeWorkspaceFileReadPath(workspaceFileTargetPath(params.args))
+  if (!canonical || !params.failedPatchSearches?.get(canonical)?.has(normalized)) return null
+  return {
+    message: PATCH_SEARCH_REPEATED_MESSAGE,
+    result: {
+      success: false,
+      errorType: 'search_repeated',
+      recoverable: true,
+      message: PATCH_SEARCH_REPEATED_MESSAGE,
+      data: {
+        vfsPath: canonical,
+        operation: 'patch',
+        suggestedNextTools: ['read', 'grep'],
+      },
+    },
+  }
+}
+
+/**
+ * Records a recoverable patch miss so the next identical search is rejected locally.
+ */
+export function rememberFailedPatchSearch(
+  store: Map<string, Set<string>>,
+  args: Record<string, unknown>,
+  result: unknown
+): void {
+  const record = result && typeof result === 'object' ? (result as Record<string, unknown>) : null
+  const errorType = typeof record?.errorType === 'string' ? record.errorType : ''
+  if (!RECORDED_PATCH_MISS_TYPES.has(errorType)) return
+  const search = searchReplacePatchSearch(args)
+  if (!search) return
+  const normalized = normalizePatchSearchForRetry(search)
+  if (!normalized) return
+  const data =
+    record?.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : null
+  const vfsPath = typeof data?.vfsPath === 'string' ? data.vfsPath : workspaceFileTargetPath(args)
+  const canonical = normalizeWorkspaceFileReadPath(vfsPath)
+  if (!canonical) return
+  const seen = store.get(canonical) ?? new Set<string>()
+  seen.add(normalized)
+  store.set(canonical, seen)
 }

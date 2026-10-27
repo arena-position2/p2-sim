@@ -192,6 +192,8 @@ export function buildWorkflowBuildChatAppendix(
     createdWorkflowThisTurn?: boolean
     successfulPopulateEdits?: number
     unresolvedFollowUpHint?: string | null
+    /** Shown as the full closer. The model hint is not prefixed onto this sentence. */
+    unresolvedFollowUpUserHint?: string | null
   }
 ): string | null {
   const createdWithoutPopulate =
@@ -205,6 +207,9 @@ export function buildWorkflowBuildChatAppendix(
       ? `I created the workflow, but the last edit did not add the blocks. ${detail}`
       : 'I created the workflow, but the edits did not add the requested blocks. Continue so I can apply them.'
   }
+
+  const userHint = options?.unresolvedFollowUpUserHint?.trim() ?? ''
+  if (userHint) return userHint
 
   if (hint) {
     return `I made partial progress but still need to finish: ${hint}`

@@ -45,8 +45,8 @@ import {
   ThinkingLiveStatusAccumulator,
 } from '@/local-copilot/lib/agent/thinking-live-status'
 import {
-  buildStagnationSystemMessage,
   createToolStagnationTracker,
+  resolveStagnationAction,
 } from '@/local-copilot/lib/agent/tool-stagnation'
 import { formatUxPhaseStatus, type LocalUxPhase } from '@/local-copilot/lib/agent/ux-phase'
 import { logCopilotAction } from '@/local-copilot/lib/audit/logger'
@@ -817,6 +817,7 @@ export async function* runLocalCopilotAgent(
     mutationIdempotency: new Map(),
     listedIntegrationToolIds: new Set(),
     readVfsPaths: new Set(),
+    failedPatchSearches: new Map(),
     allowedWorkflowIds: new Set(),
     blocksMetadataByType: new Map(),
     artifactStore: createArtifactStore(),
@@ -1808,19 +1809,16 @@ export async function* runLocalCopilotAgent(
           outcome.output
         )
         if (stagnationHit) {
-          if (pendingFollowUps.length > 0) {
-            deferredSystemMessages.push({
-              role: 'system',
-              content:
-                buildStagnationSystemMessage(stagnationHit) +
-                ' Required follow-up tools are still pending — call them now instead of retrying the stalled tool.',
-            })
-          } else {
+          const action = resolveStagnationAction(
+            stagnationHit,
+            pendingFollowUps.map((item) => item.id)
+          )
+          deferredSystemMessages.push({
+            role: 'system',
+            content: action.systemMessage,
+          })
+          if (action.stop) {
             stagnationStopMessage = stagnationHit.message
-            deferredSystemMessages.push({
-              role: 'system',
-              content: buildStagnationSystemMessage(stagnationHit),
-            })
             logger.warn('Arena Copilot tool stagnation detected', {
               toolName: stagnationHit.toolName,
               count: stagnationHit.count,
@@ -1828,6 +1826,11 @@ export async function* runLocalCopilotAgent(
             })
             break
           }
+          logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
+            toolName: stagnationHit.toolName,
+            count: stagnationHit.count,
+            pendingFollowUpIds: pendingFollowUps.map((item) => item.id),
+          })
         }
         continue
       }
@@ -2063,24 +2066,16 @@ export async function* runLocalCopilotAgent(
               toolResult.result
             )
             if (stagnationHit) {
-              if (pendingFollowUps.length > 0) {
-                deferredSystemMessages.push({
-                  role: 'system',
-                  content:
-                    buildStagnationSystemMessage(stagnationHit) +
-                    ' Required follow-up tools are still pending — call them now instead of retrying the stalled tool.',
-                })
-                logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
-                  toolName: stagnationHit.toolName,
-                  count: stagnationHit.count,
-                  pendingFollowUpIds: pendingFollowUps.map((followUp) => followUp.id),
-                })
-              } else {
+              const action = resolveStagnationAction(
+                stagnationHit,
+                pendingFollowUps.map((followUp) => followUp.id)
+              )
+              deferredSystemMessages.push({
+                role: 'system',
+                content: action.systemMessage,
+              })
+              if (action.stop) {
                 stagnationStopMessage = stagnationHit.message
-                deferredSystemMessages.push({
-                  role: 'system',
-                  content: buildStagnationSystemMessage(stagnationHit),
-                })
                 logger.warn('Arena Copilot tool stagnation detected', {
                   toolName: stagnationHit.toolName,
                   count: stagnationHit.count,
@@ -2089,6 +2084,11 @@ export async function* runLocalCopilotAgent(
                 stopAfterParallel = true
                 break
               }
+              logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
+                toolName: stagnationHit.toolName,
+                count: stagnationHit.count,
+                pendingFollowUpIds: pendingFollowUps.map((followUp) => followUp.id),
+              })
             }
           }
 
@@ -2567,25 +2567,16 @@ export async function* runLocalCopilotAgent(
         toolResult.result
       )
       if (stagnationHit) {
-        // Never abort while mandatory follow-ups (e.g. populate after create) remain.
-        if (pendingFollowUps.length > 0) {
-          deferredSystemMessages.push({
-            role: 'system',
-            content:
-              buildStagnationSystemMessage(stagnationHit) +
-              ' Required follow-up tools are still pending — call them now instead of retrying the stalled tool.',
-          })
-          logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
-            toolName: stagnationHit.toolName,
-            count: stagnationHit.count,
-            pendingFollowUpIds: pendingFollowUps.map((item) => item.id),
-          })
-        } else {
+        const action = resolveStagnationAction(
+          stagnationHit,
+          pendingFollowUps.map((item) => item.id)
+        )
+        deferredSystemMessages.push({
+          role: 'system',
+          content: action.systemMessage,
+        })
+        if (action.stop) {
           stagnationStopMessage = stagnationHit.message
-          deferredSystemMessages.push({
-            role: 'system',
-            content: buildStagnationSystemMessage(stagnationHit),
-          })
           logger.warn('Arena Copilot tool stagnation detected', {
             toolName: stagnationHit.toolName,
             count: stagnationHit.count,
@@ -2593,6 +2584,11 @@ export async function* runLocalCopilotAgent(
           })
           break
         }
+        logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
+          toolName: stagnationHit.toolName,
+          count: stagnationHit.count,
+          pendingFollowUpIds: pendingFollowUps.map((item) => item.id),
+        })
       }
     }
 
@@ -2767,6 +2763,7 @@ export async function* runLocalCopilotAgent(
               createdWorkflowThisTurn,
               successfulPopulateEdits,
               unresolvedFollowUpHint: followUpClosing ? (pendingFollowUps[0]?.hint ?? null) : null,
+              unresolvedFollowUpUserHint: pendingFollowUps[0]?.userHint ?? null,
             })
           : null) ??
         synthesizeAssistantSummaryFromTools(turnToolRecords) ??
@@ -2863,12 +2860,13 @@ export async function* runLocalCopilotAgent(
     const visible = stripIdsFromUserFacingText(
       stripOptionsTagsForDisplay(streamedUserFacingText, false)
     ).trim()
-    const followUpHint = pendingFollowUps[0]?.hint ?? null
+    const followUp = pendingFollowUps[0]
     const guaranteed =
       buildWorkflowBuildChatAppendix(turnToolRecords, {
         createdWorkflowThisTurn,
         successfulPopulateEdits,
-        unresolvedFollowUpHint: followUpHint,
+        unresolvedFollowUpHint: followUp?.hint ?? null,
+        unresolvedFollowUpUserHint: followUp?.userHint ?? null,
       }) ??
       buildUnresolvedFollowUpClosingMessage(pendingFollowUps) ??
       synthesizeAssistantSummaryFromTools(turnToolRecords)

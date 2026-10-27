@@ -756,6 +756,8 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
             )
           ).content
           const existingContent = currentBuffer.toString('utf-8')
+          let searchForIntent =
+            normalized.edit.strategy === 'search_replace' ? normalized.edit.search : ''
 
           if (normalized.edit.strategy === 'search_replace') {
             const validation = validateSearchReplaceForPatch({
@@ -775,10 +777,12 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
                   name: fileRecord.name,
                   vfsPath,
                   operation: 'patch',
-                  suggestedNextTools: ['read', 'grep', 'workspace_file'],
+                  suggestedNextTools: ['read', 'grep'],
+                  ...(validation.excerpt ? { excerpt: validation.excerpt } : {}),
                 },
               }
             }
+            searchForIntent = validation.search
           } else if (normalized.edit.strategy === 'anchored') {
             if (!normalized.edit.mode) {
               return { success: false, message: 'anchored strategy requires mode' }
@@ -804,7 +808,7 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
               strategy: normalized.edit.strategy,
               ...(normalized.edit.strategy === 'search_replace'
                 ? {
-                    search: normalized.edit.search,
+                    search: searchForIntent,
                     replaceAll: normalized.edit.replaceAll,
                   }
                 : {

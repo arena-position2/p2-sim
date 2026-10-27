@@ -18,6 +18,22 @@ export const TOOL_STAGNATION_THRESHOLD = 3
 export const EDIT_CONTENT_FAILURE_STAGNATION_THRESHOLD = 2
 
 /**
+ * Failed `workspace_file` patches share one bucket per path and error type.
+ * Two `search_not_found` misses on the same file stop the turn; a repeated
+ * search is a different error type and does not share that count.
+ */
+export const WORKSPACE_FILE_PATCH_FAILURE_STAGNATION_THRESHOLD = 2
+
+const WORKSPACE_FILE_PATCH_FAILURE_TYPES = new Set([
+  'search_not_found',
+  'search_ambiguous',
+  'search_looks_truncated',
+  'search_repeated',
+])
+
+const PATCH_REPAIR_FOLLOW_UP_ID = 'workspace_file:patch-repair'
+
+/**
  * Discovery tools get a slightly higher bar so a couple of overlapping
  * lookups during a build don't abort the turn, but identical re-fetches still stop.
  */
@@ -45,10 +61,31 @@ export function fingerprintToolCall(
   result: unknown
 ): string {
   const normalizedArgs = normalizeArgsForStagnation(toolName, argsJson, success, result)
+  const patchError = !success ? patchFailureErrorType(toolName, result) : null
   const outcome = success
     ? `ok:${successOutcomeSignature(toolName, result)}`
-    : `err:${outcomeSignature(result)}`
+    : `err:${patchError ?? outcomeSignature(result)}`
   return `${toolName}|${normalizedArgs}|${outcome}`
+}
+
+/**
+ * Hard-stop when nothing is pending, or when the stalled tool is a file patch
+ * whose repair follow-up is still open. Other pending follow-ups stay a nudge.
+ */
+export function resolveStagnationAction(
+  hit: ToolStagnationHit,
+  pendingFollowUpIds: readonly string[]
+): { stop: boolean; systemMessage: string } {
+  const stop =
+    pendingFollowUpIds.length === 0 ||
+    (hit.toolName === 'workspace_file' && pendingFollowUpIds.includes(PATCH_REPAIR_FOLLOW_UP_ID))
+  const base = buildStagnationSystemMessage(hit)
+  return {
+    stop,
+    systemMessage: stop
+      ? base
+      : `${base} Required follow-up tools are still pending — call them now instead of retrying the stalled tool.`,
+  }
 }
 
 /**
@@ -79,7 +116,9 @@ export function createToolStagnationTracker(threshold = TOOL_STAGNATION_THRESHOL
           ? DISCOVERY_STAGNATION_THRESHOLD
           : toolName === 'edit_content' && !success
             ? EDIT_CONTENT_FAILURE_STAGNATION_THRESHOLD
-            : threshold
+            : patchFailureErrorType(toolName, result)
+              ? WORKSPACE_FILE_PATCH_FAILURE_STAGNATION_THRESHOLD
+              : threshold
       if (count < limit) return null
       return {
         toolName,
@@ -142,10 +181,43 @@ function normalizeArgsForStagnation(
         FINGERPRINT_ARGS_MAX
       )
     }
+    if (toolName === 'workspace_file' && !success) {
+      const errorType = patchFailureErrorType(toolName, result)
+      if (errorType) {
+        return JSON.stringify({
+          path: patchFailurePath(parsed, result),
+          errorType,
+        }).slice(0, FINGERPRINT_ARGS_MAX)
+      }
+    }
     return JSON.stringify(sortJson(parsed)).slice(0, FINGERPRINT_ARGS_MAX)
   } catch {
     return trimmed.slice(0, FINGERPRINT_ARGS_MAX)
   }
+}
+
+function patchFailureErrorType(toolName: string, result: unknown): string | null {
+  if (toolName !== 'workspace_file' || !result || typeof result !== 'object') return null
+  const errorType = (result as Record<string, unknown>).errorType
+  if (typeof errorType !== 'string' || !WORKSPACE_FILE_PATCH_FAILURE_TYPES.has(errorType)) {
+    return null
+  }
+  return errorType
+}
+
+function patchFailurePath(args: unknown, result: unknown): string {
+  const resultRecord =
+    result && typeof result === 'object' ? (result as Record<string, unknown>) : null
+  const data =
+    resultRecord?.data && typeof resultRecord.data === 'object'
+      ? (resultRecord.data as Record<string, unknown>)
+      : null
+  if (typeof data?.vfsPath === 'string' && data.vfsPath.trim()) return data.vfsPath.trim()
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return ''
+  const target = (args as Record<string, unknown>).target
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return ''
+  const path = (target as Record<string, unknown>).path
+  return typeof path === 'string' ? path.trim() : ''
 }
 
 function shouldCoarseEditWorkflowArgs(success: boolean, result: unknown): boolean {

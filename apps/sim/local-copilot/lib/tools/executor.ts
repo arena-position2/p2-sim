@@ -134,6 +134,12 @@ export interface ToolExecutionContext {
    * Full-replace HTML/text updates must follow a read of the same file.
    */
   readVfsPaths?: Set<string>
+  /**
+   * Canonical `files/...` path → normalized patch searches that missed this turn.
+   * Shared across `{ ...toolCtx }` copies. A later patch with the same normalized
+   * search is rejected before the file is opened.
+   */
+  failedPatchSearches?: Map<string, Set<string>>
   /** Workflow ids created earlier in this turn (membership bypass until refresh). */
   allowedWorkflowIds?: Set<string>
   /** Active tool_use id for idempotency keying. */
@@ -360,6 +366,7 @@ async function executeLocalCopilotToolInner(
   ctx.mutationIdempotency ??= new Map()
   ctx.listedIntegrationToolIds ??= new Set()
   ctx.readVfsPaths ??= new Set()
+  ctx.failedPatchSearches ??= new Map()
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
 
