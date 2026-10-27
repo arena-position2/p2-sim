@@ -4,6 +4,7 @@ import {
   copilotRuns,
   organization,
   usageLog,
+  user,
   workflow,
   workflowExecutionLogs,
   workspace,
@@ -250,15 +251,18 @@ export async function listExternalApiUsage(params: {
       : undefined
   )
 
+  const workflowLabel = sql<string>`coalesce(nullif(trim(${workflow.name}), ''), ${usageLog.workflowId})`
+  const actorLabel = sql<string>`coalesce(lower(${user.email}), ${usageLog.actorUserId})`
+
   const rows = await dbReplica
     .select({
       organizationId: organization.id,
       organizationName: organization.name,
-      workspaceId: usageLog.workspaceId,
+      workspaceId: sql<string>`min(${usageLog.workspaceId})`,
       workspaceName: workspace.name,
-      workflowId: usageLog.workflowId,
-      workflowName: workflow.name,
-      actorUserId: usageLog.actorUserId,
+      workflowId: sql<string>`min(${usageLog.workflowId})`,
+      workflowName: workflowLabel,
+      actorUserId: sql<string | null>`min(${usageLog.actorUserId})`,
       executionCount: sql<number>`count(distinct ${usageLog.executionId})::int`,
       ...ledgerCostSelect(),
       ...usageMetricsSelect(),
@@ -274,6 +278,7 @@ export async function listExternalApiUsage(params: {
     .innerJoin(workspace, eq(workspace.id, usageLog.workspaceId))
     .innerJoin(organization, eq(organization.id, workspace.organizationId))
     .leftJoin(workflow, eq(workflow.id, usageLog.workflowId))
+    .leftJoin(user, eq(user.id, usageLog.actorUserId))
     .where(
       and(
         payerCondition,
@@ -283,15 +288,7 @@ export async function listExternalApiUsage(params: {
         ...ledgerPeriodBounds(period)
       )
     )
-    .groupBy(
-      organization.id,
-      organization.name,
-      usageLog.workspaceId,
-      workspace.name,
-      usageLog.workflowId,
-      workflow.name,
-      usageLog.actorUserId
-    )
+    .groupBy(organization.id, organization.name, workspace.name, workflowLabel, actorLabel)
 
   return sortByBillableCostDesc(
     rows.flatMap((row) => {
