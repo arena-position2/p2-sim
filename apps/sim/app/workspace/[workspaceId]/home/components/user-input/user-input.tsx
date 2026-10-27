@@ -94,13 +94,13 @@ function LocalCopilotModelPicker({ catalogId, onCatalogIdChange }: LocalCopilotM
           type='button'
           aria-label='Local Copilot model'
           className={cn(
-            'ml-1 inline-flex h-7 items-center gap-0.5 rounded-[10px] bg-[var(--surface-5)] px-2.5',
+            'ml-1 inline-flex h-7 min-w-0 max-w-full items-center gap-0.5 rounded-[10px] bg-[var(--surface-5)] px-2.5',
             'text-[var(--text-primary)] text-sm dark:bg-[var(--surface-4)]',
             'hover-hover:bg-[var(--surface-2)] dark:hover-hover:bg-[var(--surface-6)]'
           )}
         >
-          {selectedLabel}
-          <ChevronDown className='size-[12px] text-[var(--text-muted)]' />
+          <span className='min-w-0 truncate'>{selectedLabel}</span>
+          <ChevronDown className='size-[12px] shrink-0 text-[var(--text-muted)]' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='start' side='top' className='min-w-[14rem]'>
@@ -672,7 +672,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
         }
       }}
       className={cn(
-        'relative z-10 mx-auto w-full max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
+        'relative z-10 mx-auto w-full min-w-0 max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
         inter.className,
         isInitialView && 'shadow-ambient'
       )}

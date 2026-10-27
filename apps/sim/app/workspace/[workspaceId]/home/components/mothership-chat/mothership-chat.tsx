@@ -181,7 +181,7 @@ const LAYOUT_STYLES = {
     attachmentWidth: 'max-w-[85%]',
     userBubble: 'max-w-[85%] overflow-hidden rounded-[16px] bg-[var(--surface-5)] px-3 py-2',
     assistantRow: 'group/msg',
-    footer: 'shrink-0 px-3 pb-3',
+    footer: 'min-w-0 shrink-0 px-3 pb-3',
     footerInner: '',
   },
 } as const

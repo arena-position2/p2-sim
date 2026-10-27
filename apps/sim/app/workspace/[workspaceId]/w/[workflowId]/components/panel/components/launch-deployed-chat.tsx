@@ -40,6 +40,7 @@ export function LaunchDeployedChat({ workflowId, workspaceId }: LaunchDeployedCh
       href={href}
       mobileCompact
       variant='primary'
+      className='min-w-[30px] shrink'
       leftIcon={Zap}
       target={appRedirect ? '_blank' : undefined}
       rel={appRedirect ? 'noopener noreferrer' : undefined}

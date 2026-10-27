@@ -36,15 +36,15 @@ export function InputToolbar({
     <div
       className={
         editor
-          ? '@container/input-toolbar grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-x-3'
-          : '@container/input-toolbar flex flex-wrap items-center justify-between gap-y-1'
+          ? '@container/input-toolbar grid w-full min-w-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-end gap-x-3'
+          : '@container/input-toolbar flex w-full min-w-0 flex-wrap items-center justify-between gap-y-1'
       }
     >
       <div
         ref={leadingRef}
         className={cn(
-          'flex min-h-[30px] shrink-0 items-center @max-[280px]/input-toolbar:gap-0 gap-1',
-          editor && 'col-start-1',
+          'flex min-h-[30px] min-w-0 flex-wrap items-center @max-[280px]/input-toolbar:gap-0 gap-1',
+          editor ? 'col-start-1' : 'flex-1',
           editor && (expanded ? 'row-start-2' : 'row-start-1')
         )}
       >

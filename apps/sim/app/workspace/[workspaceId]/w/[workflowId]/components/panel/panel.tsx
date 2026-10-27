@@ -789,14 +789,14 @@ export const Panel = memo(function Panel() {
         ref={panelRef}
         id='workflow-panel'
         className={cn(
-          'panel-container relative shrink-0 overflow-hidden bg-[var(--bg)] max-md:absolute max-md:inset-0 max-md:z-[var(--z-dropdown)] max-md:w-full! md:max-w-[max(290px,40vw)]',
+          'panel-container relative min-w-0 shrink-0 overflow-hidden bg-[var(--bg)] max-md:absolute max-md:inset-0 max-md:z-[var(--z-dropdown)] max-md:w-full! md:max-w-[min(100%,max(290px,40vw))]',
           (!isMobilePanelOpen || hasCanvasOverlay) && 'max-md:hidden'
         )}
         aria-label='Workflow panel'
       >
         <div
           className={cn(
-            'flex h-full flex-col border-[var(--border)] border-l pt-3.5 max-md:pt-1',
+            'flex h-full min-h-0 w-full min-w-0 flex-col border-[var(--border)] border-l pt-3.5 max-md:pt-1',
             isSearchingEditor && 'max-md:pt-0'
           )}
         >
@@ -821,12 +821,12 @@ export const Panel = memo(function Panel() {
           {/* Header */}
           <div
             className={cn(
-              'flex shrink-0 items-center justify-between px-2',
+              'flex min-w-0 shrink-0 items-center justify-between gap-1.5 px-2',
               isSearchingEditor && 'max-md:hidden'
             )}
           >
             {/* More and Chat */}
-            <div className='flex gap-1.5'>
+            <div className='flex shrink-0 gap-1.5'>
               <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <Button mobileCompact aria-label='Workflow actions' className='size-[30px]'>
@@ -908,7 +908,7 @@ export const Panel = memo(function Panel() {
             </div>
 
             {/* Deploy and Run */}
-            <div className='flex gap-1.5'>
+            <div className='flex min-w-0 items-center gap-1.5'>
               <Deploy
                 activeWorkflowId={activeWorkflowId}
                 userPermissions={userPermissions}
@@ -916,6 +916,7 @@ export const Panel = memo(function Panel() {
               />
               <Chip
                 mobileCompact
+                className='shrink-0'
                 variant={isExecuting ? undefined : 'primary'}
                 active={isExecuting}
                 onClick={isExecuting ? cancelWorkflow : () => runWorkflow()}
@@ -999,15 +1000,15 @@ export const Panel = memo(function Panel() {
           </div>
 
           {/* Tab Content - Keep all tabs mounted but hidden to preserve state */}
-          <div className={cn('flex-1 overflow-hidden pt-3', isSearchingEditor && 'max-md:pt-0')}>
+          <div className={cn('min-w-0 flex-1 overflow-hidden pt-3', isSearchingEditor && 'max-md:pt-0')}>
             {isCopilotTabAvailable && (
               <div
                 className={
                   _hasHydrated && activeTab === 'copilot'
-                    ? 'flex h-full flex-col'
+                    ? 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden'
                     : _hasHydrated
                       ? 'hidden'
-                      : 'flex h-full flex-col'
+                      : 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden'
                 }
                 data-tab-content='copilot'
               >
