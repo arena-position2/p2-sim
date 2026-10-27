@@ -2,12 +2,23 @@ import { dbReplica } from '@sim/db'
 import {
   copilotChats,
   copilotRuns,
+  organization,
   usageLog,
   workflow,
   workflowExecutionLogs,
   workspace,
 } from '@sim/db/schema'
-import { and, eq, inArray, isNotNull, or, type SQL, type SQLWrapper, sql } from 'drizzle-orm'
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  notInArray,
+  or,
+  type SQL,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm'
 import {
   type UsageChargeTypeValue,
   type UsageLogSourceValue,
@@ -199,6 +210,110 @@ export function ledgerCostSelect() {
     rawCost: sql<string>`coalesce(sum(coalesce(${usageLog.rawCost}, ${usageLog.cost})::numeric), 0)`,
     count: sql<number>`count(*)::int`,
   }
+}
+
+export interface ExternalApiUsageRow {
+  organizationId: string
+  organizationName: string
+  workspaceId: string
+  workspaceName: string
+  workflowId: string
+  workflowName: string | null
+  actorUserId: string | null
+  executionCount: number
+  billableCost: number
+  rawCost: number
+  count: number
+  usage: UsageMetrics
+}
+
+/**
+ * API runs billed to an organization other than the one that owns the workflow.
+ *
+ * `payerCondition` selects which billed rows the viewer may see. The workflow's
+ * organization must differ from the billed organization, so the owning
+ * organization keeps those runs in its normal workflow rollup. `homeOrganizationIds`
+ * additionally drops workflows from organizations the viewer belongs to.
+ */
+export async function listExternalApiUsage(params: {
+  payerCondition: SQL
+  homeOrganizationIds: string[]
+  period: ResolvedPeriod
+}): Promise<ExternalApiUsageRow[]> {
+  const { payerCondition, homeOrganizationIds, period } = params
+  const otherOrganization = and(
+    isNotNull(workspace.organizationId),
+    eq(usageLog.billingEntityType, 'organization'),
+    sql`${workspace.organizationId} <> ${usageLog.billingEntityId}`,
+    homeOrganizationIds.length > 0
+      ? notInArray(workspace.organizationId, homeOrganizationIds)
+      : undefined
+  )
+
+  const rows = await dbReplica
+    .select({
+      organizationId: organization.id,
+      organizationName: organization.name,
+      workspaceId: usageLog.workspaceId,
+      workspaceName: workspace.name,
+      workflowId: usageLog.workflowId,
+      workflowName: workflow.name,
+      actorUserId: usageLog.actorUserId,
+      executionCount: sql<number>`count(distinct ${usageLog.executionId})::int`,
+      ...ledgerCostSelect(),
+      ...usageMetricsSelect(),
+    })
+    .from(usageLog)
+    .innerJoin(
+      workflowExecutionLogs,
+      and(
+        eq(workflowExecutionLogs.executionId, usageLog.executionId),
+        eq(workflowExecutionLogs.trigger, 'api')
+      )
+    )
+    .innerJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .innerJoin(organization, eq(organization.id, workspace.organizationId))
+    .leftJoin(workflow, eq(workflow.id, usageLog.workflowId))
+    .where(
+      and(
+        payerCondition,
+        otherOrganization,
+        eq(usageLog.billable, true),
+        isNotNull(usageLog.workflowId),
+        ...ledgerPeriodBounds(period)
+      )
+    )
+    .groupBy(
+      organization.id,
+      organization.name,
+      usageLog.workspaceId,
+      workspace.name,
+      usageLog.workflowId,
+      workflow.name,
+      usageLog.actorUserId
+    )
+
+  return sortByBillableCostDesc(
+    rows.flatMap((row) => {
+      if (!row.organizationId || !row.workspaceId || !row.workflowId) return []
+      return [
+        {
+          organizationId: row.organizationId,
+          organizationName: row.organizationName ?? row.organizationId,
+          workspaceId: row.workspaceId,
+          workspaceName: row.workspaceName ?? row.workspaceId,
+          workflowId: row.workflowId,
+          workflowName: row.workflowName,
+          actorUserId: row.actorUserId,
+          executionCount: parseIntMetric(row.executionCount),
+          billableCost: parseDecimal(row.billableCost),
+          rawCost: parseDecimal(row.rawCost),
+          count: parseIntMetric(row.count),
+          usage: mapUsageMetrics(row),
+        },
+      ]
+    })
+  )
 }
 
 /**

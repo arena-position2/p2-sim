@@ -90,16 +90,27 @@ const X_RUN_ID_DESCRIPTION =
 const X_SIM_VIA_DESCRIPTION =
   'Comma-separated workflow identifiers naming the workflow-to-workflow call chain that led to this request. Each hop appends its own workflow id, and Sim sets it automatically; supply it yourself only when relaying an existing chain. A chain at the maximum depth is rejected with `409` and `error.details.code: "CALL_CHAIN_DEPTH_EXCEEDED"`.'
 
+export const V2_WORKFLOW_BILLING_EMAIL_HEADER = 'X-Sim-Email'
+
+const X_SIM_EMAIL_DESCRIPTION =
+  'Required. Email address of the Sim user whose organization (or personal plan, when they belong to no organization) is billed for this run instead of the workspace that owns the workflow. The user is also recorded as the run actor. A missing or malformed header is rejected with `400`; an email that matches no Sim user is rejected with `400` and `error.details.code: "BILLING_EMAIL_NOT_FOUND"`.'
+
 export const v2ExecuteWorkflowHeadersSchema = z
   .object({
     'x-run-id': v2WorkflowRunIdSchema.optional().describe(X_RUN_ID_DESCRIPTION),
     'x-sim-via': z.string().optional().describe(X_SIM_VIA_DESCRIPTION),
+    'x-sim-email': z
+      .string({ error: missingFieldError('X-Sim-Email header is required') })
+      .trim()
+      .email('X-Sim-Email must be a valid email address')
+      .max(320, 'X-Sim-Email is too long')
+      .describe(X_SIM_EMAIL_DESCRIPTION),
   })
   .meta({
     id: 'ExecuteWorkflowHeaders',
     title: 'Execute workflow headers',
     description:
-      'Optional one-shot run-identifier claim and workflow call-chain marker for a workflow execution.',
+      'Required billing-payer email plus optional one-shot run-identifier claim and workflow call-chain marker for a workflow execution.',
   })
 export type V2ExecuteWorkflowHeaders = z.input<typeof v2ExecuteWorkflowHeadersSchema>
 

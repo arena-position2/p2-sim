@@ -40,6 +40,7 @@ import {
   ledgerCostSelect,
   ledgerOccurredAt,
   ledgerPeriodBounds,
+  listExternalApiUsage,
   mapBySourceBucketRow,
   mapExpensiveCopilotChatRows,
   mapExpensiveWorkflowRows,
@@ -180,6 +181,7 @@ function emptyOrganizationAnalytics(
       count: 0,
       usage: { ...EMPTY_USAGE_METRICS },
     })),
+    byApi: [],
     byChargeType: [],
     attribution: {
       missingChatId: { billableCost: 0, rawCost: 0, count: 0 },
@@ -689,6 +691,18 @@ export async function getOrganizationUsageAnalytics(
         and(...ledgerConditions, eq(usageLog.category, 'model'), isNotNull(usageLog.executionId))
       )
 
+    const externalApiPayer = and(
+      eq(usageLog.billingEntityType, 'organization'),
+      eq(usageLog.billingEntityId, organizationId)
+    )
+    const byApi = externalApiPayer
+      ? await listExternalApiUsage({
+          payerCondition: externalApiPayer,
+          homeOrganizationIds: [organizationId],
+          period,
+        })
+      : []
+
     const embeddedToolSplit = computeEmbeddedToolVirtualSplit(modelMetadataRows)
 
     const bySource = sortByBillableCostDesc(
@@ -904,6 +918,7 @@ export async function getOrganizationUsageAnalytics(
         usage: summaryUsage,
       },
       byWorkspace,
+      byApi,
       byChargeType,
       attribution: {
         missingChatId: {
