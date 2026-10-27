@@ -623,6 +623,34 @@ export function stripLeakedToolMarkers(text: string, options?: { trim?: boolean 
 /**
  * Builds a concise assistant reply when the model finishes tool use without prose.
  */
+function generatedImagePaths(result: unknown): string[] {
+  const payload = asRecord(result)
+  const files = Array.isArray(payload.files) ? payload.files : []
+  const fromFiles = files.flatMap((file) => {
+    const path = asRecord(file).vfsPath
+    return typeof path === 'string' && path.trim() ? [path.trim()] : []
+  })
+  if (fromFiles.length > 0) return fromFiles
+  const vfsPath = payload.vfsPath
+  return typeof vfsPath === 'string' && vfsPath.trim() ? [vfsPath.trim()] : []
+}
+
+/** Markdown images the chat renderer can snapshot. Plain "saved to" text does not render. */
+export function generatedImageChatMarkdown(records: ToolTurnRecord[]): string | null {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  for (const record of records) {
+    if (record.name !== 'generate_image' || !record.success) continue
+    for (const path of generatedImagePaths(record.result)) {
+      if (seen.has(path)) continue
+      seen.add(path)
+      const alt = path.split('/').pop() || 'Image'
+      lines.push(`![${alt}](${path})`)
+    }
+  }
+  return lines.length > 0 ? lines.join('\n\n') : null
+}
+
 export function synthesizeAssistantSummaryFromTools(records: ToolTurnRecord[]): string | null {
   const parts: string[] = []
 
@@ -694,33 +722,14 @@ export function synthesizeAssistantSummaryFromTools(records: ToolTurnRecord[]): 
     }
 
     if (record.name === 'generate_image') {
+      const markdown = generatedImageChatMarkdown([record])
+      if (markdown) {
+        parts.push(markdown)
+        continue
+      }
       const payload = asRecord(record.result)
       const message = typeof payload.message === 'string' ? payload.message.trim() : ''
-      if (message) {
-        parts.push(message)
-        continue
-      }
-
-      const files = Array.isArray(payload.files) ? payload.files : []
-      if (files.length > 1) {
-        const paths = files
-          .map((file) => asRecord(file).vfsPath ?? asRecord(file).fileName)
-          .filter((path): path is string => typeof path === 'string' && path.length > 0)
-        parts.push(
-          paths.length
-            ? `Generated ${files.length} images: ${paths.map((path) => `"${path}"`).join(', ')}.`
-            : `Generated ${files.length} image variations.`
-        )
-        continue
-      }
-
-      const vfsPath =
-        (typeof payload.vfsPath === 'string' && payload.vfsPath) ||
-        (typeof payload.fileName === 'string' && payload.fileName) ||
-        null
-      if (vfsPath) {
-        parts.push(`Image saved to "${vfsPath}".`)
-      }
+      if (message) parts.push(message)
       continue
     }
 

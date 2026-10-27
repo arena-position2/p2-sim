@@ -173,6 +173,7 @@ import {
   buildToolFailureEvidenceLines,
   buildWorkflowBuildChatAppendix,
   buildWorkflowRunChatAppendix,
+  generatedImageChatMarkdown,
   isWorkflowRunToolName,
   shouldAppendWorkflowRunChatResult,
   stripLeakedToolMarkers,
@@ -2900,6 +2901,20 @@ export async function* runLocalCopilotAgent(
         streamedUserFacingText += chunk
         yield { type: 'text_delta', content: chunk }
       }
+    }
+  }
+
+  const imageMarkdown = generatedImageChatMarkdown(turnToolRecords)
+  if (imageMarkdown) {
+    const missing = imageMarkdown
+      .split('\n\n')
+      .filter((line) => line.length > 0 && !streamedUserFacingText.includes(line))
+    if (missing.length > 0) {
+      const body = missing.join('\n\n')
+      const chunk = streamedUserFacingText.trim() ? `\n\n${body}` : body
+      assistantText += chunk
+      streamedUserFacingText += chunk
+      yield { type: 'text_delta', content: chunk }
     }
   }
 

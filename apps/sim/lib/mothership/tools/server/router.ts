@@ -11,6 +11,7 @@ import {
 } from '@/lib/mothership/generated/tool-catalog-v1'
 import { withFileTabFlag } from '@/lib/mothership/resources/file-tabs'
 import { copilotToolCanWrite } from '@/lib/mothership/tools/permissions'
+import { arenaServerToolRegistry } from '@/lib/mothership/tools/server/arena-registry'
 import {
   assertServerToolNotAborted,
   type BaseServerTool,
@@ -88,7 +89,7 @@ const baseServerToolRegistry: Record<string, BaseServerTool> = {
 }
 
 function getServerToolRegistry(): Record<string, BaseServerTool> {
-  return baseServerToolRegistry
+  return { ...baseServerToolRegistry, ...arenaServerToolRegistry }
 }
 
 export function getRegisteredServerToolNames(): string[] {

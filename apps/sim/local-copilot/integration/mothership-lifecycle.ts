@@ -18,6 +18,7 @@ import {
   type FilePreviewAdapterState,
   processFilePreviewStreamEvent,
 } from '@/lib/mothership/request/go/file-preview-adapter'
+import { prepareStreamImages } from '@/lib/mothership/request/go/inline-images'
 import {
   handleSubagentRouting,
   sseHandlers,
@@ -157,6 +158,7 @@ function withStrippedFileToolArgs(event: StreamEvent): StreamEvent {
 interface LocalFilePreviewRuntime {
   adapterState: FilePreviewAdapterState
   createFileSessions: Set<string>
+  attemptedInlineImages: Set<string>
 }
 
 async function dispatchStreamEvent(
@@ -192,6 +194,13 @@ async function dispatchStreamEvent(
   })
 
   const clientEvent = withStrippedFileToolArgs(event)
+  await prepareStreamImages(
+    clientEvent,
+    context,
+    execContext,
+    filePreview.attemptedInlineImages,
+    execContext.abortSignal
+  )
   await options.onEvent?.(clientEvent)
 
   if (isSubagentSpanStreamEvent(clientEvent)) {
@@ -593,6 +602,7 @@ export async function runLocalCopilotMothershipLifecycle(
   const filePreview: LocalFilePreviewRuntime = {
     adapterState: createFilePreviewAdapterState(),
     createFileSessions: new Set<string>(),
+    attemptedInlineImages: new Set<string>(),
   }
 
   if (!message) {
