@@ -4,12 +4,28 @@
  */
 
 import {
+  MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION,
+  MAX_FILE_EXPLORE_WITHOUT_MUTATION,
+} from '@/local-copilot/lib/agent/limits'
+import {
   editWorkflowNeedsFollowUp,
   isOAuthOnlyEditResult,
 } from '@/local-copilot/lib/tools/format-tool-result'
 
 /** Identical fingerprints at or above this count trigger stagnation. */
 export const TOOL_STAGNATION_THRESHOLD = 3
+
+const FILE_EXPLORE_INSPECTION_TOOLS = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
+
+const FILE_EXPLORE_MUTATION_TOOLS = new Set([
+  'create_file',
+  'create_file_folder',
+  'workspace_file',
+  'edit_content',
+  'delete_file',
+  'rename_file',
+  'move_file',
+])
 
 /**
  * Failed office `edit_content` rewrites get a lower bar — syntax retries with
@@ -131,6 +147,158 @@ export function createToolStagnationTracker(threshold = TOOL_STAGNATION_THRESHOL
       counts.clear()
     },
   }
+}
+
+export interface FileExploreStopHit {
+  toolName: string
+  pathKey: string
+  count: number
+  totalInspections: number
+  reason: 'path' | 'total'
+  message: string
+}
+
+/**
+ * Caps endless read/grep/artifact paging on a file when the turn never mutates it.
+ * Offset/limit differences do not reset the path bucket.
+ */
+export function createFileExploreTracker(
+  pathThreshold = MAX_FILE_EXPLORE_WITHOUT_MUTATION,
+  totalThreshold = MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION
+): {
+  record: (toolName: string, argsJson: string, success: boolean) => FileExploreStopHit | null
+  reset: () => void
+} {
+  const countsByPath = new Map<string, number>()
+  let totalInspections = 0
+
+  return {
+    record(toolName, argsJson, success) {
+      if (FILE_EXPLORE_MUTATION_TOOLS.has(toolName) && success) {
+        countsByPath.clear()
+        totalInspections = 0
+        return null
+      }
+      if (!success || !FILE_EXPLORE_INSPECTION_TOOLS.has(toolName)) {
+        return null
+      }
+
+      const pathKey = extractFileExplorePathKey(toolName, argsJson)
+      const pathCount = (countsByPath.get(pathKey) ?? 0) + 1
+      countsByPath.set(pathKey, pathCount)
+      totalInspections += 1
+
+      if (pathCount >= pathThreshold) {
+        return {
+          toolName,
+          pathKey,
+          count: pathCount,
+          totalInspections,
+          reason: 'path',
+          message: buildFileExploreStopMessage({ pathKey, count: pathCount, reason: 'path' }),
+        }
+      }
+      if (totalInspections >= totalThreshold) {
+        return {
+          toolName,
+          pathKey,
+          count: pathCount,
+          totalInspections,
+          reason: 'total',
+          message: buildFileExploreStopMessage({
+            pathKey,
+            count: totalInspections,
+            reason: 'total',
+          }),
+        }
+      }
+      return null
+    },
+    reset() {
+      countsByPath.clear()
+      totalInspections = 0
+    },
+  }
+}
+
+/**
+ * User-facing closer when file explore hard-stops without a write.
+ */
+export function buildFileExploreStopMessage(options: {
+  pathKey: string
+  count: number
+  reason: 'path' | 'total'
+}): string {
+  if (options.reason === 'total') {
+    return (
+      `I inspected the file ${options.count} times but did not finish applying the fix. ` +
+      'The file was left unchanged — tell me what to change, or confirm a different approach.'
+    )
+  }
+  const label =
+    options.pathKey.startsWith('artifact:') || options.pathKey.startsWith('__')
+      ? 'the file'
+      : options.pathKey
+  return (
+    `I kept reading ${label} (${options.count} looks) without applying an edit. ` +
+    'The file was left unchanged — tell me what to change, or confirm a different approach.'
+  )
+}
+
+/**
+ * System nudge so the model does not resume paging after an explore hard-stop.
+ */
+export function buildFileExploreSystemMessage(hit: FileExploreStopHit): string {
+  return (
+    `[System] File-explore hard-stop: ${hit.reason === 'path' ? hit.count : hit.totalInspections} ` +
+    `inspection tool(s) without a successful file write` +
+    (hit.reason === 'path' ? ` on ${hit.pathKey}` : '') +
+    '. Do not call read, grep, glob, or load_copilot_artifact again this turn. ' +
+    'Stop tool use and briefly tell the user the file was left unchanged.'
+  )
+}
+
+/**
+ * Groups content reads with their leaf path so offset/limit paging shares one bucket.
+ */
+export function extractFileExplorePathKey(toolName: string, argsJson: string): string {
+  try {
+    const parsed = JSON.parse(argsJson.trim() || '{}') as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return `__${toolName}__`
+    }
+    const record = parsed as Record<string, unknown>
+    if (toolName === 'load_copilot_artifact') {
+      const artifactId =
+        (typeof record.artifactId === 'string' && record.artifactId.trim()) ||
+        (typeof record.id === 'string' && record.id.trim()) ||
+        ''
+      return artifactId ? `artifact:${artifactId}` : '__load_copilot_artifact__'
+    }
+    const rawPath =
+      (typeof record.path === 'string' && record.path.trim()) ||
+      (typeof record.filePath === 'string' && record.filePath.trim()) ||
+      (typeof record.target === 'string' && record.target.trim()) ||
+      ''
+    if (!rawPath) return `__${toolName}__`
+    return normalizeFileExplorePath(rawPath)
+  } catch {
+    return `__${toolName}__`
+  }
+}
+
+function normalizeFileExplorePath(path: string): string {
+  let normalized = path.trim()
+  try {
+    normalized = decodeURIComponent(normalized)
+  } catch {
+    // Keep the raw path when it is not URI-encoded.
+  }
+  normalized = normalized.replace(/\\/g, '/')
+  if (normalized.endsWith('/content')) {
+    normalized = normalized.slice(0, -'/content'.length)
+  }
+  return normalized.replace(/\/+$/, '') || normalized
 }
 
 /**

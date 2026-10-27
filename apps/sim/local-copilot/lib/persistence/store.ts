@@ -8,11 +8,22 @@ import {
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
-import { desc, eq, max } from 'drizzle-orm'
+import { and, desc, eq, max } from 'drizzle-orm'
 import { LOCAL_COPILOT_MAX_HISTORY_MESSAGES } from '@/local-copilot/lib/context/context-budget'
 import type { LocalCopilotMessageContent, WorkflowPatch } from '@/local-copilot/lib/types'
 
 const logger = createLogger('LocalCopilotPersistence')
+
+/**
+ * Stable title key that links a mothership Chat id to a local audit conversation
+ * without a schema `chat_id` column. Chat history still lives in `copilot_messages`.
+ */
+export const MOTHERSHIP_CHAT_CONVERSATION_TITLE_PREFIX = 'mothership-chat:' as const
+
+/** Builds the lookup title for {@link ensureConversationForChat}. */
+export function mothershipChatConversationTitle(chatId: string): string {
+  return `${MOTHERSHIP_CHAT_CONVERSATION_TITLE_PREFIX}${chatId.trim()}`
+}
 
 export async function createConversation(params: {
   userId: string
@@ -33,6 +44,60 @@ export async function createConversation(params: {
     provider: params.provider,
   })
   return id
+}
+
+/**
+ * Ensures a `local_copilot_conversations` row for a mothership Chat so audit
+ * (and optional tool-call) rows can set `conversation_id`. Does not append
+ * chat messages — those stay on `copilot_messages`.
+ */
+export async function ensureConversationForChat(params: {
+  userId: string
+  workspaceId: string
+  chatId: string
+  workflowId?: string
+  model: string
+  provider: string
+}): Promise<string> {
+  const chatId = params.chatId.trim()
+  if (!chatId) {
+    throw new Error('ensureConversationForChat requires a non-empty chatId')
+  }
+
+  const title = mothershipChatConversationTitle(chatId)
+  const [existing] = await db
+    .select({ id: localCopilotConversations.id })
+    .from(localCopilotConversations)
+    .where(
+      and(
+        eq(localCopilotConversations.userId, params.userId),
+        eq(localCopilotConversations.workspaceId, params.workspaceId),
+        eq(localCopilotConversations.title, title)
+      )
+    )
+    .limit(1)
+
+  if (existing) {
+    await db
+      .update(localCopilotConversations)
+      .set({
+        updatedAt: new Date(),
+        model: params.model,
+        provider: params.provider,
+        ...(params.workflowId ? { workflowId: params.workflowId } : {}),
+      })
+      .where(eq(localCopilotConversations.id, existing.id))
+    return existing.id
+  }
+
+  return createConversation({
+    userId: params.userId,
+    workspaceId: params.workspaceId,
+    workflowId: params.workflowId,
+    title,
+    model: params.model,
+    provider: params.provider,
+  })
 }
 
 export async function getConversation(conversationId: string, userId: string) {

@@ -3,7 +3,13 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION,
+  MAX_FILE_EXPLORE_WITHOUT_MUTATION,
+} from '@/local-copilot/lib/agent/limits'
+import {
+  createFileExploreTracker,
   createToolStagnationTracker,
+  extractFileExplorePathKey,
   fingerprintToolCall,
   resolveStagnationAction,
 } from '@/local-copilot/lib/agent/tool-stagnation'
@@ -67,5 +73,92 @@ describe('workspace_file patch stagnation', () => {
     const action = resolveStagnationAction(hit!, ['create_workflow:populate'])
     expect(action.stop).toBe(false)
     expect(action.systemMessage).toMatch(/still pending/i)
+  })
+})
+
+describe('file explore hard-stop', () => {
+  const contentPath = 'files/Arena%20Agent%20Stack/ad-generator%20(13).html/content'
+
+  it('groups URI-encoded content paths with their leaf file', () => {
+    expect(
+      extractFileExplorePathKey('read', JSON.stringify({ path: contentPath, offset: 0 }))
+    ).toBe('files/Arena Agent Stack/ad-generator (13).html')
+    expect(
+      extractFileExplorePathKey(
+        'read',
+        JSON.stringify({
+          path: 'files/Arena Agent Stack/ad-generator (13).html/content',
+          offset: 200,
+        })
+      )
+    ).toBe('files/Arena Agent Stack/ad-generator (13).html')
+  })
+
+  it('hard-stops after enough reads of the same path with different offsets', () => {
+    const tracker = createFileExploreTracker()
+    let hit = null
+    for (let i = 0; i < MAX_FILE_EXPLORE_WITHOUT_MUTATION - 1; i += 1) {
+      hit = tracker.record(
+        'read',
+        JSON.stringify({ path: contentPath, offset: i * 100, limit: 120 }),
+        true
+      )
+      expect(hit).toBeNull()
+    }
+    hit = tracker.record(
+      'read',
+      JSON.stringify({ path: contentPath, offset: 900, limit: 120 }),
+      true
+    )
+    expect(hit?.reason).toBe('path')
+    expect(hit?.count).toBe(MAX_FILE_EXPLORE_WITHOUT_MUTATION)
+    expect(hit?.message).toMatch(/left unchanged/i)
+  })
+
+  it('resets the path bucket after a successful file mutation', () => {
+    const tracker = createFileExploreTracker()
+    for (let i = 0; i < MAX_FILE_EXPLORE_WITHOUT_MUTATION - 1; i += 1) {
+      expect(
+        tracker.record('read', JSON.stringify({ path: contentPath, offset: i }), true)
+      ).toBeNull()
+    }
+    expect(
+      tracker.record(
+        'workspace_file',
+        JSON.stringify({ operation: 'patch', target: { path: contentPath } }),
+        true
+      )
+    ).toBeNull()
+    expect(
+      tracker.record('read', JSON.stringify({ path: contentPath, offset: 0 }), true)
+    ).toBeNull()
+  })
+
+  it('hard-stops on turn-total inspections across mixed tools', () => {
+    const tracker = createFileExploreTracker()
+    let hit = null
+    for (let i = 0; i < MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION - 1; i += 1) {
+      const toolName = i % 2 === 0 ? 'read' : 'load_copilot_artifact'
+      const args =
+        toolName === 'read'
+          ? JSON.stringify({ path: `files/other-${i}.html/content`, offset: 0 })
+          : JSON.stringify({ artifactId: `art-${i}` })
+      hit = tracker.record(toolName, args, true)
+      expect(hit).toBeNull()
+    }
+    hit = tracker.record(
+      'grep',
+      JSON.stringify({ path: 'files/final.html/content', pattern: 'x' }),
+      true
+    )
+    expect(hit?.reason).toBe('total')
+    expect(hit?.totalInspections).toBe(MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION)
+  })
+
+  it('ignores failed inspections', () => {
+    const tracker = createFileExploreTracker(2, 100)
+    expect(tracker.record('read', JSON.stringify({ path: contentPath }), false)).toBeNull()
+    expect(tracker.record('read', JSON.stringify({ path: contentPath }), false)).toBeNull()
+    expect(tracker.record('read', JSON.stringify({ path: contentPath }), true)).toBeNull()
   })
 })
