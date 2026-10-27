@@ -35,9 +35,10 @@ import type { WorkflowState } from '@/stores/workflows/workflow/types'
 
 const logger = createLogger('DefaultUserWorkflowsService')
 
-const DEFAULT_WORKFLOW_COLOR = '#3972F6'
-
 const SYSTEM_DEFAULT_WORKFLOWS_FOLDER_NAME = 'System Workflows'
+
+/** Admin provisioned templates are platform writes — no permission-group subject. */
+const UNGOVERNED_PERSIST = { workspaceId: null, subjectUserId: null } as const
 
 /**
  * Returns the workspace folder used for admin-provisioned default workflows.
@@ -322,7 +323,6 @@ async function buildWorkflowDataFromSource(input: DefaultWorkflowSourceInput) {
       metadata: {
         name: input.nameOverride || sourceWorkflow.name,
         description: sourceWorkflow.description ?? undefined,
-        color: sourceWorkflow.color,
       },
       variables:
         sourceWorkflow.variables && isRecord(sourceWorkflow.variables)
@@ -384,7 +384,11 @@ async function applyWorkflowStateToTarget(params: {
   })
   const now = new Date()
 
-  const saveResult = await saveWorkflowToNormalizedTables(params.targetWorkflowId, workflowData)
+  const saveResult = await saveWorkflowToNormalizedTables(
+    params.targetWorkflowId,
+    workflowData,
+    UNGOVERNED_PERSIST
+  )
   if (!saveResult.success) {
     throw new Error(`Failed to save workflow state: ${saveResult.error}`)
   }
@@ -393,7 +397,6 @@ async function applyWorkflowStateToTarget(params: {
     .update(workflow)
     .set({
       description: sourceWorkflow.description || 'Imported via Admin API',
-      color: sourceWorkflow.color || DEFAULT_WORKFLOW_COLOR,
       variables: sourceWorkflow.variables ?? {},
       defaultAgent: true,
       lastSynced: now,
@@ -505,7 +508,6 @@ async function createDefaultUserWorkflow(params: {
     folderId: params.systemFolderId,
     name: dedupedName,
     description: sourceWorkflow.description || 'Imported via Admin API',
-    color: sourceWorkflow.color || DEFAULT_WORKFLOW_COLOR,
     lastSynced: now,
     createdAt: now,
     updatedAt: now,
@@ -515,7 +517,11 @@ async function createDefaultUserWorkflow(params: {
     defaultAgent: true,
   })
 
-  const saveResult = await saveWorkflowToNormalizedTables(workflowId, workflowData)
+  const saveResult = await saveWorkflowToNormalizedTables(
+    workflowId,
+    workflowData,
+    UNGOVERNED_PERSIST
+  )
   if (!saveResult.success) {
     await db.delete(workflow).where(eq(workflow.id, workflowId))
     throw new Error(`Failed to save workflow state: ${saveResult.error}`)
@@ -695,9 +701,7 @@ export async function syncDefaultWorkflowsForSource(
 
       if (params.deploy !== false) {
         const deployOptions = {
-          workflowName: refreshed.name,
           requestId: params.requestId,
-          request: params.request,
           actorId: 'admin-api' as const,
         }
 
@@ -802,7 +806,8 @@ export async function syncDefaultWorkflowsForSource(
           allowedEmails: [targetUser.email],
           outputConfigs,
           workspaceId: targetWorkflow.workspaceId,
-          deployOptions,
+          requestId: deployOptions.requestId,
+          actorId: deployOptions.actorId,
         })
 
         if (!chatDeployResult.success) {

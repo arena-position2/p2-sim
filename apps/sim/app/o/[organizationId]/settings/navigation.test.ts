@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import { describe, expect, it } from 'vitest'
 import {
   ORGANIZATION_SETTINGS_GROUPS,
@@ -29,7 +26,7 @@ describe('organization settings navigation', () => {
   it('exposes MCP setup to an ordinary organization member and keeps the roster for admins', () => {
     expect(
       organizationSettingsNavigation(false, enterprise, available).map(({ id }) => id)
-    ).toEqual(['recently-deleted', 'search-mcp'])
+    ).toEqual(['members', 'recently-deleted', 'requests', 'search-mcp'])
   })
 
   it('uses Sources for administration when Search is available', () => {
@@ -50,7 +47,7 @@ describe('organization settings navigation', () => {
         { ...enterprise, hasEnterprisePlan: false, governanceActive: false },
         available
       ).map(({ id }) => id)
-    ).toEqual(['billing', 'members', 'recently-deleted', 'search-mcp'])
+    ).toEqual(['billing', 'members', 'recently-deleted', 'requests', 'search-mcp'])
   })
 
   /**
@@ -65,7 +62,14 @@ describe('organization settings navigation', () => {
         { ...enterprise, hasEnterprisePlan: false, governanceActive: true },
         available
       ).map(({ id }) => id)
-    ).toEqual(['billing', 'members', 'recently-deleted', 'access-control', 'search-mcp'])
+    ).toEqual([
+      'billing',
+      'members',
+      'recently-deleted',
+      'requests',
+      'access-control',
+      'search-mcp',
+    ])
   })
 
   it('honors individual self-hosted feature flags and hides billing when disabled', () => {
@@ -80,7 +84,15 @@ describe('organization settings navigation', () => {
         },
         available
       ).map(({ id }) => id)
-    ).toEqual(['members', 'recently-deleted', 'sso', 'integrations', 'search-mcp', 'search-slack'])
+    ).toEqual([
+      'members',
+      'recently-deleted',
+      'requests',
+      'sso',
+      'integrations',
+      'search-mcp',
+      'search-slack',
+    ])
   })
 
   it('normalizes old section names and does not expose unsupported routes', () => {
@@ -93,7 +105,7 @@ describe('organization settings navigation', () => {
     expect(resolveOrganizationSettingsSection('credential-groups')).toBe('connected-accounts')
     expect(resolveOrganizationSettingsSection('/o/one/settings/network')).toBeNull()
     expect(resolveOrganizationSettingsSection('skills')).toBeNull()
-    expect(buildOrganizationNavItems('org', true).map(({ id }) => id)).toEqual([
+    expect(buildOrganizationNavItems('org', true, true).map(({ id }) => id)).toEqual([
       'home',
       'search',
       'integrations',
@@ -108,6 +120,7 @@ describe('organization settings navigation', () => {
       'organization:usage',
       'organization:whitelabeling',
       'organization:recently-deleted',
+      'organization:requests',
       'governance:audit-logs',
       'governance:access-control',
       'governance:sso',
@@ -123,7 +136,7 @@ describe('organization settings navigation', () => {
   it('hosts the account General section ahead of the organization sections', () => {
     expect(
       organizationSurfaceSettingsNavigation(false, enterprise, available).map(({ id }) => id)
-    ).toEqual(['general', 'recently-deleted', 'search-mcp'])
+    ).toEqual(['general', 'members', 'recently-deleted', 'requests', 'search-mcp'])
     expect(ORGANIZATION_SETTINGS_GROUPS.map(({ key }) => key)).toEqual([
       'account',
       'organization',
@@ -148,6 +161,7 @@ describe('organization settings navigation', () => {
       section: 'recently-deleted',
     })
   })
+
   it('hides gated sections while preserving ordinary organization navigation', () => {
     const sections = organizationSurfaceSettingsNavigation(true, enterprise, {
       connectedAccounts: false,
@@ -158,8 +172,9 @@ describe('organization settings navigation', () => {
     expect(sections).not.toContain('integrations')
     expect(sections).toContain('members')
     expect(sections).toContain('general')
-    expect(buildOrganizationNavItems('org', false)).toEqual([])
+    expect(buildOrganizationNavItems('org', false, false)).toEqual([])
   })
+
   it('exposes Connected accounts before Search is enabled', () => {
     const sections = organizationSettingsNavigation(true, enterprise, {
       connectedAccounts: true,
@@ -169,6 +184,7 @@ describe('organization settings navigation', () => {
     expect(sections).not.toContain('search-mcp')
     expect(sections).not.toContain('integrations')
   })
+
   it('keeps both setup pages hidden from non-admins when Search is disabled', () => {
     const sections = organizationSettingsNavigation(false, enterprise, {
       connectedAccounts: true,

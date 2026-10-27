@@ -15,12 +15,14 @@ import {
 } from '@/executor/utils/block-reference'
 import { formatInertStringLiteral, formatLiteralForCode } from '@/executor/utils/code-formatting'
 import {
-  aggregateLoopIterationOutputs,
-  buildClonedSubflowId,
-  collectLoopScopedOutputs,
+  buildOuterBranchScopedId,
   extractBaseBlockId,
   extractOuterBranchIndex,
   stripCloneSuffixes,
+} from '@/executor/utils/subflow-node-id-codec'
+import {
+  aggregateLoopIterationOutputs,
+  collectLoopScopedOutputs,
 } from '@/executor/utils/subflow-utils'
 import {
   type AsyncPathNavigator,
@@ -362,7 +364,7 @@ export class BlockResolver implements Resolver {
 
     if (shouldResolveClonedSubflowOutput) {
       const clonedState = context.executionState.getBlockState(
-        buildClonedSubflowId(blockId, mappedBranchIndex)
+        buildOuterBranchScopedId(blockId, mappedBranchIndex)
       )
       if (clonedState !== undefined) {
         return clonedState

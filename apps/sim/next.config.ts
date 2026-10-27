@@ -1,109 +1,20 @@
-import { createRequire } from 'node:module'
 import path from 'node:path'
+import { SIM_SITE_URL } from '@sim/utils/site'
 import type { NextConfig } from 'next'
-import { DEFAULT_PRIVACY_URL, DEFAULT_TERMS_URL } from './lib/branding/defaults'
 import { env, isTruthy } from './lib/core/config/env'
+
+/** Monorepo root — required so Turbopack doesn't pick a stray ~/yarn.lock as the workspace root. */
+const monorepoRoot = path.resolve(__dirname, '../..')
+
+import { DEFAULT_PRIVACY_URL, DEFAULT_TERMS_URL } from './lib/branding/defaults'
 import { isDev } from './lib/core/config/env-flags'
 import {
   getChatEmbedCSPPolicy,
   getMainCSPPolicy,
   getWorkflowExecutionCSPPolicy,
 } from './lib/core/security/csp'
-
-const require = createRequire(import.meta.url)
-
-/**
- * Docker image builds set `DOCKER_BUILD=1`. Prefer `process.env` so the flag is
- * observed even if t3-env's typed `env.DOCKER_BUILD` is unset under
- * `skipValidation` — without it, browser source maps and multi-worker static
- * generation come back and the webpack heap OOMs in GHCR.
- */
-const isDockerBuild = isTruthy(process.env.DOCKER_BUILD) || isTruthy(env.DOCKER_BUILD)
-
-/** Monorepo root — required so Turbopack doesn't pick a stray ~/yarn.lock as the workspace root. */
-const monorepoRoot = path.resolve(__dirname, '../..')
-
-/**
- * Walk from a resolved package entry to the directory that contains its package.json.
- * `htmlparser2` does not export `./package.json`, so `require.resolve('htmlparser2/package.json')`
- * throws.
- */
-function packageRootFromEntry(entry: string, packageName: string): string {
-  let dir = path.dirname(entry)
-  while (dir !== path.dirname(dir)) {
-    const packageJsonPath = path.join(dir, 'package.json')
-    try {
-      const pkg = require(packageJsonPath) as { name?: string }
-      if (pkg.name === packageName) {
-        return dir
-      }
-    } catch {}
-    dir = path.dirname(dir)
-  }
-  throw new Error(`Could not find package root for ${packageName} from ${entry}`)
-}
-
-/**
- * htmlparser2@10+/12 and parse5 import `entities/decode` and `entities/escape`.
- * Docker installs with `--linker=hoisted`, so those subpaths resolve to root
- * `entities@4` (rss-parser / html-to-text), which only exports `./lib/decode.js`
- * and `./lib/escape.js`. Point the bundler at the entities@7 copy nested under
- * htmlparser2.
- */
-function resolveHtmlparser2EntitiesSubpath(subpath: 'decode' | 'escape'): string {
-  const htmlparser2Dir = packageRootFromEntry(require.resolve('htmlparser2'), 'htmlparser2')
-  return require.resolve(`entities/${subpath}`, { paths: [htmlparser2Dir] })
-}
-
-/**
- * Turbopack `resolveAlias` treats a leading `/` as a server-relative URL
- * (`./app/node_modules/...` when the file lives at `/app/node_modules/...` in
- * Docker) and then fails with "server relative imports are not implemented".
- * Values must be `./`-prefixed paths from `turbopack.root`.
- */
-function toTurbopackAlias(absolutePath: string): string {
-  const relative = path.relative(monorepoRoot, absolutePath).split(path.sep).join('/')
-  if (relative.startsWith('../') || path.isAbsolute(relative)) {
-    throw new Error(`entities alias ${absolutePath} is outside turbopack root ${monorepoRoot}`)
-  }
-  return `./${relative}`
-}
-
-const entitiesDecodeAbsolute = resolveHtmlparser2EntitiesSubpath('decode')
-const entitiesEscapeAbsolute = resolveHtmlparser2EntitiesSubpath('escape')
-const entitiesDecodeAlias = toTurbopackAlias(entitiesDecodeAbsolute)
-const entitiesEscapeAlias = toTurbopackAlias(entitiesEscapeAbsolute)
-
-/**
- * Marketing routes (`app/(landing)/**`, plus the root) exempted from COEP.
- *
- * COEP is a *document* header and is inherited across client-side `<Link>`
- * navigations, so `/demo`'s own exemption only applies on a direct load. Any
- * landing page left isolated soft-navigates into `/demo` still credentialless,
- * where the Cal.com booker iframe loads uncredentialed and hangs forever.
- * Every route under `app/(landing)` must be listed here.
- */
-const LANDING_ROUTES = [
-  'blog',
-  'careers',
-  'changelog',
-  'comparisons',
-  'contact',
-  'demo',
-  'enterprise',
-  'files',
-  'integrations',
-  'knowledge',
-  'library',
-  'logs',
-  'models',
-  'pricing',
-  'privacy',
-  'solutions',
-  'tables',
-  'terms',
-  'workflows',
-] as const
+import { LANDING_ROUTES } from './lib/landing/routes'
+import { LIBRARY_MERGED_SLUGS, LIBRARY_MOVED_BLOG_SLUGS } from './lib/library/retired-slugs'
 
 /**
  * Dev-only escape hatch: when `SIM_DEV_MINIMAL_REGISTRY=1` (`bun run dev:minimal`),
@@ -129,136 +40,22 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Safe here since this repo's source is already fully public on GitHub -
   // no additional exposure versus Next's default (disabled to avoid leaking
-  // source on the client). Off under DOCKER_BUILD: webpack source-map
-  // generation is what pushed the heap past 8GB (V8 OOM at 8192).
-  productionBrowserSourceMaps: !isDockerBuild,
-  /**
-   * Production `next build` uses webpack (`package.json` `build` passes `--webpack`).
-   * Next 16.2.12 Turbopack truncates chunk idents to 7 base38 chars; this branch's
-   * `[root-of-the-server]` graph collides deterministically (same output path and
-   * the same two content hashes on every Docker run). `version-6-main` stays under
-   * the collision with a smaller graph. `next dev` still uses Turbopack.
-   */
+  // source on the client).
+  productionBrowserSourceMaps: true,
   turbopack: {
     root: monorepoRoot,
-    resolveAlias: {
-      ...minimalRegistryAlias,
-      'entities/decode': entitiesDecodeAlias,
-      'entities/escape': entitiesEscapeAlias,
-    },
+    resolveAlias: minimalRegistryAlias,
   },
-  webpack: (config, { isServer }) => {
-    /**
-     * Emit pdfjs ESM files imported with `?url` as static assets.
-     * `serverExternalPackages` includes `pdfjs-dist`, so
-     * `new URL('pdfjs-dist/...', import.meta.url)` fails the server compile
-     * (`import-esm-externals`). A `?url` import must not be parsed as JavaScript
-     * either — evaluating pdfjs on the main thread clobbers its process-level state.
-     */
-    config.module ??= { rules: [] }
-    config.module.rules ??= []
-    config.module.rules.unshift({
-      test: /[/\\]pdfjs-dist[/\\]build[/\\]pdf\.min\.mjs$/,
-      resourceQuery: /^\?url$/,
-      type: 'asset/resource',
-    })
-    const monacoEditorApi = path.join(
-      packageRootFromEntry(require.resolve('monaco-editor'), 'monaco-editor'),
-      'esm/vs/editor/editor.api.js'
-    )
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      'monaco-editor$': monacoEditorApi,
-      'entities/decode$': entitiesDecodeAbsolute,
-      'entities/escape$': entitiesEscapeAbsolute,
-      ...(useMinimalRegistry
-        ? {
-            '@/tools/registry$': path.resolve(import.meta.dirname, 'tools/registry.minimal.ts'),
-            '@/blocks/registry-maps$': path.resolve(
-              import.meta.dirname,
-              'blocks/registry-maps.minimal.ts'
-            ),
-          }
-        : {}),
-    }
-    if (!isServer) {
-      /**
-       * Webpack treats `node:foo` as a URI scheme and fails with UnhandledSchemeError
-       * before `NormalModuleReplacementPlugin` or `resolve.fallback` run. The
-       * `resolveForScheme` hook is the one that actually intercepts it.
-       * `resource` is the string stored on the module and later read by scheme;
-       * rewriting only `path` leaves that string as `node:crypto`.
-       */
-      const emptyNodeBuiltin = path.resolve(
-        import.meta.dirname,
-        'lib/webpack-empty-node-builtin.cjs'
-      )
-      config.plugins.push({
-        apply(compiler: {
-          hooks: {
-            compilation: {
-              tap: (
-                name: string,
-                fn: (
-                  compilation: unknown,
-                  params: {
-                    normalModuleFactory: {
-                      hooks: {
-                        resolveForScheme: {
-                          for: (scheme: string) => {
-                            tap: (
-                              name: string,
-                              handler: (resource: {
-                                resource: string
-                                path?: string
-                                query?: string
-                                fragment?: string
-                              }) => boolean
-                            ) => void
-                          }
-                        }
-                      }
-                    }
-                  }
-                ) => void
-              ) => void
-            }
-          }
-        }) {
-          compiler.hooks.compilation.tap(
-            'HandleNodeScheme',
-            (_compilation, { normalModuleFactory }) => {
-              normalModuleFactory.hooks.resolveForScheme
-                .for('node')
-                .tap('HandleNodeScheme', (resource) => {
-                  resource.resource = emptyNodeBuiltin
-                  resource.path = emptyNodeBuiltin
-                  resource.query = ''
-                  resource.fragment = ''
-                  return true
-                })
-            }
-          )
-        },
-      })
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        async_hooks: false,
-        child_process: false,
-        crypto: false,
-        fs: false,
-        http: false,
-        https: false,
-        net: false,
-        os: false,
-        path: false,
-        perf_hooks: false,
-        stream: false,
-        tls: false,
+  webpack: (config) => {
+    if (useMinimalRegistry) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@/tools/registry$': path.resolve(import.meta.dirname, 'tools/registry.minimal.ts'),
+        '@/blocks/registry-maps$': path.resolve(
+          import.meta.dirname,
+          'blocks/registry-maps.minimal.ts'
+        ),
       }
-    }
-    if (isDockerBuild) {
-      config.parallelism = 1
     }
     return config
   },
@@ -334,9 +131,9 @@ const nextConfig: NextConfig = {
     ],
   },
   typescript: {
-    ignoreBuildErrors: isDockerBuild,
+    ignoreBuildErrors: isTruthy(env.DOCKER_BUILD) || isTruthy(env.NEXT_BUILD_SKIP_TYPE_CHECK),
   },
-  output: isDockerBuild ? 'standalone' : undefined,
+  output: isTruthy(env.DOCKER_BUILD) ? 'standalone' : undefined,
   serverExternalPackages: [
     '@1password/sdk',
     'unpdf',
@@ -363,16 +160,9 @@ const nextConfig: NextConfig = {
     /**
      * Keep PDF.js and its native canvas implementation intact. The shared server
      * loader initializes canvas primitives before PDF.js evaluates its module.
-     * Do not put client-only packages here — webpack then treats ESM worker
-     * `new URL(...)` imports as externals and fails the client bundle.
      */
     'pdfjs-dist',
     '@napi-rs/canvas',
-    // Webpack bundles `@trigger.dev/core` and fails on `z.ZodSchema` (removed as
-    // a named export in Zod 4). Turbopack never analyzed that path. Leave the
-    // SDK as a Node require — it is server-only.
-    '@trigger.dev/sdk',
-    '@trigger.dev/core',
     // The collab-doc seed converter lazily `require`s jsdom for a headless TipTap editor. Keep it
     // external so webpack doesn't try to bundle jsdom's dynamic internal requires.
     'jsdom',
@@ -401,7 +191,14 @@ const nextConfig: NextConfig = {
   ],
   outputFileTracingIncludes: {
     '/api/tools/stagehand/*': ['./node_modules/ws/**/*'],
-    '/api/tools/arena_generative_ui/*': ['./node_modules/@json-render/**/*'],
+    '/api/tools/generative_ui/*': [
+      './node_modules/@json-render/**/*',
+      './node_modules/@react-email/**/*',
+    ],
+    '/api/tools/arena_generative_ui/*': [
+      './node_modules/@json-render/**/*',
+      './node_modules/@react-email/**/*',
+    ],
     // The seed, merge, and persist endpoints all lazily `require('jsdom')` (via the collab-doc
     // converter), which is invisible to the standalone file tracer, so force jsdom (and its transitive
     // deps, followed from its static requires) into the trace — otherwise a Docker/standalone build
@@ -411,15 +208,14 @@ const nextConfig: NextConfig = {
     '/api/internal/file-doc/seed': ['./node_modules/jsdom/**/*'],
     '/api/internal/file-doc/merge': ['./node_modules/jsdom/**/*'],
     '/api/internal/file-doc/persist': ['./node_modules/jsdom/**/*'],
-    // sharp@0.35+ needs both `@img/sharp-<platform>` and sibling
-    // `@img/sharp-libvips-<platform>` (the `.so` the addon dlopens). These
-    // globs help non-monorepo / Vercel traces; Docker still has to COPY the
-    // hoisted `/app/node_modules/{sharp,@img}` trees in `docker/app.Dockerfile`
-    // because these paths resolve against `apps/sim` and miss the root hoist.
+    /**
+     * No `sharp`/`@img` entries: these globs resolve against apps/sim while both hoist to the
+     * monorepo root, so they matched nothing. docker/app.Dockerfile copies them instead.
+     */
     '/*': [
-      './node_modules/sharp/**/*',
-      './node_modules/@img/**/*',
       './lib/execution/sandbox/bundles/*.cjs',
+      './node_modules/ws/**/*',
+      '../../packages/sim-cli/dist/runtime.js',
     ],
   },
   experimental: {
@@ -466,21 +262,15 @@ const nextConfig: NextConfig = {
      * it lives. Restoring across commits is separately undocumented-as-supported
      * (vercel/next.js#87283 reports stale HTML from a cache built elsewhere).
      *
-     * Pinned explicitly rather than left to the Next default: upstream already
-     * flips this default to true in canary/preview builds (vercel/next.js#94616),
-     * so relying on the default would let a version bump silently re-enable a
-     * config we measured as harmful. Always off for Docker/CI too — the cache
-     * itself adds RSS under BuildKit's tight cgroup.
-     * Keep the explicit pin even while we sit on 16.2.12: 16.3.0 flips this
-     * default to true for stable (vercel/next.js#94616), so dropping it would
-     * silently re-enable the slower cache the next time we take that bump.
+     * The explicit pin is load-bearing: 16.3.0 flipped this default to true for
+     * stable (vercel/next.js#94616), so dropping it re-enables the slower cache.
      */
     turbopackFileSystemCacheForBuild: false,
     /**
      * TypeScript 7 ships no JavaScript compiler API until 7.1, so Next's default
      * checker cannot load it — this shells out to the project-local `tsc` instead.
      * Pinned because the failure mode is not slower type checking but none at all:
-     * without it 16.2.12 skips the stage silently in 138ms.
+     * 16.2.12 skipped the stage silently in 138ms.
      */
     useTypeScriptCli: true,
     preloadEntriesOnStart: false,
@@ -493,7 +283,7 @@ const nextConfig: NextConfig = {
      * pages. Cap both knobs when DOCKER_BUILD is set. Do not also set
      * memoryBasedWorkersCount — that path enforces a minimum of 4 workers.
      */
-    ...(isDockerBuild
+    ...(isTruthy(env.DOCKER_BUILD)
       ? {
           cpus: 1,
           staticGenerationMaxConcurrency: 1,
@@ -505,12 +295,13 @@ const nextConfig: NextConfig = {
      * which also removes each entry from the server externals set. Entries here
      * must be real barrel packages that are actually imported - a stale entry
      * costs transform work and overrides that package's own `sideEffects`
-     * declaration.
+     * declaration. Never list a package whose entry module does setup: zod's
+     * entry installs its English error messages, and listing it left every
+     * default message in a production build as "Invalid input".
      */
     optimizePackageImports: [
       'framer-motion',
       '@xyflow/react',
-      'reactflow',
       '@radix-ui/react-dialog',
       '@radix-ui/react-dropdown-menu',
       '@radix-ui/react-popover',
@@ -520,7 +311,6 @@ const nextConfig: NextConfig = {
       '@radix-ui/react-switch',
       '@radix-ui/react-slider',
       'streamdown',
-      'zod',
     ],
   },
   ...(isDev && {
@@ -544,6 +334,7 @@ const nextConfig: NextConfig = {
   transpilePackages: [
     '@react-email/components',
     '@react-email/render',
+    'sim',
     '@t3-oss/env-nextjs',
     '@t3-oss/env-core',
     '@sim/db',
@@ -552,16 +343,6 @@ const nextConfig: NextConfig = {
   ],
   async headers() {
     return [
-      {
-        /** Generated footer artwork uses content hashes, so URLs are immutable. */
-        source: '/landing/footer-artwork/:path*',
-        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
-      },
-      {
-        /** Generated hero artwork uses content hashes, so URLs are immutable. */
-        source: '/landing/hero-artwork/:path*',
-        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
-      },
       {
         // `/public`-served assets keep their path across deploys (no content
         // hash), so a shorter TTL + revalidation window bounds how long a
@@ -574,6 +355,16 @@ const nextConfig: NextConfig = {
             value: 'public, max-age=86400, stale-while-revalidate=604800',
           },
         ],
+      },
+      {
+        /** Generated footer artwork uses content hashes, so URLs are immutable. */
+        source: '/landing/footer-artwork/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+      },
+      {
+        /** Generated hero artwork uses content hashes, so URLs are immutable. */
+        source: '/landing/hero-artwork/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
       },
       {
         source: '/.well-known/:path*',
@@ -596,7 +387,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: '/api/v2/workflows/:id/execute',
+        source: '/api/v2/workflows/:workflowId/execute',
         headers: [
           { key: 'Cross-Origin-Embedder-Policy', value: 'unsafe-none' },
           { key: 'Cross-Origin-Opener-Policy', value: 'unsafe-none' },
@@ -698,26 +489,11 @@ const nextConfig: NextConfig = {
           { key: 'Cross-Origin-Opener-Policy', value: 'unsafe-none' },
         ],
       },
-      {
-        source: '/gui-apps/:path*',
-        headers: [
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'Content-Security-Policy',
-            value: getChatEmbedCSPPolicy(),
-          },
-          { key: 'Cross-Origin-Embedder-Policy', value: 'unsafe-none' },
-          { key: 'Cross-Origin-Opener-Policy', value: 'unsafe-none' },
-        ],
-      },
       // Apply security headers to routes not handled by middleware runtime CSP
       // Middleware handles: /, /login, /signup, /workspace/*
-      // Exclude chat and gui-apps routes which have their own permissive embed headers
+      // Exclude chat routes which have their own permissive embed headers
       {
-        source: '/((?!workspace|chat|gui-apps|login|signup|$).*)',
+        source: '/((?!workspace|chat|login|signup|$).*)',
         headers: [
           {
             key: 'X-Content-Type-Options',
@@ -737,24 +513,6 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     const redirects = []
-
-    redirects.push(
-      {
-        source: '/terms',
-        destination: env.NEXT_PUBLIC_TERMS_URL || DEFAULT_TERMS_URL,
-        permanent: false,
-      },
-      {
-        source: '/privacy',
-        destination: env.NEXT_PUBLIC_PRIVACY_URL || DEFAULT_PRIVACY_URL,
-        permanent: false,
-      },
-      {
-        source: '/cookie-policy',
-        destination: env.NEXT_PUBLIC_PRIVACY_URL || DEFAULT_PRIVACY_URL,
-        permanent: false,
-      }
-    )
 
     // Social link redirects (used in emails to avoid spam filter issues)
     redirects.push(
@@ -776,7 +534,7 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/linkedin',
-        destination: 'https://www.linkedin.com/company/simstudioai/',
+        destination: 'https://www.linkedin.com/company/simdotai/',
         permanent: false,
       },
       {
@@ -791,19 +549,25 @@ const nextConfig: NextConfig = {
       }
     )
 
-    // Redirect /building and /studio to /blog (legacy URL support)
-    redirects.push(
-      {
-        source: '/building/:path*',
-        destination: 'https://www.sim.ai/blog/:path*',
-        permanent: true,
-      },
-      {
-        source: '/studio/:path*',
-        destination: 'https://www.sim.ai/blog/:path*',
-        permanent: true,
+    /**
+     * Legacy `/building` and `/studio` URLs map to `/blog`. Posts since moved to
+     * `/library` get their own rules ahead of the wildcard (first match wins)
+     * so they land there in one hop instead of chaining through `/blog`.
+     */
+    for (const legacyPrefix of ['building', 'studio']) {
+      for (const slug of LIBRARY_MOVED_BLOG_SLUGS) {
+        redirects.push({
+          source: `/${legacyPrefix}/${slug}`,
+          destination: `${SIM_SITE_URL}/library/${slug}`,
+          permanent: true,
+        })
       }
-    )
+      redirects.push({
+        source: `/${legacyPrefix}/:path*`,
+        destination: `${SIM_SITE_URL}/blog/:path*`,
+        permanent: true,
+      })
+    }
 
     // The scheduled-tasks marketing page is retired with the feature. The URL is
     // indexed, so send it to the surface that still carries scheduled execution
@@ -825,6 +589,28 @@ const nextConfig: NextConfig = {
       destination: 'https://docs.sim.ai/academy',
       permanent: true,
     })
+
+    /**
+     * In-app Terms, Privacy, and Cookie Policy pages are disabled until Arena
+     * legal copy is finalized. Send visitors to the Arena legal URLs instead.
+     */
+    redirects.push(
+      {
+        source: '/terms',
+        destination: env.NEXT_PUBLIC_TERMS_URL || DEFAULT_TERMS_URL,
+        permanent: false,
+      },
+      {
+        source: '/privacy',
+        destination: env.NEXT_PUBLIC_PRIVACY_URL || DEFAULT_PRIVACY_URL,
+        permanent: false,
+      },
+      {
+        source: '/cookie-policy',
+        destination: env.NEXT_PUBLIC_PRIVACY_URL || DEFAULT_PRIVACY_URL,
+        permanent: false,
+      }
+    )
 
     // Move root feeds to blog namespace
     redirects.push(
@@ -890,22 +676,18 @@ const nextConfig: NextConfig = {
       permanent: true,
     })
 
-    /**
-     * AEO/GEO-style posts (listicles, comparisons, how-tos) were split out of
-     * `/blog` into the dedicated `/library` section so `/blog` stays
-     * editorial-only. Preserve previously indexed URLs for the moved posts.
-     */
-    for (const slug of [
-      'best-zapier-alternatives',
-      'ai-agents-vs-rpa',
-      'ai-agent-vs-chatbot',
-      'openai-vs-n8n-vs-sim',
-      'ai-agent-ideas',
-      'how-to-create-an-ai-agent',
-    ]) {
+    for (const slug of LIBRARY_MOVED_BLOG_SLUGS) {
       redirects.push({
         source: `/blog/${slug}`,
         destination: `/library/${slug}`,
+        permanent: true,
+      })
+    }
+
+    for (const [retired, kept] of Object.entries(LIBRARY_MERGED_SLUGS)) {
+      redirects.push({
+        source: `/library/${retired}`,
+        destination: `/library/${kept}`,
         permanent: true,
       })
     }

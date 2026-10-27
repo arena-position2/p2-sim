@@ -26,7 +26,7 @@ env:
 jobs:
   reserve-image-tag:
     name: Reserve immutable tag
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
       packages: read
@@ -35,7 +35,7 @@ jobs:
       git_tag: ${{ steps.validate.outputs.git_tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: useblacksmith/checkout@v1
         with:
           fetch-depth: 0
 
@@ -94,10 +94,10 @@ jobs:
   secret-scan:
     name: Secret Scan
     needs: [reserve-image-tag]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: useblacksmith/checkout@v1
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -110,7 +110,8 @@ jobs:
   build-ghcr-images:
     name: Build GHCR Images
     needs: [secret-scan, reserve-image-tag]
-    runs-on: ubuntu-latest
+    # App next build needs the 64 GB runner. Migrations and realtime fit in 16 GB.
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -120,13 +121,16 @@ jobs:
         include:
           - dockerfile: ./docker/app.Dockerfile
             ghcr_image: ghcr.io/${{ github.repository_owner }}/p2-sim-simstudio
+            runner: blacksmith-16vcpu-ubuntu-2404
           - dockerfile: ./docker/db.Dockerfile
             ghcr_image: ghcr.io/${{ github.repository_owner }}/p2-sim-migrations
+            runner: blacksmith-4vcpu-ubuntu-2404
           - dockerfile: ./docker/realtime.Dockerfile
             ghcr_image: ghcr.io/${{ github.repository_owner }}/p2-sim-realtime
+            runner: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: useblacksmith/checkout@v1
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -135,8 +139,8 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Generate tags
         id: meta
@@ -145,42 +149,41 @@ jobs:
           GHCR_IMAGE="${{ matrix.ghcr_image }}"
           echo "tags=${GHCR_IMAGE}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Add swap
-        run: |
-          SWAPFILE=/mnt/gh-actions-swap
-          if sudo swapon --show=NAME | awk -v file="$SWAPFILE" '$1 == file { found = 1 } END { exit !found }'; then
-            echo "$SWAPFILE is already active"
-            free -h
-            exit 0
-          fi
-          sudo swapoff "$SWAPFILE" 2>/dev/null || true
-          sudo rm -f "$SWAPFILE"
-          sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=20480 status=none
-          sudo chmod 600 "$SWAPFILE"
-          sudo mkswap "$SWAPFILE"
-          sudo swapon "$SWAPFILE"
-          free -h
-
       - name: Build and push images
-        uses: docker/build-push-action@v7
+        id: build
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha,scope=${{ matrix.dockerfile }}-amd64
-          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}-amd64
           build-args: |
             NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
           provenance: false
           sbom: false
 
+      - name: Publish image tag to run summary
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "::notice title=Published image::${IMAGE_REF}"
+          {
+            echo "### Published \`${IMAGE_REF##*/}\`"
+            echo '```'
+            echo "docker pull ${IMAGE_REF}"
+            echo '```'
+            if [[ -n "${DIGEST}" ]]; then
+              echo "Digest: \`${DIGEST}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   release-failed-tag:
     name: Release tag on failure
     if: failure() && needs.reserve-image-tag.result == 'success'
     needs: [reserve-image-tag, secret-scan, build-ghcr-images]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:

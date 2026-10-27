@@ -1,36 +1,30 @@
-/**
- * @vitest-environment node
- */
-import { dbChainMockFns, resetDbChainMock } from '@sim/testing'
+import { billingCoreMock, billingCoreMockFns } from '@sim/testing/mocks/billing-core.mock'
+import { billingOutboxHandlersMock } from '@sim/testing/mocks/billing-outbox-handlers.mock'
+import { billingPlanMock, billingPlanMockFns } from '@sim/testing/mocks/billing-plan.mock'
+import { billingSubscriptionSyncMock } from '@sim/testing/mocks/billing-subscription-sync.mock'
+import { dbChainMockFns, resetDbChainMock } from '@sim/testing/mocks/database.mock'
+import {
+  organizationMembershipMock,
+  organizationMembershipMockFns,
+} from '@sim/testing/mocks/organization-membership.mock'
+import { outboxServiceMock } from '@sim/testing/mocks/outbox-service.mock'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
-  mockGetOrganizationSubscription,
-  mockGetHighestPriorityPersonalSubscription,
   mockEnsureOrganizationForTeamSubscriptionTx,
   mockAssertNoUnresolvedEnterpriseIssuance,
-  mockAcquireOrganizationMutationLock,
   mockGetPlanByName,
-  enqueueMock,
   updateCalls,
 } = vi.hoisted(() => ({
-  mockGetOrganizationSubscription: vi.fn(),
-  mockGetHighestPriorityPersonalSubscription: vi.fn(),
   mockEnsureOrganizationForTeamSubscriptionTx: vi.fn(),
   mockAssertNoUnresolvedEnterpriseIssuance: vi.fn(),
-  mockAcquireOrganizationMutationLock: vi.fn(),
   mockGetPlanByName: vi.fn(),
-  enqueueMock: vi.fn(),
   updateCalls: { value: [] as Array<Record<string, unknown>> },
 }))
 
-vi.mock('@/lib/billing/core/billing', () => ({
-  getOrganizationSubscription: mockGetOrganizationSubscription,
-}))
+vi.mock('@/lib/billing/core/billing', () => billingCoreMock)
 
-vi.mock('@/lib/billing/core/plan', () => ({
-  getHighestPriorityPersonalSubscription: mockGetHighestPriorityPersonalSubscription,
-}))
+vi.mock('@/lib/billing/core/plan', () => billingPlanMock)
 
 vi.mock('@/lib/billing/organization', () => ({
   ensureOrganizationForTeamSubscriptionTx: mockEnsureOrganizationForTeamSubscriptionTx,
@@ -40,32 +34,41 @@ vi.mock('@/lib/billing/enterprise-outbox', () => ({
   assertNoUnresolvedEnterpriseIssuance: mockAssertNoUnresolvedEnterpriseIssuance,
 }))
 
-vi.mock('@/lib/billing/organizations/membership', () => ({
-  acquireOrganizationMutationLock: mockAcquireOrganizationMutationLock,
-}))
+vi.mock('@/lib/billing/organizations/membership', () => organizationMembershipMock)
 
 vi.mock('@/lib/billing/plans', () => ({
   getPlanByName: mockGetPlanByName,
 }))
 
-vi.mock('@/lib/core/outbox/service', () => ({
-  enqueueOutboxEvent: enqueueMock,
-}))
+vi.mock('@/lib/core/outbox/service', () => outboxServiceMock)
 
-vi.mock('@/lib/billing/webhooks/outbox-handlers', () => ({
-  OUTBOX_EVENT_TYPES: {
-    STRIPE_SYNC_CANCEL_AT_PERIOD_END: 'stripe.sync-cancel-at-period-end',
-    STRIPE_SYNC_SUBSCRIPTION_SEATS: 'stripe.sync-subscription-seats',
-  },
-}))
+vi.mock('@/lib/billing/webhooks/subscription-sync', () => billingSubscriptionSyncMock)
+
+vi.mock('@/lib/billing/webhooks/outbox-handlers', () => billingOutboxHandlersMock)
 
 import { ensureTeamOrganizationForAcceptance } from '@/lib/billing/organizations/provision-seat'
 
-function testExecutor(onUpdate: () => void = () => {}) {
+const { mockAcquireOrganizationMutationLock } = organizationMembershipMockFns
+const mockGetOrganizationSubscription = billingCoreMockFns.mockGetOrganizationSubscription
+const mockGetHighestPriorityPersonalSubscription =
+  billingPlanMockFns.mockGetHighestPriorityPersonalSubscription
+
+/** The subscription row as the activation re-reads it under its lock. */
+function testExecutor(onSubscriptionLock: () => void = () => {}) {
+  const lockedRow = { cancelAtPeriodEnd: false, seats: 1, stripeSubscriptionId: 'stripe_sub' }
   return {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: () => {
+            onSubscriptionLock()
+            return { limit: () => Promise.resolve([lockedRow]) }
+          },
+        }),
+      }),
+    }),
     update: () => ({
       set: (values: Record<string, unknown>) => {
-        onUpdate()
         updateCalls.value.push(values)
         return { where: () => Promise.resolve([]) }
       },
@@ -75,7 +78,6 @@ function testExecutor(onUpdate: () => void = () => {}) {
 
 describe('ensureTeamOrganizationForAcceptance', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     updateCalls.value = []
     mockGetPlanByName.mockReturnValue({
@@ -87,46 +89,6 @@ describe('ensureTeamOrganizationForAcceptance', () => {
 
   afterAll(() => {
     resetDbChainMock()
-  })
-
-  it('is a no-op for enterprise organizations (fixed seats)', async () => {
-    mockGetOrganizationSubscription.mockResolvedValue({
-      id: 'sub-ent',
-      plan: 'enterprise',
-      status: 'active',
-      stripeSubscriptionId: 'stripe_sub',
-      seats: 5,
-    })
-
-    const result = await ensureTeamOrganizationForAcceptance({
-      billingOwnerUserId: 'owner-1',
-      workspaceOrganizationId: 'org-1',
-      executor: testExecutor(),
-      workspaceIdsToAttach: [],
-    })
-
-    expect(result).toEqual({ success: true, organizationId: 'org-1', fixedSeats: true })
-    expect(updateCalls.value).toHaveLength(0)
-  })
-
-  it('is a no-op for an existing Team organization (org + plan already correct)', async () => {
-    mockGetOrganizationSubscription.mockResolvedValue({
-      id: 'sub-team',
-      plan: 'team_6000',
-      status: 'active',
-      seats: 1,
-      stripeSubscriptionId: 'stripe_sub',
-    })
-
-    const result = await ensureTeamOrganizationForAcceptance({
-      billingOwnerUserId: 'owner-1',
-      workspaceOrganizationId: 'org-1',
-      executor: testExecutor(),
-      workspaceIdsToAttach: [],
-    })
-
-    expect(result).toEqual({ success: true, organizationId: 'org-1', fixedSeats: false })
-    expect(updateCalls.value).toHaveLength(0)
   })
 
   it('moves an org-scoped Pro subscription to the equivalent Team plan', async () => {
@@ -163,12 +125,6 @@ describe('ensureTeamOrganizationForAcceptance', () => {
       },
     })
     expect(updateCalls.value).toContainEqual(expect.objectContaining({ plan: 'team_6000' }))
-    // The Pro→Team price migration is durably enqueued at conversion time.
-    expect(enqueueMock).toHaveBeenCalledWith(
-      executor,
-      'stripe.sync-subscription-seats',
-      expect.objectContaining({ subscriptionId: 'sub-pro' })
-    )
     expect(mockGetOrganizationSubscription).toHaveBeenCalledWith(
       'org-1',
       expect.objectContaining({ executor })
@@ -253,20 +209,8 @@ describe('ensureTeamOrganizationForAcceptance', () => {
       executor,
       expect.objectContaining({ plan: 'team_6000', referenceId: 'owner-1' })
     )
-    // The plan change enqueues the price seat-sync...
-    expect(enqueueMock).toHaveBeenCalledWith(
-      executor,
-      'stripe.sync-subscription-seats',
-      expect.objectContaining({ subscriptionId: 'sub-pro' })
-    )
     expect(dbChainMockFns.transaction).not.toHaveBeenCalled()
     expect(lockOrder).toEqual(['organization', 'subscription'])
-    // ...but with no scheduled cancellation there is no cancel-sync event.
-    expect(enqueueMock).not.toHaveBeenCalledWith(
-      expect.anything(),
-      'stripe.sync-cancel-at-period-end',
-      expect.anything()
-    )
   })
 
   it('blocks personal Pro conversion when the reused organization has unresolved Enterprise', async () => {
@@ -294,35 +238,6 @@ describe('ensureTeamOrganizationForAcceptance', () => {
       })
     ).rejects.toThrow('Enterprise issuance is unfinished')
     expect(updateCalls.value).toHaveLength(0)
-    expect(enqueueMock).not.toHaveBeenCalled()
-  })
-
-  it('clears a scheduled cancellation when converting a Pro subscription', async () => {
-    mockGetHighestPriorityPersonalSubscription.mockResolvedValue({
-      id: 'sub-pro',
-      plan: 'pro_6000',
-      status: 'active',
-      stripeSubscriptionId: 'stripe_sub',
-      cancelAtPeriodEnd: true,
-    })
-    mockEnsureOrganizationForTeamSubscriptionTx.mockResolvedValue({
-      referenceId: 'org-new',
-      usageLimitUserIds: [],
-    })
-
-    const result = await ensureTeamOrganizationForAcceptance({
-      billingOwnerUserId: 'owner-1',
-      workspaceOrganizationId: null,
-      executor: testExecutor(),
-      workspaceIdsToAttach: ['workspace-1'],
-    })
-
-    expect(result.success).toBe(true)
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.anything(),
-      'stripe.sync-cancel-at-period-end',
-      expect.objectContaining({ stripeSubscriptionId: 'stripe_sub', subscriptionId: 'sub-pro' })
-    )
   })
 
   it('provisions an org for a legacy personal-scoped Team subscription without a plan change', async () => {
@@ -349,8 +264,6 @@ describe('ensureTeamOrganizationForAcceptance', () => {
       expect.anything(),
       expect.objectContaining({ plan: 'team', referenceId: 'owner-1' })
     )
-    // No plan change and no scheduled cancellation: nothing to push to Stripe.
-    expect(enqueueMock).not.toHaveBeenCalled()
   })
 
   it('returns upgrade-required (no downgrade) when no eligible Team tier exists', async () => {

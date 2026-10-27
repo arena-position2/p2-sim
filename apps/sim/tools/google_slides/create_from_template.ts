@@ -440,383 +440,384 @@ export const createFromTemplateTool: ToolConfig<
     headers: () => ({}),
   },
 
-  directExecution: async (
-    params: CreateFromTemplateParams
-  ): Promise<CreateFromTemplateResponse> => {
-    const accessToken = params.accessToken?.trim()
-    const presentationName = (params.presentationName ?? '').trim()
-    if (!accessToken) {
-      throw new Error('Access token is required')
-    }
-    if (!presentationName) {
-      throw new Error('Presentation name is required')
-    }
-
-    logger.info('Create from template started', {
-      presentationName,
-      schemaJsonLength:
-        typeof params.schemaJson === 'string'
-          ? params.schemaJson.length
-          : JSON.stringify(params.schemaJson).length,
-    })
-
-    const schema = parseSchema(params.schemaJson)
-    validateTemplateId(schema)
-
-    logger.info('Schema validated', {
-      templateId: schema.id,
-      templateVersion: schema.templateVersion,
-      slideCount: schema.slides.length,
-    })
-
-    // 1. Duplicate Presentation
-    const presentationId = await duplicatePresentation(accessToken, schema.id, presentationName)
-
-    // Keep track of the original template slides so we can delete them at the end
-    const originalSlidesToDelete = (await getPresentationSlides(accessToken, presentationId)).map(
-      (s) => s.objectId
-    )
-
-    logger.info('Original slides to delete after content fill', {
-      presentationId,
-      originalSlideCount: originalSlidesToDelete.length,
-    })
-
-    const templatePresRes = await fetchWithRetry(
-      `https://slides.googleapis.com/v1/presentations/${schema.id}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    )
-    const templatePresData = await templatePresRes.json()
-    if (!templatePresRes.ok) {
-      throw new Error(
-        templatePresData.error?.message || 'Failed to read template presentation for tables'
-      )
-    }
-
-    const slidesOrdered = expandSlidesForTableOverflow([...schema.slides], templatePresData)
-    if (slidesOrdered.length > schema.slides.length) {
-      logger.info('Expanded slides for table overflow', {
-        originalSlideCount: schema.slides.length,
-        expandedSlideCount: slidesOrdered.length,
-      })
-    }
-
-    const slideIndexToShapeMap: Record<string, string>[] = []
-
-    // 2. Duplicate Slides & Reorder (Batch)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const duplicateRequests: any[] = []
-
-    for (let i = 0; i < slidesOrdered.length; i++) {
-      const slideSchema = slidesOrdered[i]
-      const templateSlideId = (slideSchema as SlideLike).templateSlideObjectId
-      const blocks = (slideSchema as SlideLike).blocks || []
-
-      const objectIds: Record<string, string> = {}
-      const newSlideId = generateObjectId()
-
-      objectIds[templateSlideId] = newSlideId
-
-      for (const b of blocks) {
-        if (b.shapeId) {
-          objectIds[b.shapeId] = generateObjectId()
-        }
-      }
-
-      duplicateRequests.push({
-        duplicateObject: {
-          objectId: templateSlideId,
-          objectIds,
-        },
-      })
-
-      duplicateRequests.push({
-        updateSlidesPosition: {
-          slideObjectIds: [newSlideId],
-          insertionIndex: originalSlidesToDelete.length + i + 1,
-        },
-      })
-
-      slideIndexToShapeMap.push(objectIds)
-    }
-
-    logger.info('Executing batch slide duplication', { requestCount: duplicateRequests.length })
-
-    if (duplicateRequests.length > 0) {
-      const duplicateBatchRes = await fetchWithRetry(
-        `https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ requests: duplicateRequests }),
-        }
-      )
-
-      if (!duplicateBatchRes.ok) {
-        const errData = await duplicateBatchRes.json()
-        logger.error('Batch slide duplication failed', {
-          presentationId,
-          status: duplicateBatchRes.status,
-          error: errData.error?.message,
-        })
-        throw new Error(errData.error?.message || 'Failed to duplicate template slides')
-      }
-    }
-
-    logger.info('Fetching presentation state to build list maps', { presentationId })
-
-    // 3. Fetch presentation ONCE to get text endIndexes AND shape geometry
-    const presRes = await fetchWithRetry(
-      `https://slides.googleapis.com/v1/presentations/${presentationId}`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    )
-    const presData = await presRes.json()
-    if (!presRes.ok) {
-      throw new Error(presData.error?.message || 'Failed to read presentation state for mapping')
-    }
-    const textEndIndexMap = buildTextEndIndexMap(presData)
-    const tableCellTextEndIndexMap = buildTableCellTextEndIndexMap(presData)
-
-    // Build shape geometry map for image size restoration
-    const shapeGeometryMap: Record<string, { size: any; transform: any }> = {}
-    for (const slide of presData.slides || []) {
-      for (const el of slide.pageElements || []) {
-        if (el.size && el.transform) {
-          shapeGeometryMap[el.objectId] = {
-            size: el.size,
-            transform: el.transform,
-          }
-        }
-      }
-    }
-
-    logger.info('Preparing batch content replacements', {
-      presentationId,
-      slideCount: slidesOrdered.length,
-    })
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const batchRequests: any[] = []
-
-    // Collect pending image checks: { objectId, imageUrl, source }
-    const imageCheckQueue: {
-      objectId: string
-      imageUrl: string
-      source?: BlockLike['source']
-    }[] = []
-
-    for (let s = 0; s < slidesOrdered.length; s++) {
-      const slideSchema = slidesOrdered[s] as SlideLike
-      const shapeMap = slideIndexToShapeMap[s] ?? {}
-      const blocks = slideSchema.blocks || []
-
-      for (const block of blocks) {
-        const objectId = shapeMap[block.shapeId] ?? block.shapeId
-        if (!objectId) continue
-
-        const isList = block.type === 'TEXT' && (block as BlockLike).role === 'LIST'
-        const content = block.content
-
-        if (block.type === 'TEXT' && !isList) {
-          const text = typeof content === 'string' ? content : ''
-          if (text) {
-            batchRequests.push({ deleteText: { objectId, textRange: { type: 'ALL' } } })
-            batchRequests.push({ insertText: { objectId, insertionIndex: 0, text } })
-          }
-        } else if (block.type === 'TABLE') {
-          const tableObjectId = objectId
-          const maxRows = block.maxRows ?? 0
-          const maxColumns = block.maxColumns ?? 0
-          if (!maxRows || !maxColumns) {
-            logger.warn('Skipping table block with missing maxRows/maxColumns', {
-              shapeId: block.shapeId,
-            })
-            continue
-          }
-
-          const dimensions = findTableDimensions(presData, tableObjectId)
-          if (!dimensions) {
-            logger.warn('Table element not found after duplication', {
-              tableObjectId,
-              shapeId: block.shapeId,
-            })
-            continue
-          }
-
-          const layout = findTableColumnLayout(presData, tableObjectId)
-
-          const tableContent = Array.isArray(content) ? content : []
-          if (tableContent.length === 0) {
-            logger.info('Skipping empty table content; leaving template placeholders', {
-              tableObjectId,
-              shapeId: block.shapeId,
-            })
-            continue
-          }
-
-          batchRequests.push(
-            ...buildTableContentRequests({
-              tableObjectId,
-              content: tableContent,
-              templateRows: dimensions.rows,
-              templateColumns: dimensions.columns,
-              maxRows: block.maxRows,
-              maxColumns: block.maxColumns,
-              minRows: block.minRows,
-              minColumns: block.minColumns,
-              cellTextEndIndexMap: tableCellTextEndIndexMap,
-              layout: layout ?? undefined,
-            })
-          )
-        } else if (block.type === 'IMAGE' && content) {
-          const imageUrl = typeof content === 'string' ? content : ''
-          if (imageUrl) {
-            imageCheckQueue.push({ objectId, imageUrl, source: block.source })
-          }
-        } else if (isList && Array.isArray(content) && content.length > 0) {
-          const listText = content.join('\n')
-          const endIndex = textEndIndexMap[objectId] || 1
-
-          batchRequests.push({
-            deleteText: {
-              objectId,
-              textRange: { type: 'FIXED_RANGE', startIndex: 0, endIndex: endIndex - 1 },
-            },
-          })
-          batchRequests.push({ insertText: { objectId, insertionIndex: 0, text: listText } })
-        }
-      }
-    }
-
-    // Run all image URL checks in parallel, then add only passing ones to the batch
-    if (imageCheckQueue.length > 0) {
-      logger.info('Running image URL pre-flight checks', { count: imageCheckQueue.length })
-
-      const checkResults = await Promise.all(
-        imageCheckQueue.map(async ({ objectId, imageUrl, source }) => {
-          // Sim-internal URLs: resolve to a presigned S3 URL via internal endpoint
-          if (isSimInternalImageUrl(imageUrl)) {
-            const presignedUrl = await resolveSimImageToPresignedUrl(imageUrl)
-            return { objectId, imageUrl: presignedUrl, accessible: presignedUrl !== null }
-          }
-
-          const resolvedUrl = await resolveAccessibleImageUrl(imageUrl, source)
-          return {
-            objectId,
-            imageUrl: resolvedUrl,
-            accessible: resolvedUrl !== null,
-          }
-        })
-      )
-
-      for (const { objectId, imageUrl, accessible } of checkResults) {
-        if (accessible && imageUrl) {
-          // Replace the image content
-          batchRequests.push({
-            replaceImage: {
-              imageObjectId: objectId,
-              url: imageUrl,
-              imageReplaceMethod: 'CENTER_CROP',
-            },
-          })
-
-          // Reset crop properties so the new image is shown in full
-          batchRequests.push({
-            updateImageProperties: {
-              objectId,
-              imageProperties: {
-                cropProperties: {},
-              },
-              fields: 'cropProperties',
-            },
-          })
-
-          // Restore the original shape's size and position so the element
-          // doesn't shrink/expand after the image swap
-          const geo = shapeGeometryMap[objectId]
-          if (geo) {
-            batchRequests.push({
-              updatePageElementTransform: {
-                objectId,
-                transform: {
-                  ...geo.transform,
-                  unit: 'EMU',
-                },
-                applyMode: 'ABSOLUTE',
-              },
-            })
-          } else {
-            logger.warn('No geometry found for image shape — size may not be preserved', {
-              objectId,
-            })
-          }
-        } else {
-          logger.warn('Skipping image replacement — URL not accessible', { objectId, imageUrl })
-        }
-      }
-    }
-
-    // 5. Append original slide deletions to the same batch payload
-    for (const objectId of originalSlidesToDelete) {
-      batchRequests.push({ deleteObject: { objectId } })
-    }
-
-    // 6. Execute ALL content replacements and deletions in ONE network call
-    if (batchRequests.length > 0) {
-      logger.info('Executing master batch update', {
-        presentationId,
-        requestCount: batchRequests.length,
-      })
-
-      const batchRes = await fetchWithRetry(
-        `https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ requests: batchRequests }),
-        }
-      )
-
-      if (!batchRes.ok) {
-        const errData = await batchRes.json()
-        logger.error('Master batch update failed', {
-          presentationId,
-          status: batchRes.status,
-          error: errData.error?.message,
-        })
-        throw new Error(errData.error?.message || 'Failed to apply template updates')
-      }
-    }
-
-    logger.info('Create from template completed', {
-      presentationId,
-      title: presentationName,
-      slidesCreated: slidesOrdered.length,
-    })
-
-    return {
-      success: true,
-      output: {
-        presentationId,
-        title: presentationName,
-        url: `https://docs.google.com/presentation/d/${presentationId}/edit`,
-        slidesCreated: slidesOrdered.length,
-      },
-    }
-  },
-
   outputs: {
     presentationId: { type: 'string', description: 'The new presentation ID' },
     title: { type: 'string', description: 'The presentation title' },
     url: { type: 'string', description: 'URL to open the presentation' },
     slidesCreated: { type: 'number', description: 'Number of slides created' },
   },
+}
+
+export async function executeCreateFromTemplateDirect(
+  params: CreateFromTemplateParams
+): Promise<CreateFromTemplateResponse> {
+  const accessToken = params.accessToken?.trim()
+  const presentationName = (params.presentationName ?? '').trim()
+  if (!accessToken) {
+    throw new Error('Access token is required')
+  }
+  if (!presentationName) {
+    throw new Error('Presentation name is required')
+  }
+
+  logger.info('Create from template started', {
+    presentationName,
+    schemaJsonLength:
+      typeof params.schemaJson === 'string'
+        ? params.schemaJson.length
+        : JSON.stringify(params.schemaJson).length,
+  })
+
+  const schema = parseSchema(params.schemaJson)
+  validateTemplateId(schema)
+
+  logger.info('Schema validated', {
+    templateId: schema.id,
+    templateVersion: schema.templateVersion,
+    slideCount: schema.slides.length,
+  })
+
+  // 1. Duplicate Presentation
+  const presentationId = await duplicatePresentation(accessToken, schema.id, presentationName)
+
+  // Keep track of the original template slides so we can delete them at the end
+  const originalSlidesToDelete = (await getPresentationSlides(accessToken, presentationId)).map(
+    (s) => s.objectId
+  )
+
+  logger.info('Original slides to delete after content fill', {
+    presentationId,
+    originalSlideCount: originalSlidesToDelete.length,
+  })
+
+  const templatePresRes = await fetchWithRetry(
+    `https://slides.googleapis.com/v1/presentations/${schema.id}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  )
+  const templatePresData = await templatePresRes.json()
+  if (!templatePresRes.ok) {
+    throw new Error(
+      templatePresData.error?.message || 'Failed to read template presentation for tables'
+    )
+  }
+
+  const slidesOrdered = expandSlidesForTableOverflow([...schema.slides], templatePresData)
+  if (slidesOrdered.length > schema.slides.length) {
+    logger.info('Expanded slides for table overflow', {
+      originalSlideCount: schema.slides.length,
+      expandedSlideCount: slidesOrdered.length,
+    })
+  }
+
+  const slideIndexToShapeMap: Record<string, string>[] = []
+
+  // 2. Duplicate Slides & Reorder (Batch)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const duplicateRequests: any[] = []
+
+  for (let i = 0; i < slidesOrdered.length; i++) {
+    const slideSchema = slidesOrdered[i]
+    const templateSlideId = (slideSchema as SlideLike).templateSlideObjectId
+    const blocks = (slideSchema as SlideLike).blocks || []
+
+    const objectIds: Record<string, string> = {}
+    const newSlideId = generateObjectId()
+
+    objectIds[templateSlideId] = newSlideId
+
+    for (const b of blocks) {
+      if (b.shapeId) {
+        objectIds[b.shapeId] = generateObjectId()
+      }
+    }
+
+    duplicateRequests.push({
+      duplicateObject: {
+        objectId: templateSlideId,
+        objectIds,
+      },
+    })
+
+    duplicateRequests.push({
+      updateSlidesPosition: {
+        slideObjectIds: [newSlideId],
+        insertionIndex: originalSlidesToDelete.length + i + 1,
+      },
+    })
+
+    slideIndexToShapeMap.push(objectIds)
+  }
+
+  logger.info('Executing batch slide duplication', { requestCount: duplicateRequests.length })
+
+  if (duplicateRequests.length > 0) {
+    const duplicateBatchRes = await fetchWithRetry(
+      `https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requests: duplicateRequests }),
+      }
+    )
+
+    if (!duplicateBatchRes.ok) {
+      const errData = await duplicateBatchRes.json()
+      logger.error('Batch slide duplication failed', {
+        presentationId,
+        status: duplicateBatchRes.status,
+        error: errData.error?.message,
+      })
+      throw new Error(errData.error?.message || 'Failed to duplicate template slides')
+    }
+  }
+
+  logger.info('Fetching presentation state to build list maps', { presentationId })
+
+  // 3. Fetch presentation ONCE to get text endIndexes AND shape geometry
+  const presRes = await fetchWithRetry(
+    `https://slides.googleapis.com/v1/presentations/${presentationId}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  )
+  const presData = await presRes.json()
+  if (!presRes.ok) {
+    throw new Error(presData.error?.message || 'Failed to read presentation state for mapping')
+  }
+  const textEndIndexMap = buildTextEndIndexMap(presData)
+  const tableCellTextEndIndexMap = buildTableCellTextEndIndexMap(presData)
+
+  // Build shape geometry map for image size restoration
+  const shapeGeometryMap: Record<string, { size: any; transform: any }> = {}
+  for (const slide of presData.slides || []) {
+    for (const el of slide.pageElements || []) {
+      if (el.size && el.transform) {
+        shapeGeometryMap[el.objectId] = {
+          size: el.size,
+          transform: el.transform,
+        }
+      }
+    }
+  }
+
+  logger.info('Preparing batch content replacements', {
+    presentationId,
+    slideCount: slidesOrdered.length,
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const batchRequests: any[] = []
+
+  // Collect pending image checks: { objectId, imageUrl, source }
+  const imageCheckQueue: {
+    objectId: string
+    imageUrl: string
+    source?: BlockLike['source']
+  }[] = []
+
+  for (let s = 0; s < slidesOrdered.length; s++) {
+    const slideSchema = slidesOrdered[s] as SlideLike
+    const shapeMap = slideIndexToShapeMap[s] ?? {}
+    const blocks = slideSchema.blocks || []
+
+    for (const block of blocks) {
+      const objectId = shapeMap[block.shapeId] ?? block.shapeId
+      if (!objectId) continue
+
+      const isList = block.type === 'TEXT' && (block as BlockLike).role === 'LIST'
+      const content = block.content
+
+      if (block.type === 'TEXT' && !isList) {
+        const text = typeof content === 'string' ? content : ''
+        if (text) {
+          batchRequests.push({ deleteText: { objectId, textRange: { type: 'ALL' } } })
+          batchRequests.push({ insertText: { objectId, insertionIndex: 0, text } })
+        }
+      } else if (block.type === 'TABLE') {
+        const tableObjectId = objectId
+        const maxRows = block.maxRows ?? 0
+        const maxColumns = block.maxColumns ?? 0
+        if (!maxRows || !maxColumns) {
+          logger.warn('Skipping table block with missing maxRows/maxColumns', {
+            shapeId: block.shapeId,
+          })
+          continue
+        }
+
+        const dimensions = findTableDimensions(presData, tableObjectId)
+        if (!dimensions) {
+          logger.warn('Table element not found after duplication', {
+            tableObjectId,
+            shapeId: block.shapeId,
+          })
+          continue
+        }
+
+        const layout = findTableColumnLayout(presData, tableObjectId)
+
+        const tableContent: string[][] =
+          Array.isArray(content) && Array.isArray(content[0]) ? (content as string[][]) : []
+        if (tableContent.length === 0) {
+          logger.info('Skipping empty table content; leaving template placeholders', {
+            tableObjectId,
+            shapeId: block.shapeId,
+          })
+          continue
+        }
+
+        batchRequests.push(
+          ...buildTableContentRequests({
+            tableObjectId,
+            content: tableContent,
+            templateRows: dimensions.rows,
+            templateColumns: dimensions.columns,
+            maxRows: block.maxRows,
+            maxColumns: block.maxColumns,
+            minRows: block.minRows,
+            minColumns: block.minColumns,
+            cellTextEndIndexMap: tableCellTextEndIndexMap,
+            layout: layout ?? undefined,
+          })
+        )
+      } else if (block.type === 'IMAGE' && content) {
+        const imageUrl = typeof content === 'string' ? content : ''
+        if (imageUrl) {
+          imageCheckQueue.push({ objectId, imageUrl, source: block.source })
+        }
+      } else if (isList && Array.isArray(content) && content.length > 0) {
+        const listText = content.join('\n')
+        const endIndex = textEndIndexMap[objectId] || 1
+
+        batchRequests.push({
+          deleteText: {
+            objectId,
+            textRange: { type: 'FIXED_RANGE', startIndex: 0, endIndex: endIndex - 1 },
+          },
+        })
+        batchRequests.push({ insertText: { objectId, insertionIndex: 0, text: listText } })
+      }
+    }
+  }
+
+  // Run all image URL checks in parallel, then add only passing ones to the batch
+  if (imageCheckQueue.length > 0) {
+    logger.info('Running image URL pre-flight checks', { count: imageCheckQueue.length })
+
+    const checkResults = await Promise.all(
+      imageCheckQueue.map(async ({ objectId, imageUrl, source }) => {
+        // Sim-internal URLs: resolve to a presigned S3 URL via internal endpoint
+        if (isSimInternalImageUrl(imageUrl)) {
+          const presignedUrl = await resolveSimImageToPresignedUrl(imageUrl)
+          return { objectId, imageUrl: presignedUrl, accessible: presignedUrl !== null }
+        }
+
+        const resolvedUrl = await resolveAccessibleImageUrl(imageUrl, source)
+        return {
+          objectId,
+          imageUrl: resolvedUrl,
+          accessible: resolvedUrl !== null,
+        }
+      })
+    )
+
+    for (const { objectId, imageUrl, accessible } of checkResults) {
+      if (accessible && imageUrl) {
+        // Replace the image content
+        batchRequests.push({
+          replaceImage: {
+            imageObjectId: objectId,
+            url: imageUrl,
+            imageReplaceMethod: 'CENTER_CROP',
+          },
+        })
+
+        // Reset crop properties so the new image is shown in full
+        batchRequests.push({
+          updateImageProperties: {
+            objectId,
+            imageProperties: {
+              cropProperties: {},
+            },
+            fields: 'cropProperties',
+          },
+        })
+
+        // Restore the original shape's size and position so the element
+        // doesn't shrink/expand after the image swap
+        const geo = shapeGeometryMap[objectId]
+        if (geo) {
+          batchRequests.push({
+            updatePageElementTransform: {
+              objectId,
+              transform: {
+                ...geo.transform,
+                unit: 'EMU',
+              },
+              applyMode: 'ABSOLUTE',
+            },
+          })
+        } else {
+          logger.warn('No geometry found for image shape — size may not be preserved', {
+            objectId,
+          })
+        }
+      } else {
+        logger.warn('Skipping image replacement — URL not accessible', { objectId, imageUrl })
+      }
+    }
+  }
+
+  // 5. Append original slide deletions to the same batch payload
+  for (const objectId of originalSlidesToDelete) {
+    batchRequests.push({ deleteObject: { objectId } })
+  }
+
+  // 6. Execute ALL content replacements and deletions in ONE network call
+  if (batchRequests.length > 0) {
+    logger.info('Executing master batch update', {
+      presentationId,
+      requestCount: batchRequests.length,
+    })
+
+    const batchRes = await fetchWithRetry(
+      `https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requests: batchRequests }),
+      }
+    )
+
+    if (!batchRes.ok) {
+      const errData = await batchRes.json()
+      logger.error('Master batch update failed', {
+        presentationId,
+        status: batchRes.status,
+        error: errData.error?.message,
+      })
+      throw new Error(errData.error?.message || 'Failed to apply template updates')
+    }
+  }
+
+  logger.info('Create from template completed', {
+    presentationId,
+    title: presentationName,
+    slidesCreated: slidesOrdered.length,
+  })
+
+  return {
+    success: true,
+    output: {
+      presentationId,
+      title: presentationName,
+      url: `https://docs.google.com/presentation/d/${presentationId}/edit`,
+      slidesCreated: slidesOrdered.length,
+    },
+  }
 }

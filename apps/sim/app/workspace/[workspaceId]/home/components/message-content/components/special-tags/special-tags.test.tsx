@@ -2,12 +2,29 @@
  * @vitest-environment jsdom
  * @vitest-environment-options { "url": "https://sim.test/workspace/workspace-1/chat/chat-1" }
  */
-import { act } from 'react'
+
+import { act, type ReactNode } from 'react'
+import { authClientMock, authClientMockFns } from '@sim/testing/mocks/auth-client.mock'
+import {
+  createMockDeploymentShape,
+  deploymentShapeMock,
+  deploymentShapeMockFns,
+} from '@sim/testing/mocks/deployment-shape.mock'
+import { nextNavigationMock, nextNavigationMockFns } from '@sim/testing/mocks/next-navigation.mock'
+import {
+  organizationProviderMock,
+  organizationProviderMockFns,
+} from '@sim/testing/mocks/organization-provider.mock'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot, type Root } from 'react-dom/client'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/hooks/queries/workspace-usage', () => ({
+  useWorkspaceUsageGate: () => ({ isSuccess: false, data: undefined }),
+}))
 
 const {
-  mockParams,
+  mockCredentialHost,
   mockRefetchPersonalEnvironment,
   mockRefetchWorkspaceCredentials,
   mockIsBrowserAgentAvailable,
@@ -19,7 +36,7 @@ const {
   mockUseWorkspaceCredential,
   mockUseWorkspaceCredentials,
 } = vi.hoisted(() => ({
-  mockParams: vi.fn(() => ({ workspaceId: 'workspace-1' })),
+  mockCredentialHost: vi.fn(({ children }: { children: ReactNode }) => children),
   mockUpdateWorkspaceCredential: vi.fn(async () => undefined),
   mockRefetchPersonalEnvironment: vi.fn(async () => ({ data: {} })),
   mockRefetchWorkspaceCredentials: vi.fn(async () => ({ data: [] })),
@@ -32,17 +49,26 @@ const {
   mockUseWorkspaceCredentials: vi.fn(),
 }))
 
+vi.mock('@/app/workspace/[workspaceId]/home/components/resource-workspace-host', () => ({
+  ResourceWorkspaceHost: mockCredentialHost,
+}))
+
+vi.mock('@/app/o/[organizationId]/providers/organization-provider', () => organizationProviderMock)
+vi.mock('@/app/workspace/[workspaceId]/providers/workspace-host-provider', () => ({
+  useOptionalWorkspaceHostContext: () => null,
+}))
+vi.mock('@/lib/core/config/deployment-shape', () => deploymentShapeMock)
+vi.mock('@/hooks/use-settings-navigation', () => ({
+  useSettingsNavigation: () => ({ getSettingsHref: () => '/unexpected-workspace-settings' }),
+}))
+
 vi.mock('@/app/workspace/[workspaceId]/providers/workspace-permissions-provider', () => ({
   useUserPermissionsContext: mockUseUserPermissionsContext,
 }))
 
-vi.mock('next/navigation', () => ({
-  useParams: mockParams,
-}))
+vi.mock('next/navigation', () => nextNavigationMock)
 
-vi.mock('@/lib/auth/auth-client', () => ({
-  useSession: () => ({ data: { user: { id: 'person' } } }),
-}))
+vi.mock('@/lib/auth/auth-client', () => authClientMock)
 vi.mock('@/app/workspace/[workspaceId]/home/components/chat-surface-context', () => ({
   useChatSurface: () => ({
     SearchConnectionComponent: ({ onConnected }: { onConnected?: () => void }) => (
@@ -80,21 +106,38 @@ vi.mock('@/lib/browser-agent/transport', () => ({
 }))
 
 import { toast } from '@sim/emcn'
+import type { GenericSecretSource } from '@/lib/api/contracts/organization-secrets'
 import {
   createOAuthChatAttempt,
   setOAuthChatAttemptStatus,
 } from '@/lib/credentials/oauth-chat-attempt'
-import type { CredentialItemData } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/special-tags'
 import {
-  parseSpecialTags,
-  SpecialTags,
-} from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/special-tags'
+  captureRevealedSimKeys,
+  type RevealedSimKeysByMessage,
+  redactSensitiveContent,
+  restoreRevealedSimKeysForMessage,
+} from '@/lib/mothership/chat/sim-key-redaction'
+import type { CredentialItemData } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/special-tags'
+import { SpecialTags } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/special-tags'
+import { organizationSecretKeys } from '@/hooks/queries/organization-secrets'
+
+const mockOrganizationContext = organizationProviderMockFns.mockUseOptionalOrganizationContext
+const mockSession = authClientMockFns.mockUseSession
+deploymentShapeMockFns.mockUseDeploymentShape.mockReturnValue(
+  createMockDeploymentShape({ hosted: true })
+)
+
+const mockParams = nextNavigationMockFns.mockUseParams
+mockParams.mockReturnValue({ workspaceId: 'workspace-1' })
 
 /**
  * Minimal dependency-free render harness (the repo has no `@testing-library/react`). Mounts the
  * component in a real React 19 root under jsdom, matching the pattern in `use-autosave.test.tsx`.
  */
-function renderCredentialLink(data: CredentialItemData | CredentialItemData[]): {
+function renderCredentialLink(
+  data: CredentialItemData | CredentialItemData[],
+  onOptionSelect?: (message: string) => void
+): {
   container: HTMLDivElement
   root: Root
 } {
@@ -103,7 +146,10 @@ function renderCredentialLink(data: CredentialItemData | CredentialItemData[]): 
   const root: Root = createRoot(container)
   act(() => {
     root.render(
-      <SpecialTags segment={{ type: 'credential', data: Array.isArray(data) ? data : [data] }} />
+      <SpecialTags
+        segment={{ type: 'credential', data: Array.isArray(data) ? data : [data] }}
+        onOptionSelect={onOptionSelect}
+      />
     )
   })
   return { container, root }
@@ -112,8 +158,10 @@ function renderCredentialLink(data: CredentialItemData | CredentialItemData[]): 
 describe('CredentialDisplay link tag', () => {
   beforeEach(() => {
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-    vi.clearAllMocks()
     mockParams.mockReturnValue({ workspaceId: 'workspace-1' })
+    mockOrganizationContext.mockReturnValue(null)
+    mockSession.mockReturnValue({ data: { user: { id: 'person' } } })
+    mockCredentialHost.mockImplementation(({ children }: { children: ReactNode }) => children)
     window.localStorage.clear()
     window.history.replaceState({}, '', '/workspace/workspace-1/chat/chat-1')
     mockUseUserPermissionsContext.mockReturnValue({ canEdit: true })
@@ -126,85 +174,290 @@ describe('CredentialDisplay link tag', () => {
     mockIsBrowserAgentAvailable.mockReturnValue(false)
   })
 
-  it('keeps organization Search connection completion behind Submit', async () => {
-    mockParams.mockReturnValue({ organizationId: 'org' } as never)
-    const container = document.createElement('div')
-    const root = createRoot(container)
-    const onContinue = vi.fn()
-    act(() =>
-      root.render(
-        <SpecialTags
-          segment={{
-            type: 'credential',
-            data: [{ type: 'link', provider: 'google-email', connectorType: 'gmail' }],
-          }}
-          requestMode='assistant'
-          interactionId='org-card'
-          onOptionSelect={onContinue}
-        />
+  describe('organization Generic Secrets', () => {
+    const secret: CredentialItemData = {
+      type: 'secret_input',
+      name: 'SERVICE_API_KEY',
+      scope: 'organization',
+    }
+    let queryClient: QueryClient
+    let root: Root
+    let container: HTMLDivElement
+    let onContinue: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      mockParams.mockReturnValue({ organizationId: 'org' } as never)
+      mockOrganizationContext.mockReturnValue({
+        organization: { id: 'org', name: 'Example' },
+        viewer: { isAdmin: true },
+      } as never)
+      mockUseUserPermissionsContext.mockReturnValue({ canEdit: false })
+      queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      container = document.createElement('div')
+      document.body.appendChild(container)
+      root = createRoot(container)
+      onContinue = vi.fn()
+      vi.spyOn(toast, 'error').mockImplementation(() => 'toast-id')
+      vi.spyOn(toast, 'success').mockImplementation(() => 'toast-id')
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }))
       )
-    )
-    const connect = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Test Search connection'
-    )
-    act(() => connect?.click())
-    expect(onContinue).not.toHaveBeenCalled()
-    const submit = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
-    )
-    expect(submit).toBeDefined()
-    await act(async () => submit?.click())
-    expect(onContinue).toHaveBeenCalledOnce()
-    expect(onContinue.mock.calls[0][0]).toContain('connected')
-    act(() => root.unmount())
-  })
-  it('renders browser takeover through the shared question UI', () => {
-    mockIsBrowserAgentAvailable.mockReturnValue(true)
-    const { container, root } = renderCredentialLink({
-      type: 'browser_takeover',
-      name: 'Please pick a match in the draw and click into it.',
     })
 
-    expect(container.textContent).toContain('Please pick a match in the draw and click into it.')
-    expect(container.textContent).toContain('Continue')
-    expect(container.querySelector('input')?.placeholder).toBe('Something else')
-    expect(container.querySelector('[aria-label="Dismiss"]')).toBeNull()
+    afterEach(() => {
+      act(() => root.unmount())
+      queryClient.clear()
+      container.remove()
+    })
 
-    const continueButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Continue'
-    )
-    act(() => continueButton?.click())
+    function render(
+      data: CredentialItemData[] = [secret],
+      mode: 'agent' | 'assistant' | 'plan' = 'plan'
+    ) {
+      act(() =>
+        root.render(
+          <QueryClientProvider client={queryClient}>
+            <SpecialTags
+              segment={{ type: 'credential', data }}
+              requestMode={mode}
+              onOptionSelect={onContinue}
+            />
+          </QueryClientProvider>
+        )
+      )
+    }
 
-    expect(mockSendBrowserPanelAction).toHaveBeenCalledWith(
-      'takeover-done',
-      {},
-      'pending:workspace-1'
+    function setSource(source: GenericSecretSource | null) {
+      queryClient.setQueryData(organizationSecretKeys.source('org'), { source })
+    }
+
+    function enter(name = 'SERVICE_API_KEY', value = 'typed-only-into-form') {
+      const input = container.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!
+      expect(input).not.toBeNull()
+      act(() => input.focus())
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(
+          input,
+          value
+        )
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+
+    async function submit() {
+      await act(async () => {
+        Array.from(container.querySelectorAll('button'))
+          .find((button) => button.textContent === 'Submit')
+          ?.click()
+      })
+    }
+
+    it.each(['member', 'missing'] as const)(
+      'blocks shared setup for %s access without falling back to workspace secrets',
+      (access) => {
+        setSource(access === 'missing' ? null : { id: 'source', mode: 'organization' })
+        mockOrganizationContext.mockReturnValue({
+          organization: { id: 'org', name: 'Example' },
+          viewer: { isAdmin: false },
+        } as never)
+        render()
+        expect(container.textContent).toContain('Ask an organization admin')
+        expect(container.querySelector('input')).toBeNull()
+        expect(fetch).not.toHaveBeenCalled()
+        expect(mockUpsertWorkspaceEnvironment).not.toHaveBeenCalled()
+      }
     )
-    act(() => root.unmount())
+
+    it('clears every draft when the authenticated user changes', () => {
+      setSource({ id: 'source', mode: 'member' })
+      const data: CredentialItemData[] = [
+        secret,
+        { type: 'secret_input', name: 'PERSONAL_KEY', scope: 'personal' },
+      ]
+      render(data)
+      enter()
+      enter('PERSONAL_KEY', 'personal-only')
+      mockSession.mockReturnValue({ data: { user: { id: 'another-person' } } })
+      render(data)
+      expect(
+        container.querySelector<HTMLInputElement>('input[aria-label="SERVICE_API_KEY"]')?.value
+      ).toBe('')
+      expect(
+        container.querySelector<HTMLInputElement>('input[aria-label="PERSONAL_KEY"]')?.value
+      ).toBe('')
+    })
+
+    it('never renders organization inputs in Search mode or a workspace conversation', () => {
+      setSource({ id: 'source', mode: 'organization' })
+      render([secret], 'assistant')
+      expect(container.querySelector('input')).toBeNull()
+      mockParams.mockReturnValue({ workspaceId: 'workspace-1' })
+      render()
+      expect(container.textContent).toContain('require an organization conversation')
+      expect(container.querySelector('input')).toBeNull()
+      expect(fetch).not.toHaveBeenCalled()
+    })
+
+    it.each([403, 409])(
+      'does not claim success or fall back after a %s refusal',
+      async (status) => {
+        setSource({ id: 'source', mode: 'member' })
+        vi.mocked(fetch).mockResolvedValueOnce(
+          new Response(JSON.stringify({ error: 'Access or configuration changed' }), { status })
+        )
+        if (status === 409)
+          vi.mocked(fetch).mockResolvedValueOnce(
+            new Response(JSON.stringify({ source: { id: 'new-source', mode: 'organization' } }), {
+              status: 200,
+            })
+          )
+        render()
+        enter()
+        await submit()
+        expect(onContinue).not.toHaveBeenCalled()
+        expect(mockUpsertWorkspaceEnvironment).not.toHaveBeenCalled()
+        expect(mockSavePersonalEnvironment).not.toHaveBeenCalled()
+        const patches = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PATCH')
+        expect(patches).toHaveLength(1)
+        expect(JSON.parse(String(patches[0][1]?.body))).toMatchObject({
+          sourceId: 'source',
+          mode: 'member',
+        })
+        if (status === 409) expect(container.querySelector('input')?.value).toBe('')
+      }
+    )
   })
 
-  it('returns a custom takeover instruction to the browser agent', () => {
-    mockIsBrowserAgentAvailable.mockReturnValue(true)
-    const { container, root } = renderCredentialLink({
-      type: 'browser_takeover',
-      name: 'Please pick a match in the draw.',
-    })
-    const input = container.querySelector('input')
-    const submit = container.querySelector<HTMLButtonElement>('button[aria-label="Submit answer"]')
-
+  it('saves an organization credential into its explicit authorized workspace', async () => {
+    mockParams.mockReturnValue({ organizationId: 'org' } as never)
+    const { container, root } = renderCredentialLink(
+      { type: 'secret_input', name: 'TOKEN', workspaceId: 'target-workspace' },
+      vi.fn()
+    )
+    expect(mockCredentialHost).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: 'target-workspace', organizationId: 'org' }),
+      undefined
+    )
+    const input = container.querySelector('input')!
     act(() => {
-      if (!input) return
-      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-      valueSetter?.call(input, 'Open the second match')
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(
+        input,
+        'test-token'
+      )
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    act(() => submit?.click())
-
-    expect(mockSendBrowserPanelAction).toHaveBeenCalledWith(
-      'takeover-done',
-      { takeoverResponse: 'Open the second match' },
-      'pending:workspace-1'
+    await act(async () =>
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Submit')
+        ?.click()
     )
+    expect(mockUpsertWorkspaceEnvironment).toHaveBeenCalledWith({
+      workspaceId: 'target-workspace',
+      variables: { TOKEN: 'test-token' },
+    })
+    act(() => root.unmount())
+  })
+
+  it.each(
+    (
+      [
+        [{ type: 'secret_input', name: 'TOKEN' }],
+        [
+          { type: 'secret_input', name: 'A', workspaceId: 'workspace-a' },
+          { type: 'secret_input', name: 'B', workspaceId: 'workspace-b' },
+        ],
+        [
+          {
+            type: 'link',
+            provider: 'slack',
+            workspaceId: 'workspace-a',
+            value: 'https://sim.test/api/auth/oauth2/authorize?workspaceId=workspace-b',
+          },
+        ],
+      ] satisfies CredentialItemData[][]
+    ).map((data) => ({ data }))
+  )('does not mount unscoped or conflicting organization controls: %j', ({ data }) => {
+    mockParams.mockReturnValue({ organizationId: 'org', workspaceId: 'stale-workspace' } as never)
+    const { container, root } = renderCredentialLink(data)
+    expect(container.textContent).toContain('one explicit workspace target')
+    expect(container.querySelector('input')).toBeNull()
+    expect(mockCredentialHost).not.toHaveBeenCalled()
+    expect(mockUpsertWorkspaceEnvironment).not.toHaveBeenCalled()
+    act(() => root.unmount())
+  })
+
+  it('reveals a created key in organization chat after the live fill and after persistence', async () => {
+    mockParams.mockReturnValue({ organizationId: 'org' } as never)
+    const tag = (item: Record<string, string>) => `<credential>${JSON.stringify(item)}</credential>`
+    const tagData = (content: string) =>
+      JSON.parse(
+        content.slice('<credential>'.length, -'</credential>'.length)
+      ) as CredentialItemData
+    const cache: RevealedSimKeysByMessage = new Map()
+    captureRevealedSimKeys(cache, ['msg-1'], tag({ type: 'sim_key' }), [
+      {
+        toolCall: {
+          name: 'generate_api_key',
+          result: { success: true, output: { key: 'sk-sim-live', workspaceId: 'ws-1' } },
+        },
+      },
+    ])
+    const live = restoreRevealedSimKeysForMessage(
+      { id: 'msg-1', role: 'assistant', content: tag({ type: 'sim_key' }) },
+      cache
+    ).content
+
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const copyButton = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === 'Copy to clipboard'
+      )
+
+    const liveView = renderCredentialLink(tagData(live))
+    await act(async () => copyButton(liveView.container)?.click())
+    expect(writeText).toHaveBeenCalledWith('sk-sim-live')
+    act(() => liveView.root.unmount())
+
+    const persisted = redactSensitiveContent(
+      tag({ type: 'sim_key', workspaceId: 'ws-1', value: 'sk-sim-live' })
+    )
+    const persistedView = renderCredentialLink(tagData(persisted))
+    expect(persistedView.container.querySelector('code')).not.toBeNull()
+    expect(copyButton(persistedView.container)).toBeUndefined()
+    expect(persistedView.container.textContent).not.toContain('sk-sim-live')
+    act(() => persistedView.root.unmount())
+  })
+
+  it('renders a saved key masked in workspace chat even when its tag names another workspace', () => {
+    const persisted = redactSensitiveContent(
+      `<credential>${JSON.stringify({ type: 'sim_key', workspaceId: 'other-workspace', value: 'sk-sim-saved' })}</credential>`
+    )
+    const { container, root } = renderCredentialLink(
+      JSON.parse(
+        persisted.slice('<credential>'.length, -'</credential>'.length)
+      ) as CredentialItemData
+    )
+    expect(container.querySelector('[role="status"]')).toBeNull()
+    expect(container.querySelector('code')).not.toBeNull()
+    expect(container.querySelector('button')).toBeNull()
+    act(() => root.unmount())
+  })
+
+  it('does not mount credential inputs when the target host denies access', () => {
+    mockParams.mockReturnValue({ organizationId: 'org' } as never)
+    mockCredentialHost.mockReturnValue(null)
+    const { container, root } = renderCredentialLink({
+      type: 'secret_input',
+      name: 'TOKEN',
+      workspaceId: 'revoked-workspace',
+    })
+    expect(container.querySelector('input')).toBeNull()
+    expect(mockUpsertWorkspaceEnvironment).not.toHaveBeenCalled()
+    expect(mockUseWorkspaceCredentials).not.toHaveBeenCalled()
     act(() => root.unmount())
   })
 
@@ -276,9 +529,18 @@ describe('CredentialDisplay link tag', () => {
     })
 
     const submitButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
+      (button) => button.textContent === 'Continue'
     )
     expect(submitButton?.disabled).toBe(false)
+    mockRefetchWorkspaceCredentials.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'cred-gmail',
+          providerId: 'google-email',
+          updatedAt: '2026-10-23T00:00:00.000Z',
+        },
+      ],
+    })
     act(() => {
       setOAuthChatAttemptStatus(attempt.id, 'connected')
     })
@@ -291,6 +553,52 @@ describe('CredentialDisplay link tag', () => {
     )
     expect(container.textContent).toContain('Gmail')
     expect(container.textContent).toContain('Connected')
+    act(() => root.unmount())
+  })
+
+  it('reports each requested provider from the refetched credential list', async () => {
+    mockRefetchWorkspaceCredentials.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'cred-gmail',
+          providerId: 'google-email',
+          updatedAt: '2026-10-23T00:00:00.000Z',
+        },
+      ],
+    })
+    const container = document.createElement('div')
+    const root: Root = createRoot(container)
+    const onOptionSelect = vi.fn()
+    const data: CredentialItemData[] = [
+      {
+        type: 'link',
+        provider: 'google-email',
+        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
+      },
+      {
+        type: 'link',
+        provider: 'google-calendar',
+        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-calendar',
+      },
+    ]
+
+    act(() => {
+      root.render(
+        <SpecialTags segment={{ type: 'credential', data }} onOptionSelect={onOptionSelect} />
+      )
+    })
+
+    const continueButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Continue'
+    )
+    expect(container.textContent).toContain('Connect these, then continue.')
+    await act(async () => {
+      continueButton?.click()
+    })
+
+    expect(onOptionSelect).toHaveBeenCalledWith(
+      'Credential setup submitted — {"integrations":[{"name":"google-email","status":"connected"},{"name":"google-calendar","status":"skipped"}],"secrets":[]}'
+    )
     act(() => root.unmount())
   })
 
@@ -1050,110 +1358,6 @@ describe('CredentialDisplay link tag', () => {
     act(() => root.unmount())
   })
 
-  it('labels a reconnect URL with the credential display name', () => {
-    mockUseWorkspaceCredential.mockReturnValue({
-      data: { id: 'cred-1', displayName: "Justin's Gmail" },
-    })
-    const { container, root } = renderCredentialLink({
-      type: 'link',
-      provider: 'google-email',
-      value:
-        'https://sim.test/api/auth/oauth2/authorize?providerId=google-email&workspaceId=ws-1&credentialId=cred-1',
-    })
-
-    expect(mockUseWorkspaceCredential).toHaveBeenCalledWith('cred-1')
-    expect(container.textContent).toContain("Reconnect Justin's Gmail")
-    act(() => root.unmount())
-  })
-
-  it('falls back to the integration name while the reconnect credential is unresolved', () => {
-    const { container, root } = renderCredentialLink({
-      type: 'link',
-      provider: 'google-email',
-      value:
-        'https://sim.test/api/auth/oauth2/authorize?providerId=google-email&workspaceId=ws-1&credentialId=cred-1',
-    })
-
-    expect(container.textContent).toContain('Reconnect Gmail')
-    act(() => root.unmount())
-  })
-
-  it('renders integrations and secrets in one card and saves secrets on Submit', async () => {
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const onOptionSelect = vi.fn()
-    const data: CredentialItemData[] = [
-      {
-        type: 'secret_input',
-        name: 'OPENAI_API_KEY',
-      },
-      {
-        type: 'link',
-        provider: 'google-email',
-        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
-      },
-    ]
-    const attempt = createOAuthChatAttempt({
-      workspaceId: 'workspace-1',
-      providerId: 'google-email',
-      baseProviderId: 'google',
-      displayName: 'Gmail',
-      controlId: 'credential-card:0',
-      baselineCredentialIds: [],
-    })
-    window.history.replaceState({}, '', `?oauthAttempt=${attempt.id}`)
-
-    act(() => {
-      root.render(
-        <SpecialTags segment={{ type: 'credential', data }} onOptionSelect={onOptionSelect} />
-      )
-    })
-
-    expect(container.textContent).toContain('Set up credentials')
-    expect(container.textContent).not.toContain('1 of 2')
-    expect(container.querySelectorAll('a')).toHaveLength(1)
-    const secretInput = container.querySelector('input')
-    expect(secretInput?.getAttribute('placeholder')).toBe('Paste OPENAI_API_KEY')
-    expect(secretInput?.className).toContain('border-0 bg-transparent p-0')
-    expect(secretInput?.parentElement?.className).toContain('px-2 py-2')
-    expect(secretInput?.parentElement?.className).not.toContain('rounded')
-    expect(container.querySelector('svg rect')).toBeNull()
-    expect(container.querySelector('button[aria-label="Save"]')).toBeNull()
-
-    act(() => secretInput?.focus())
-    act(() => {
-      if (!secretInput) return
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      )?.set
-      valueSetter?.call(secretInput, 'sk-test-key')
-      secretInput.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-
-    const submitButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
-    )
-    expect(submitButton?.disabled).toBe(false)
-    expect(submitButton?.querySelector('div')).toBeNull()
-    await act(async () => {
-      submitButton?.click()
-    })
-
-    expect(mockUpsertWorkspaceEnvironment).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1',
-      variables: { OPENAI_API_KEY: 'sk-test-key' },
-    })
-    expect(onOptionSelect).toHaveBeenCalledWith(
-      'Credential setup submitted — {"integrations":[{"name":"google-email","status":"skipped"}],"secrets":[{"name":"OPENAI_API_KEY","status":"saved"}]}'
-    )
-    expect(container.textContent).toContain('Gmail')
-    expect(container.textContent).toContain('Skipped')
-    expect(container.textContent).toContain('OPENAI_API_KEY')
-    expect(container.textContent).toContain('Added')
-    act(() => root.unmount())
-  })
-
   it('keeps canonical secret indexes when permission filtering hides a workspace row', async () => {
     mockUseUserPermissionsContext.mockReturnValue({ canEdit: false })
     const container = document.createElement('div')
@@ -1193,347 +1397,5 @@ describe('CredentialDisplay link tag', () => {
       'Credential setup submitted — {"integrations":[],"secrets":[{"name":"WORKSPACE_KEY","status":"skipped"},{"name":"PERSONAL_KEY","status":"saved"}]}'
     )
     act(() => root.unmount())
-  })
-
-  it('attaches an agent-authored description after the secret value is saved', async () => {
-    mockUseUserPermissionsContext.mockReturnValue({ canEdit: true })
-    mockRefetchWorkspaceCredentials.mockResolvedValueOnce({
-      data: [{ id: 'cred-1', envKey: 'WORKSPACE_KEY' }],
-    })
-    const container = document.createElement('div')
-    const root = createRoot(container)
-    const data: CredentialItemData[] = [
-      {
-        type: 'secret_input',
-        name: 'WORKSPACE_KEY',
-        scope: 'workspace',
-        description: '  Stripe live key for billing  ',
-      },
-    ]
-
-    act(() => {
-      root.render(<SpecialTags segment={{ type: 'credential', data }} onOptionSelect={vi.fn()} />)
-    })
-
-    const input = container.querySelector('input')
-    act(() => {
-      if (!input) return
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      )?.set
-      valueSetter?.call(input, 'sk-live-123')
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    const submitButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
-    )
-    await act(async () => submitButton?.click())
-
-    expect(mockUpsertWorkspaceEnvironment).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1',
-      variables: { WORKSPACE_KEY: 'sk-live-123' },
-    })
-    // The description rides the credential row the value save just created, so
-    // the trimmed note lands without the user ever seeing the field.
-    expect(mockUpdateWorkspaceCredential).toHaveBeenCalledWith({
-      credentialId: 'cred-1',
-      description: 'Stripe live key for billing',
-    })
-    act(() => root.unmount())
-  })
-
-  it('leaves a personal secret undescribed', async () => {
-    mockUseUserPermissionsContext.mockReturnValue({ canEdit: true })
-    const container = document.createElement('div')
-    const root = createRoot(container)
-    const data: CredentialItemData[] = [
-      { type: 'secret_input', name: 'PERSONAL_KEY', scope: 'personal', description: 'my key' },
-    ]
-
-    act(() => {
-      root.render(<SpecialTags segment={{ type: 'credential', data }} onOptionSelect={vi.fn()} />)
-    })
-
-    const input = container.querySelector('input')
-    act(() => {
-      if (!input) return
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      )?.set
-      valueSetter?.call(input, 'personal-secret')
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    const submitButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
-    )
-    await act(async () => submitButton?.click())
-
-    expect(mockSavePersonalEnvironment).toHaveBeenCalled()
-    expect(mockUpdateWorkspaceCredential).not.toHaveBeenCalled()
-    act(() => root.unmount())
-  })
-
-  it('renders one status recap from a transcript submission', () => {
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const data: CredentialItemData[] = [
-      {
-        type: 'link',
-        provider: 'google-email',
-        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
-      },
-      { type: 'secret_input', name: 'OPENAI_API_KEY' },
-    ]
-
-    act(() => {
-      root.render(
-        <SpecialTags
-          segment={{ type: 'credential', data }}
-          credentialSubmission={{
-            integrations: [{ name: 'google-email', status: 'connected' }],
-            secrets: [{ name: 'OPENAI_API_KEY', status: 'skipped' }],
-          }}
-        />
-      )
-    })
-
-    expect(container.textContent).not.toContain('Credential setup')
-    expect(container.textContent).not.toContain('Set up credentials')
-    expect(container.textContent).toContain('GmailConnected')
-    expect(container.textContent).toContain('OPENAI_API_KEYSkipped')
-    expect(container.querySelector('input')).toBeNull()
-    act(() => root.unmount())
-  })
-
-  it('recaps an abandoned card as skipped instead of leaving a live form', () => {
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const data: CredentialItemData[] = [
-      { type: 'secret_input', name: 'ABC_API_KEY' },
-      { type: 'secret_input', name: 'BED_API_KEY' },
-    ]
-
-    act(() => {
-      root.render(<SpecialTags segment={{ type: 'credential', data }} credentialAbandoned />)
-    })
-
-    expect(container.textContent).not.toContain('Add secrets')
-    expect(container.textContent).toContain('ABC_API_KEYSkipped')
-    expect(container.textContent).toContain('BED_API_KEYSkipped')
-    expect(container.querySelector('input')).toBeNull()
-    act(() => root.unmount())
-  })
-
-  it('restores a finished connect into an abandoned recap on a fresh mount', () => {
-    const attempt = createOAuthChatAttempt({
-      workspaceId: 'workspace-1',
-      providerId: 'google-email',
-      baseProviderId: 'google',
-      displayName: 'Gmail',
-      controlId: 'credential-card:0',
-      baselineCredentialIds: [],
-    })
-    setOAuthChatAttemptStatus(attempt.id, 'connected')
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const data: CredentialItemData[] = [
-      {
-        type: 'link',
-        provider: 'google-email',
-        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
-      },
-      { type: 'secret_input', name: 'ABC_API_KEY' },
-    ]
-
-    act(() => {
-      root.render(<SpecialTags segment={{ type: 'credential', data }} credentialAbandoned />)
-    })
-
-    expect(container.textContent).toContain('GmailConnected')
-    expect(container.textContent).toContain('ABC_API_KEYSkipped')
-    act(() => root.unmount())
-  })
-
-  it('renders a sim_key as a standalone reveal, not a card, even when the turn moves on', () => {
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const data: CredentialItemData[] = [{ type: 'sim_key', name: 'Sim API key', value: 'sim-key' }]
-
-    act(() => {
-      root.render(<SpecialTags segment={{ type: 'credential', data }} credentialAbandoned />)
-    })
-
-    // The generated key is an output: the reveal chip shows the value with no
-    // question-style card chrome around it and no recap when abandoned.
-    expect(container.textContent).toContain('sim-key')
-    expect(container.textContent).not.toContain('API key')
-    expect(container.textContent).not.toContain('Skipped')
-    act(() => root.unmount())
-  })
-
-  it('keeps the sim_key reveal outside a mixed card and out of its recap', () => {
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const data: CredentialItemData[] = [
-      { type: 'sim_key', name: 'Sim API key', value: 'sim-key' },
-      { type: 'secret_input', name: 'ABC_API_KEY' },
-    ]
-
-    act(() => {
-      root.render(
-        <SpecialTags
-          segment={{ type: 'credential', data }}
-          credentialSubmission={{
-            integrations: [],
-            secrets: [{ name: 'ABC_API_KEY', status: 'saved' }],
-          }}
-        />
-      )
-    })
-
-    // After Submit the input row collapses to the recap, but the generated key
-    // stays retrievable in its reveal chip and never reads as "Added".
-    expect(container.textContent).toContain('sim-key')
-    expect(container.textContent).toContain('ABC_API_KEYAdded')
-    expect(container.textContent).not.toContain('Sim API key')
-    act(() => root.unmount())
-  })
-
-  it('keeps a typed secret while a sibling row runs its OAuth connect', async () => {
-    // The card's secret drafts live in component state until its Submit, so a
-    // connect that navigates this tab away discards whatever the user already
-    // typed into a sibling row. Running the flow in a popup is what makes the
-    // mixed card safe: this tab is never unloaded, so the draft outlives the
-    // connect — including the re-render its verdict and refetch trigger.
-    const toastSuccess = vi.spyOn(toast, 'success').mockImplementation(() => '')
-    const popup = { focus: vi.fn(), closed: false }
-    const openSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(popup as unknown as ReturnType<typeof window.open>)
-    const container = document.createElement('div')
-    const root: Root = createRoot(container)
-    const onOptionSelect = vi.fn()
-    const data: CredentialItemData[] = [
-      {
-        type: 'link',
-        provider: 'google-email',
-        value:
-          'https://sim.test/api/auth/oauth2/authorize?providerId=google-email&callbackURL=https%3A%2F%2Fsim.test%2Fworkspace%2Fworkspace-1%2Fchat%2Fchat-1',
-      },
-      { type: 'secret_input', name: 'OPENAI_API_KEY' },
-    ]
-    act(() => {
-      root.render(
-        <SpecialTags segment={{ type: 'credential', data }} onOptionSelect={onOptionSelect} />
-      )
-    })
-
-    const secretInput = container.querySelector('input')
-    act(() => {
-      if (!secretInput) return
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      )?.set
-      valueSetter?.call(secretInput, 'sk-test-key')
-      secretInput.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-
-    await act(async () => {
-      container
-        .querySelector('a')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    })
-    const attemptId = new URL(
-      new URL(openSpy.mock.calls[0][0] as string).searchParams.get('callbackURL') ?? ''
-    ).searchParams.get('oauthAttempt') as string
-    await act(async () => {
-      setOAuthChatAttemptStatus(attemptId, 'connected')
-    })
-
-    // The field masks while unfocused, so assert on what the draft is actually
-    // for: submitting it. A mask of the right length is not proof it survived.
-    const submitButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Submit'
-    )
-    await act(async () => {
-      submitButton?.click()
-    })
-
-    expect(mockUpsertWorkspaceEnvironment).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1',
-      variables: { OPENAI_API_KEY: 'sk-test-key' },
-    })
-    openSpy.mockRestore()
-    toastSuccess.mockRestore()
-    act(() => root.unmount())
-  })
-})
-
-describe('parseSpecialTags sim_key placeholder', () => {
-  it('accepts a value-less {"type":"sim_key"} tag as a credential segment', () => {
-    const { segments } = parseSpecialTags('<credential>{"type":"sim_key"}</credential>', false)
-    const credential = segments.find((s) => s.type === 'credential')
-    expect(credential).toEqual({ type: 'credential', data: [{ type: 'sim_key' }] })
-  })
-
-  it('still accepts the legacy {"redacted":true} form as a value-less sim_key placeholder', () => {
-    const { segments } = parseSpecialTags(
-      '<credential>{"type":"sim_key","redacted":true}</credential>',
-      false
-    )
-    const credential = segments.find((s) => s.type === 'credential')
-    expect(credential?.type).toBe('credential')
-    if (credential?.type === 'credential') {
-      expect(credential.data[0].type).toBe('sim_key')
-      expect(credential.data[0].value).toBeUndefined()
-    }
-  })
-})
-
-describe('recoverTrailingBareOptions', () => {
-  const bareOptions =
-    '{"1": {"title": "Fix the tracker", "description": "debug"}, "2": {"title": "Inspect the miss", "description": "look"}}'
-
-  it('renders a trailing bare-JSON options payload as an options card', () => {
-    const { segments } = parseSpecialTags(`Here they are.\n${bareOptions}`, false)
-    const last = segments[segments.length - 1]
-    expect(last.type).toBe('options')
-    if (last.type === 'options') {
-      expect(last.data['1']?.title).toBe('Fix the tracker')
-    }
-    expect(segments[0]).toEqual({ type: 'text', content: 'Here they are.' })
-  })
-
-  it('never recovers mid-stream — a partial JSON tail must not flicker into a card', () => {
-    const { segments } = parseSpecialTags(`Here they are.\n${bareOptions}`, true)
-    expect(segments.every((segment) => segment.type === 'text')).toBe(true)
-  })
-
-  it('leaves ordinary JSON prose alone', () => {
-    const { segments } = parseSpecialTags('The config is {"retries": 3, "mode": "fast"}', false)
-    expect(segments.every((segment) => segment.type === 'text')).toBe(true)
-  })
-
-  it('does not double-render when a real options tag already parsed', () => {
-    const { segments } = parseSpecialTags(`Pick one <options>${bareOptions}</options>`, false)
-    expect(segments.filter((segment) => segment.type === 'options')).toHaveLength(1)
-  })
-
-  it('recovers an options payload wrapped in the singular <option> near-miss tag', () => {
-    const body =
-      '{"1": {"title": "Demo wait — sleep until an agent finishes", "description": "wait_agents demo"}, "2": {"title": "Demo steer — redirect a running agent mid-task", "description": "steer_agent demo"}, "3": {"title": "Demo stop — interrupt a running agent", "description": "interrupt_agent demo"}}'
-    const { segments } = parseSpecialTags(
-      `Next up is usually **wait**, **steer**, or **stop**.\n\n<option>${body}</option>`,
-      false
-    )
-    const last = segments[segments.length - 1]
-    expect(last.type).toBe('options')
-    if (last.type === 'options') {
-      expect(Object.keys(last.data)).toEqual(['1', '2', '3'])
-      expect(last.data['1']?.title).toBe('Demo wait — sleep until an agent finishes')
-    }
   })
 })

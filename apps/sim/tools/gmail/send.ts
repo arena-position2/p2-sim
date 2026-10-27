@@ -1,4 +1,5 @@
 import type { GmailSendParams, GmailToolResponse } from '@/tools/gmail/types'
+import { castGmailResponse } from '@/tools/gmail/utils'
 import type { InternalToolConfig } from '@/tools/types'
 
 export const gmailSendTool: InternalToolConfig<GmailSendParams, GmailToolResponse> = {
@@ -147,7 +148,7 @@ export const gmailSendV2Tool: InternalToolConfig<GmailSendParams, GmailSendV2Res
   params: gmailSendTool.params,
   operation: gmailSendTool.operation,
   transformResponse: async (response) => {
-    return await gmailSendTool.transformResponse!(response)
+    return castGmailResponse<GmailSendV2Response>(await gmailSendTool.transformResponse!(response))
   },
   outputs: {
     content: { type: 'string', description: 'Success message' },

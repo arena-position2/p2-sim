@@ -1,12 +1,3 @@
-const API_ENDPOINTS = {
-  ENVIRONMENT: '/api/environment',
-  SETTINGS: '/api/users/me/settings',
-  WORKFLOWS: '/api/workflows',
-  WORKSPACE_PERMISSIONS: (id: string) => `/api/workspaces/${id}/permissions`,
-  WORKSPACE_ENVIRONMENT: (id: string) => `/api/workspaces/${id}/environment`,
-  WORKSPACE_BYOK_KEYS: (id: string) => `/api/workspaces/${id}/byok-keys`,
-}
-
 /**
  * Layout dimension constants.
  *
@@ -29,10 +20,17 @@ export const CONTENT_WINDOW_GAP = 0
 /** Sidebar width constraints */
 export const SIDEBAR_WIDTH = {
   DEFAULT: 238,
+  /** Default and narrowest expanded rail width across every surface. */
   MIN: 238,
   /** Width when sidebar is collapsed to icon-only mode */
   COLLAPSED: 48,
-  /** Maximum is 30% of viewport, enforced dynamically */
+  /**
+   * Absolute ceiling on the expanded width. The percentage below already scales
+   * the rail with the viewport; this keeps a wide monitor from granting a rail
+   * that swallows a third of the page. `getMaxSidebarWidth` combines the two.
+   */
+  MAX: 400,
+  /** Maximum is 30% of viewport (up to `MAX`), enforced dynamically */
   MAX_PERCENTAGE: 0.3,
 } as const
 
@@ -72,7 +70,8 @@ export const MOTHERSHIP_WIDTH = {
   MAX_PERCENTAGE: 0.8,
   /**
    * Narrowest the chat column beside the panel may be laid out at — the
-   * `min-w-[240px]` class on that column in home.tsx, so the two must agree.
+   * `min-w-[min(480px,50%)]` class on that column in home.tsx yields to half
+   * the available space when the regular layout is narrow.
    *
    * The panel is what yields to it: the chat's flex-basis is 0, so the whole of
    * any negative free space is taken out of the panel. A width written past
@@ -80,7 +79,7 @@ export const MOTHERSHIP_WIDTH = {
    * still reads what was asked for, and anything deriving the divider from that
    * value follows an edge that is not on screen.
    */
-  CHAT_MIN: 240,
+  CHAT_MIN: 480,
   /**
    * Share of the viewport the panel takes while unpinned — the `w-1/2` class in
    * mothership-view. Also reported to the desktop shell so it can re-derive the

@@ -47,6 +47,9 @@ export const MAX_PROCESSING_ATTEMPTS = 5
  */
 export const QUEUED_DISPATCH_GRACE_MS = 240 * 60 * 1000
 
+/** How long after a document's upload, or a deferred retry, automatic recovery still acts on it. */
+export const RECOVERY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
 /** Worst-case wall clock for one processing run across its retry budget. */
 export function worstCaseProcessingMinutes(
   maxDurationSeconds: number,
@@ -126,19 +129,3 @@ export type DocumentSortField =
   | 'processingStatus'
   | 'enabled'
 export type SortOrder = 'asc' | 'desc'
-
-interface DocumentSortOptions {
-  sortBy?: DocumentSortField
-  sortOrder?: SortOrder
-}
-
-interface HeaderInfo {
-  /** Header text */
-  text: string
-  /** Header level (1-6) */
-  level: number
-  /** Anchor link */
-  anchor: string
-  /** Position in document */
-  position: number
-}

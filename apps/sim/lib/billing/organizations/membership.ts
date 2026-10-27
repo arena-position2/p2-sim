@@ -10,7 +10,6 @@ import {
   account,
   credential,
   invitation,
-  knowledgeBase,
   member,
   organization,
   permissionGroupMember,
@@ -19,7 +18,6 @@ import {
   user,
   userStats,
   workspace,
-  workspaceFiles,
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
@@ -38,6 +36,8 @@ import {
 } from '@/lib/billing/enterprise-outbox'
 import { acquireUserBillingIdentityLock } from '@/lib/billing/organizations/billing-identity-lock'
 import { setOrgMemberUsageLimit } from '@/lib/billing/organizations/member-limits'
+import { MEMBER_BILLING_RECONCILIATION_EVENT_TYPE } from '@/lib/billing/organizations/membership-reconciliation-event'
+import { reassignOrganizationSharedResourcesTx } from '@/lib/billing/organizations/resource-handoff'
 import { hasOrganizationSeatEntitlement, isPaid } from '@/lib/billing/plan-helpers'
 import { sqlIsPro } from '@/lib/billing/plan-helpers.sql'
 import { changeOrganizationWorkspaceBilledAccountsInTx } from '@/lib/billing/storage/payer-transfer'
@@ -47,21 +47,28 @@ import {
 } from '@/lib/billing/subscriptions/utils'
 import { toDecimal, toNumber } from '@/lib/billing/utils/decimal'
 import { validateSeatAvailability } from '@/lib/billing/validation/seat-management'
-import { OUTBOX_EVENT_TYPES } from '@/lib/billing/webhooks/outbox-handlers'
+import { OUTBOX_EVENT_TYPES } from '@/lib/billing/webhooks/outbox-events'
+import {
+  enqueueCancelAtPeriodEndSync,
+  isCancelAtPeriodEndSettled,
+} from '@/lib/billing/webhooks/subscription-sync'
 import { isBillingEnabled } from '@/lib/core/config/env-flags'
+import { OrchestrationError } from '@/lib/core/orchestration/types'
 import { enqueueOutboxEvent } from '@/lib/core/outbox/service'
 import { revokeWorkspaceCredentialMembershipsTx } from '@/lib/credentials/access'
-import type { DbOrTx } from '@/lib/db/types'
+import { acquireAdvisoryXactLock } from '@/lib/db/advisory-locks'
+import { isRetryableTransactionError } from '@/lib/db/transaction'
+import type { DbOrTx, DbTransaction } from '@/lib/db/types'
 import { acquireInvitationMutationLocks } from '@/lib/invitations/locks'
+import { requireMemberManagementAuthority } from '@/lib/organizations/members/authority'
 import {
   revokePersonalApiKeysTx,
   revokeUserSessionsTx,
 } from '@/lib/organizations/members/revocation'
+import { reassignOrganizationProjects } from '@/lib/projects/membership'
 import { removeWorkspaceSkillMembershipsTx } from '@/lib/skills/access'
-import {
-  reassignWorkflowOwnershipForWorkspaceMemberRemovalTx,
-  WorkspaceBillingAccountRemovalError,
-} from '@/lib/workspaces/utils'
+import { reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx } from '@/lib/workspaces/resource-handoff'
+import { WorkspaceBillingAccountRemovalError } from '@/lib/workspaces/utils'
 import { endDirectoryMembershipTx } from '@/ee/scim/lib/identity/end-directory-membership'
 
 export { acquireUserBillingIdentityLock } from '@/lib/billing/organizations/billing-identity-lock'
@@ -71,18 +78,18 @@ const logger = createLogger('OrganizationMembership')
 
 const ORG_MEMBERSHIP_LOCK_TIMEOUT_MS = 5_000
 
-export const MEMBER_BILLING_RECONCILIATION_EVENT_TYPE = 'billing.reconcile-member-after-org-leave'
-
 /** Serializes organization-wide owner, seat, move, and membership decisions. */
 export async function acquireOrganizationMutationLock(
-  tx: DbOrTx,
+  tx: DbTransaction,
   organizationId: string
 ): Promise<void> {
   await tx.execute(
     sql`select set_config('lock_timeout', ${`${ORG_MEMBERSHIP_LOCK_TIMEOUT_MS}ms`}, true)`
   )
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`organization-mutation:${organizationId}`}, 0))`
+  await acquireAdvisoryXactLock(
+    tx,
+    'organization_mutation',
+    `organization-mutation:${organizationId}`
   )
 }
 
@@ -99,16 +106,14 @@ export async function acquireOrganizationMutationLock(
  * the wait (it raises SQLSTATE 55P03 instead of hanging) if a holder is stuck.
  */
 export async function acquireOrgMembershipLock(
-  tx: DbOrTx,
+  tx: DbTransaction,
   userId: string,
   organizationId: string
 ): Promise<void> {
   await tx.execute(
     sql`select set_config('lock_timeout', ${`${ORG_MEMBERSHIP_LOCK_TIMEOUT_MS}ms`}, true)`
   )
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`${userId}:${organizationId}`}, 0))`
-  )
+  await acquireAdvisoryXactLock(tx, 'organization_membership', `${userId}:${organizationId}`)
 }
 
 /**
@@ -123,7 +128,7 @@ export async function acquireOrgMembershipLock(
  * transfer and refuses the insert.
  */
 export async function acquireOrganizationUserMutationLocks(
-  tx: DbOrTx,
+  tx: DbTransaction,
   params: { userId: string; organizationIds: string[] }
 ): Promise<void> {
   const organizationIds = [...new Set(params.organizationIds)].sort()
@@ -255,7 +260,17 @@ export async function restoreUserProSubscription(userId: string): Promise<Restor
       .for('update')
       .limit(1)
 
-    if (!personalPro?.cancelAtPeriodEnd || !personalPro.stripeSubscriptionId) return
+    if (!personalPro?.stripeSubscriptionId) return
+    if (
+      await isCancelAtPeriodEndSettled(
+        tx,
+        personalPro.id,
+        Boolean(personalPro.cancelAtPeriodEnd),
+        false
+      )
+    ) {
+      return
+    }
     result.subscriptionId = personalPro.id
 
     const organizationMemberships = await tx
@@ -285,9 +300,10 @@ export async function restoreUserProSubscription(userId: string): Promise<Restor
       .set({ cancelAtPeriodEnd: false })
       .where(eq(subscriptionTable.id, personalPro.id))
 
-    await enqueueOutboxEvent(tx, OUTBOX_EVENT_TYPES.STRIPE_SYNC_CANCEL_AT_PERIOD_END, {
+    await enqueueCancelAtPeriodEndSync(tx, {
       stripeSubscriptionId: personalPro.stripeSubscriptionId,
       subscriptionId: personalPro.id,
+      cancelAtPeriodEnd: false,
       reason: 'member-left-paid-org',
     })
 
@@ -400,7 +416,16 @@ export async function pauseProSubscriptionForOrgCoverage(
 
     result.subscriptionId = personalPro.id
 
-    if (personalPro.cancelAtPeriodEnd) return
+    if (
+      await isCancelAtPeriodEndSettled(
+        tx,
+        personalPro.id,
+        Boolean(personalPro.cancelAtPeriodEnd),
+        true
+      )
+    ) {
+      return
+    }
 
     await tx
       .update(subscriptionTable)
@@ -408,9 +433,10 @@ export async function pauseProSubscriptionForOrgCoverage(
       .where(eq(subscriptionTable.id, personalPro.id))
 
     if (personalPro.stripeSubscriptionId) {
-      await enqueueOutboxEvent(tx, OUTBOX_EVENT_TYPES.STRIPE_SYNC_CANCEL_AT_PERIOD_END, {
+      await enqueueCancelAtPeriodEndSync(tx, {
         stripeSubscriptionId: personalPro.stripeSubscriptionId,
         subscriptionId: personalPro.id,
+        cancelAtPeriodEnd: true,
         reason: 'covered-by-organization',
       })
     }
@@ -482,6 +508,12 @@ export interface RemoveMemberParams {
   revokePersonalApiKeys?: boolean
   /** The caller's own session token, kept alive when a member removes themselves. */
   spareSessionToken?: string
+  /** Verified session row to preserve during a self-removal. */
+  spareSessionId?: string
+  /** Acting member whose management authority is rechecked under the mutation lock. */
+  actorUserId?: string
+  /** Legacy compound callers consume failure results; application use cases propagate errors. */
+  onError?: 'return-failure' | 'throw'
   /**
    * Only remove the member when they hold no remaining permission on any of the
    * org's workspaces, evaluated atomically under the membership lock. Used by
@@ -532,41 +564,20 @@ async function reassignOwnedOrganizationResourcesTx({
   organizationId,
   workspaceIds,
 }: {
-  tx: DbOrTx
+  tx: DbTransaction
   userId: string
   organizationId: string
   workspaceIds: string[]
 }) {
-  const [ownerMembership] = await tx
-    .select({ userId: member.userId })
-    .from(member)
-    .where(and(eq(member.organizationId, organizationId), eq(member.role, 'owner')))
-    .limit(1)
+  const ownerId = await reassignOrganizationSharedResourcesTx(tx, organizationId, userId)
+  if (!ownerId) return 0
 
-  const ownerId = ownerMembership?.userId
-  if (!ownerId || ownerId === userId) return 0
-
-  /** Creator attribution must survive account deletion without changing document ACLs. */
-  await tx
-    .update(knowledgeBase)
-    .set({ userId: ownerId, updatedAt: new Date() })
-    .where(
-      and(
-        eq(knowledgeBase.organizationId, organizationId),
-        isNull(knowledgeBase.workspaceId),
-        eq(knowledgeBase.userId, userId)
-      )
-    )
-  await tx
-    .update(workspaceFiles)
-    .set({ userId: ownerId, updatedAt: new Date() })
-    .where(
-      and(
-        eq(workspaceFiles.organizationId, organizationId),
-        isNull(workspaceFiles.workspaceId),
-        eq(workspaceFiles.userId, userId)
-      )
-    )
+  await reassignOrganizationProjects(tx, {
+    organizationId,
+    fromUserId: userId,
+    toUserId: ownerId,
+    workspaceIds,
+  })
 
   if (workspaceIds.length === 0) return 0
 
@@ -628,7 +639,7 @@ interface MembershipValidationResult {
  * back together in the caller's transaction.
  */
 export async function ensureUserInOrganizationTx(
-  tx: DbOrTx,
+  tx: DbTransaction,
   params: AddMemberParams
 ): Promise<EnsureMemberResult> {
   const {
@@ -836,16 +847,25 @@ async function applyPaidOrgJoinBillingTx(
     .for('update')
     .limit(1)
 
-  if (personalPro && !personalPro.cancelAtPeriodEnd) {
+  const alreadyPausing =
+    personalPro &&
+    (await isCancelAtPeriodEndSettled(
+      tx,
+      personalPro.id,
+      Boolean(personalPro.cancelAtPeriodEnd),
+      true
+    ))
+  if (personalPro && !alreadyPausing) {
     await tx
       .update(subscriptionTable)
       .set({ cancelAtPeriodEnd: true })
       .where(eq(subscriptionTable.id, personalPro.id))
 
     if (personalPro.stripeSubscriptionId) {
-      await enqueueOutboxEvent(tx, OUTBOX_EVENT_TYPES.STRIPE_SYNC_CANCEL_AT_PERIOD_END, {
+      await enqueueCancelAtPeriodEndSync(tx, {
         stripeSubscriptionId: personalPro.stripeSubscriptionId,
         subscriptionId: personalPro.id,
+        cancelAtPeriodEnd: true,
         reason: 'joined-paid-org',
         ...(options.sourceOperationId ? { sourceOperationId: options.sourceOperationId } : {}),
       })
@@ -874,7 +894,7 @@ async function applyPaidOrgJoinBillingTx(
  * and the personal-Pro transition.
  */
 export async function reapplyPaidOrgJoinBillingForExistingMemberTx(
-  tx: DbOrTx,
+  tx: DbTransaction,
   userId: string,
   organizationId: string,
   options: { sourceOperationId?: string } = {}
@@ -957,7 +977,10 @@ export async function withInvitationSafeOrganizationAccessMutation<T>(
     scope: InvitationRemovalScope
     additionalOrganizationIds?: string[]
   },
-  operation: (tx: DbOrTx, locked: { workspaceIds: string[]; invitationIds: string[] }) => Promise<T>
+  operation: (
+    tx: DbTransaction,
+    locked: { workspaceIds: string[]; invitationIds: string[] }
+  ) => Promise<T>
 ): Promise<T> {
   let candidate = await getInvitationRemovalLockSnapshot(db, params)
 
@@ -1186,13 +1209,13 @@ export async function transferUserBetweenOrganizations(
           workspaceIds,
         })
         if (workspaceIds.length > 0) {
-          const workflowOwnershipReassignment =
-            await reassignWorkflowOwnershipForWorkspaceMemberRemovalTx({
+          const resourceOwnershipReassignment =
+            await reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx({
               tx,
               workspaceIds,
               departingUserId: params.userId,
             })
-          if (workflowOwnershipReassignment.unresolved.length > 0) {
+          if (resourceOwnershipReassignment.unresolved.length > 0) {
             throw new WorkspaceBillingAccountRemovalError()
           }
           const deletedPermissions = await tx
@@ -1280,6 +1303,9 @@ export async function removeUserFromOrganization(
     requireNoOrgWorkspaceAccess = false,
     revokePersonalApiKeys = false,
     spareSessionToken,
+    spareSessionId,
+    actorUserId,
+    onError = 'return-failure',
   } = params
 
   const billingActions = {
@@ -1312,6 +1338,8 @@ export async function removeUserFromOrganization(
     const result = await withInvitationSafeOrganizationAccessMutation(
       { userId, organizationId, scope: 'all' },
       async (tx, { workspaceIds, invitationIds }) => {
+        if (actorUserId)
+          await requireMemberManagementAuthority(tx, organizationId, actorUserId, userId)
         if (requireNoOrgWorkspaceAccess && workspaceIds.length > 0) {
           const [remainingAccess] = await tx
             .select({ id: permissions.id })
@@ -1336,8 +1364,9 @@ export async function removeUserFromOrganization(
           .returning({ id: member.id })
 
         if (deletedMember.length === 0) {
-          throw new Error(
-            'Member could not be removed — they may have been promoted to owner concurrently'
+          throw new OrchestrationError(
+            'conflict',
+            'The membership changed before removal. Refresh and try again.'
           )
         }
 
@@ -1392,6 +1421,7 @@ export async function removeUserFromOrganization(
           userId,
           organizationId,
           ...(spareSessionToken ? { spareSessionToken } : {}),
+          ...(spareSessionId ? { spareSessionId } : {}),
         })
         if (revokePersonalApiKeys) await revokePersonalApiKeysTx(tx, { userId })
         await endDirectoryMembershipTx(tx, { userId, organizationId })
@@ -1408,13 +1438,13 @@ export async function removeUserFromOrganization(
           }
         }
 
-        const workflowOwnershipReassignment =
-          await reassignWorkflowOwnershipForWorkspaceMemberRemovalTx({
+        const resourceOwnershipReassignment =
+          await reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx({
             tx,
             workspaceIds,
             departingUserId: userId,
           })
-        if (workflowOwnershipReassignment.unresolved.length > 0) {
+        if (resourceOwnershipReassignment.unresolved.length > 0) {
           throw new WorkspaceBillingAccountRemovalError()
         }
 
@@ -1520,6 +1550,7 @@ export async function removeUserFromOrganization(
     if (error instanceof WorkspaceBillingAccountRemovalError) {
       return { success: false, error: error.message, billingActions }
     }
+    if (onError === 'throw') throw error
 
     logger.error('Failed to remove user from organization', {
       userId,
@@ -1538,6 +1569,7 @@ export async function removeUserFromOrganization(
 export async function removeExternalUserFromOrganizationWorkspaces(params: {
   userId: string
   organizationId: string
+  actorUserId?: string
 }): Promise<RemoveExternalWorkspaceAccessResult> {
   const { userId, organizationId } = params
 
@@ -1567,12 +1599,18 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
     } = await withInvitationSafeOrganizationAccessMutation(
       { userId, organizationId, scope: 'external' },
       async (tx, { workspaceIds, invitationIds }) => {
+        if (params.actorUserId)
+          await requireMemberManagementAuthority(tx, organizationId, params.actorUserId)
         const [currentMember] = await tx
           .select({ id: member.id })
           .from(member)
           .where(and(eq(member.organizationId, organizationId), eq(member.userId, userId)))
           .limit(1)
-        if (currentMember) throw new Error('User is an organization member')
+        if (currentMember)
+          throw new OrchestrationError(
+            'conflict',
+            'User is now an organization member. Refresh before removing them.'
+          )
 
         await setOrgMemberUsageLimit(organizationId, userId, null, undefined, tx)
 
@@ -1617,13 +1655,13 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
           }
         }
 
-        const workflowOwnershipReassignment =
-          await reassignWorkflowOwnershipForWorkspaceMemberRemovalTx({
+        const resourceOwnershipReassignment =
+          await reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx({
             tx,
             workspaceIds,
             departingUserId: userId,
           })
-        if (workflowOwnershipReassignment.unresolved.length > 0) {
+        if (resourceOwnershipReassignment.unresolved.length > 0) {
           throw new WorkspaceBillingAccountRemovalError()
         }
 
@@ -1687,6 +1725,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
       pendingInvitationsCancelled,
     }
   } catch (error) {
+    if (error instanceof OrchestrationError || isRetryableTransactionError(error)) throw error
     if (error instanceof WorkspaceBillingAccountRemovalError) {
       return {
         success: false,
@@ -1800,6 +1839,12 @@ export async function transferOrganizationOwnership(
         .returning({ id: workspace.id })
 
       result.workspacesReassigned = ownerUpdate.length
+      await reassignOrganizationProjects(tx, {
+        organizationId,
+        fromUserId: currentOwnerUserId,
+        toUserId: newOwnerUserId,
+        workspaceIds: ownerUpdate.map((workspaceRow) => workspaceRow.id),
+      })
 
       const reassignedWorkspaceIds = Array.from(
         new Set([...billedWorkspaceIds, ...ownerUpdate.map((workspaceRow) => workspaceRow.id)])

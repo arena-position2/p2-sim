@@ -44,6 +44,35 @@ describe('runImageGenerationWrapper', () => {
     }
   )
 
+  it('runs one generation per requested variation', async () => {
+    mockExecuteTool.mockImplementation(async (_toolId: string, params: { prompt?: string }) => ({
+      success: true,
+      output: { image: `https://example.com/${params.prompt?.length ?? 0}.png` },
+    }))
+
+    const result = await runImageGenerationWrapper({
+      baseToolId: 'image_generate',
+      params: {
+        provider: 'gemini',
+        model: 'gemini-3.1-flash-image-preview',
+        prompt: 'Create 3 distinct variations of this street market scene',
+      },
+    })
+
+    expect(result.success).toBe(true)
+    expect(mockExecuteTool).toHaveBeenCalledTimes(3)
+    const prompts = mockExecuteTool.mock.calls.map((call) => call[1]?.prompt as string)
+    expect(prompts[0]).toContain('variation 1 of 3')
+    expect(prompts[1]).toContain('variation 2 of 3')
+    expect(prompts[2]).toContain('variation 3 of 3')
+    expect(prompts.every((prompt) => prompt.includes('Do not combine multiple variations'))).toBe(
+      true
+    )
+    if (result.success) {
+      expect(result.output.images).toHaveLength(3)
+    }
+  })
+
   it.each(BASE_TOOLS)('forwards trusted executeTool options to %s', async (baseToolId, params) => {
     const executionContext = {
       workflowId: 'wf-1',

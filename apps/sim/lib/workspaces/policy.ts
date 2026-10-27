@@ -3,6 +3,7 @@ import { member, type WorkspaceMode, workspace } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { isOrgAdminRole } from '@sim/platform-authz/workspace'
 import { and, count, eq, isNull } from 'drizzle-orm'
+import type { OrganizationRole } from '@/lib/api/contracts/primitives'
 import { isArenaMaxWorkspacePlan } from '@/lib/billing/arena/access'
 import { getOrganizationSubscription } from '@/lib/billing/core/billing'
 import { getHighestPrioritySubscription } from '@/lib/billing/core/plan'
@@ -14,11 +15,13 @@ import type { PlanCategory } from '@/lib/billing/plan-helpers'
 import { getPlanType, isEnterprise, isMaxTier, isPro, isTeam } from '@/lib/billing/plan-helpers'
 import { hasUsableSubscriptionStatus } from '@/lib/billing/subscriptions/utils'
 import { isBillingEnabled } from '@/lib/core/config/env-flags'
-import type { DbOrTx } from '@/lib/db/types'
+import type { DbOrTx, DbTransaction } from '@/lib/db/types'
 import {
+  capabilityDeniedBy,
   capabilityRefusal,
   isEntitledOrganizationCapabilityWithheld,
 } from '@/lib/permission-groups/capability-assertions'
+import type { PermissionGroupConfig } from '@/lib/permission-groups/fields'
 import { acquirePermissionGroupOrgLock } from '@/lib/permission-groups/locks'
 import { isOrganizationPermissionRegimeActive } from '@/lib/permission-groups/resolve.server'
 import {
@@ -27,6 +30,21 @@ import {
 } from '@/lib/workspaces/policy-constants'
 
 const logger = createLogger('WorkspacePolicy')
+
+/** Permission only: quotas and subscription availability are enforced when a workspace is created. */
+export function canCreateOrganizationWorkspace(
+  role: OrganizationRole | null,
+  config: PermissionGroupConfig | null
+): boolean {
+  return (
+    organizationWorkspaceCreationRoleAllowed(role) &&
+    !capabilityDeniedBy('workspace.create', config)
+  )
+}
+
+function organizationWorkspaceCreationRoleAllowed(role: string | null | undefined): boolean {
+  return Boolean(role) && (!isBillingEnabled || isOrgAdminRole(role))
+}
 
 export const WORKSPACE_MODE = {
   PERSONAL: 'personal',
@@ -209,7 +227,7 @@ export async function resolveGoverningPermissionGroupOrganization(params: {
  * lapse, which is the condition the admin must fix first anyway.
  */
 export async function lockWorkspaceCreationContext(
-  tx: DbOrTx,
+  tx: DbTransaction,
   {
     userId,
     organizationId,
@@ -237,7 +255,7 @@ export async function lockWorkspaceCreationContext(
   let billedAccountUserId = userId
   if (organizationId) {
     if (isBillingEnabled) {
-      if (!currentMembership || !isOrgAdminRole(currentMembership.role)) {
+      if (!currentMembership || !organizationWorkspaceCreationRoleAllowed(currentMembership.role)) {
         throw new WorkspaceCreationContextChangedError()
       }
       const currentSubscription = await getOrganizationSubscription(organizationId, {
@@ -313,10 +331,11 @@ export function isPersonalWorkspace(
  * subscription (seats, org subscription) like any other org workspace.
  */
 export async function getWorkspaceInvitePolicy(
-  workspaceState: WorkspaceOwnershipState
+  workspaceState: WorkspaceOwnershipState,
+  executor: DbOrTx = db
 ): Promise<WorkspaceInvitePolicy> {
   const billedPlanCategory = isBillingEnabled
-    ? await resolveBilledPlanCategory(workspaceState)
+    ? await resolveBilledPlanCategory(workspaceState, executor)
     : 'free'
   return evaluateWorkspaceInvitePolicy(workspaceState, { billedPlanCategory })
 }
@@ -369,15 +388,16 @@ function blockInvite(organizationId: string | null): WorkspaceInvitePolicy {
 }
 
 async function resolveBilledPlanCategory(
-  workspaceState: WorkspaceOwnershipState
+  workspaceState: WorkspaceOwnershipState,
+  executor: DbOrTx
 ): Promise<PlanCategory> {
   if (
     workspaceState.workspaceMode === WORKSPACE_MODE.ORGANIZATION &&
     workspaceState.organizationId
   ) {
-    return getInvitePlanCategoryForOrganization(workspaceState.organizationId)
+    return getInvitePlanCategoryForOrganization(workspaceState.organizationId, executor)
   }
-  return getInvitePlanCategoryForUser(workspaceState.billedAccountUserId)
+  return getInvitePlanCategoryForUser(workspaceState.billedAccountUserId, executor)
 }
 
 /**
@@ -387,10 +407,11 @@ async function resolveBilledPlanCategory(
  * blocked consistently with accept-time provisioning.
  */
 export async function getInvitePlanCategoryForOrganization(
-  organizationId: string
+  organizationId: string,
+  executor: DbOrTx = db
 ): Promise<PlanCategory> {
   try {
-    const orgSub = await getOrganizationSubscription(organizationId)
+    const orgSub = await getOrganizationSubscription(organizationId, { executor })
     if (!orgSub || !hasUsableSubscriptionStatus(orgSub.status)) return 'free'
     return getPlanType(orgSub.plan)
   } catch (error) {
@@ -505,6 +526,7 @@ export async function getWorkspaceCreationPolicy({
       reason: 'You must belong to an organization to create a workspace.',
       status: 403,
       observedOrganizationId: membership?.organizationId ?? null,
+      governingPermissionGroupOrganizationId,
     }
   }
 
@@ -529,7 +551,6 @@ export async function getWorkspaceCreationPolicy({
   const billedAccountUserId = await requireOrganizationOwnerId(organizationId)
   const isPersonal = !(await userHasPersonalWorkspace(userId))
   const currentWorkspaceCount = await countOrganizationWorkspaces(organizationId)
-  const isOrgAdmin = !!orgRole && isOrgAdminRole(orgRole)
 
   /**
    * Without billing, any org member may create. The admin-only rule exists
@@ -561,7 +582,7 @@ export async function getWorkspaceCreationPolicy({
     hasUsableSubscriptionStatus(organizationSubscription.status) &&
     (isTeam(organizationSubscription.plan) || isEnterprise(organizationSubscription.plan))
   ) {
-    if (!isOrgAdmin) {
+    if (!organizationWorkspaceCreationRoleAllowed(orgRole)) {
       return {
         canCreate: false,
         workspaceMode: WORKSPACE_MODE.ORGANIZATION,
@@ -569,7 +590,7 @@ export async function getWorkspaceCreationPolicy({
         billedAccountUserId,
         isPersonal,
         maxWorkspaces: null,
-        currentWorkspaceCount,
+        currentWorkspaceCount: 0,
         reason: 'Only organization owners and admins can create organization workspaces.',
         status: 403,
         observedOrganizationId: membership?.organizationId ?? null,
@@ -584,7 +605,7 @@ export async function getWorkspaceCreationPolicy({
       billedAccountUserId,
       isPersonal,
       maxWorkspaces: null,
-      currentWorkspaceCount,
+      currentWorkspaceCount: 0,
       reason: null,
       status: 200,
       observedOrganizationId: membership?.organizationId ?? null,
@@ -592,8 +613,16 @@ export async function getWorkspaceCreationPolicy({
     }
   }
 
-  // Free / lapsed org: members may create only their first personal workspace.
-  if (!isOrgAdmin && !isPersonal) {
+  /**
+   * Lapsed organization (no usable Team/Enterprise plan). A plain member
+   * gets NO personal fallback: letting them create workspaces here would
+   * hand them an estate outside every admin's view purely because billing
+   * lapsed — exactly the purview escape this regime closes. Owners and
+   * admins DO fall through to the personal regime below: they sit at the top
+   * of the hierarchy, so there is no purview to escape, and after a
+   * downgrade they are usually back on a personal plan they still pay for.
+   */
+  if (!organizationWorkspaceCreationRoleAllowed(orgRole)) {
     return {
       canCreate: false,
       workspaceMode: WORKSPACE_MODE.ORGANIZATION,

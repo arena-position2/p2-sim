@@ -34,19 +34,6 @@ export const getTemplateSchemaTool: ToolConfig<GetTemplateSchemaParams, GetTempl
       headers: () => ({}),
     },
 
-    directExecution: async (
-      params: GetTemplateSchemaParams
-    ): Promise<GetTemplateSchemaResponse> => {
-      const templateId = params.template?.trim() || 'position2_2026'
-      const schema = getTemplateMasterSchema(templateId)
-      return {
-        success: true,
-        output: {
-          schema: schema as unknown as Record<string, unknown>,
-        },
-      }
-    },
-
     outputs: {
       schema: {
         type: 'json',
@@ -54,3 +41,16 @@ export const getTemplateSchemaTool: ToolConfig<GetTemplateSchemaParams, GetTempl
       },
     },
   }
+
+export async function executeGetTemplateSchemaDirect(
+  params: GetTemplateSchemaParams
+): Promise<GetTemplateSchemaResponse> {
+  const templateId = params.template?.trim() || 'position2_2026'
+  const schema = getTemplateMasterSchema(templateId)
+  return {
+    success: true,
+    output: {
+      schema: schema as unknown as Record<string, unknown>,
+    },
+  }
+}

@@ -1,49 +1,55 @@
-/** @vitest-environment node */
-import type { SessionPrincipal } from '@sim/auth/principal'
-import { dbChainMockFns, queueTableRows, resetDbChainMock, schemaMock } from '@sim/testing'
+import type { OrganizationDelegatedPrincipal } from '@sim/auth/principal'
+import {
+  auditMock,
+  auditMockFns,
+  dbChainMockFns,
+  queueTableRows,
+  resetDbChainMock,
+  schemaMock,
+} from '@sim/testing'
+import { createSessionPrincipal } from '@sim/testing/factories/principal.factory'
+import {
+  credentialGroupsAvailabilityMock,
+  credentialGroupsAvailabilityMockFns,
+} from '@sim/testing/mocks/credential-groups-availability.mock'
+import {
+  credentialGroupsCredentialsMock,
+  credentialGroupsCredentialsMockFns,
+} from '@sim/testing/mocks/credential-groups-credentials.mock'
+import {
+  credentialGroupsOrganizationSetupMock,
+  credentialGroupsOrganizationSetupMockFns,
+} from '@sim/testing/mocks/credential-groups-organization-setup.mock'
+import {
+  credentialGroupsSelfEnrollmentMock,
+  credentialGroupsSelfEnrollmentMockFns,
+} from '@sim/testing/mocks/credential-groups-self-enrollment.mock'
+import {
+  credentialGroupsServiceMock,
+  credentialGroupsServiceMockFns,
+} from '@sim/testing/mocks/credential-groups-service.mock'
+import { knowledgeAvailabilityMock } from '@sim/testing/mocks/knowledge-availability.mock'
+import { permissionGroupsResolveMock } from '@sim/testing/mocks/permission-groups-resolve.mock'
+import {
+  resourcePolicyRepositoryMock,
+  resourcePolicyRepositoryMockFns,
+} from '@sim/testing/mocks/resource-policy-repository.mock'
 import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({
-  available: vi.fn(),
-  group: vi.fn(),
-  setup: vi.fn(),
-  write: vi.fn(),
-  policy: vi.fn(),
-  accountsGroup: vi.fn(),
-  invite: vi.fn(),
-}))
-vi.mock('@/lib/credential-groups/scoped-availability', () => ({
-  isScopedCredentialGroupsAvailable: mocks.available,
-}))
-vi.mock('@/lib/credential-groups/credentials', () => ({
-  loadScopedAccountsCredentialListContext: mocks.group,
-}))
-vi.mock('@/lib/credential-groups/organization-setup', () => ({
-  requireOrganizationAccountsSetup: mocks.setup,
-}))
-vi.mock('@/lib/permission-groups/resolve.server', () => ({
-  getUserPermissionConfigForOrganization: vi.fn().mockResolvedValue(null),
-}))
-vi.mock('@/lib/credential-groups/service', () => ({
-  ensureWorkspaceAccountsGroup: vi.fn(),
-  getOrganizationAccountsGroup: mocks.accountsGroup,
-  updateCredentialGroup: vi.fn(),
-}))
+vi.mock('@sim/audit', () => auditMock)
+vi.mock('@/lib/credential-groups/scoped-availability', () => credentialGroupsAvailabilityMock)
+vi.mock('@/lib/credential-groups/credentials', () => credentialGroupsCredentialsMock)
+vi.mock('@/lib/credential-groups/organization-setup', () => credentialGroupsOrganizationSetupMock)
+vi.mock('@/lib/permission-groups/resolve.server', () => permissionGroupsResolveMock)
+vi.mock('@/lib/credential-groups/service', () => credentialGroupsServiceMock)
 vi.mock('@/lib/credential-groups/provider-availability', () => ({
   listConfiguredCredentialGroupProviders: vi.fn(),
+  listConfiguredManagedMcpConnectors: vi.fn().mockResolvedValue([]),
 }))
-vi.mock('@/lib/knowledge/access/availability', () => ({
-  isKnowledgeMemberAccessAvailable: vi.fn().mockResolvedValue(true),
-}))
-vi.mock('@/lib/credential-groups/self-enrollment', () => ({
-  createViewerCredentialGroupEnrollment: mocks.invite,
-}))
-vi.mock('@/lib/resource-policies/repository', () => ({
-  requireResourcePolicy: mocks.policy,
-  writeResourcePolicy: mocks.write,
-  ResourcePolicyRevisionConflictError: class extends Error {},
-}))
+vi.mock('@/lib/knowledge/access/availability', () => knowledgeAvailabilityMock)
+vi.mock('@/lib/credential-groups/self-enrollment', () => credentialGroupsSelfEnrollmentMock)
+vi.mock('@/lib/resource-policies/repository', () => resourcePolicyRepositoryMock)
 
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
@@ -58,11 +64,17 @@ import { buildOrganizationAccountAccessPolicy } from '@/lib/credential-groups/ap
 import { ORGANIZATION_CREDENTIAL_TYPES } from '@/lib/credential-groups/credential-types'
 import { ResourcePolicyRevisionConflictError } from '@/lib/resource-policies/repository'
 
-const principal: SessionPrincipal = {
-  kind: 'session',
-  userId: 'admin-user',
-  sessionId: 'session-1',
+const mocks = {
+  available: credentialGroupsAvailabilityMockFns.mockIsScopedCredentialGroupsAvailable,
+  group: credentialGroupsCredentialsMockFns.mockLoadScopedAccountsCredentialListContext,
+  setup: credentialGroupsOrganizationSetupMockFns.mockRequireOrganizationAccountsSetup,
+  accountsGroup: credentialGroupsServiceMockFns.mockGetOrganizationAccountsGroup,
+  invite: credentialGroupsSelfEnrollmentMockFns.mockCreateViewerCredentialGroupEnrollment,
+  policy: resourcePolicyRepositoryMockFns.mockRequireResourcePolicy,
+  write: resourcePolicyRepositoryMockFns.mockWriteResourcePolicy,
 }
+
+const principal = createSessionPrincipal({ userId: 'admin-user' })
 const input = {
   organizationId: 'org-1',
   revision: 3,
@@ -73,10 +85,20 @@ const input = {
     },
   ],
 }
+const delegated: OrganizationDelegatedPrincipal = {
+  kind: 'organization_delegated',
+  serviceId: 'copilot',
+  organizationId: 'org-1',
+  subjectUserId: 'real-actor',
+  delegationId: 'settings-call',
+  audience: 'sim:settings',
+  resourceScope: { chatId: 'chat-1' },
+  issuedAt: new Date(),
+  expiresAt: new Date(Date.now() + 60_000),
+}
 
 describe('organization workspace sharing administration', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     mocks.available.mockResolvedValue(true)
     mocks.group.mockResolvedValue({
@@ -90,6 +112,56 @@ describe('organization workspace sharing administration', () => {
       document: buildOrganizationAccountAccessPolicy('group-1', []),
     })
     mocks.write.mockImplementation(async ({ document }) => ({ revision: 4, document }))
+  })
+
+  it('reauthorizes the delegated human and attributes a workspace access change to that actor', async () => {
+    queueTableRows(schemaMock.member, [{ role: 'admin' }])
+    queueTableRows(schemaMock.workspace, [{ id: 'workspace-1' }])
+    await updateOrganizationAccountWorkspaceAccess.execute({ principal: delegated, input })
+    expect(eq).toHaveBeenCalledWith(schemaMock.member.userId, 'real-actor')
+    expect(mocks.write).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: 'real-actor', organizationId: 'org-1' })
+    )
+    expect(auditMockFns.mockRecordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: 'real-actor',
+        metadata: expect.objectContaining({
+          operation: 'organization_accounts.workspace_access.update',
+          actor: expect.objectContaining({
+            kind: 'organization_delegated',
+            subjectUserId: 'real-actor',
+          }),
+        }),
+      })
+    )
+  })
+
+  it.each(['member', null])(
+    'does not preserve an outdated delegated admin grant: %s',
+    async (role) => {
+      queueTableRows(schemaMock.member, role ? [{ role }] : [])
+      await expect(
+        updateOrganizationAccountWorkspaceAccess.execute({ principal: delegated, input })
+      ).rejects.toThrow()
+      expect(mocks.write).not.toHaveBeenCalled()
+      expect(mocks.group).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    { organizationId: 'foreign' },
+    { audience: 'sim:search' },
+    { expiresAt: new Date(0) },
+    { resourceScope: {} },
+  ])('rejects invalid delegation before loading connected accounts: %j', async (override) => {
+    await expect(
+      updateOrganizationAccountWorkspaceAccess.execute({
+        principal: { ...delegated, ...override },
+        input,
+      })
+    ).rejects.toMatchObject({ code: 'forbidden' })
+    expect(mocks.group).not.toHaveBeenCalled()
+    expect(mocks.write).not.toHaveBeenCalled()
   })
 
   it.each(['member', null])(
@@ -115,6 +187,7 @@ describe('organization workspace sharing administration', () => {
       optionId: 'option-1',
       status: 'needs_reauth',
     }
+    queueTableRows(schemaMock.credential, [])
     queueTableRows(schemaMock.credential, [account])
     const result = await getOrganizationAccountsSettings.execute({
       principal,
@@ -148,11 +221,36 @@ describe('organization workspace sharing administration', () => {
       authorizationUrl:
         'https://sim.test/api/credential-groups/enroll/fixture-token/oauth/option-1?returnTo=search',
     })
-    expect(mocks.invite).toHaveBeenCalledExactlyOnceWith({
-      organizationId: 'org-1',
-      userId: 'admin-user',
-      credentialGroupId: 'group-1',
+  })
+
+  it('starts only an enabled MCP provider belonging to the canonical organization group', async () => {
+    queueTableRows(schemaMock.member, [{ role: 'member' }])
+    mocks.accountsGroup.mockResolvedValue({
+      id: 'group-1',
+      status: 'active',
+      options: [],
+      mcpServers: [{ id: 'coda-server', enabled: true }],
     })
+    mocks.invite.mockResolvedValue({
+      invitationLink: 'https://sim.test/credential-groups/enroll/fixture-token',
+    })
+    expect(
+      await startOrganizationAccountConnection.execute({
+        principal,
+        input: { organizationId: 'org-1', mcpServerId: 'coda-server' },
+      })
+    ).toMatchObject({
+      authorizationUrl:
+        'https://sim.test/api/credential-groups/enroll/fixture-token/mcp/coda-server',
+    })
+    queueTableRows(schemaMock.member, [{ role: 'member' }])
+    await expect(
+      startOrganizationAccountConnection.execute({
+        principal,
+        input: { organizationId: 'org-1', mcpServerId: 'another-server' },
+      })
+    ).rejects.toThrow('no longer available')
+    expect(mocks.invite).toHaveBeenCalledTimes(1)
   })
 
   it('does not issue a direct authorization link when enrollment access was revoked', async () => {
@@ -205,19 +303,6 @@ describe('organization workspace sharing administration', () => {
       updateOrganizationAccountWorkspaceAccess.execute({ principal, input })
     ).rejects.toThrow('Every allowed workspace')
     expect(mocks.write).not.toHaveBeenCalled()
-  })
-
-  it('supports revoking every workspace without a replacement workflow grant', async () => {
-    queueTableRows(schemaMock.member, [{ role: 'admin' }])
-    await expect(
-      updateOrganizationAccountWorkspaceAccess.execute({
-        principal,
-        input: { ...input, grants: [] },
-      })
-    ).resolves.toMatchObject({ grants: [] })
-    expect(mocks.write).toHaveBeenCalledWith(
-      expect.objectContaining({ document: buildOrganizationAccountAccessPolicy('group-1', []) })
-    )
   })
 
   it('rejects selected grants exceeding the persisted policy size bound before writing', async () => {

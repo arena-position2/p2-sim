@@ -293,6 +293,9 @@ export async function getUserUsageAnalytics(
       executionWorkspaceCondition,
       eq(workflowExecutionLogs.actorUserId, userId)
     )
+    if (!chatMembershipScope || !expensiveWorkflowExecutionScope) {
+      throw new Error('Missing usage analytics scope')
+    }
     const useHourlyBuckets = shouldUseHourlyTimeBuckets(options, period)
     const bucketExpr = timeBucketExpr(useHourlyBuckets)
     const executionBucket = executionBucketExpr(useHourlyBuckets)
@@ -1202,15 +1205,26 @@ export async function getUserUsageAnalytics(
       timeSeries: densifiedTimeSeries,
       lineage: {
         roots: lineageRootRows
-          .filter(
-            (row): row is typeof row & { rootExecutionId: string } => row.rootExecutionId !== null
+          .flatMap(
+            (
+              row
+            ): Array<{
+              rootExecutionId: string
+              executionCount: number
+              inclusiveBillableCost: number
+              inclusiveRawCost: number
+            }> => {
+              if (typeof row.rootExecutionId !== 'string') return []
+              return [
+                {
+                  rootExecutionId: row.rootExecutionId,
+                  executionCount: parseIntMetric(row.executionCount),
+                  inclusiveBillableCost: parseDecimal(row.inclusiveBillableCost),
+                  inclusiveRawCost: parseDecimal(row.inclusiveRawCost),
+                },
+              ]
+            }
           )
-          .map((row) => ({
-            rootExecutionId: row.rootExecutionId,
-            executionCount: parseIntMetric(row.executionCount),
-            inclusiveBillableCost: parseDecimal(row.inclusiveBillableCost),
-            inclusiveRawCost: parseDecimal(row.inclusiveRawCost),
-          }))
           .sort((a, b) => b.inclusiveBillableCost - a.inclusiveBillableCost)
           .slice(0, 25),
         drillDown,

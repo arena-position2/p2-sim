@@ -1,4 +1,5 @@
 import type { GmailMarkReadParams, GmailToolResponse } from '@/tools/gmail/types'
+import { castGmailResponse } from '@/tools/gmail/utils'
 import type { InternalToolConfig } from '@/tools/types'
 
 export const gmailDeleteTool: InternalToolConfig<GmailMarkReadParams, GmailToolResponse> = {
@@ -89,7 +90,9 @@ export const gmailDeleteV2Tool: InternalToolConfig<GmailMarkReadParams, GmailMod
   params: gmailDeleteTool.params,
   operation: gmailDeleteTool.operation,
   transformResponse: async (response) => {
-    return await gmailDeleteTool.transformResponse!(response)
+    return castGmailResponse<GmailModifyV2Response>(
+      await gmailDeleteTool.transformResponse!(response)
+    )
   },
   outputs: {
     content: { type: 'string', description: 'Success message' },

@@ -1,11 +1,15 @@
 import { ChartBarIcon } from '@/components/icons'
 import { CHART_GENERATOR_DEFAULT_MODEL } from '@/lib/chart-generation/chart-generator-config'
-import type { BlockConfig, SuggestedSkill } from '@/blocks/types'
+import type { BlockConfig, SubBlockConfig, SuggestedSkill } from '@/blocks/types'
 import {
   getModelOptions,
   getProviderCredentialSubBlocks,
   PROVIDER_CREDENTIAL_INPUTS,
 } from '@/blocks/utils'
+
+function credentialDependsOn(dependsOn: SubBlockConfig['dependsOn']): string[] {
+  return Array.isArray(dependsOn) ? dependsOn : []
+}
 
 const ECHARTS_JSON_GENERATOR_SKILL: SuggestedSkill = {
   name: 'echarts-json-generator',
@@ -74,23 +78,38 @@ export const ChartGeneratorBlock: BlockConfig = {
       options: getModelOptions,
       condition: { field: 'operation', value: 'generate' },
     },
-    ...getProviderCredentialSubBlocks().map((subBlock) => ({
-      ...subBlock,
-      // Keep model-specific credential visibility (OpenAI vs Vertex vs Bedrock) — do not
-      // replace with operation-only or deploy will require every provider field.
-      condition: (values?: Record<string, unknown>) => {
-        if (values?.operation !== 'generate') {
-          return { field: 'operation', value: '__never_show__' }
-        }
-        if (!subBlock.condition) {
+    ...getProviderCredentialSubBlocks().map(
+      (subBlock): SubBlockConfig => ({
+        ...subBlock,
+        // Keep model-specific credential visibility (OpenAI vs Vertex vs Bedrock) — do not
+        // replace with operation-only or deploy will require every provider field.
+        condition: (values?: Record<string, unknown>) => {
+          if (values?.operation !== 'generate') {
+            return { field: 'operation', value: '__never_show__' }
+          }
+          if (!subBlock.condition) {
+            return { field: 'operation', value: 'generate' }
+          }
+          const inner =
+            typeof subBlock.condition === 'function'
+              ? subBlock.condition(values)
+              : subBlock.condition
+          if (inner && typeof inner === 'object' && 'field' in inner) {
+            return {
+              field: 'operation',
+              value: 'generate',
+              and: {
+                field: inner.field,
+                value: inner.value,
+                ...(inner.not !== undefined ? { not: inner.not } : {}),
+              },
+            }
+          }
           return { field: 'operation', value: 'generate' }
-        }
-        const inner =
-          typeof subBlock.condition === 'function' ? subBlock.condition(values) : subBlock.condition
-        return { field: 'operation', value: 'generate', and: inner }
-      },
-      dependsOn: [...(subBlock.dependsOn ?? []), 'operation', 'model'],
-    })),
+        },
+        dependsOn: [...credentialDependsOn(subBlock.dependsOn), 'operation', 'model'],
+      })
+    ),
     {
       id: 'skills',
       title: 'Skills',
@@ -105,7 +124,6 @@ export const ChartGeneratorBlock: BlockConfig = {
       id: 'systemPrompt',
       title: 'System prompt',
       type: 'code',
-      language: 'markdown',
       placeholder: 'Leave empty to use the built-in analysis + chart instructions',
       mode: 'advanced',
       condition: { field: 'operation', value: 'generate' },
@@ -117,7 +135,6 @@ export const ChartGeneratorBlock: BlockConfig = {
       id: 'userPrompt',
       title: 'User prompt template',
       type: 'code',
-      language: 'markdown',
       placeholder: 'Leave empty to auto-build from Chart request + Data',
       mode: 'advanced',
       condition: { field: 'operation', value: 'generate' },

@@ -7,20 +7,20 @@ const { executeCreateWorkflow } = vi.hoisted(() => ({
   executeCreateWorkflow: vi.fn(),
 }))
 
-vi.mock('@/lib/copilot/tools/handlers/workflow/mutations', () => ({
+vi.mock('@/lib/mothership/tools/handlers/workflow/mutations', () => ({
   executeCreateWorkflow,
 }))
 
-vi.mock('@/lib/copilot/tools/server/workflow/edit-workflow', () => ({
+vi.mock('@/lib/mothership/tools/server/workflow/edit-workflow', () => ({
   editWorkflowServerTool: { execute: vi.fn() },
 }))
 
-vi.mock('@/lib/copilot/tools/server/workflow/edit-workflow/normalize-args', () => ({
+vi.mock('@/lib/mothership/tools/server/workflow/edit-workflow/normalize-args', () => ({
   normalizeEditWorkflowArgs: (args: Record<string, unknown>) => args,
   resolveEditWorkflowOperations: () => null,
 }))
 
-import { editWorkflowServerTool } from '@/lib/copilot/tools/server/workflow/edit-workflow'
+import { editWorkflowServerTool } from '@/lib/mothership/tools/server/workflow/edit-workflow'
 import {
   runCreateWorkflowTool,
   runEditWorkflowTool,

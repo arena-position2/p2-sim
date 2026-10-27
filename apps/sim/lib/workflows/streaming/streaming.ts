@@ -6,6 +6,7 @@ import {
   extractChartsFromData,
   hasRenderableChartDeployOutput,
 } from '@/lib/chart-generation/echarts-option'
+import { formatChatImageFileText } from '@/lib/chat/assistant-assets'
 import { createTimeoutAbortController, getTimeoutErrorMessage } from '@/lib/core/execution-limits'
 import {
   extractBlockIdFromOutputId,
@@ -155,58 +156,6 @@ interface SelectedOutputDescriptor {
   blockId: string
   path: string
   key: string
-}
-
-function isRenderableImageUrl(value: unknown): value is string {
-  if (typeof value !== 'string') {
-    return false
-  }
-
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return false
-  }
-
-  if (trimmed.startsWith('data:image/')) {
-    return true
-  }
-
-  if (trimmed.startsWith('/api/files/serve/')) {
-    return (
-      /\.(png|jpg|jpeg|gif|webp)(\?|#|%|$)/i.test(trimmed) ||
-      trimmed.includes('agent-generated-images')
-    )
-  }
-
-  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-    return false
-  }
-
-  return (
-    /\.(png|jpg|jpeg|gif|webp)(\?|#|%|$)/i.test(trimmed) ||
-    trimmed.includes('agent-generated-images') ||
-    trimmed.includes('/api/files/serve/')
-  )
-}
-
-function containsRenderableImageOutput(value: unknown): boolean {
-  if (!value) {
-    return false
-  }
-
-  if (isRenderableImageUrl(value)) {
-    return true
-  }
-
-  if (Array.isArray(value)) {
-    return value.some((item) => containsRenderableImageOutput(item))
-  }
-
-  if (typeof value === 'object') {
-    return Object.values(value).some((item) => containsRenderableImageOutput(item))
-  }
-
-  return false
 }
 
 function resolveStreamedContent(state: StreamingState): Map<string, string> {
@@ -1118,10 +1067,12 @@ export async function createStreamingResponse(
                 state.processedOutputs.add(selectedOutputBlockId)
                 continue
               }
+              const imageFileText =
+                typeof hydratedOutput === 'string' ? null : formatChatImageFileText(hydratedOutput)
               const formattedOutput =
                 typeof hydratedOutput === 'string'
                   ? hydratedOutput
-                  : JSON.stringify(hydratedOutput, null, 2)
+                  : (imageFileText ?? JSON.stringify(hydratedOutput, null, 2))
               const selectedOutputBytes = Math.max(
                 getInlineJsonByteLength(hydratedOutput) ?? 0,
                 Buffer.byteLength(formattedOutput, 'utf8')
@@ -1210,7 +1161,7 @@ export async function createStreamingResponse(
           timeoutController.timeoutMs &&
           !requestAborted
         ) {
-          const timeoutErrorMessage = getTimeoutErrorMessage(null, timeoutController.timeoutMs)
+          const timeoutErrorMessage = getTimeoutErrorMessage(timeoutController.timeoutMs)
           logger.info(`[${requestId}] Streaming execution timed out`, {
             timeoutMs: timeoutController.timeoutMs,
           })

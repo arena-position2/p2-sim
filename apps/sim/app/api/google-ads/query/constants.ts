@@ -2,7 +2,7 @@
 export const POSITION2_MANAGER = '4455285084'
 
 /** Google Ads REST API version used for search and list endpoints. */
-export const GOOGLE_ADS_API_VERSION = 'v22'
+export const GOOGLE_ADS_API_VERSION = 'v26'
 
 // Constants
 export const MAX_DAYS_FOR_LAST_N_DAYS = 365

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
+import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 import { env } from '@/lib/core/config/env'
-import { getArenaToken } from '@/app/api/tools/arena/utils/get-token'
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,30 +11,31 @@ export async function GET(req: NextRequest) {
     if (!workflowId) {
       return NextResponse.json({ error: 'workflowId is required' }, { status: 400 })
     }
-    const tokenObject = await getArenaToken(req, workflowId)
-    if (tokenObject.found === false) {
+    const resolved = await resolveArenaCaller(req, workflowId)
+    if (!resolved.found) {
       return NextResponse.json(
-        { error: 'Failed to create task', details: tokenObject.reason },
+        { error: 'Failed to search tasks', details: resolved.reason },
         { status: 400 }
       )
     }
-    const { arenaToken } = tokenObject
+    const { caller } = resolved
 
-    // Remove workflowId so it doesn't get sent to Arena
     searchParams.delete('workflowId')
     const params = searchParams.toString()
+    const arenaPath = params ? `/sol/v1/tasks/users?${params}` : '/sol/v1/tasks/users'
 
-    // Reconstruct Arena API URL with remaining params
-    const arenaBackendBaseUrl = env.ARENA_BACKEND_BASE_URL
-    const arenaUrl = `${arenaBackendBaseUrl}/sol/v1/tasks/users?${params}`
-
-    const response = await fetch(arenaUrl, {
-      method: 'GET',
-      headers: {
-        accept: '*/*',
-        'accept-language': 'en-GB,en;q=0.9',
-        //authorisation: process.env.ARENA_AUTH_TOKEN || '', // 🔑 from .env
-        authorisation: arenaToken || '', // ⬅️ Use env var for security
+    const response = await arenaSolFetch({
+      mode: caller.mode,
+      userId: caller.userId,
+      pathOrUrl: arenaPath,
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+      init: {
+        method: 'GET',
+        headers: {
+          accept: '*/*',
+          'accept-language': 'en-GB,en;q=0.9',
+        },
       },
     })
 
@@ -46,14 +48,17 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await response.json()
-    const formattedData = data.tasks.map((task: any) => ({
+    const formattedData = data.tasks.map((task: { sysId?: string }) => ({
       ...task,
       redirectUrl: `${env.ARENA_FRONTEND_APP_URL}/arn/home?sysId=${task.sysId}`,
     }))
 
-    // Optionally attach workflowId to response if you need it
     return NextResponse.json(formattedData)
-  } catch (err: any) {
-    return NextResponse.json({ error: 'Unexpected error', details: err.message }, { status: 500 })
+  } catch (err) {
+    if (err instanceof ArenaAuthError) {
+      return NextResponse.json({ error: err.message }, { status: 401 })
+    }
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: 'Unexpected error', details: message }, { status: 500 })
   }
 }

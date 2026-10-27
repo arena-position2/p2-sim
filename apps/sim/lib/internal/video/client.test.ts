@@ -1,20 +1,15 @@
-/**
- * @vitest-environment node
- */
+import { jsonResponse } from '@sim/testing/helpers/http'
+import {
+  executionLimitsMock,
+  executionLimitsMockFns,
+} from '@sim/testing/mocks/execution-limits.mock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/core/execution-limits', () => ({ getMaxExecutionTimeout: () => 5000 }))
+vi.mock('@/lib/core/execution-limits', () => executionLimitsMock)
 
 import { generateVideo } from '@/lib/internal/video/client'
 
-function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
-const FALAI_SUBMIT_URL = 'https://queue.fal.run/fal-ai/veo3.1'
+executionLimitsMockFns.mockGetMaxExecutionTimeout.mockReturnValue(5000)
 
 function falaiInput() {
   return {
@@ -33,37 +28,87 @@ describe('Video provider client', () => {
     vi.unstubAllGlobals()
   })
 
-  it('submits a Fal.ai job once and only polls the returned request', async () => {
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValueOnce(
+  it.each([
+    {
+      provider: 'veo' as const,
+      responses: [
+        jsonResponse({ name: 'operations/veo-1' }),
+        jsonResponse({
+          done: true,
+          response: {
+            generateVideoResponse: {
+              generatedSamples: [{ video: { uri: 'https://cdn.example/veo.mp4' } }],
+            },
+          },
+        }),
+        new Response(Buffer.from('video')),
+      ],
+      submitUrl:
+        'https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-generate-001:predictLongRunning',
+    },
+    {
+      provider: 'luma' as const,
+      responses: [
+        jsonResponse({ id: 'luma-1' }),
+        jsonResponse({ state: 'completed', assets: { video: 'https://cdn.example/luma.mp4' } }),
+        new Response(Buffer.from('video')),
+      ],
+      submitUrl: 'https://api.lumalabs.ai/dream-machine/v1/generations',
+    },
+    {
+      provider: 'minimax' as const,
+      responses: [
+        jsonResponse({ base_resp: { status_code: 0 }, task_id: 'minimax-1' }),
+        jsonResponse({ base_resp: { status_code: 0 }, status: 'Success', file_id: 'file-1' }),
+        jsonResponse({ file: { download_url: 'https://cdn.example/minimax.mp4' } }),
+        new Response(Buffer.from('video')),
+      ],
+      submitUrl: 'https://api.minimax.io/v1/video_generation',
+    },
+    {
+      provider: 'falai' as const,
+      responses: [
         jsonResponse({
           request_id: 'fal-1',
           status_url: 'https://queue.fal.run/status/fal-1',
           response_url: 'https://queue.fal.run/response/fal-1',
-        })
-      )
-      .mockResolvedValueOnce(jsonResponse({ status: 'COMPLETED' }))
-      .mockResolvedValueOnce(
+        }),
+        jsonResponse({ status: 'COMPLETED' }),
         jsonResponse({
           video: { url: 'https://cdn.example/fal.mp4', width: 1920, height: 1080, duration: 8 },
-        })
-      )
-      .mockResolvedValueOnce(new Response(Buffer.from('video')))
+        }),
+        new Response(Buffer.from('video')),
+      ],
+      submitUrl: 'https://queue.fal.run/fal-ai/veo3.1',
+    },
+  ])('submits $provider once and polls only its returned provider job', async (testCase) => {
+    const mockFetch = vi.fn()
+    for (const response of testCase.responses) mockFetch.mockResolvedValueOnce(response)
     vi.stubGlobal('fetch', mockFetch)
 
-    const resultPromise = generateVideo(falaiInput(), { requestId: 'request-1' })
+    const resultPromise = generateVideo(
+      {
+        provider: testCase.provider,
+        apiKey: 'key',
+        model: testCase.provider === 'falai' ? 'veo-3.1' : undefined,
+        prompt: 'A cinematic sunrise',
+      },
+      { requestId: 'request-1' }
+    )
     await vi.advanceTimersByTimeAsync(5000)
     const result = await resultPromise
 
-    expect(result).toMatchObject({
-      buffer: Buffer.from('video'),
-      width: 1920,
-      height: 1080,
-      jobId: 'fal-1',
-      duration: 8,
-    })
-    expect(String(mockFetch.mock.calls[0]?.[0])).toBe(FALAI_SUBMIT_URL)
+    if (testCase.provider === 'falai') {
+      expect(result).toMatchObject({
+        buffer: Buffer.from('video'),
+        width: 1920,
+        height: 1080,
+        jobId: 'fal-1',
+        duration: 8,
+      })
+    }
+
+    expect(String(mockFetch.mock.calls[0]?.[0])).toBe(testCase.submitUrl)
     expect((mockFetch.mock.calls[0]?.[1] as RequestInit).method).toBe('POST')
     expect(
       mockFetch.mock.calls.filter(

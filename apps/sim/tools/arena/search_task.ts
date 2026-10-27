@@ -166,11 +166,9 @@ export const searchTask: ToolConfig<SearchTaskQueryParams, SearchTaskResponse> =
         add('fromDate', startDate)
         add('toDate', endDate)
       }
-      if (
-        params['search-task-max-results'] !== undefined &&
-        params['search-task-max-results'] !== ''
-      ) {
-        const pageSize = Number(params['search-task-max-results'])
+      const maxResults = params['search-task-max-results']
+      if (maxResults !== undefined && String(maxResults) !== '') {
+        const pageSize = Number(maxResults)
         if (Number.isInteger(pageSize)) {
           add('pageSize', pageSize)
         }
@@ -179,7 +177,7 @@ export const searchTask: ToolConfig<SearchTaskQueryParams, SearchTaskResponse> =
       return q.length > 0 ? `${base}?${q.join('&')}` : base
     },
     method: 'GET',
-    headers: (params: SearchTaskQueryParams) => {
+    headers: () => {
       return {
         Accept: 'application/json',
         'Content-Type': 'application/json',

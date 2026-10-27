@@ -1,7 +1,7 @@
 import type { ApplicationOperation } from '@/lib/core/application'
 
 function definePlatformAdminOperation<const Id extends string>(id: Id): ApplicationOperation<Id> {
-  return Object.freeze({ id })
+  return Object.freeze({ id, capability: 'none' })
 }
 
 /**

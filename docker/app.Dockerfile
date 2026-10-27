@@ -3,12 +3,13 @@
 # ========================================
 # Base Stage: runtime-only dependencies (inherited by the final image)
 # ========================================
-FROM oven/bun:1.4.1-slim AS base
+FROM oven/bun:1.4.2-slim AS base
 
 # Install Node.js 24 (Active LTS) and the runtime dependencies once in base.
-# Node runs only the isolated-vm sandbox worker (the app itself runs under Bun);
-# the version is kept in lockstep with the `isolated-vm` pin in
-# apps/sim/package.json — Node 24 (ABI 137) requires isolated-vm 6.x.
+# Node runs the isolated-vm sandbox worker and the Oracle Database worker (the
+# app itself runs under Bun); the version is kept in lockstep with the
+# `isolated-vm` pin in apps/sim/package.json — Node 24 (ABI 137) requires
+# isolated-vm 6.x.
 #
 # Only what the running container needs belongs here. ffmpeg backs the media
 # subprocess adapter; python3 is the node-gyp interpreter and is kept because
@@ -64,6 +65,12 @@ COPY --from=pruner /app/out/json/ ./
 # forcing a slow fresh resolve. The full lockfile parses cleanly and bun
 # only installs what the pruned package.jsons reference.
 COPY --from=pruner /app/bun.lock ./bun.lock
+# Bun resolves the root patchedDependencies paths during install, so the exact
+# Oracle driver patch and its verification scripts must be present in this
+# manifest-only stage.
+COPY --from=pruner /app/patches ./patches
+COPY --from=pruner /app/apps/sim/scripts/verify-oracledb-patch.cjs ./apps/sim/scripts/verify-oracledb-patch.cjs
+COPY --from=pruner /app/apps/sim/scripts/oracledb-patch-self-test.cjs ./apps/sim/scripts/oracledb-patch-self-test.cjs
 
 # Install all dependencies (including devDependencies — tailwindcss/postcss are
 # devDeps but required at build time). Then rebuild isolated-vm against Node.js.
@@ -82,6 +89,8 @@ COPY --from=pruner /app/bun.lock ./bun.lock
 RUN --mount=type=cache,id=bun-cache,target=/root/.bun/install/cache \
     --mount=type=cache,id=npm-cache,target=/root/.npm \
     HUSKY=0 bun install --ignore-scripts --linker=hoisted && \
+    node apps/sim/scripts/verify-oracledb-patch.cjs && \
+    node apps/sim/scripts/oracledb-patch-self-test.cjs && \
     cd node_modules/isolated-vm && JOBS=4 /app/node_modules/.bin/node-gyp rebuild --release
 
 # ========================================
@@ -164,6 +173,10 @@ RUN bun build apps/sim/bootstrap.ts --target=bun --outfile=apps/sim/bootstrap.js
 FROM base AS runner
 WORKDIR /app
 
+# Runtime flags override these image defaults; dev images opt into Plan.
+ARG MSHIP_PLAN_MODE_DEFAULT=false
+ENV MSHIP_PLAN_MODE_DEFAULT=$MSHIP_PLAN_MODE_DEFAULT
+
 # Node.js 24, Python, ffmpeg, etc. are already installed in base stage
 ENV NODE_ENV=production
 
@@ -235,6 +248,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/.next/static ./apps/sim/
 # Self-contained secrets-loading bootstrap (bundled in the builder stage). Runs
 # before the standalone server.js to hydrate process.env from the runtime secret.
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/bootstrap.js ./apps/sim/bootstrap.js
+COPY --from=builder --chown=nextjs:nodejs /app/packages/sim-cli/dist/runtime.js ./packages/sim-cli/dist/runtime.js
 
 # Copy blog/author content for runtime filesystem reads (not part of the JS bundle)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/content ./apps/sim/content
@@ -242,17 +256,15 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/content ./apps/sim/conte
 # Copy isolated-vm native module (compiled for Node.js in deps stage)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/isolated-vm ./node_modules/isolated-vm
 
-# sharp@0.35+ splits the native addon (`@img/sharp-linux-*`) from the libvips
-# shared library (`@img/sharp-libvips-linux-*/lib/libvips-cpp.so.*`). The addon
-# dlopens libvips at runtime, so Next's standalone file tracer never sees the
-# `.so` and omits it — every route whose import graph reaches sharp then 500s
-# with `ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.3`. Same monorepo-root hoist
-# problem as yjs/lib0 below: `outputFileTracingIncludes` globs resolve against
-# apps/sim and cannot reach `/app/node_modules`, so copy the full trees from
-# the deps install (which already has the correct linux/$TARGETARCH optional
-# packages because this stage builds on that platform).
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/sharp ./node_modules/sharp
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/@img ./node_modules/@img
+# The Oracle Database adapter runs as a Node child process. Keep the complete,
+# locally patched driver beside that worker instead of relying on Next's tracer.
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/oracledb ./node_modules/oracledb
+COPY --from=deps --chown=nextjs:nodejs /app/apps/sim/scripts/verify-oracledb-patch.cjs ./apps/sim/scripts/verify-oracledb-patch.cjs
+COPY --from=deps --chown=nextjs:nodejs /app/apps/sim/scripts/oracledb-patch-self-test.cjs ./apps/sim/scripts/oracledb-patch-self-test.cjs
+COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/internal/oracledb/oracle-worker.cjs ./apps/sim/lib/internal/oracledb/oracle-worker.cjs
+
+RUN node apps/sim/scripts/oracledb-patch-self-test.cjs \
+    --worker apps/sim/lib/internal/oracledb/oracle-worker.cjs
 
 # The collab-doc seed/merge/persist routes run the converter (markdown <-> Yjs) server-side. `yjs` is a
 # serverExternalPackage, and the Next standalone tracer copies it only partially — it misses ESM subpath

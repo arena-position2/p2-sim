@@ -2,6 +2,7 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
+import { MAX_FILE_EDIT_CONTINUATION_ROUNDS } from '@/local-copilot/lib/agent/limits'
 import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
@@ -13,6 +14,7 @@ import {
   turnHasWorkflowDiscoveryTools,
 } from '@/local-copilot/lib/synthesize-assistant-summary'
 import {
+  buildFileEditContinuationMessage,
   isFileInspectionBridgeNarration,
   isLiveWebSearchToolCall,
   shouldForceDebugExplanationContinuation,
@@ -268,7 +270,7 @@ describe('file inspection continuation', () => {
       shouldForceFileEditContinuation({
         postBuildToolMode: 'all',
         forcedFileEditContinuations: 0,
-        maxForcedFileEditContinuations: 1,
+        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
         round: 2,
         maxToolRounds: 10,
         hasFileInspectionTools: true,
@@ -280,12 +282,50 @@ describe('file inspection continuation', () => {
     ).toBe(true)
   })
 
+  it('allows multiple inspect-only continuations before giving up', () => {
+    expect(MAX_FILE_EDIT_CONTINUATION_ROUNDS).toBeGreaterThanOrEqual(3)
+    expect(
+      shouldForceFileEditContinuation({
+        postBuildToolMode: 'all',
+        forcedFileEditContinuations: 2,
+        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
+        round: 4,
+        maxToolRounds: 20,
+        hasFileInspectionTools: true,
+        hasFileMutationTools: false,
+        streamedUserFacingText: 'Let me read the rest of the standalone.',
+        roundDisplayText: '',
+      })
+    ).toBe(true)
+    expect(
+      shouldForceFileEditContinuation({
+        postBuildToolMode: 'all',
+        forcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
+        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
+        round: 5,
+        maxToolRounds: 20,
+        hasFileInspectionTools: true,
+        hasFileMutationTools: false,
+        streamedUserFacingText: 'Let me read the rest of the standalone.',
+        roundDisplayText: '',
+      })
+    ).toBe(false)
+  })
+
+  it('nudge tells the model to stop paging and apply one fat patch', () => {
+    const message = buildFileEditContinuationMessage()
+    expect(message).toMatch(/STOP paging/i)
+    expect(message).toMatch(/workspace_file/i)
+    expect(message).toMatch(/edit_content/i)
+    expect(message).toMatch(/single fat edit|one targeted patch/i)
+  })
+
   it('does not force after workspace_file / edit_content already ran', () => {
     expect(
       shouldForceFileEditContinuation({
         postBuildToolMode: 'all',
         forcedFileEditContinuations: 0,
-        maxForcedFileEditContinuations: 1,
+        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
         round: 2,
         maxToolRounds: 10,
         hasFileInspectionTools: true,

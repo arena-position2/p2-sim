@@ -1,15 +1,17 @@
-/** @vitest-environment node */
+import { createSessionPrincipal } from '@sim/testing/factories/principal.factory'
+import { redisConfigMockFns } from '@sim/testing/mocks/redis-config.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const redis = vi.hoisted(() => ({ set: vi.fn(), eval: vi.fn() }))
-vi.mock('@/lib/core/config/redis', () => ({ getRedisClient: () => redis }))
 
 import {
   consumeSlackSearchOAuthAttempt,
   storeSlackSearchOAuthAttempt,
 } from '@/lib/slack-search/oauth-state'
 
-const principal = { kind: 'session', userId: 'admin1', sessionId: 'session1' } as const
+redisConfigMockFns.mockGetRedisClient.mockImplementation(() => redis)
+
+const principal = createSessionPrincipal({ userId: 'admin1', sessionId: 'session1' })
 const attempt = {
   userId: 'admin1',
   sessionId: 'session1',
@@ -23,7 +25,6 @@ const attempt = {
   createdAt: Date.now(),
 }
 beforeEach(() => {
-  vi.clearAllMocks()
   redis.set.mockResolvedValue('OK')
   redis.eval.mockResolvedValue(null)
 })
@@ -57,6 +58,26 @@ describe('Slack OAuth state', () => {
       'already completed'
     )
   })
+  it.each([
+    { ...principal, sessionId: 'foreign-session' },
+    { ...principal, userId: 'foreign-user' },
+  ])(
+    'rejects a foreign browser context without consuming the original attempt: %s',
+    async (foreign) => {
+      redis.eval.mockResolvedValueOnce(null).mockResolvedValueOnce(JSON.stringify(attempt))
+      await expect(consumeSlackSearchOAuthAttempt('state', foreign)).rejects.toThrow(
+        'expired or was already completed'
+      )
+      expect(redis.eval).toHaveBeenCalledWith(
+        expect.stringContaining('attempt.userId ~= ARGV[1] or attempt.sessionId ~= ARGV[2]'),
+        1,
+        expect.any(String),
+        foreign.userId,
+        foreign.sessionId
+      )
+      await expect(consumeSlackSearchOAuthAttempt('state', principal)).resolves.toEqual(attempt)
+    }
+  )
   it('round-trips the custom installation snapshot in a single-use shared-app attempt', async () => {
     const { encryptedClientSecret, encryptedSigningSecret, ...common } = attempt
     const transition = {

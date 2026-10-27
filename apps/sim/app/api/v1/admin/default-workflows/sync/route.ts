@@ -10,8 +10,8 @@ import { parsePostgresConnectionFromBody } from '@/lib/workflows/default-user-wo
 import { syncDefaultWorkflowsForSource } from '@/lib/workflows/default-user-workflows/service'
 import { authenticateCronSecretRequest } from '@/app/api/v1/admin/cron-secret-auth'
 import {
-  badRequestResponse,
-  internalErrorResponse,
+  adminBadRequestResponse,
+  adminInternalErrorResponse,
   singleResponse,
 } from '@/app/api/v1/admin/responses'
 
@@ -48,34 +48,34 @@ export const POST = withRouteHandler(async (request) => {
 
     const body: unknown = await request.json()
     if (!isRecord(body)) {
-      return badRequestResponse('Request body must be a JSON object.')
+      return adminBadRequestResponse('Request body must be a JSON object.')
     }
 
     const sourceWorkflowId =
       typeof body.sourceWorkflowId === 'string' ? body.sourceWorkflowId.trim() : ''
     if (!sourceWorkflowId) {
-      return badRequestResponse('sourceWorkflowId is required.')
+      return adminBadRequestResponse('sourceWorkflowId is required.')
     }
 
     const deploy = body.deploy !== false
     const deployAsChat = body.deployAsChat !== false
 
     if (body.chat !== undefined && !deployAsChat) {
-      return badRequestResponse('chat must not be provided when deployAsChat is false.')
+      return adminBadRequestResponse('chat must not be provided when deployAsChat is false.')
     }
 
     let chatOutputConfigs: ChatOutputConfigInput[] | undefined
     if (deployAsChat) {
       const parsedChatOutputs = parseChatOutputConfigInputs(body)
       if (parsedChatOutputs && 'error' in parsedChatOutputs) {
-        return badRequestResponse(parsedChatOutputs.error)
+        return adminBadRequestResponse(parsedChatOutputs.error)
       }
       chatOutputConfigs = parsedChatOutputs
     }
 
     const postgresParsed = parsePostgresConnectionFromBody(body)
     if (postgresParsed && 'error' in postgresParsed) {
-      return badRequestResponse(postgresParsed.error)
+      return adminBadRequestResponse(postgresParsed.error)
     }
     const postgresConnection = postgresParsed
 
@@ -102,6 +102,6 @@ export const POST = withRouteHandler(async (request) => {
     logger.error(`[${requestId}] Admin API: Failed to sync default workflows`, {
       error: toError(error),
     })
-    return internalErrorResponse('Failed to sync default workflows')
+    return adminInternalErrorResponse('Failed to sync default workflows')
   }
 })

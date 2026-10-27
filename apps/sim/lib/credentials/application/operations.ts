@@ -84,7 +84,14 @@ export const credentialOperations = {
     minimumRole: 'read',
     workspaceApiKey: 'allow',
     capability: 'integrations.manage',
-    principalKinds: ['session', 'personal_api_key', 'oauth_access_token', 'workspace_api_key'],
+    principalKinds: [
+      'session',
+      'personal_api_key',
+      'oauth_access_token',
+      'workspace_api_key',
+      'delegated',
+    ],
+    delegatedServices: ['copilot'],
   }),
   listConnections: defineWorkspaceOperation({
     id: 'credentials.connections.list',
@@ -92,7 +99,14 @@ export const credentialOperations = {
     minimumRole: 'read',
     workspaceApiKey: 'allow',
     capability: 'integrations.manage',
-    principalKinds: ['session', 'personal_api_key', 'oauth_access_token', 'workspace_api_key'],
+    principalKinds: [
+      'session',
+      'personal_api_key',
+      'oauth_access_token',
+      'workspace_api_key',
+      'delegated',
+    ],
+    delegatedServices: ['copilot'],
   }),
   /**
    * `integrations.manage`, like every other credential operation — these three
@@ -111,7 +125,8 @@ export const credentialOperations = {
     minimumRole: 'write',
     workspaceApiKey: 'deny',
     capability: 'integrations.manage',
-    principalKinds: ['session', 'personal_api_key', 'oauth_access_token'],
+    principalKinds: ['session', 'personal_api_key', 'oauth_access_token', 'delegated'],
+    delegatedServices: ['copilot'],
   }),
   prepareConnection: defineWorkspaceOperation({
     id: 'credentials.connections.prepare',
@@ -127,7 +142,7 @@ export const credentialOperations = {
     minimumRole: 'write',
     workspaceApiKey: 'deny',
     capability: 'integrations.manage',
-    principalKinds: ['session', 'personal_api_key', 'oauth_access_token'],
+    ...HUMAN_AND_COPILOT_PRINCIPALS,
   }),
   read: defineCredentialOperation(
     defineWorkspaceOperation({
@@ -168,14 +183,6 @@ export const credentialOperations = {
     }),
     'admin'
   ),
-  deleteMany: defineWorkspaceOperation({
-    id: 'credentials.delete_many',
-    minimumRole: 'read',
-    workspaceApiKey: 'deny',
-    capability: 'integrations.manage',
-    principalKinds: ['delegated'],
-    delegatedServices: ['copilot'],
-  }),
   saveDraft: defineWorkspaceOperation({
     id: 'credentials.drafts.save',
     minimumRole: 'write',
@@ -184,29 +191,32 @@ export const credentialOperations = {
     principalKinds: ['session'],
   }),
   listMembers: defineWorkspaceOperation({
+    oauthScope: 'api:read',
     id: 'credentials.members.list',
     minimumRole: 'read',
     workspaceApiKey: 'deny',
     capability: 'integrations.manage',
-    principalKinds: ['session'],
+    ...HUMAN_AND_COPILOT_PRINCIPALS,
   }),
   upsertMember: defineCredentialOperation(
     defineWorkspaceOperation({
+      oauthScope: 'api:write',
       id: 'credentials.members.upsert',
       minimumRole: 'read',
       workspaceApiKey: 'deny',
       capability: 'integrations.manage',
-      principalKinds: ['session'],
+      ...HUMAN_AND_COPILOT_PRINCIPALS,
     }),
     'admin'
   ),
   removeMember: defineCredentialOperation(
     defineWorkspaceOperation({
+      oauthScope: 'api:write',
       id: 'credentials.members.remove',
       minimumRole: 'read',
       workspaceApiKey: 'deny',
       capability: 'integrations.manage',
-      principalKinds: ['session'],
+      ...HUMAN_AND_COPILOT_PRINCIPALS,
     }),
     'admin'
   ),

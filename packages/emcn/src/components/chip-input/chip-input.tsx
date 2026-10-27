@@ -28,13 +28,15 @@
  */
 import * as React from 'react'
 import { cn } from '../../lib/cn'
-import { chipFieldSurfaceClass, chipFieldTextClass, chipGeometryClass } from '../chip/chip-chrome'
+import { chipFieldSurfaceClass, chipFieldTextClass, chipGeometryClass } from '../chip/chrome'
 
 type ChipInputIcon = React.ComponentType<{ className?: string }>
 
 export interface ChipInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'> {
   /** Leading icon component (e.g. `Search` from `@sim/emcn/icons`). Rendered at 14px in `--text-icon`, with the chip's 1.5 gap. */
   icon?: ChipInputIcon
+  /** Custom leading content, such as a color swatch. Takes precedence over `icon`. */
+  startAdornment?: React.ReactNode
   /** Trailing content rendered after the input (e.g. reveal / copy buttons). */
   endAdornment?: React.ReactNode
   /** Marks the field invalid; swaps the border to the error token. */
@@ -55,6 +57,7 @@ export const ChipInput = React.forwardRef<HTMLInputElement, ChipInputProps>(
       className,
       inputClassName,
       icon: Icon,
+      startAdornment,
       endAdornment,
       error,
       disabled,
@@ -65,7 +68,7 @@ export const ChipInput = React.forwardRef<HTMLInputElement, ChipInputProps>(
   ) => (
     <div
       className={cn(
-        'flex w-full',
+        'flex w-full max-md:pointer-coarse:min-h-11',
         chipGeometryClass,
         chipFieldSurfaceClass,
         error && 'border-[var(--text-error)]',
@@ -73,13 +76,14 @@ export const ChipInput = React.forwardRef<HTMLInputElement, ChipInputProps>(
         className
       )}
     >
-      {Icon ? <Icon className='size-[14px] shrink-0 text-[var(--text-icon)]' /> : null}
+      {startAdornment ??
+        (Icon ? <Icon className='size-[14px] shrink-0 text-[var(--text-icon)]' /> : null)}
       <input
         ref={ref}
         type={type}
         disabled={disabled}
         className={cn(
-          '-ml-1 h-full w-full bg-transparent indent-1 disabled:cursor-not-allowed',
+          '-ml-1 size-full min-w-0 bg-transparent indent-1 disabled:cursor-not-allowed',
           chipFieldTextClass,
           inputClassName
         )}

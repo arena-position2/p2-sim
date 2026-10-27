@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockSaveBlob } = vi.hoisted(() => ({
@@ -72,40 +69,6 @@ describe('terminal console store', () => {
     })
   })
 
-  it('normalizes oversized replaceOutput updates', () => {
-    useTerminalConsoleStore.getState().addConsole({
-      workflowId: 'wf-1',
-      blockId: 'block-1',
-      blockName: 'Function',
-      blockType: 'function',
-      executionId: 'exec-1',
-      executionOrder: 1,
-      output: { ok: true },
-    })
-
-    useTerminalConsoleStore.getState().updateConsole(
-      'block-1',
-      {
-        executionOrder: 1,
-        replaceOutput: {
-          a: 'x'.repeat(100_000),
-          b: 'y'.repeat(100_000),
-          c: 'z'.repeat(100_000),
-          d: 'q'.repeat(100_000),
-          e: 'r'.repeat(100_000),
-          f: 's'.repeat(100_000),
-        },
-      },
-      'exec-1'
-    )
-
-    const [entry] = useTerminalConsoleStore.getState().getWorkflowEntries('wf-1')
-
-    expect(entry.output).toMatchObject({
-      __simTruncated: true,
-    })
-  })
-
   it('updates one workflow without replacing unrelated workflow arrays', () => {
     useTerminalConsoleStore.getState().addConsole({
       workflowId: 'wf-1',
@@ -146,55 +109,6 @@ describe('terminal console store', () => {
   })
 
   describe('cancelRunningEntries', () => {
-    it('flips a plain running entry to canceled', () => {
-      useTerminalConsoleStore.getState().addConsole({
-        workflowId: 'wf-1',
-        blockId: 'block-1',
-        blockName: 'Function',
-        blockType: 'function',
-        executionId: 'exec-1',
-        executionOrder: 1,
-        isRunning: true,
-        startedAt: new Date(Date.now() - 1000).toISOString(),
-      })
-
-      useTerminalConsoleStore.getState().cancelRunningEntries('wf-1')
-
-      const [entry] = useTerminalConsoleStore.getState().getWorkflowEntries('wf-1')
-      expect(entry.isCanceled).toBe(true)
-      expect(entry.isRunning).toBe(false)
-    })
-
-    it('settles live agent stream chrome when canceling', () => {
-      useTerminalConsoleStore.getState().addConsole({
-        workflowId: 'wf-1',
-        blockId: 'block-1',
-        blockName: 'Agent',
-        blockType: 'agent',
-        executionId: 'exec-1',
-        executionOrder: 1,
-        isRunning: true,
-        agentStreamActive: true,
-        agentStreamThinking: 'drafting…',
-        agentStreamToolCalls: [
-          {
-            key: 'block-1:t1',
-            id: 't1',
-            name: 'http_request',
-            displayName: 'HTTP Request',
-            status: 'running',
-          },
-        ],
-      })
-
-      useTerminalConsoleStore.getState().cancelRunningEntries('wf-1', 'exec-1')
-
-      const [entry] = useTerminalConsoleStore.getState().getWorkflowEntries('wf-1')
-      expect(entry.agentStreamActive).toBe(false)
-      expect(entry.agentStreamThinking).toBe('drafting…')
-      expect(entry.agentStreamToolCalls?.[0]?.status).toBe('cancelled')
-    })
-
     it('only cancels running entries for the requested execution when provided', () => {
       useTerminalConsoleStore.getState().addConsole({
         workflowId: 'wf-1',

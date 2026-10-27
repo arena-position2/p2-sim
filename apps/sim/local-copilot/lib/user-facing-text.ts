@@ -3,6 +3,10 @@
  * after a successful workflow build.
  */
 
+import {
+  MAX_PRE_POPULATE_DISCOVERY_CALLS,
+  MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS,
+} from '@/local-copilot/lib/agent/limits'
 import { stripOptionsTagsForDisplay } from '@/local-copilot/lib/format-options-tag'
 import { stripUntrustedSecurityControls } from '@/local-copilot/lib/security/trusted-controls'
 
@@ -122,7 +126,7 @@ export function stripIdsFromUserFacingText(text: string): string {
 export function buildWorkflowBuildCompleteSystemMessage(mode: PostBuildToolMode): string {
   if (mode === 'oauth_only') {
     return (
-      '[System] Workflow populate succeeded. Call oauth_get_auth_link once for the missing provider, ' +
+      '[System] Workflow populate succeeded. Call oauth_get_auth_link once for each missing provider in this response, ' +
       'then STOP. Do not validate, re-edit, or re-fetch metadata. ' +
       'The Connect control is shown automatically from the tool result — do not invent URLs.'
     )
@@ -140,8 +144,9 @@ export function buildWorkflowBuildCompleteSystemMessage(mode: PostBuildToolMode)
 export function buildBlocksMetadataReuseSystemMessage(): string {
   return (
     '[System] Block metadata was already fetched this turn. ' +
-    'Reuse that result. Call get_blocks_metadata again ONLY for new block types not covered yet — ' +
-    'prefer one call with every type you need (e.g. agent, start_trigger, gmail).'
+    'Reuse that result. Do not call get_blocks_metadata or load_copilot_artifact again unless a specific field id is missing. ' +
+    'Call edit_workflow now. A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". ' +
+    'Omit Agent model unless that metadata lists the exact current id.'
   )
 }
 
@@ -357,8 +362,65 @@ export function buildWorkflowBuildContinuationMessage(): string {
 export function buildIncompleteWorkflowPopulateContinuationMessage(): string {
   return (
     '[System] create_workflow already succeeded this turn but edit_workflow has not populated it yet. ' +
-    'Call get_blocks_metadata (if needed) then edit_workflow NOW to add the requested blocks and connections. ' +
-    'Do not create another workflow and do not stop on an empty shell.'
+    'Call edit_workflow NOW. Do not call get_blocks_metadata or load_copilot_artifact again if metadata was already returned. ' +
+    'A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". ' +
+    'Omit Agent model unless metadata lists that exact current id. Do not create another workflow.'
+  )
+}
+
+/** Tools that only re-fetch block schemas and must not consume the populate budget. */
+const PRE_POPULATE_DISCOVERY_TOOLS = new Set(['get_blocks_metadata', 'load_copilot_artifact'])
+
+/**
+ * True for metadata / artifact reloads that run before the first successful populate edit.
+ */
+export function isPrePopulateDiscoveryTool(toolName: string): boolean {
+  return PRE_POPULATE_DISCOVERY_TOOLS.has(toolName)
+}
+
+/**
+ * Whether a discovery call may run before the first successful populate edit.
+ * `ignore` means the cap does not apply (not a discovery tool, or populate already started).
+ */
+export function admitPrePopulateDiscovery(options: {
+  createdWorkflowThisTurn: boolean
+  successfulPopulateEdits: number
+  discoveryCallsSoFar: number
+  toolName: string
+}): 'allow' | 'reject' | 'ignore' {
+  if (!isPrePopulateDiscoveryTool(options.toolName)) return 'ignore'
+  if (!options.createdWorkflowThisTurn || options.successfulPopulateEdits > 0) return 'ignore'
+  if (options.discoveryCallsSoFar >= MAX_PRE_POPULATE_DISCOVERY_CALLS) return 'reject'
+  return 'allow'
+}
+
+/**
+ * True when a discovery-only round should not consume a tool-iteration slot.
+ * Rejected discovery rounds are not refunded, so a model that ignores the block cannot loop forever.
+ */
+export function shouldRefundPrePopulateDiscoveryRound(options: {
+  createdWorkflowThisTurn: boolean
+  successfulPopulateEdits: number
+  roundToolNames: string[]
+  refundsSoFar: number
+  hadRejectedDiscovery: boolean
+}): boolean {
+  if (options.hadRejectedDiscovery) return false
+  if (!options.createdWorkflowThisTurn || options.successfulPopulateEdits > 0) return false
+  if (options.refundsSoFar >= MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS) return false
+  if (options.roundToolNames.length === 0) return false
+  return options.roundToolNames.every((name) => isPrePopulateDiscoveryTool(name))
+}
+
+/**
+ * Instruction returned when further metadata / artifact reloads are blocked.
+ */
+export function buildPrePopulateDiscoveryBlockedMessage(): string {
+  return (
+    'Block metadata for this new workflow is already loaded. ' +
+    'Do not call get_blocks_metadata or load_copilot_artifact again. Call edit_workflow now. ' +
+    'A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". ' +
+    'Omit Agent model unless the metadata you already have lists that exact current id.'
   )
 }
 
@@ -373,7 +435,6 @@ export function buildWorkflowBuildSoftCompleteSystemMessage(): string {
     'Otherwise stop tools and reply once with a short summary (display names only) and at most one <options> block.'
   )
 }
-
 
 /**
  * True when prose only narrates inspecting a file (read/grep/see) without
@@ -397,9 +458,11 @@ export function isFileInspectionBridgeNarration(text: string): boolean {
  */
 export function buildFileEditContinuationMessage(): string {
   return (
-    '[System] You already read/grepped the workspace file (and maybe load_copilot_artifact) ' +
-    'but have not applied the fix. Call workspace_file (patch/update) then edit_content NOW with the ' +
-    'corrected code. Do not dump HTML/JS into chat. Do not stop on Thinking after inspection tools.'
+    '[System] You already read/grepped (and maybe load_copilot_artifact) but have not applied the fix. ' +
+    'STOP paging the source with more offset/limit reads. Call workspace_file (patch/update) then ' +
+    'edit_content NOW — one targeted patch into the destination (e.g. empty KPIs shell / insert anchor). ' +
+    'Prefer a single fat edit with the needed markup/seed data over reassembling the standalone via many reads. ' +
+    'Do not dump HTML/JS into chat. Do not end the turn on Thinking after inspection tools.'
   )
 }
 
@@ -556,7 +619,6 @@ export function buildUnresolvedFollowUpClosingMessage(
   }
   return 'I made partial progress but still need another step to finish the request. Please continue in chat.'
 }
-
 
 /**
  * System nudge when research/factual intent settled without a live web search.

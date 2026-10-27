@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
     context = body.context
   } catch (error) {
     if (error instanceof z.ZodError) {
-      logger.warn('Invalid resolve-workspace request body', { errors: error.errors })
-      return NextResponse.json({ error: 'Invalid request', details: error.errors }, { status: 400 })
+      logger.warn('Invalid resolve-workspace request body', { errors: error.issues })
+      return NextResponse.json({ error: 'Invalid request', details: error.issues }, { status: 400 })
     }
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }

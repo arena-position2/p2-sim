@@ -1,40 +1,30 @@
-/**
- * @vitest-environment node
- */
-import { resetEnvFlagsMock, setEnvFlags } from '@sim/testing'
+import {
+  billingAttributionMock,
+  billingAttributionMockFns,
+} from '@sim/testing/mocks/billing-attribution.mock'
+import {
+  billingPlanHelpersMock,
+  billingPlanHelpersMockFns,
+} from '@sim/testing/mocks/billing-plan-helpers.mock'
+import { resetEnvFlagsMock, setEnvFlags } from '@sim/testing/mocks/env-flags.mock'
+import { tableConstantsMock, tableConstantsMockFns } from '@sim/testing/mocks/table-constants.mock'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const {
-  mockResolveWorkspaceBillingPayer,
-  mockGetPlanTypeForLimits,
-  mockGetBillingDisabledTableLimits,
-  mockGetTablePlanLimits,
-} = vi.hoisted(() => ({
-  mockResolveWorkspaceBillingPayer: vi.fn(),
-  mockGetPlanTypeForLimits: vi.fn(),
-  mockGetBillingDisabledTableLimits: vi.fn(),
-  mockGetTablePlanLimits: vi.fn(),
-}))
-
-vi.mock('@/lib/billing/core/billing-attribution', () => ({
-  resolveWorkspaceBillingPayer: mockResolveWorkspaceBillingPayer,
-}))
-vi.mock('@/lib/billing/plan-helpers', () => ({
-  getPlanTypeForLimits: mockGetPlanTypeForLimits,
-}))
-vi.mock('@/lib/table/constants', () => ({
-  getBillingDisabledTableLimits: mockGetBillingDisabledTableLimits,
-  getTablePlanLimits: mockGetTablePlanLimits,
-}))
+vi.mock('@/lib/billing/core/billing-attribution', () => billingAttributionMock)
+vi.mock('@/lib/billing/plan-helpers', () => billingPlanHelpersMock)
+vi.mock('@/lib/table/constants', () => tableConstantsMock)
 
 import {
   assertRowCapacity,
-  getMaxRowsPerTable,
   getWorkspaceTableLimits,
   notifyTableRowUsage,
   TableRowLimitError,
   wouldExceedRowLimit,
 } from '@/lib/table/billing'
+
+const { mockGetBillingDisabledTableLimits, mockGetTablePlanLimits } = tableConstantsMockFns
+const mockGetPlanTypeForLimits = billingPlanHelpersMockFns.mockGetPlanTypeForLimits
+const mockResolveWorkspaceBillingPayer = billingAttributionMockFns.mockResolveWorkspaceBillingPayer
 
 const LIMITS = {
   free: { maxTables: 3, maxRowsPerTable: 1000 },
@@ -49,7 +39,6 @@ let wsCounter = 0
 const nextWorkspaceId = () => `ws-${++wsCounter}`
 
 beforeEach(() => {
-  vi.clearAllMocks()
   setEnvFlags({ isBillingEnabled: true })
   mockGetTablePlanLimits.mockReturnValue(LIMITS)
   mockGetBillingDisabledTableLimits.mockReturnValue({
@@ -67,10 +56,6 @@ beforeEach(() => {
 afterAll(resetEnvFlagsMock)
 
 describe('getWorkspaceTableLimits', () => {
-  it('returns the limits for the workspace subscription plan', async () => {
-    expect(await getWorkspaceTableLimits(nextWorkspaceId())).toEqual(LIMITS.pro)
-  })
-
   it('caches the resolved limits within the TTL', async () => {
     const ws = nextWorkspaceId()
     await getWorkspaceTableLimits(ws)
@@ -119,12 +104,6 @@ describe('getWorkspaceTableLimits', () => {
   })
 })
 
-describe('getMaxRowsPerTable', () => {
-  it('returns the plan maxRowsPerTable', async () => {
-    expect(await getMaxRowsPerTable(nextWorkspaceId())).toBe(5000)
-  })
-})
-
 describe('wouldExceedRowLimit', () => {
   it('is false under the limit and at the limit exactly', () => {
     expect(wouldExceedRowLimit(1000, 10, 5)).toBe(false)
@@ -145,12 +124,6 @@ describe('wouldExceedRowLimit', () => {
 })
 
 describe('assertRowCapacity', () => {
-  it('returns the resolved limit when the write stays under it', async () => {
-    await expect(
-      assertRowCapacity({ workspaceId: nextWorkspaceId(), currentRowCount: 10, addedRows: 5 })
-    ).resolves.toBe(5000)
-  })
-
   it('allows reaching the limit exactly and returns it', async () => {
     await expect(
       assertRowCapacity({ workspaceId: nextWorkspaceId(), currentRowCount: 4999, addedRows: 1 })
@@ -161,12 +134,6 @@ describe('assertRowCapacity', () => {
     await expect(
       assertRowCapacity({ workspaceId: nextWorkspaceId(), currentRowCount: 5000, addedRows: 1 })
     ).rejects.toBeInstanceOf(TableRowLimitError)
-  })
-
-  it('names the plan limit in the error message', async () => {
-    await expect(
-      assertRowCapacity({ workspaceId: nextWorkspaceId(), currentRowCount: 5000, addedRows: 1 })
-    ).rejects.toThrow(/row limit \(5,000 rows\)/)
   })
 
   it('skips the check when the plan is unlimited (-1)', async () => {

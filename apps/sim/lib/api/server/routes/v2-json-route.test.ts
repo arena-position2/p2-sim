@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import type { PersonalApiKeyPrincipal } from '@sim/auth/principal'
 import {
   MockV2ApiKeyUnauthenticatedError,
@@ -148,7 +145,6 @@ function oversizedRequest(maxBodyBytes: number): NextRequest {
 
 describe('defineV2JsonRoute', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.authenticate.mockResolvedValue(auth)
     v2RouteMocks.preauthRate.mockResolvedValue({
       allowed: true,
@@ -282,11 +278,13 @@ describe('defineV2JsonRoute', () => {
     expect(v2RouteMocks.operationRate).toHaveBeenCalledTimes(2)
     expect(v2RouteMocks.operationRate).toHaveBeenCalledWith(
       'v2:widgets.update:api-key:key-1',
-      expect.objectContaining({ maxTokens: 100 })
+      expect.objectContaining({ maxTokens: 100 }),
+      1
     )
     expect(v2RouteMocks.operationRate).toHaveBeenCalledWith(
       'v2:widgets.update:user:user-1',
-      expect.objectContaining({ maxTokens: 100 })
+      expect.objectContaining({ maxTokens: 100 }),
+      1
     )
     expect(response.headers.get('X-RateLimit-Limit')).toBe('100')
     expect(response.headers.get('X-RateLimit-Remaining')).toBe('12')
@@ -504,7 +502,6 @@ describe('defineV2JsonRoute', () => {
  */
 describe('defineV2JsonRoute unreadable body classification', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.authenticate.mockResolvedValue(auth)
     v2RouteMocks.preauthRate.mockResolvedValue({
       allowed: true,
@@ -679,7 +676,6 @@ describe('defineV2JsonRoute HEAD on a route that is not head-safe', () => {
   }
 
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.authenticate.mockResolvedValue(auth)
     v2RouteMocks.preauthRate.mockResolvedValue({
       allowed: true,
@@ -800,7 +796,6 @@ const presenterContract = defineRouteContract({
  */
 describe('defineV2JsonRoute presentation', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.authenticate.mockResolvedValue(auth)
     v2RouteMocks.preauthRate.mockResolvedValue({
       allowed: true,
@@ -884,7 +879,6 @@ describe('defineV2JsonRoute OAuth scope admission', () => {
   }
 
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.preauthRate.mockResolvedValue({
       allowed: true,
       remaining: 599,

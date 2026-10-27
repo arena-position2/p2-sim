@@ -11,6 +11,7 @@ import type {
   GmailToolResponse,
 } from '@/tools/gmail/types'
 import {
+  castGmailResponse,
   createMessagesSummary,
   GMAIL_API_BASE,
   processMessage,
@@ -315,16 +316,16 @@ export const gmailReadV2Tool: ToolConfig<GmailReadParams, GmailToolResponse> = {
   ) => {
     const legacy = await gmailReadTool.transformResponse!(response, params, context)
     if (!legacy.success) {
-      return {
+      return castGmailResponse<GmailToolResponse>({
         success: false,
         output: {},
         error: legacy.error,
-      }
+      })
     }
 
     const metadata = (legacy.output.metadata || {}) as any
 
-    return {
+    return castGmailResponse<GmailToolResponse>({
       success: true,
       output: {
         id: metadata.id,
@@ -341,7 +342,7 @@ export const gmailReadV2Tool: ToolConfig<GmailReadParams, GmailToolResponse> = {
         attachments: legacy.output.attachments || [],
         results: metadata.results,
       },
-    }
+    })
   },
   outputs: {
     body: { type: 'string', description: 'Text content of the email' },

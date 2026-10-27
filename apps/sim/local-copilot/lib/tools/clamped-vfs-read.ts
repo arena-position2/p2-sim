@@ -1,7 +1,14 @@
 import { createLogger } from '@sim/logger'
-import { getOrMaterializeVFS } from '@/lib/copilot/vfs'
-import { isOversizedReadPlaceholder } from '@/lib/copilot/vfs/read-placeholders'
+import { getErrorMessage } from '@sim/utils/errors'
+import {
+  executeCopilotFileUseCase,
+  resolveCopilotWorkspaceFileReference,
+} from '@/lib/mothership/application/execute-file-use-case'
+import { isImageFileType } from '@/lib/uploads/utils/file-utils'
+import { fileOperations } from '@/lib/workspace-files/application/operations'
+import { readWorkspaceFileContent } from '@/lib/workspace-files/application/read-workspace-file-content'
 import { clampReadResultForLocalModel } from '@/local-copilot/lib/tools/clamp-read-result'
+import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import type { ToolExecutionContext, ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
 
 const logger = createLogger('LocalCopilotClampedVfsRead')
@@ -69,7 +76,7 @@ export function clampSuccessfulReadResult(result: ToolExecutionResult): ToolExec
 
 /**
  * Local-only recovery when shared `read` hard-fails on Arena/Figma-scale HTML.
- * Re-reads via VFS, applies offset/limit, then clamps mega lines for the model.
+ * Re-reads the workspace file, applies offset/limit, then clamps mega lines for the model.
  */
 export async function recoverOversizedVfsReadForLocal(
   args: Record<string, unknown>,
@@ -81,53 +88,25 @@ export async function recoverOversizedVfsReadForLocal(
   const offset = parseOptionalNumber(args.offset)
   const limit = parseOptionalNumber(args.limit)
 
+  const reference = path.replace(/\/(?:content|style|compiled-check|compiled|render|extract)$/, '')
+  if (!reference.startsWith('files/') && !reference.startsWith('uploads/')) return null
+
   try {
-    const vfs = await getOrMaterializeVFS(ctx.workspaceId, ctx.userId, {
-      secretMountPolicy: undefined,
+    const delegation = toCopilotServerToolContext(ctx)
+    const file = await resolveCopilotWorkspaceFileReference(
+      delegation,
+      fileOperations.readContent,
+      { workspaceId: ctx.workspaceId, reference }
+    )
+    if (isImageFileType(file.type)) return null
+
+    const { content } = await executeCopilotFileUseCase(delegation, readWorkspaceFileContent, {
+      fileId: file.id,
+      assertedWorkspaceId: ctx.workspaceId,
     })
-
-    const shouldReadDynamicFileContent =
-      /^recently-deleted\/files\/.+\/content$/.test(path) ||
-      /^files\/.+\/(?:content|style|compiled-check|compiled|render|extract)$/.test(path)
-
-    let raw: { content: string; totalLines: number; error?: string } | null = null
-
-    if (shouldReadDynamicFileContent) {
-      const envelope = await vfs.readFileContentWithProvenance(path)
-      const value = envelope?.value
-      if (!value) return null
-      if (hasModelAttachment(value) || isOversizedReadPlaceholder(value)) return null
-      if (typeof value.content !== 'string') return null
-      raw = {
-        content: value.content,
-        totalLines: value.totalLines,
-        ...(value.error !== undefined ? { error: value.error } : {}),
-      }
-    } else {
-      const value = await vfs.read(path, offset, limit)
-      if (!value) return null
-      if (hasModelAttachment(value) || isOversizedReadPlaceholder(value)) return null
-      if (typeof value.content !== 'string') return null
-      raw = {
-        content: value.content,
-        totalLines: value.totalLines,
-        ...(value.error !== undefined ? { error: value.error } : {}),
-      }
-    }
-
-    if (raw.error) {
-      return {
-        toolName: 'read',
-        success: false,
-        error: raw.error,
-        result: { success: false, error: raw.error },
-      }
-    }
-
-    const windowed =
-      shouldReadDynamicFileContent || (offset === undefined && limit === undefined)
-        ? applyLineWindow(raw, offset, limit)
-        : raw
+    const text = content.toString('utf8')
+    const raw = { content: text, totalLines: text.split('\n').length }
+    const windowed = applyLineWindow(raw, offset, limit)
     const clamped = clampReadResultForLocalModel(windowed)
 
     logger.info('Recovered oversized VFS read for Local Copilot', {
@@ -147,7 +126,7 @@ export async function recoverOversizedVfsReadForLocal(
   } catch (error) {
     logger.warn('Local oversized VFS read recovery failed', {
       path,
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
     })
     return null
   }

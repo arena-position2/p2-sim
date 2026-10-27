@@ -100,7 +100,8 @@ async function insertFileMetadataHelper(
   contentType: string,
   fileSize: number,
   uploadId?: string,
-  cleanupOnMetadataFailure = false
+  cleanupOnMetadataFailure = false,
+  metadataId?: string
 ): Promise<void> {
   const { insertFileMetadata, insertImmutableFileMetadata } = await import(
     '@/lib/uploads/server/metadata'
@@ -109,6 +110,7 @@ async function insertFileMetadataHelper(
     context === 'knowledge-base' ? insertImmutableFileMetadata : insertFileMetadata
   try {
     await insertMetadata({
+      ...(metadataId ? { id: metadataId } : {}),
       key,
       userId: metadata.userId,
       workspaceId: metadata.workspaceId || null,
@@ -163,6 +165,8 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
     customKey,
     metadata,
     persistMetadata = true,
+    metadataId,
+    createOnly = false,
     cleanupOnMetadataFailure = false,
     createOnlyUploadId,
     signal,
@@ -255,7 +259,7 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
       file.length,
       preserveKey,
       objectMetadata,
-      Boolean(uploadId),
+      Boolean(uploadId) || createOnly,
       signal
     )
 
@@ -268,7 +272,8 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
         contentType,
         file.length,
         uploadId,
-        cleanupOnMetadataFailure
+        cleanupOnMetadataFailure,
+        metadataId
       )
     }
 
@@ -294,7 +299,7 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
       file.length,
       preserveKey,
       objectMetadata,
-      Boolean(uploadId),
+      Boolean(uploadId) || createOnly,
       signal
     )
 
@@ -313,7 +318,8 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
         contentType,
         file.length,
         uploadId,
-        cleanupOnMetadataFailure
+        cleanupOnMetadataFailure,
+        metadataId
       )
     }
 
@@ -330,7 +336,7 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
       file.length,
       preserveKey,
       objectMetadata,
-      Boolean(uploadId),
+      Boolean(uploadId) || createOnly,
       signal
     )
 
@@ -343,7 +349,8 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
         contentType,
         file.length,
         uploadId,
-        cleanupOnMetadataFailure
+        cleanupOnMetadataFailure,
+        metadataId
       )
     }
 
@@ -377,6 +384,17 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
       metadata: objectMetadata ?? {},
       signal,
     })
+  } else if (createOnly) {
+    /** Publish only complete bytes; link is atomic and refuses an existing winner. */
+    const { link, rm } = await import('fs/promises')
+    const temporary = `${filesystemPath}.${generateId()}.tmp`
+    try {
+      await writeFile(temporary, file, { signal, flag: 'wx' })
+      signal?.throwIfAborted()
+      await link(temporary, filesystemPath)
+    } finally {
+      await rm(temporary, { force: true })
+    }
   } else {
     await writeFile(filesystemPath, file, { signal })
   }
@@ -391,7 +409,8 @@ export async function uploadFile(options: UploadFileOptions): Promise<FileInfo> 
       contentType,
       file.length,
       uploadId,
-      cleanupOnMetadataFailure
+      cleanupOnMetadataFailure,
+      metadataId
     )
   }
 
@@ -932,28 +951,4 @@ export async function generatePresignedDownloadUrl(
  */
 export function hasCloudStorage(): boolean {
   return USE_BLOB_STORAGE || USE_S3_STORAGE || USE_GCS_STORAGE
-}
-
-/**
- * Get S3 bucket and key information for a storage key
- * Useful for services that need direct S3 access (e.g., AWS Textract async)
- */
-export function getS3InfoForKey(
-  key: string,
-  context: StorageContext
-): { bucket: string; key: string } {
-  if (!USE_S3_STORAGE) {
-    throw new Error('S3 storage is not configured. Cannot retrieve S3 info for key.')
-  }
-
-  const config = getStorageConfig(context)
-
-  if (!config.bucket) {
-    throw new Error(`S3 bucket not configured for context: ${context}`)
-  }
-
-  return {
-    bucket: config.bucket,
-    key,
-  }
 }

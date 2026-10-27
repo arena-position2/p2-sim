@@ -1,13 +1,13 @@
-import chalk from 'chalk'
+import { sleep } from '@sim/utils/helpers'
 import { type Command, Option } from 'commander'
 import { dump } from 'js-yaml'
+import { printLine, writeStderr } from '#sim-cli/output/io'
+import { hasProgressTerminal, styles } from '#sim-cli/output/presentation'
 import type { OutputFormat } from '../../config/index'
-import { clientFrom } from '../../context'
 import { CLI_CONTRACT } from '../../contract/commands'
 import type { ColumnSpec } from '../../contract/types'
 import { type ListLogsResponse, V2_OPERATIONS } from '../../generated/v2-api'
-import { sleep } from '../../helpers'
-import { SimApiError, type SimClient } from '../../http/client'
+import { SimApiError } from '../../http/client'
 import {
   bool,
   bytes,
@@ -18,6 +18,7 @@ import {
   timestamp,
   visibleWidth,
 } from '../../output/render'
+import { apiCommand, type OperationClient } from '../../runtime/called-operations'
 import { encodeFolderPath } from '../../runtime/request'
 
 /** One run, as `GET /api/v2/logs` returns it. */
@@ -213,8 +214,8 @@ function createTableWriter(): RowWriter {
         )
       )
       const header = widths
-      console.log(
-        chalk.dim(
+      printLine(
+        styles().dim(
           COLUMNS.map((column, index) => pad(column.header.toUpperCase(), header[index]))
             .join('  ')
             .trimEnd()
@@ -224,7 +225,7 @@ function createTableWriter(): RowWriter {
 
     const locked = widths
     for (const line of lines) {
-      console.log(
+      printLine(
         line
           .map((cell, index) => pad(cell, locked[index]))
           .join('  ')
@@ -246,13 +247,13 @@ function createTableWriter(): RowWriter {
 function createWriter(format: OutputFormat): RowWriter {
   if (format === 'json') {
     return (rows) => {
-      for (const row of rows) console.log(JSON.stringify(row))
+      for (const row of rows) printLine(JSON.stringify(row))
     }
   }
   if (format === 'yaml') {
     return (rows) => {
       for (const row of rows) {
-        console.log(`---\n${dump(row, { lineWidth: 0, noRefs: true }).trimEnd()}`)
+        printLine(`---\n${dump(row, { lineWidth: 0, noRefs: true }).trimEnd()}`)
       }
     }
   }
@@ -290,21 +291,21 @@ export function followStatus(): FollowStatus {
   let reported = false
   return {
     note: (message) => {
-      if (!process.stderr.isTTY) return
+      if (!hasProgressTerminal()) return
       reported = true
-      process.stderr.write(`\r${chalk.dim(message)}${ERASE_LINE}`)
+      writeStderr(`\r${styles().dim(message)}${ERASE_LINE}`)
     },
     warn: (message) => {
       if (reported) {
         reported = false
-        process.stderr.write(`\r${ERASE_LINE}`)
+        writeStderr(`\r${ERASE_LINE}`)
       }
-      process.stderr.write(`warning: ${message}\n`)
+      writeStderr(`warning: ${message}\n`)
     },
     clear: () => {
       if (!reported) return
       reported = false
-      process.stderr.write(`\r${ERASE_LINE}`)
+      writeStderr(`\r${ERASE_LINE}`)
     },
   }
 }
@@ -420,8 +421,7 @@ interface PollBatch {
 }
 
 async function collectUnprinted(
-  client: Pick<SimClient, 'request'>,
-  path: string,
+  client: OperationClient<'listLogs'>,
   query: Record<string, string | number | undefined>,
   state: FollowState,
   pageSize: number,
@@ -432,7 +432,7 @@ async function collectUnprinted(
   let truncated = false
 
   for (let page = 0; page < maxPages; page += 1) {
-    const response: ListLogsResponse = await client.request<ListLogsResponse>(path, {
+    const response: ListLogsResponse = await client.request<ListLogsResponse>('listLogs', {
       query: { ...query, limit: pageSize, cursor },
     })
     const page_rows = response?.data ?? []
@@ -496,9 +496,9 @@ function inSeconds(ms: number): number {
  * take the same arguments and render the same columns.
  */
 export function attachLogsFollow(logs: Command): void {
-  logs
-    .command('follow')
-    .description('Watch runs as they arrive, printing each new run once')
+  const [follow, connectFollow] = apiCommand(logs, 'follow', ['listLogs'])
+  follow
+    .description('Watch runs live as they arrive, printing each new run once')
     .option('--workflow <id>', 'Only follow runs of this workflow (repeatable)', collect, [])
     .option(
       '--folder <path>',
@@ -535,12 +535,11 @@ Examples:
   $ sim --output json logs follow | jq -r '.runId'
 `
     )
-    .action(async (options: FollowOptions, command: Command) => {
+    .action(async (options: FollowOptions) => {
       const lines = nonNegativeInteger(options.lines, '--lines')
       const delay = intervalMs(options.interval)
 
-      const { client, profile } = clientFrom(command)
-      const path = V2_OPERATIONS.listLogs.path
+      const { client, profile } = connectFollow()
       const query = {
         workspaceId: client.requireWorkspace(),
         workflowIds: options.workflow?.length ? options.workflow.join(',') : undefined,
@@ -569,7 +568,7 @@ Examples:
         // The backlog page doubles as the seed: every run on it is recorded and
         // its oldest start time becomes the floor, so even `-n 0` anchors the
         // follow to now instead of replaying the workspace's whole history.
-        const seed = await collectUnprinted(client, path, query, state, Math.max(lines, 1), 1)
+        const seed = await collectUnprinted(client, query, state, Math.max(lines, 1), 1)
         remember(state, seed.rows)
         state.floor = seed.rows.at(-1)?.startedAt ?? null
         // The API clamps `limit` into 1–1000 rather than rejecting it, so a
@@ -593,14 +592,7 @@ Examples:
 
           let fresh: PollBatch
           try {
-            fresh = await collectUnprinted(
-              client,
-              path,
-              query,
-              state,
-              POLL_PAGE_SIZE,
-              MAX_PAGES_PER_POLL
-            )
+            fresh = await collectUnprinted(client, query, state, POLL_PAGE_SIZE, MAX_PAGES_PER_POLL)
           } catch (error) {
             if (!isTransient(error)) throw error
             failures += 1

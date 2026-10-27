@@ -1,11 +1,13 @@
 /** Real PostgreSQL coverage for provider-independent snapshots and administrator-managed grants. */
 import { db } from '@sim/db'
 import { knowledgeConnector, organization, user, workspace } from '@sim/db/schema'
+import { deleteWorkspaceFixture } from '@sim/db/testing/workspace-fixtures'
 import { eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedKnowledgeAclFixture } from '@/lib/knowledge/__integration__/seed-source-access-fixture'
 import { loadConnectorPermissionGroupTokens } from '@/lib/knowledge/access/connector-permissions'
 import {
+  hasConnectorPermissionGrant,
   loadConnectorPermissionSnapshot,
   readConnectorPermissionMetadata,
   writeConnectorPermissions,
@@ -20,7 +22,7 @@ describe('connector-owned permission storage', () => {
   })
   afterAll(async () => {
     for (const owner of owners) {
-      await db.delete(workspace).where(eq(workspace.id, owner.workspaceId))
+      await deleteWorkspaceFixture(db, eq(workspace.id, owner.workspaceId))
       await db.delete(organization).where(eq(organization.id, owner.organizationId))
       await db.delete(user).where(inArray(user.id, [owner.aliceId, owner.bobId]))
     }
@@ -68,6 +70,15 @@ describe('connector-owned permission storage', () => {
         workspaceId: owners[0].workspaceId,
       })
     ).toEqual([])
+    expect(await hasConnectorPermissionGrant(owners[0].connectorId, 'readers', subject)).toBe(true)
+    expect(await hasConnectorPermissionGrant(owners[0].connectorId, 'other', subject)).toBe(false)
+    expect(
+      await hasConnectorPermissionGrant(
+        owners[0].connectorId,
+        'readers',
+        `u:${owners[0].bobId}@fixture.test`
+      )
+    ).toBe(false)
     await db
       .update(knowledgeConnector)
       .set({ accessRewritePending: false })
@@ -102,5 +113,12 @@ describe('connector-owned permission storage', () => {
         workspaceId: owner.workspaceId,
       })
     ).toEqual([])
+    expect(
+      await hasConnectorPermissionGrant(
+        owner.connectorId,
+        'readers',
+        `u:${owner.aliceId}@fixture.test`
+      )
+    ).toBe(false)
   })
 })

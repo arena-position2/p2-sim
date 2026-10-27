@@ -3,6 +3,8 @@ import {
   getReferenceImageModelIds,
   IMAGE_BLOCK_ALL_MODEL_OPTIONS,
   IMAGE_BLOCK_PROVIDER_OPTIONS,
+  IMAGE_GENERATOR_DEFAULT_MODEL,
+  IMAGE_GENERATOR_DEFAULT_PROVIDER,
   normalizeImageModelId,
   OPENAI_IMAGE_MODEL_IDS,
   reconcileImageProviderAndModel,
@@ -16,7 +18,6 @@ import { normalizeReferenceFileParams } from '@/lib/image-generation/reference-f
 import { AuthMode, type BlockConfig, IntegrationType } from '@/blocks/types'
 import { createVersionedToolSelector, parseOptionalBooleanInput } from '@/blocks/utils'
 import { START_FILES_REF } from '@/executor/constants'
-import type { ImageGenerationResponse } from '@/tools/image/types'
 
 const OPENAI_STANDARD_SIZE_MODELS = OPENAI_IMAGE_MODEL_IDS.filter(
   (modelId) => modelId !== 'gpt-image-2'
@@ -62,7 +63,7 @@ const OUTPUT_FORMAT_OPTIONS = [
   { label: 'WebP', id: 'webp' },
 ]
 
-export const ImageGeneratorBlockV2: BlockConfig = {
+export const ImageGeneratorBlock: BlockConfig = {
   type: 'image_generator',
   name: 'Image Generator',
   description: 'Generate, edit, or fuse images',
@@ -538,9 +539,7 @@ export const ImageGeneratorBlockV2: BlockConfig = {
   },
 }
 
-export const ImageGeneratorBlock = ImageGeneratorBlockV2
-
-export const ImageGeneratorV2Block: BlockConfig<ImageGenerationResponse> = {
+export const ImageGeneratorV2Block: BlockConfig = {
   type: 'image_generator_v2',
   name: 'Image Generator',
   description: 'Generate images',
@@ -570,7 +569,7 @@ export const ImageGeneratorV2Block: BlockConfig<ImageGenerationResponse> = {
       searchable: true,
       commandSearchable: true,
       clearable: true,
-      value: () => '',
+      defaultValue: IMAGE_GENERATOR_DEFAULT_PROVIDER,
     },
     {
       id: 'model',
@@ -581,7 +580,7 @@ export const ImageGeneratorV2Block: BlockConfig<ImageGenerationResponse> = {
       searchable: true,
       commandSearchable: true,
       clearable: true,
-      value: () => '',
+      defaultValue: IMAGE_GENERATOR_DEFAULT_MODEL,
     },
     {
       id: 'prompt',

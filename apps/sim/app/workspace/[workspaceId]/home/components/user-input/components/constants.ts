@@ -55,27 +55,31 @@ export interface PlusMenuHandle {
   selectActive: () => 'selected' | 'empty' | 'hydrating'
 }
 
+/** Shared draft typography for Build and Search composers. */
+export const PROMPT_TEXT_CLASSES =
+  'font-body text-md leading-[24px] tracking-[-0.015em] md:pointer-fine:text-sm'
+
 /**
  * Box and typography shared by the textarea and its mirror overlay — both must
  * produce identical line wrapping so the overlay text sits exactly over the
- * (transparent) textarea text. The scale is the chat input's native prompt
- * scale (`text-[14px]`, `-0.015em` tracking); the task modal's body inherits it
- * so the editor reads the same whether it's the chat input or inside the modal.
+ * (transparent) textarea text. The task modal inherits the same responsive
+ * prompt scale so its editor and the chat input wrap identically.
  */
-const FIELD_MIRROR_CLASSES = cn(
+export const PROMPT_FIELD_CLASSES = cn(
   'm-0 box-border min-h-[24px] w-full [overflow-wrap:anywhere] border-0 bg-transparent',
-  'px-1 py-1 font-body text-[14px] leading-[24px] tracking-[-0.015em]'
+  'px-1 py-1',
+  PROMPT_TEXT_CLASSES
 )
 
 /**
  * The textarea grows to its full content height (`h-auto`, no internal scroll);
- * the shared scroller clips and scrolls it. Its text is transparent so the
- * mirror overlay shows through; only the caret paints.
+ * the shared scroller clips and scrolls it. PromptEditor makes the text
+ * transparent when its mention overlay paints the visible content.
  */
 export const TEXTAREA_BASE_CLASSES = cn(
-  FIELD_MIRROR_CLASSES,
+  PROMPT_FIELD_CLASSES,
   'block h-auto resize-none overflow-hidden',
-  'text-transparent caret-[var(--text-primary)] outline-hidden',
+  'text-[var(--text-primary)] caret-[var(--text-primary)] outline-hidden',
   'placeholder:text-[var(--text-muted)]',
   'focus-visible:ring-0 focus-visible:ring-offset-0'
 )
@@ -86,21 +90,16 @@ export const TEXTAREA_BASE_CLASSES = cn(
  * scroll-sync, so the caret and mirrored text never drift apart.
  */
 export const OVERLAY_CLASSES = cn(
-  FIELD_MIRROR_CLASSES,
+  PROMPT_FIELD_CLASSES,
   'pointer-events-none absolute inset-0 whitespace-pre-wrap',
   'text-[var(--text-primary)]'
 )
 
 /** Single scroll container for the textarea + overlay; caps height and hides its scrollbar. */
 export const SCROLLER_CLASSES = cn(
-  'relative overflow-y-auto overflow-x-hidden',
+  'relative overflow-y-auto overflow-x-hidden max-md:overscroll-y-contain',
   '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 )
-
-export const SEND_BUTTON_BASE = 'h-[28px] w-[28px] rounded-full border-0 p-0 transition-colors'
-export const SEND_BUTTON_ACTIVE =
-  'bg-[#383838] hover:bg-[#575757] dark:bg-[#E0E0E0] dark:hover:bg-[#CFCFCF]'
-export const SEND_BUTTON_DISABLED = 'bg-[#808080] dark:bg-[#808080]'
 
 export const SPEECH_RECOGNITION_LANG = 'en-US'
 
@@ -114,8 +113,11 @@ export const SPEECH_RECOGNITION_LANG = 'en-US'
 // so each id is a precise pointer the agent can act on directly.
 const RESOURCE_TO_CONTEXT: Record<
   MothershipResourceType,
-  (resource: MothershipResource) => ChatContext
+  (resource: MothershipResource) => ChatContext | null
 > = {
+  /** A saved query is panel state, not document evidence or an attachable resource. */
+  search: () => null,
+  sources: () => null,
   browser: (r) => ({ kind: 'browser_tab', tabId: r.id, label: r.title }),
   terminal: (r) => ({
     kind: 'terminal_tab',
@@ -124,21 +126,26 @@ const RESOURCE_TO_CONTEXT: Record<
   }),
   workflow: (r) => ({ kind: 'workflow', workflowId: r.id, label: r.title }),
   knowledgebase: (r) => ({ kind: 'knowledge', knowledgeId: r.id, label: r.title }),
-  table: (r) => ({ kind: 'table', tableId: r.id, label: r.title }),
+  table: (r) => ({
+    kind: 'table',
+    tableId: r.id,
+    label: r.title,
+    ...(r.viewId ? { viewId: r.viewId } : {}),
+  }),
+  dashboard: (r) => ({ kind: 'dashboard', dashboardId: r.id, label: r.title }),
+  /** Sim reads a test through its file, `tests/<name>.test.js`, not a chat context. */
+  test: () => null,
   file: (r) => ({ kind: 'file', fileId: r.id, label: r.title }),
   folder: (r) => ({ kind: 'folder', folderId: r.id, label: r.title }),
   filefolder: (r) => ({ kind: 'filefolder', fileFolderId: r.id, label: r.title }),
   task: (r) => ({ kind: 'past_chat', chatId: r.id, label: r.title }),
-  // Addressed by run, not by log row: `id` is the row's key, and the server
-  // resolves this context against `workflow_execution_logs.execution_id`. A
-  // picked resource carries the run id; one rebuilt from the wire (a restored
-  // or agent-opened tab) cannot, since the stored and streamed resource shapes
-  // are the identity triple — those keep the row id they have always sent.
+  // Context reads use execution identity; panel reads use the log row id.
+  // The saved resource address retains both across chat hydration.
   log: (r) => ({ kind: 'logs', executionId: r.executionId ?? r.id, label: r.title }),
   integration: (r) => ({ kind: 'integration', blockType: r.id, label: r.title }),
   generic: (r) => ({ kind: 'docs', label: r.title }),
 }
 
-export function mapResourceToContext(resource: MothershipResource): ChatContext {
+export function mapResourceToContext(resource: MothershipResource): ChatContext | null {
   return RESOURCE_TO_CONTEXT[resource.type](resource)
 }

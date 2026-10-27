@@ -25,6 +25,7 @@ import {
   user,
   workspace,
 } from '@sim/db/schema'
+import { deleteWorkspaceFixture } from '@sim/db/testing/workspace-fixtures'
 import { generateId } from '@sim/utils/id'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -88,8 +89,7 @@ describe('indexed source content through real application access', () => {
   }
   const revokedSiteReaders = new Set<string>()
   const ids = createKnowledgeAclFixtureIds()
-  const { aliceId, bobId, workspaceId, knowledgeBaseId, connectorId, lockId, groups, groupIds } =
-    ids
+  const { aliceId, bobId, workspaceId, knowledgeBaseId, connectorId, lockId, groups } = ids
   const alice: Principal = { kind: 'session', userId: aliceId, sessionId: 'fixture-alice' }
   const bob: Principal = { kind: 'personal_api_key', userId: bobId, keyId: 'fixture-bob' }
   const workspaceKey: Principal = {
@@ -279,7 +279,7 @@ describe('indexed source content through real application access', () => {
       CONFLUENCE_CLIENT_ID: previousConfluenceClient.id,
       CONFLUENCE_CLIENT_SECRET: previousConfluenceClient.secret,
     })
-    await db.delete(workspace).where(eq(workspace.id, workspaceId))
+    await deleteWorkspaceFixture(db, eq(workspace.id, workspaceId))
     await db.delete(user).where(eq(user.id, aliceId))
     await db.delete(user).where(eq(user.id, bobId))
     await rm(fixtures.storageRoot, { recursive: true, force: true })

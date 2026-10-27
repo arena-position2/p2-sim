@@ -15,7 +15,12 @@ import { materializeExecutionData } from '@/lib/logs/execution/trace-store'
 import type { TraceSpan } from '@/lib/logs/types'
 import { BlockType } from '@/executor/constants'
 import { CostBlockHandler } from '@/executor/handlers/cost/cost-handler'
-import type { BlockLog, BlockState, ExecutionContext } from '@/executor/types'
+import type {
+  BlockLog,
+  BlockState,
+  ExecutionContext,
+  NormalizedBlockOutput,
+} from '@/executor/types'
 import type { SerializedBlock, SerializedConnection, SerializedWorkflow } from '@/serializer/types'
 
 const logger = createLogger('CostBlockReprice')
@@ -315,9 +320,9 @@ async function repriceCostBlocksForExecution(params: {
     }
 
     const inputs = { ...costBlock.config.params }
-    const output = await handler.executeWithNode(ctx, costBlock, inputs, {
+    const output = (await handler.executeWithNode(ctx, costBlock, inputs, {
       nodeId: costBlockId,
-    })
+    })) as NormalizedBlockOutput
 
     if (!output.recorded || !output.cost?.total || output.cost.total <= COST_EPSILON) {
       continue

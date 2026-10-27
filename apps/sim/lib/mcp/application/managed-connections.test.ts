@@ -1,39 +1,56 @@
-/** @vitest-environment node */
 import type { SessionPrincipal } from '@sim/auth/principal'
 import { dbChainMockFns, queueTableRows, resetDbChainMock, schemaMock } from '@sim/testing'
-import { eq } from 'drizzle-orm'
+import { createSessionPrincipal } from '@sim/testing/factories/principal.factory'
+import {
+  billingWorkspaceAccessMock,
+  billingWorkspaceAccessMockFns,
+} from '@sim/testing/mocks/billing-workspace-access.mock'
+import {
+  credentialGroupsAvailabilityMock,
+  credentialGroupsAvailabilityMockFns,
+} from '@sim/testing/mocks/credential-groups-availability.mock'
+import {
+  credentialGroupsCredentialsMock,
+  credentialGroupsCredentialsMockFns,
+} from '@sim/testing/mocks/credential-groups-credentials.mock'
+import {
+  resourcePolicyRepositoryMock,
+  resourcePolicyRepositoryMockFns,
+} from '@sim/testing/mocks/resource-policy-repository.mock'
+import { workspaceAuthzMock, workspaceAuthzMockFns } from '@sim/testing/mocks/workspace-authz.mock'
+import { eq, inArray } from 'drizzle-orm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({
-  billing: vi.fn(),
+const hoisted = vi.hoisted(() => ({
   available: vi.fn(),
-  group: vi.fn(),
   workspace: vi.fn(),
-  permission: vi.fn(),
-  requireAccess: vi.fn(),
 }))
-vi.mock('@/lib/billing/core/workspace-access', () => ({
-  getWorkspaceOwnerSubscriptionAccess: mocks.billing,
-}))
+vi.mock('@/lib/billing/core/workspace-access', () => billingWorkspaceAccessMock)
 vi.mock('@/lib/credential-groups/availability', () => ({
-  isCredentialGroupsAvailable: mocks.available,
+  isCredentialGroupsAvailable: hoisted.available,
 }))
-vi.mock('@/lib/credential-groups/credentials', () => ({
-  loadScopedAccountsCredentialListContext: mocks.group,
-}))
-vi.mock('@/lib/credential-groups/application/organization-workspace-access', () => ({
-  requireOrganizationAccountsWorkspaceAccess: mocks.requireAccess,
-}))
-vi.mock('@/lib/mcp/application/context', () => ({ resolveMcpWorkspaceContext: mocks.workspace }))
-vi.mock('@sim/platform-authz/workspace', () => ({
-  permissionSatisfies: (permission: string | null) => permission !== null,
-  resolveEffectiveWorkspacePermission: mocks.permission,
-}))
+vi.mock('@/lib/credential-groups/credentials', () => credentialGroupsCredentialsMock)
+vi.mock('@/lib/credential-groups/scoped-availability', () => credentialGroupsAvailabilityMock)
+vi.mock('@/lib/resource-policies/repository', () => resourcePolicyRepositoryMock)
+vi.mock('@/lib/mcp/application/context', () => ({ resolveMcpWorkspaceContext: hoisted.workspace }))
+vi.mock('@sim/platform-authz/workspace', () => workspaceAuthzMock)
 
-import { buildOrganizationAccountAccessPolicy } from '@/lib/credential-groups/application/workspace-access-policy'
+import {
+  buildOrganizationAccountAccessPolicy,
+  organizationAccountAccessPolicyCodec,
+} from '@/lib/credential-groups/application/workspace-access-policy'
 import { listManagedMcpConnectionsUseCase } from '@/lib/mcp/application/managed-connections'
 
-const principal: SessionPrincipal = { kind: 'session', userId: 'user-1', sessionId: 'session-1' }
+const mocks = {
+  ...hoisted,
+  policy: resourcePolicyRepositoryMockFns.mockRequireResourcePolicy,
+  scopedAvailable: credentialGroupsAvailabilityMockFns.mockIsScopedCredentialGroupsAvailable,
+  group: credentialGroupsCredentialsMockFns.mockLoadScopedAccountsCredentialListContext,
+  billing: billingWorkspaceAccessMockFns.mockGetWorkspaceOwnerSubscriptionAccess,
+  permission: workspaceAuthzMockFns.mockResolveEffectiveWorkspacePermission,
+}
+
+const principal: SessionPrincipal = createSessionPrincipal()
 const input = { workspaceId: 'workspace-1' }
 const metadata = {
   id: 'mcp-cg-connection-1',
@@ -49,10 +66,10 @@ const metadata = {
 
 describe('managed MCP connection catalog', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     mocks.billing.mockResolvedValue({ organizationId: 'org-1' })
     mocks.available.mockResolvedValue(true)
+    mocks.scopedAvailable.mockResolvedValue(true)
     mocks.group.mockResolvedValue({ credentialGroupId: 'group-1' })
     mocks.workspace.mockResolvedValue({
       workspaceId: 'workspace-1',
@@ -61,11 +78,11 @@ describe('managed MCP connection catalog', () => {
       billedAccountUserId: 'owner-1',
     })
     mocks.permission.mockResolvedValue('read')
-    mocks.requireAccess.mockResolvedValue(
-      buildOrganizationAccountAccessPolicy('group-1', [
+    mocks.policy.mockResolvedValue({
+      document: buildOrganizationAccountAccessPolicy('group-1', [
         { workspaceId: 'workspace-1', access: { mode: 'all' } },
-      ])
-    )
+      ]),
+    })
   })
 
   it('uses organization ownership and workspace access before exposing credential operations', async () => {
@@ -78,11 +95,12 @@ describe('managed MCP connection catalog', () => {
     ])
     const result = await listManagedMcpConnectionsUseCase.execute({ principal, input })
     expect(mocks.group).toHaveBeenCalledWith({ kind: 'organization', organizationId: 'org-1' })
-    expect(mocks.requireAccess).toHaveBeenCalledWith(
+    expect(mocks.policy).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: 'org-1',
-        credentialGroupId: 'group-1',
-        workspaceId: 'workspace-1',
+        resourceType: 'credential_group',
+        resourceId: 'group-1',
+        codec: organizationAccountAccessPolicyCodec,
       })
     )
     expect(eq).toHaveBeenCalledWith(schemaMock.credential.organizationId, 'org-1')
@@ -95,11 +113,68 @@ describe('managed MCP connection catalog', () => {
     })
   })
 
-  it('denies revoked workspace access before reading credentials', async () => {
-    mocks.requireAccess.mockRejectedValue(new Error('Workspace access revoked'))
+  it.each(['workspace', 'organization'])(
+    'returns an empty catalog when %s availability is disabled',
+    async (scope) => {
+      const available = scope === 'workspace' ? mocks.available : mocks.scopedAvailable
+      available.mockResolvedValue(false)
+      await expect(listManagedMcpConnectionsUseCase.execute({ principal, input })).resolves.toEqual(
+        {
+          servers: [],
+          tools: [],
+        }
+      )
+      expect(mocks.policy).not.toHaveBeenCalled()
+      expect(dbChainMockFns.from).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    { name: 'no grants', grants: [] },
+    {
+      name: 'another workspace only',
+      grants: [{ workspaceId: 'other-workspace', access: { mode: 'all' as const } }],
+    },
+    {
+      name: 'OAuth only',
+      grants: [
+        {
+          workspaceId: input.workspaceId,
+          access: { mode: 'selected' as const, credentialTypes: ['oauth:gmail' as const] },
+        },
+      ],
+    },
+  ])('returns an empty catalog without an MCP workspace grant: $name', async ({ grants }) => {
+    mocks.policy.mockResolvedValue({
+      document: buildOrganizationAccountAccessPolicy('group-1', grants),
+    })
+    await expect(listManagedMcpConnectionsUseCase.execute({ principal, input })).resolves.toEqual({
+      servers: [],
+      tools: [],
+    })
+    expect(dbChainMockFns.from).not.toHaveBeenCalled()
+  })
+
+  it('only queries connectors granted to this workspace', async () => {
+    mocks.policy.mockResolvedValue({
+      document: buildOrganizationAccountAccessPolicy('group-1', [
+        {
+          workspaceId: input.workspaceId,
+          access: { mode: 'selected', credentialTypes: ['mcp:fireflies'] },
+        },
+      ]),
+    })
+    await listManagedMcpConnectionsUseCase.execute({ principal, input })
+    expect(inArray).toHaveBeenCalledWith(schemaMock.mcpServers.managedConnectorId, ['fireflies'])
+  })
+
+  it('rejects callers without workspace access before checking catalog availability', async () => {
+    mocks.permission.mockResolvedValue(null)
     await expect(listManagedMcpConnectionsUseCase.execute({ principal, input })).rejects.toThrow(
-      'revoked'
+      'Insufficient workspace permissions'
     )
+    expect(mocks.billing).not.toHaveBeenCalled()
+    expect(mocks.policy).not.toHaveBeenCalled()
     expect(dbChainMockFns.from).not.toHaveBeenCalled()
   })
 

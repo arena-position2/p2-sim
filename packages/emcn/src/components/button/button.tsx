@@ -1,6 +1,10 @@
 import { type ButtonHTMLAttributes, forwardRef } from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '../../lib/cn'
+import {
+  MobileTouchTarget,
+  mobileTouchTargetClass,
+} from '../mobile-touch-target/mobile-touch-target'
 
 /**
  * `size='icon'` is the square 20px icon-only button — a chip field's trailing
@@ -50,6 +54,10 @@ const buttonVariants = cva(
         md: 'px-2 py-1.5 text-[length:12px]',
         icon: 'size-[20px] rounded-sm p-0 [&_svg]:[stroke-width:1.25]',
       },
+      iconPadding: {
+        sm: 'p-1',
+        md: 'p-1.5',
+      },
     },
     compoundVariants: [
       /**
@@ -70,16 +78,36 @@ const buttonVariants = cva(
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+    VariantProps<typeof buttonVariants> {
+  /** Reserves a 44px mobile hit target while preserving the button's visible size. */
+  mobileCompact?: boolean
+  /**
+   * Symmetric padding for icon actions whose content or layout determines their size.
+   * Preserves the selected size's typography, corner radius and icon stroke.
+   * Omit for the standard size padding, including the fixed `size='icon'` treatment.
+   * @example <Button variant='ghost' iconPadding='sm' aria-label='Copy'><Clipboard /></Button>
+   */
+  iconPadding?: VariantProps<typeof buttonVariants>['iconPadding']
+}
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => {
+  ({ className, variant, size, iconPadding, mobileCompact, ...props }, ref) => {
     return (
-      <button ref={ref} className={cn(buttonVariants({ variant, size }), className)} {...props} />
+      <MobileTouchTarget enabled={Boolean(mobileCompact)}>
+        <button
+          ref={ref}
+          className={cn(
+            buttonVariants({ variant, size, iconPadding }),
+            mobileCompact && mobileTouchTargetClass,
+            className
+          )}
+          {...props}
+        />
+      </MobileTouchTarget>
     )
   }
 )
 
 Button.displayName = 'Button'
 
-export { Button, buttonVariants }
+export { Button }

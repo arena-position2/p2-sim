@@ -136,7 +136,7 @@ export const ianaTimezoneSchema = z.string().refine(
 )
 
 export const userSettingsSchema = z.object({
-  theme: z.enum(['system', 'light', 'dark']).default('system'),
+  theme: z.enum(['system', 'light', 'dark']).default('light'),
   autoConnect: z.boolean().default(true),
   telemetryEnabled: z.boolean().default(true),
   emailPreferences: userSettingsEmailPreferencesSchema.optional().default({}),
@@ -574,6 +574,7 @@ export const accountDeletionBlockerSchema = z.object({
     'shared_workspace',
     'organization_workspace',
     'data_drain_owner',
+    'project_lifecycle',
   ]),
   /** A sentence naming both the obstacle and the way out. */
   message: z.string(),

@@ -184,6 +184,7 @@ export function Deploy({ activeWorkflowId, userPermissions, disabled = false }: 
         <Tooltip.Trigger asChild>
           <span className='inline-flex'>
             <Chip
+              mobileCompact
               variant='border'
               onClick={onDeployClick}
               onMouseEnter={prefetchDeployModal}

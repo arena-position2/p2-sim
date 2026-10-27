@@ -6,6 +6,7 @@ import { generateId } from '@sim/utils/id'
 import {
   and,
   asc,
+  desc,
   eq,
   gt,
   inArray,
@@ -51,9 +52,8 @@ const STALE_DISPATCH_EVENT_CONCURRENCY = 10
  * How long past its stale threshold a dispatch may be spared by cell activity
  * before it is reclaimed anyway. Bounds the one masking case the probe cannot
  * resolve — two table-wide dispatches sharing a group — which continuous
- * activity would otherwise hide forever. Far beyond any single window: the
- * Trigger.dev run ceiling is ninety minutes, and a live dispatch heartbeats
- * between windows no matter what its cells are doing.
+ * activity would otherwise hide forever. Far beyond any single window: a live
+ * dispatch heartbeats between windows no matter what its cells are doing.
  */
 const DISPATCH_ABSOLUTE_STALE_MS = 24 * 60 * 60 * 1000
 
@@ -93,7 +93,7 @@ export interface DispatchRow {
   cursor: number
   /** Cap on work before completion; null = unbounded. */
   limit: DispatchLimit | null
-  /** Units of `limit.type` already consumed (eligible rows dispatched). */
+  /** Distinct rows dispatched so far; under a `rows` limit, the units of it consumed. */
   processedCount: number
   isManualRun: boolean
   /** User who triggered the run (for usage attribution); null for auto-fire. */
@@ -334,48 +334,7 @@ export async function countRunningCells(
   return { byRowId, hasRunning }
 }
 
-/** Read every dispatch on a table whose status is still `pending` or
- *  `dispatching`. Drives the client-side "about to run" overlay: rows in an
- *  active dispatch's scope ahead of its cursor are rendered as queued even
- *  before the dispatcher has reached them, so refresh during a long Run-all
- *  doesn't lose the queued indicators. */
-export async function listActiveDispatches(tableId: string): Promise<DispatchRow[]> {
-  const rows = await db
-    .select()
-    .from(tableRunDispatches)
-    .where(
-      and(
-        eq(tableRunDispatches.tableId, tableId),
-        inArray(tableRunDispatches.status, [...ACTIVE_DISPATCH_STATUSES])
-      )
-    )
-  return rows.map((row) => ({
-    id: row.id,
-    tableId: row.tableId,
-    workspaceId: row.workspaceId,
-    requestId: row.requestId,
-    mode: row.mode as DispatchMode,
-    scope: row.scope as DispatchScope,
-    status: row.status as DispatchStatus,
-    cursor: row.cursor,
-    limit: (row.limit as DispatchLimit | null) ?? null,
-    processedCount: row.processedCount,
-    isManualRun: row.isManualRun,
-    triggeredByUserId: row.triggeredByUserId,
-    capabilityGovernedUserId: row.capabilityGovernedUserId,
-    requestedAt: row.requestedAt,
-    completedAt: row.completedAt,
-    cancelledAt: row.cancelledAt,
-  }))
-}
-
-export async function readDispatch(dispatchId: string): Promise<DispatchRow | null> {
-  const [row] = await db
-    .select()
-    .from(tableRunDispatches)
-    .where(eq(tableRunDispatches.id, dispatchId))
-    .limit(1)
-  if (!row) return null
+function toDispatchRow(row: typeof tableRunDispatches.$inferSelect): DispatchRow {
   return {
     id: row.id,
     tableId: row.tableId,
@@ -394,6 +353,58 @@ export async function readDispatch(dispatchId: string): Promise<DispatchRow | nu
     completedAt: row.completedAt,
     cancelledAt: row.cancelledAt,
   }
+}
+
+/** Read every dispatch on a table whose status is still `pending` or
+ *  `dispatching`. Drives the client-side "about to run" overlay: rows in an
+ *  active dispatch's scope ahead of its cursor are rendered as queued even
+ *  before the dispatcher has reached them, so refresh during a long Run-all
+ *  doesn't lose the queued indicators. */
+export async function listActiveDispatches(tableId: string): Promise<DispatchRow[]> {
+  const rows = await db
+    .select()
+    .from(tableRunDispatches)
+    .where(
+      and(
+        eq(tableRunDispatches.tableId, tableId),
+        inArray(tableRunDispatches.status, [...ACTIVE_DISPATCH_STATUSES])
+      )
+    )
+  return rows.map(toDispatchRow)
+}
+
+/**
+ * How many dispatches {@link listDispatches} returns at most. Settled dispatches accumulate
+ * for the life of the table, so the public list needs a ceiling where the active-only read
+ * had the dispatcher's own bound; a table's recent history is what a caller polls for.
+ */
+export const MAX_LISTED_DISPATCHES = 100
+
+/**
+ * Every dispatch on a table, settled ones included, most recent first.
+ *
+ * The public `GET /tables/{tableId}/dispatches` returned only {@link listActiveDispatches},
+ * so a run that had just finished vanished from the list while `GET .../dispatches/{id}`
+ * still reported it `complete` — a caller polling the list right after a create saw `[]`
+ * and could not tell a completed run from one that never started.
+ */
+export async function listDispatches(tableId: string): Promise<DispatchRow[]> {
+  const rows = await db
+    .select()
+    .from(tableRunDispatches)
+    .where(eq(tableRunDispatches.tableId, tableId))
+    .orderBy(desc(tableRunDispatches.requestedAt), desc(tableRunDispatches.id))
+    .limit(MAX_LISTED_DISPATCHES)
+  return rows.map(toDispatchRow)
+}
+
+export async function readDispatch(dispatchId: string): Promise<DispatchRow | null> {
+  const [row] = await db
+    .select()
+    .from(tableRunDispatches)
+    .where(eq(tableRunDispatches.id, dispatchId))
+    .limit(1)
+  return row ? toDispatchRow(row) : null
 }
 
 /** Drive `dispatcherStep` to completion. Shared between the trigger.dev task
@@ -545,13 +556,34 @@ export async function dispatcherStep(
       .select()
       .from(userTableRows)
       .where(and(...filters))
-      .orderBy(asc(userTableRows.position))
+      .orderBy(asc(userTableRows.position), asc(userTableRows.id))
       .limit(windowSize)
   // Filtered scopes carry a jsonb predicate the planner can't estimate — left alone it
   // seq-scans the whole shared relation per window; keep it on the tenant's position index.
-  const chunk = hasJsonbFilter
-    ? await withSeqscanOff(async (trx) => windowQuery(trx))
-    : await windowQuery(db)
+  const runQuery = async <T>(query: (executor: DbExecutor) => PromiseLike<T>): Promise<T> =>
+    hasJsonbFilter ? withSeqscanOff(async (trx) => query(trx)) : query(db)
+  const chunk = await runQuery(windowQuery)
+
+  // Inserts assign `position` without a lock, so concurrent ones can share it. The next window
+  // starts strictly after this one's last position, so a full window takes the rest of that tie.
+  if (chunk.length === windowSize) {
+    const lastPosition = chunk[chunk.length - 1].position
+    const seen = chunk.filter((r) => r.position === lastPosition).map((r) => r.id)
+    const ties = await runQuery((executor) =>
+      executor
+        .select()
+        .from(userTableRows)
+        .where(
+          and(
+            ...filters,
+            eq(userTableRows.position, lastPosition),
+            notInArray(userTableRows.id, seen)
+          )
+        )
+        .orderBy(asc(userTableRows.id))
+    )
+    chunk.push(...ties)
+  }
 
   if (chunk.length === 0) {
     // Through the shared, guarded completion like the other two exits: this
@@ -622,7 +654,6 @@ export async function dispatcherStep(
   // row's groups consecutively in ascending position, so collecting distinct
   // rowIds until the budget fills picks the lowest-position rows.
   let windowRuns = pendingRuns
-  let dispatchedRows = 0
   let budgetExhausted = false
   if (dispatch.limit?.type === 'rows') {
     const remaining = dispatch.limit.max - dispatch.processedCount
@@ -637,9 +668,12 @@ export async function dispatcherStep(
       allowedRowIds.add(p.rowId)
     }
     windowRuns = pendingRuns.filter((p) => allowedRowIds.has(p.rowId))
-    dispatchedRows = allowedRowIds.size
-    budgetExhausted = dispatch.processedCount + dispatchedRows >= dispatch.limit.max
+    budgetExhausted = dispatch.processedCount + allowedRowIds.size >= dispatch.limit.max
   }
+  // Every dispatch tallies the distinct rows it sends, capped or not: the
+  // tally is what `processedCount` reports, so an unlimited dispatch that ran
+  // the whole table must not read back as having processed nothing.
+  let dispatchedRows = new Set(windowRuns.map((p) => p.rowId)).size
 
   if (windowRuns.length > 0) {
     /**

@@ -1,7 +1,7 @@
 import { db } from '@sim/db'
 import { knowledgeBase, userTableDefinitions } from '@sim/db/schema'
 import { and, eq, isNull } from 'drizzle-orm'
-import { canonicalWorkspaceFilePath } from '@/lib/copilot/vfs/path-utils'
+import { canonicalWorkspaceFilePath } from '@/lib/mothership/vfs/path-utils'
 import { listWorkspaceFiles } from '@/lib/uploads/contexts/workspace'
 
 /**

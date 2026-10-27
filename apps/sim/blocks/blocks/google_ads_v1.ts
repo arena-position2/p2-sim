@@ -1,6 +1,5 @@
 import { GoogleIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
-import type { ToolResponse } from '@/tools/types'
 
 /** In-flight promise cache keyed by workspaceId — deduplicates concurrent fetchOptions + fetchOptionById calls */
 let _inflightFetch: {
@@ -33,7 +32,7 @@ async function fetchGoogleAdsAccounts(
   return promise
 }
 
-export const GoogleAdsV1Block: BlockConfig<ToolResponse> = {
+export const GoogleAdsV1Block: BlockConfig = {
   type: 'google_ads_v1',
   name: 'Google Ads V1',
   description: 'AI-powered Google Ads query tool with simplified GAQL generation',

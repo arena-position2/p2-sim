@@ -10,14 +10,16 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { DbTransaction } from '@/lib/db/types'
 import {
   FILE_SEARCH_BUILD_LEASE_MS,
+  FILE_SEARCH_CHUNK_BYTES,
   FILE_SEARCH_CLEANUP_BATCH_BUILDS,
   FILE_SEARCH_CLEANUP_BATCH_ROWS,
   FILE_SEARCH_CLEANUP_BUDGET_MS,
   FILE_SEARCH_CLEANUP_MAX_BATCHES,
-  FILE_SEARCH_INSERT_BATCH_BYTES,
-  FILE_SEARCH_INSERT_BATCH_ROWS,
+  FILE_SEARCH_CLEANUP_MIN_BATCH_MS,
+  FILE_SEARCH_INDEX_TRANSACTION_LIMITS,
 } from '@/lib/workspace-files/search/constants'
-import type { FileSearchChunk } from '@/lib/workspace-files/search/index-plan'
+import { exceedsFileSearchBatchBudget } from '@/lib/workspace-files/search/index-batches'
+import { estimateTrigramKeys, type FileSearchChunk } from '@/lib/workspace-files/search/index-plan'
 import { configureFileSearchTransaction } from '@/lib/workspace-files/search/transaction'
 
 export interface FileSearchRevision {
@@ -83,13 +85,17 @@ async function lockBuild(tx: DbTransaction, build: FileSearchBuild): Promise<boo
   return Boolean(state)
 }
 
-/** A new attempt replaces the build token, never another attempt's chunks. */
+/**
+ * A new attempt replaces the build token, never another attempt's chunks. Beginning also completes
+ * the claim's handoff: the run the claim was waiting for evidently exists, even if the dispatcher
+ * never recorded enqueueing it.
+ */
 export async function beginFileSearchBuild(
   revision: FileSearchRevision,
   dispatchToken?: string
 ): Promise<FileSearchBuild | null> {
   return db.transaction(async (tx) => {
-    await configureFileSearchTransaction(tx)
+    await configureFileSearchTransaction(tx, FILE_SEARCH_INDEX_TRANSACTION_LIMITS)
     if (!(await lockCurrentFile(tx, revision))) return null
     const [observed] = await tx
       .select({
@@ -130,6 +136,7 @@ export async function beginFileSearchBuild(
         indexedBytes: 0,
         lineCount: 0,
         dispatchedAt: state.dispatchedAt ?? now,
+        handoffExpiresAt: null,
         updatedAt: now,
       })
       .where(revisionFilter(revision))
@@ -137,7 +144,7 @@ export async function beginFileSearchBuild(
   })
 }
 
-/** Each batch is fenced and byte-bounded; no file or parser work runs inside this transaction. */
+/** Each batch is fenced and work-bounded; no file or parser work runs inside this transaction. */
 export async function appendFileSearchChunks(
   build: FileSearchBuild,
   chunks: readonly FileSearchChunk[],
@@ -146,14 +153,17 @@ export async function appendFileSearchChunks(
   signal.throwIfAborted()
   if (!chunks.length) return true
   if (
-    chunks.length > FILE_SEARCH_INSERT_BATCH_ROWS ||
-    chunks.reduce((sum, c) => sum + Buffer.byteLength(c.content), 0) >
-      FILE_SEARCH_INSERT_BATCH_BYTES
+    chunks.some((chunk) => Buffer.byteLength(chunk.content) > FILE_SEARCH_CHUNK_BYTES) ||
+    exceedsFileSearchBatchBudget(
+      chunks.length,
+      chunks.reduce((sum, chunk) => sum + Buffer.byteLength(chunk.content), 0),
+      chunks.reduce((sum, chunk) => sum + estimateTrigramKeys(chunk.content), 0)
+    )
   ) {
     throw new Error('File search insert batch exceeds its budget')
   }
   return db.transaction(async (tx) => {
-    await configureFileSearchTransaction(tx)
+    await configureFileSearchTransaction(tx, FILE_SEARCH_INDEX_TRANSACTION_LIMITS)
     if (!(await lockBuild(tx, build))) return false
     signal.throwIfAborted()
     await tx
@@ -176,7 +186,7 @@ export async function publishFileSearchBuild(
   signal: AbortSignal
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
-    await configureFileSearchTransaction(tx)
+    await configureFileSearchTransaction(tx, FILE_SEARCH_INDEX_TRANSACTION_LIMITS)
     signal.throwIfAborted()
     if (!(await lockCurrentFile(tx, build)) || !(await lockBuild(tx, build))) return false
     if (publication.status === 'ready') {
@@ -215,7 +225,7 @@ export async function failFileSearchRevision(
   dispatchToken?: string
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    await configureFileSearchTransaction(tx)
+    await configureFileSearchTransaction(tx, FILE_SEARCH_INDEX_TRANSACTION_LIMITS)
     if (!(await lockCurrentFile(tx, revision))) return
     const [state] = await tx
       .select()
@@ -253,19 +263,27 @@ export async function failFileSearchRevision(
   })
 }
 
+/**
+ * A build {@link cleanupFileSearchBuilds} reclaims: retired, or abandoned past its lease. Implies
+ * `expires_at IS NOT NULL`, so `workspace_file_search_build_cleanup_idx` serves it.
+ */
+export const fileSearchBuildExpired = sql`${workspaceFileSearchBuild.expiresAt} <= now()`
+
 /** Expired and invalidated builds drain without cascading a large delete through file mutations. */
 export async function cleanupFileSearchBuilds(): Promise<number> {
   const deadline = Date.now() + FILE_SEARCH_CLEANUP_BUDGET_MS
   let deleted = 0
-  for (let batch = 0; batch < FILE_SEARCH_CLEANUP_MAX_BATCHES && Date.now() < deadline; batch++) {
+  for (let batch = 0; batch < FILE_SEARCH_CLEANUP_MAX_BATCHES; batch++) {
+    if (deadline - Date.now() < FILE_SEARCH_CLEANUP_MIN_BATCH_MS) break
     const result = await db.transaction(async (tx) => {
-      await configureFileSearchTransaction(tx, {
-        statementTimeout: Math.max(1, deadline - Date.now()),
-      })
+      /** Re-read: acquiring the connection can itself have spent the rest of the budget. */
+      const remainingBudget = deadline - Date.now()
+      if (remainingBudget < FILE_SEARCH_CLEANUP_MIN_BATCH_MS) return null
+      await configureFileSearchTransaction(tx, { statementTimeout: remainingBudget })
       const builds = await tx.execute<{
         id: string
       }>(sql`SELECT id FROM workspace_file_search_build
-        WHERE expires_at <= now() ORDER BY expires_at, id LIMIT ${FILE_SEARCH_CLEANUP_BATCH_BUILDS} FOR UPDATE SKIP LOCKED`)
+        WHERE ${fileSearchBuildExpired} ORDER BY expires_at, id LIMIT ${FILE_SEARCH_CLEANUP_BATCH_BUILDS} FOR UPDATE SKIP LOCKED`)
       if (!builds.length) return null
       const buildIds = sql.join(
         builds.map((build) => sql`${build.id}`),

@@ -37,6 +37,7 @@ import {
   deletePersonalEnvCredentialForUser,
   deleteWorkspaceEnvCredentials,
 } from '@/lib/credentials/environment'
+import { OciCredentialVerificationError } from '@/lib/credentials/oci-api-key-service-account.server'
 import type {
   AtlassianProduct,
   ServiceAccountFieldId,
@@ -92,9 +93,15 @@ const ROTATABLE_SECRET_FIELDS: readonly ServiceAccountFieldId[] = [
   'certificateId',
   'orgId',
   'dataCenter',
+  'scope',
   'authMethod',
   'privateKey',
   'username',
+  'tenancyOcid',
+  'userOcid',
+  'fingerprint',
+  'privateKeyPassphrase',
+  'region',
 ]
 
 /**
@@ -145,7 +152,7 @@ async function readStoredSecretBlob(credentialId: string): Promise<Record<string
  */
 function readStoredField(
   blob: Record<string, unknown> | null,
-  field: 'dataCenter' | 'authMethod' | 'username' | 'atlassianProduct'
+  field: 'dataCenter' | 'scope' | 'authMethod' | 'username' | 'atlassianProduct'
 ): string | undefined {
   const value = blob?.[field]
   return typeof value === 'string' && value ? value : undefined
@@ -205,9 +212,15 @@ export interface PerformUpdateCredentialParams extends CredentialActorParams {
   certificateId?: string
   orgId?: string
   dataCenter?: string
+  scope?: string
   authMethod?: string
   privateKey?: string
   username?: string
+  tenancyOcid?: string
+  userOcid?: string
+  fingerprint?: string
+  privateKeyPassphrase?: string
+  region?: string
 }
 
 export interface PerformCredentialResult {
@@ -307,6 +320,13 @@ export async function updateCredentialRecord(
       // when the caller did not supply one.
       const isClientCredentialProvider = isClientCredentialAccountProviderId(providerId)
       const needsStoredDataCenter = params.dataCenter === undefined && isClientCredentialProvider
+      const needsStoredScope =
+        params.scope === undefined &&
+        Boolean(
+          getClientCredentialAccountDescriptor(providerId)?.fields.some(
+            (field) => field.id === 'scope'
+          )
+        )
       // Only a multi-grant provider stores these, so single-grant ones must not
       // pay for a row read + decrypt that can only ever return undefined.
       const isMultiGrantProvider = Boolean(
@@ -330,6 +350,7 @@ export async function updateCredentialRecord(
       // One read + decrypt at most, and only for the providers that can use it.
       const storedBlob =
         needsStoredDataCenter ||
+        needsStoredScope ||
         needsStoredAuthMethod ||
         needsStoredUsername ||
         needsStoredIdentity ||
@@ -401,11 +422,17 @@ export async function updateCredentialRecord(
           dataCenter: needsStoredDataCenter
             ? readStoredField(storedBlob, 'dataCenter')
             : params.dataCenter,
+          scope: needsStoredScope ? readStoredField(storedBlob, 'scope') : params.scope,
           authMethod: needsStoredAuthMethod
             ? readStoredField(storedBlob, 'authMethod')
             : params.authMethod,
           privateKey: params.privateKey,
           username: needsStoredUsername ? readStoredField(storedBlob, 'username') : params.username,
+          tenancyOcid: params.tenancyOcid,
+          userOcid: params.userOcid,
+          fingerprint: params.fingerprint,
+          privateKeyPassphrase: params.privateKeyPassphrase,
+          region: params.region,
         })
         updates.encryptedServiceAccountKey = secret.encryptedServiceAccountKey
         rotatedSlackBotUserId = secret.botUserId
@@ -425,6 +452,17 @@ export async function updateCredentialRecord(
       } catch (error) {
         if (error instanceof ServiceAccountSecretError) {
           return { success: false, error: error.message, errorCode: 'validation' }
+        }
+        if (error instanceof OciCredentialVerificationError) {
+          const providerUnavailable = error.code !== 'invalid_credentials'
+          return {
+            success: false,
+            error: providerUnavailable
+              ? 'OCI is temporarily unavailable for credential verification'
+              : 'OCI API-key credential could not be verified',
+            errorCode: 'validation',
+            providerErrorCode: providerUnavailable ? 'provider_unavailable' : 'invalid_credentials',
+          }
         }
         if (error instanceof AtlassianValidationError) {
           // Surface the provider code so the client maps it to the specific
@@ -690,7 +728,11 @@ export async function deleteCredentialRecord(
   }
 
   if (credentialRow.type === 'oauth') {
-    if (credentialRow.providerId === UNIPILE_LINKEDIN_PROVIDER_ID && credentialRow.accountId) {
+    if (
+      credentialRow.providerId === UNIPILE_LINKEDIN_PROVIDER_ID &&
+      credentialRow.accountId &&
+      credentialRow.createdBy
+    ) {
       const unipileAccounts = await listAccountsToDisconnect({
         userId: credentialRow.createdBy,
         provider: UNIPILE_LINKEDIN_PROVIDER_ID,

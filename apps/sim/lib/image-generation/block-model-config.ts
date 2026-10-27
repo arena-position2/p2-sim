@@ -198,6 +198,35 @@ export function getDefaultImageModelForProvider(provider: ImageProvider): string
   return 'gpt-image-1.5'
 }
 
+/** Editor / Copilot default when dropping or creating an Image Generator v2 block. */
+export const IMAGE_GENERATOR_DEFAULT_PROVIDER: ImageBlockProvider = 'gemini'
+
+/** Nano Banana 2 — matches {@link getDefaultImageModelForProvider}(`gemini`). */
+export const IMAGE_GENERATOR_DEFAULT_MODEL = getDefaultImageModelForProvider(
+  IMAGE_GENERATOR_DEFAULT_PROVIDER
+)
+
+/**
+ * Image Generator v2 seeds Provider+Model as a pair. If only one half of the
+ * declared defaults landed (e.g. model permission-denied), clear both so the
+ * editor does not show an orphan provider or model.
+ */
+export function applyImageGeneratorDefaultPairing(
+  subBlocks: Record<string, { value: unknown }>
+): void {
+  const provider = subBlocks.provider?.value
+  const model = subBlocks.model?.value
+  const providerEmpty = provider == null || provider === ''
+  const modelEmpty = model == null || model === ''
+  const providerIsDefault = provider === IMAGE_GENERATOR_DEFAULT_PROVIDER
+  const modelIsDefault = model === IMAGE_GENERATOR_DEFAULT_MODEL
+
+  if ((providerIsDefault && modelEmpty) || (modelIsDefault && providerEmpty)) {
+    if (subBlocks.provider) subBlocks.provider.value = null
+    if (subBlocks.model) subBlocks.model.value = null
+  }
+}
+
 /**
  * Reconciles provider and model so OpenAI models route to OpenAI and Gemini models route to Google.
  * When the model implies a provider, the model wins over a conflicting or missing provider.

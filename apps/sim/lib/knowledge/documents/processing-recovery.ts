@@ -2,7 +2,7 @@ import { db } from '@sim/db'
 import { document, knowledgeBase, knowledgeConnector } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
-import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 import {
   assertBillingAttributionOwner,
   resolveSystemBillingAttribution,
@@ -10,17 +10,25 @@ import {
 } from '@/lib/billing/core/billing-attribution'
 import { enqueueOutboxEvent } from '@/lib/core/outbox/service'
 import { withinDeadline } from '@/lib/core/utils/deadline'
+import type { DbOrTx } from '@/lib/db/types'
 import { getConnectorFailureDiagnostic } from '@/lib/knowledge/connectors/connector-error'
+import { connectorIndexingCondition } from '@/lib/knowledge/connectors/indexing-policy'
 import {
   createDocumentProcessingPayload,
   createOrganizationDocumentProcessingBillingContext,
   createWorkspaceDocumentProcessingBillingContext,
 } from '@/lib/knowledge/documents/processing-payload'
+import { KNOWLEDGE_DOCUMENT_RECOVERY_OUTBOX_EVENT } from '@/lib/knowledge/documents/processing-recovery-event'
 import { documentProcessingRecoveryCondition } from '@/lib/knowledge/documents/processing-recovery-policy'
+import {
+  DOCUMENT_LIVENESS_BATCH_SIZE,
+  documentProcessingSnapshotCondition,
+  findAbandonedDocumentProcessing,
+  processingSnapshotColumns,
+} from '@/lib/knowledge/documents/processing-recovery-queue'
 
 const logger = createLogger('KnowledgeDocumentRecovery')
 
-export const KNOWLEDGE_DOCUMENT_RECOVERY_OUTBOX_EVENT = 'knowledge.document.processing.recover'
 export const DOCUMENT_RECOVERY_BATCH_SIZE = 200
 const RECOVERY_RUNTIME_MS = 20_000
 const MAX_RECOVERY_CANDIDATE_BATCHES = 4
@@ -29,11 +37,79 @@ const RECOVERABLE_CONNECTOR_STATUSES = ['active', 'error', 'pending', 'syncing']
 /**
  * Re-admits bounded, abandoned connector documents from our retained bytes, independently
  * of source sync schedules and credentials. The generation, attempt and outbox event commit
- * together; no provider call or source lease is needed. Paused/deleted sources stay paused.
+ * together; no source-provider call or source lease is needed. Paused/deleted sources stay paused,
+ * and search-index knowledge bases are not indexed while indexed organization search is dormant.
  */
 export async function recoverKnowledgeDocumentProcessing(now = new Date()): Promise<number> {
   const deadlineAt = Date.now() + RECOVERY_RUNTIME_MS
   return withinDeadline((signal) => recoverStoredDocuments(now, deadlineAt, signal), deadlineAt)
+}
+
+interface RecoveryCandidateScope {
+  limit: number
+  attemptedConnectors: ReadonlySet<string>
+  blockedKnowledgeBases: ReadonlySet<string>
+}
+
+/**
+ * Walks only admissible sources, each through its own oldest-first index page, so retained
+ * inputs of paused or federated sources cost nothing however many there are. Exclusions apply
+ * to the source rows, and the oldest candidates across sources still come first.
+ */
+export function recoveryCandidatesQuery(
+  executor: DbOrTx,
+  now: Date,
+  { limit, attemptedConnectors, blockedKnowledgeBases }: RecoveryCandidateScope
+) {
+  const candidate = executor
+    .select(processingSnapshotColumns)
+    .from(document)
+    .where(
+      and(
+        eq(document.connectorId, knowledgeConnector.id),
+        eq(document.knowledgeBaseId, knowledgeConnector.knowledgeBaseId),
+        documentProcessingRecoveryCondition(now)
+      )
+    )
+    .orderBy(asc(document.uploadedAt), asc(document.id))
+    .limit(limit)
+    .as('candidate')
+  return executor
+    .select({
+      id: candidate.id,
+      uploadedAt: candidate.uploadedAt,
+      processingStatus: candidate.processingStatus,
+      processingQueueToken: candidate.processingQueueToken,
+      processingQueuedAt: candidate.processingQueuedAt,
+      processingStartedAt: candidate.processingStartedAt,
+      processingDeferredUntil: candidate.processingDeferredUntil,
+      processingCompletedAt: candidate.processingCompletedAt,
+      processingRecoveryAfter: candidate.processingRecoveryAfter,
+      knowledgeBaseId: knowledgeConnector.knowledgeBaseId,
+      connectorId: knowledgeConnector.id,
+      workspaceId: knowledgeBase.workspaceId,
+      organizationId: knowledgeBase.organizationId,
+    })
+    .from(knowledgeConnector)
+    .innerJoin(knowledgeBase, eq(knowledgeBase.id, knowledgeConnector.knowledgeBaseId))
+    .crossJoinLateral(candidate)
+    .where(
+      and(
+        blockedKnowledgeBases.size > 0
+          ? notInArray(knowledgeBase.id, [...blockedKnowledgeBases])
+          : undefined,
+        attemptedConnectors.size > 0
+          ? notInArray(knowledgeConnector.id, [...attemptedConnectors])
+          : undefined,
+        isNull(knowledgeBase.deletedAt),
+        connectorIndexingCondition(),
+        isNull(knowledgeConnector.deletedAt),
+        isNull(knowledgeConnector.archivedAt),
+        inArray(knowledgeConnector.status, RECOVERABLE_CONNECTOR_STATUSES)
+      )
+    )
+    .orderBy(asc(candidate.uploadedAt), asc(candidate.id))
+    .limit(limit)
 }
 
 async function recoverStoredDocuments(
@@ -69,42 +145,21 @@ async function recoverStoredDocumentBatch(
   limit: number
 ): Promise<number> {
   /** Discovery does not claim work. Ownership is rechecked under lifecycle locks below. */
-  const candidates = await db.transaction(async (tx) => {
+  const observedCandidates = await db.transaction(async (tx) => {
     signal.throwIfAborted()
     await tx.execute(
       sql`SELECT set_config('statement_timeout', '5000', true), set_config('lock_timeout', '1000', true)`
     )
     signal.throwIfAborted()
-    return tx
-      .select({
-        id: document.id,
-        knowledgeBaseId: document.knowledgeBaseId,
-        connectorId: knowledgeConnector.id,
-        workspaceId: knowledgeBase.workspaceId,
-        organizationId: knowledgeBase.organizationId,
-      })
-      .from(document)
-      .innerJoin(knowledgeBase, eq(knowledgeBase.id, document.knowledgeBaseId))
-      .innerJoin(knowledgeConnector, eq(knowledgeConnector.id, document.connectorId))
-      .where(
-        and(
-          documentProcessingRecoveryCondition(now),
-          blockedKnowledgeBases.size > 0
-            ? notInArray(document.knowledgeBaseId, [...blockedKnowledgeBases])
-            : undefined,
-          attemptedConnectors.size > 0
-            ? notInArray(document.connectorId, [...attemptedConnectors])
-            : undefined,
-          isNull(knowledgeBase.deletedAt),
-          isNull(knowledgeConnector.deletedAt),
-          isNull(knowledgeConnector.archivedAt),
-          inArray(knowledgeConnector.status, RECOVERABLE_CONNECTOR_STATUSES)
-        )
-      )
-      .orderBy(asc(document.uploadedAt), asc(document.id))
-      .limit(limit)
+    return recoveryCandidatesQuery(tx, now, {
+      limit: Math.min(limit, DOCUMENT_LIVENESS_BATCH_SIZE),
+      attemptedConnectors,
+      blockedKnowledgeBases,
+    })
   })
   signal.throwIfAborted()
+  for (const candidate of observedCandidates) attemptedConnectors.add(candidate.connectorId)
+  const candidates = await findAbandonedDocumentProcessing(observedCandidates, signal)
   if (candidates.length === 0) return 0
 
   let recovered = 0
@@ -117,7 +172,6 @@ async function recoverStoredDocumentBatch(
   for (const [knowledgeBaseId, group] of groups) {
     if (Date.now() >= deadlineAt) break
     const connectorIds = [...new Set(group.map((row) => row.connectorId))]
-    for (const connectorId of connectorIds) attemptedConnectors.add(connectorId)
     const owner = group[0]
     let ownerVerified = false
     try {
@@ -144,7 +198,13 @@ async function recoverStoredDocumentBatch(
             organizationId: knowledgeBase.organizationId,
           })
           .from(knowledgeBase)
-          .where(and(eq(knowledgeBase.id, knowledgeBaseId), isNull(knowledgeBase.deletedAt)))
+          .where(
+            and(
+              eq(knowledgeBase.id, knowledgeBaseId),
+              isNull(knowledgeBase.deletedAt),
+              connectorIndexingCondition()
+            )
+          )
           .for('share', { skipLocked: true })
         signal.throwIfAborted()
         if (!kb) {
@@ -183,6 +243,7 @@ async function recoverStoredDocumentBatch(
                 document.id,
                 group.map((row) => row.id)
               ),
+              or(...group.map(documentProcessingSnapshotCondition)),
               eq(document.knowledgeBaseId, knowledgeBaseId),
               inArray(
                 document.connectorId,

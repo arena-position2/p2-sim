@@ -1,12 +1,11 @@
 'use client'
 
 import * as React from 'react'
-import { cn, Textarea } from '@sim/emcn'
+import { Button, cn, Textarea } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import axios from 'axios'
 import { ChevronsUpDown, Wand2 } from 'lucide-react'
 import { createPortal } from 'react-dom'
-import { Button } from '@/components/ui/button'
 import {
   Command,
   CommandEmpty,
@@ -372,7 +371,7 @@ export function ArenaCommentInput({
   wandControlRef,
   hideInternalWand = false,
 }: ArenaCommentInputProps) {
-  const [localContent, setLocalContent] = React.useState<string>('')
+  const [, setLocalContent] = React.useState<string>('')
   const [displayText, setDisplayText] = React.useState<string>('')
   const [htmlContent, setHtmlContent] = React.useState<string>('')
   const persistSubBlockValueRef = React.useRef<(value: string) => void>(() => {})
@@ -773,12 +772,6 @@ export function ArenaCommentInput({
     if (wandHook.isStreaming) return displayText
     return displayText
   }, [wandHook.isStreaming, displayText])
-
-  const baseValue = isPreview
-    ? previewValue
-    : propValue !== undefined
-      ? propValue
-      : ctrl.valueString
 
   React.useLayoutEffect(() => {
     const rowCount = rows || DEFAULT_ROWS

@@ -42,7 +42,9 @@ export function shouldRunSpecialistPass(_intent: LocalCopilotIntent): boolean {
   return false
 }
 
-export function specialistPassDomain(_intent: LocalCopilotIntent): LocalCopilotSpecialistDomain | null {
+export function specialistPassDomain(
+  _intent: LocalCopilotIntent
+): LocalCopilotSpecialistDomain | null {
   return null
 }
 

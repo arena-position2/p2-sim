@@ -896,7 +896,11 @@ export async function getWorkspaceUsageAnalytics(
             count: parseIntMetric(row.count),
           }))
         ),
-        byChat: mapExpensiveCopilotChatRows(copilotByChatRows).map((row) => ({
+        byChat: mapExpensiveCopilotChatRows(
+          copilotByChatRows.filter(
+            (row): row is typeof row & { workspaceId: string } => row.workspaceId !== null
+          )
+        ).map((row) => ({
           chatId: row.chatId,
           title: row.title,
           chatType: row.chatType,

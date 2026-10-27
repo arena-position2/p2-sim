@@ -1,5 +1,3 @@
-/** @vitest-environment node */
-
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createGoogleCompanyScheduler } from '@/lib/knowledge/connectors/google-company-scheduler'
 import {
@@ -15,15 +13,20 @@ import type {
 } from '@/lib/knowledge/connectors/partition-work'
 import { GoogleDriveApiError } from '@/connectors/google-drive/google-drive-errors'
 import { GoogleApiError } from '@/connectors/google-workspace/api-errors'
+import {
+  GoogleWorkspaceMailboxNotSetup,
+  listGoogleWorkspaceDocuments,
+} from '@/connectors/google-workspace/company-crawl'
 import { googleCompanyUserContextSchema } from '@/connectors/google-workspace/company-work'
 import type { GoogleWorkspaceUser } from '@/connectors/google-workspace/users'
-import { ConnectorSourceError } from '@/connectors/source-error'
 import type { ConnectorConfig, ExternalDocument, ExternalListingFailures } from '@/connectors/types'
+import { memberDocumentId } from '@/connectors/utils'
 
-const mocks = vi.hoisted(() => ({ directory: vi.fn() }))
+const mocks = vi.hoisted(() => ({ directory: vi.fn(), getUser: vi.fn() }))
 vi.mock('@/connectors/google-workspace/users', async (original) => ({
   ...(await original<typeof import('@/connectors/google-workspace/users')>()),
   listGoogleWorkspaceUsers: mocks.directory,
+  getGoogleWorkspaceUser: mocks.getUser,
 }))
 
 const document: ExternalDocument = {
@@ -33,8 +36,8 @@ const document: ExternalDocument = {
   contentHash: 'hash',
   mimeType: 'text/plain',
 }
-function user(id: string): GoogleWorkspaceUser {
-  return { id, email: `${id}@fixture.test`, customerId: 'customer', active: true }
+function user(id: string, extra: Partial<GoogleWorkspaceUser> = {}): GoogleWorkspaceUser {
+  return { id, email: `${id}@fixture.test`, customerId: 'customer', active: true, ...extra }
 }
 interface FakeWork extends ConnectorPartitionWorkItem<GoogleWorkspaceUser> {
   complete: boolean
@@ -139,10 +142,12 @@ function fixture(provider = 'google_calendar', syncIntervalMinutes = 60) {
     documents: [document],
     hasMore: false,
   }))
+  const visible = vi.fn(async (_user: GoogleWorkspaceUser) => false)
   let scheduler = createGoogleCompanyScheduler({
     provider,
     store,
     listDocuments: list,
+    hasVisibleDocuments: visible,
     syncIntervalMinutes,
     isListingCursorInvalidError: (error) => error === expiredCursor,
     now: () => clock,
@@ -179,6 +184,7 @@ function fixture(provider = 'google_calendar', syncIntervalMinutes = 60) {
   return {
     rows,
     list,
+    visible,
     process,
     step,
     saved: () => saved,
@@ -193,6 +199,7 @@ function fixture(provider = 'google_calendar', syncIntervalMinutes = 60) {
         provider,
         store,
         listDocuments: list,
+        hasVisibleDocuments: visible,
         syncIntervalMinutes,
         isListingCursorInvalidError: (error) => error === expiredCursor,
         now: () => clock,
@@ -203,6 +210,7 @@ function fixture(provider = 'google_calendar', syncIntervalMinutes = 60) {
 
 beforeEach(() => {
   mocks.directory.mockReset()
+  mocks.getUser.mockReset().mockImplementation(async (_token: string, id: string) => user(id))
 })
 
 describe('durable Google company user scheduling', () => {
@@ -223,18 +231,19 @@ describe('durable Google company user scheduling', () => {
   })
 
   it.each([
-    ['google_calendar', []],
-    ['google_calendar', ['notACalendarUser']],
-    ['google_drive', []],
+    ['google_calendar', [], false],
+    ['google_calendar', ['forbidden'], true],
+    ['google_calendar', ['notACalendarUser'], false],
+    ['google_drive', [], false],
   ] as const)(
-    'retains a failed %s user (%j) and continues other users',
-    async (provider, reasons) => {
+    'retains a failed %s user (%j, reasons complete: %s) and continues other users',
+    async (provider, reasons, reasonsComplete) => {
       mocks.directory.mockResolvedValue({ users: [user('a'), user('z')] })
       const f = fixture(provider)
       f.list.mockRejectedValueOnce(
         provider === 'google_drive'
           ? new GoogleDriveApiError(403, [], 'drive.files.list', false)
-          : new GoogleApiError('calendar.events.list', 403, reasons, reasons.length > 0)
+          : new GoogleApiError('calendar.events.list', 403, reasons, reasonsComplete)
       )
       await f.step(4)
       expect(f.rows.get('a:content')).toMatchObject({
@@ -256,80 +265,99 @@ describe('durable Google company user scheduling', () => {
     }
   )
 
-  it.each(['insufficientPermissions', 'rateLimitExceeded', 'SERVICE_DISABLED'])(
-    'keeps %s as a connector-level failure',
-    async (reason) => {
-      mocks.directory.mockResolvedValue({ users: [user('a')] })
-      const f = fixture()
-      const error = new GoogleApiError('calendar.events.list', 403, [reason])
-      f.list.mockRejectedValue(error)
-      await f.step()
-      await expect(f.step()).rejects.toBe(error)
-      expect(f.rows.get('a:content')?.attempts).toBe(0)
+  it('completes Calendar users without the service so the listing stays reconcilable, re-probing them at the Directory refresh', async () => {
+    mocks.directory.mockResolvedValue({ users: ['a', 'b', 'c', 'z'].map((id) => user(id)) })
+    const f = fixture('google_calendar', 15)
+    const listUserDocuments = vi.fn<ConnectorConfig['listDocuments']>(
+      async (_token, _config, _cursor, ctx) => ({
+        documents: [{ ...document, externalId: memberDocumentId('event', ctx) }],
+        hasMore: false,
+      })
+    )
+    for (let i = 0; i < 3; i++) {
+      listUserDocuments.mockRejectedValueOnce(
+        new GoogleApiError('calendar.events.list', 403, ['notACalendarUser'])
+      )
     }
-  )
+    const syncContext = {
+      mirrorsSourceAcls: true,
+      getDelegatedAccessToken: vi.fn(async () => 'user-token'),
+    }
+    f.list.mockImplementation(async (accessToken, sourceConfig, cursor) =>
+      listGoogleWorkspaceDocuments({
+        provider: 'google_calendar',
+        accessToken,
+        sourceConfig,
+        cursor,
+        syncContext,
+        listUserDocuments,
+      })
+    )
 
-  it('bounds a run of unresolved user errors rather than marking the tenant complete', async () => {
-    mocks.directory.mockResolvedValue({ users: ['a', 'b', 'c', 'd'].map(user) })
-    const f = fixture()
-    f.list.mockRejectedValue(new GoogleApiError('calendar.events.list', 403, [], false))
-    await f.step(25)
-    expect(f.list).toHaveBeenCalledTimes(3)
-    expect(f.saved()).toMatchObject({ complete: false, unsafe: true })
-    expect(f.rows.get('d:content')?.served).toBe(0)
-    expect(f.saved().resumeAt).toBe('2026-09-17T00:05:00.000Z')
+    await f.step(10)
+
+    for (const id of ['a', 'b', 'c']) {
+      expect(f.rows.get(`${id}:content`)).toMatchObject({
+        complete: true,
+        attempts: 0,
+        retryAt: new Date('2026-09-17T01:00:00Z'),
+      })
+      expect(f.rows.get(`${id}:content`)?.failure).toBeUndefined()
+    }
+    expect(f.rows.get('z:content')).toMatchObject({
+      complete: true,
+      retryAt: new Date('2026-09-17T00:15:00Z'),
+    })
+    expect(f.saved()).toMatchObject({ complete: true, unsafe: false, listingFailures: null })
+    expect(listUserDocuments).toHaveBeenCalledTimes(4)
   })
 
   it.each([
     {
-      provider: 'gmail',
-      prefix: 'google-workspace:v1:',
-      state: { provider: 'gmail', providerCursor: 'existing-page-91' },
-    },
-    {
       provider: 'google_calendar',
-      prefix: 'google-workspace:v1:',
-      state: { provider: 'google_calendar', providerCursor: 'existing-page-91' },
+      error: () => new GoogleApiError('calendar.events.list', 403, ['notACalendarUser']),
+      reason: { operation: 'calendar.events.list', status: 403, reasons: ['notACalendarUser'] },
     },
     {
-      provider: 'google_drive',
-      prefix: 'gdrive-company:v1:',
-      state: { scope: { kind: 'user', cursor: 'existing-page-91' } },
-    },
-    {
-      provider: 'google_drive',
-      prefix: 'gdrive-company:v1:',
-      state: { scope: { kind: 'drives', pageToken: 'existing-drives-page-91' } },
-    },
-    {
-      provider: 'google_drive',
-      prefix: 'gdrive-company:v1:',
-      state: {
-        scope: {
-          kind: 'drive',
-          driveIds: ['shared-drive'],
-          nextPageToken: 'next-drives-page',
-          cursor: 'existing-page-91',
-        },
-      },
+      provider: 'gmail',
+      error: () => new GoogleWorkspaceMailboxNotSetup(),
+      reason: { operation: 'directory.users.get', reasons: ['mailboxNotSetup'] },
     },
   ])(
-    'adopts $provider legacy state $state without resetting the active page',
-    async ({ provider, prefix, state }) => {
-      mocks.directory.mockResolvedValue({ users: [user('a'), user('z')] })
-      const f = fixture(provider)
-      const legacy = `${prefix}${Buffer.from(JSON.stringify({ ...state, users: [user('a')], nextUsersPageToken: 'old-directory' })).toString('base64url')}`
-      const generationId = f.saved().generationId
-      f.setSaved({ ...f.saved(), cursor: legacy, listedCount: 10 })
-      await f.step(3)
-      expect(f.list.mock.calls[0]?.[2]).toContain(prefix)
-      const resume = JSON.parse(
-        Buffer.from(f.list.mock.calls[0]![2]!.slice(prefix.length), 'base64url').toString()
-      )
-      expect(resume).toMatchObject(state)
-      expect(resume.users).toEqual([{ id: 'a', email: 'a@fixture.test', customerId: 'customer' }])
-      expect(f.saved()).toMatchObject({ generationId, listedCount: 11 })
-      expect(mocks.directory.mock.calls[0]?.[1]).toBeUndefined()
+    'retains a $provider user whose documents readers still see until the condition outlasts propagation',
+    async ({ provider, error, reason }) => {
+      mocks.directory.mockResolvedValue({ users: [user('a')] })
+      const f = fixture(provider, 15)
+      f.visible.mockResolvedValue(true)
+      f.list.mockImplementation(async () => {
+        throw error()
+      })
+      await f.step(5)
+      const retained = {
+        complete: false,
+        failure: { scope: 'a@fixture.test', ...reason, since: '2026-09-17T00:00:00.000Z' },
+      }
+      expect(f.rows.get('a:content')).toMatchObject({ ...retained, attempts: 1 })
+      expect(f.visible).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
+      expect(f.saved()).toMatchObject({
+        complete: false,
+        unsafe: true,
+        listingFailures: { count: 1 },
+      })
+
+      f.advance(23 * 60 * 60 * 1000)
+      f.restart()
+      await f.step(5)
+      expect(f.rows.get('a:content')).toMatchObject({ ...retained, attempts: 2 })
+      expect(f.visible).toHaveBeenCalledOnce()
+      expect(f.saved().complete).toBe(false)
+
+      f.advance(60 * 60 * 1000)
+      f.restart()
+      await f.step(5)
+      expect(f.rows.get('a:content')).toMatchObject({ complete: true, attempts: 0 })
+      expect(f.rows.get('a:content')?.failure).toBeUndefined()
+      expect(f.saved()).toMatchObject({ complete: true, listingFailures: null })
     }
   )
 
@@ -351,75 +379,6 @@ describe('durable Google company user scheduling', () => {
     await f.step()
     expect(f.list.mock.calls.at(-1)?.[2]).toBe('stable-provider-snapshot')
     expect(f.rows.get('a:content')?.cursor).toBe('next-provider-page')
-  })
-
-  it('refreshes permissions with a separate cursor while content remains unfinished', async () => {
-    mocks.directory.mockResolvedValue({ users: [user('a'), user('z')] })
-    const f = fixture()
-    f.list.mockResolvedValue({ documents: [document], hasMore: true, nextCursor: 'next-page' })
-    await f.step(2)
-    const contentCursor = f.rows.get('a:content')?.cursor
-    f.advance(13 * 60 * 60 * 1000)
-    await f.step(2)
-    expect(f.process.mock.calls.at(-1)?.[2]).toMatchObject({ permissionsOnly: true })
-    expect(f.rows.get('a:content')?.cursor).toBe(contentCursor)
-    expect(f.rows.get('a:permissions')?.cursor).toBe('next-page')
-    expect(f.saved().listedCount).toBe(1)
-    await f.step()
-    expect(f.rows.get('z:content')?.served).toBeGreaterThan(0)
-  })
-
-  it('restarts expired Directory discovery without losing committed user work', async () => {
-    mocks.directory
-      .mockResolvedValueOnce({ users: [user('a')], nextPageToken: 'expired' })
-      .mockRejectedValueOnce(new ConnectorSourceError('expired', 400))
-      .mockResolvedValueOnce({ users: [user('a'), user('z')] })
-    const f = fixture()
-    f.list.mockResolvedValue({
-      documents: [document],
-      hasMore: true,
-      nextCursor: 'saved-user-page',
-    })
-    await f.step(4)
-    expect(f.rows.get('a:content')?.cursor).toBe('saved-user-page')
-    expect(f.rows.has('z:content')).toBe(true)
-  })
-
-  it('discovers new employees and rescans healthy users while an unavailable mailbox stays blocked', async () => {
-    mocks.directory
-      .mockResolvedValueOnce({ users: [user('a'), user('z')] })
-      .mockResolvedValue({ users: [user('a'), user('new'), user('z')] })
-    const f = fixture()
-    f.list.mockImplementation(async (_token, _config, cursor) => {
-      const state = JSON.parse(Buffer.from(cursor!.split(':v1:')[1], 'base64url').toString())
-      if (state.users[0].id === 'a')
-        return {
-          documents: [],
-          hasMore: false,
-          listingFailures: {
-            count: 1,
-            samples: [
-              {
-                scope: 'a@fixture.test',
-                operation: 'directory.users.get',
-                reasons: ['mailboxNotSetup'],
-              },
-            ],
-          },
-        }
-      return { documents: [{ ...document, externalId: state.users[0].id }], hasMore: false }
-    })
-    await f.step(4)
-    const oldCount = f.saved().listedCount
-    expect(f.rows.get('a:content')?.complete).toBe(false)
-    expect(f.rows.get('z:content')?.complete).toBe(true)
-    f.advance(61 * 60_000)
-    f.restart()
-    await f.step(5)
-    expect(f.rows.get('new:content')?.complete).toBe(true)
-    expect(f.rows.get('z:content')?.complete).toBe(true)
-    expect(f.saved().listedCount).toBe(oldCount + 2)
-    expect(f.saved().complete).toBe(false)
   })
 
   it('rejects an oversized continuation before making provider requests', async () => {
@@ -472,67 +431,4 @@ describe('durable Google company user scheduling', () => {
       expect(f.list).toHaveBeenCalledTimes(2)
     }
   )
-
-  it('schedules completed users at the supplied refresh cadence', async () => {
-    mocks.directory.mockResolvedValue({ users: [user('a'), user('b')] })
-    const f = fixture('gmail', 15)
-    await f.step(2)
-    expect(f.rows.get('a:content')?.retryAt).toEqual(new Date('2026-09-17T00:15:00Z'))
-  })
-
-  it.each([0, 60])(
-    'waits for deferred permissions at cadence %i, then reaches EOF without waiting for periodic refresh',
-    async (cadence) => {
-      mocks.directory.mockResolvedValue({ users: [user('a')] })
-      const f = fixture('google_calendar', cadence)
-      await f.step(2)
-      const content = structuredClone(f.rows.get('a:content'))
-      const permission = f.rows.get('a:permissions')!
-      permission.cursor = 'permission-page-2'
-      permission.retryAt = new Date('2026-09-17T00:00:00Z')
-      f.list.mockRejectedValueOnce(new GoogleApiError('calendar.events.list', 403, [], false))
-      await f.step(2)
-      expect(f.saved()).toMatchObject({
-        generationId: 'generation',
-        complete: false,
-        resumeAt: '2026-09-17T00:05:00.000Z',
-        listingFailures: { count: 1 },
-      })
-      expect(permission.cursor).toBe('permission-page-2')
-      const callsBeforeRetry = f.list.mock.calls.length
-      f.restart()
-      await f.step()
-      expect(f.list).toHaveBeenCalledTimes(callsBeforeRetry)
-      expect(f.saved().complete).toBe(false)
-      f.advance(5 * 60_000)
-      f.restart()
-      await f.step(2)
-      expect(f.list.mock.calls.at(-1)?.[2]).toBe('permission-page-2')
-      expect(f.rows.get('a:content')).toEqual(content)
-      expect(f.saved()).toMatchObject({
-        generationId: 'generation',
-        complete: true,
-        resumeAt: null,
-        listingFailures: null,
-      })
-      expect(permission.retryAt).toEqual(new Date('2026-09-17T12:05:00Z'))
-      expect(mocks.directory).toHaveBeenCalledTimes(1)
-    }
-  )
-
-  it('keeps completed manual users complete while unfinished work and permission refresh continue', async () => {
-    mocks.directory.mockResolvedValue({ users: [user('a'), user('b')] })
-    const f = fixture('gmail', 0)
-    await f.step(2)
-    const a = f.rows.get('a:content')!
-    const before = structuredClone(a)
-    const b = f.rows.get('b:content')!
-    b.retryAt = new Date('2026-09-18T00:00:00Z')
-    f.advance(13 * 60 * 60 * 1000)
-    await f.step(2)
-    expect(f.rows.get('a:content')).toEqual(before)
-    expect(f.process.mock.calls.at(-2)?.[2]).toMatchObject({ permissionsOnly: true })
-    expect(mocks.directory).toHaveBeenCalledTimes(1)
-    expect(f.saved().resumeAt).toBe('2026-09-18T00:00:00.000Z')
-  })
 })

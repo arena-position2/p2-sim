@@ -60,6 +60,8 @@ https://sim.yourdomain.com/api/auth/oauth2/callback/google-drive
 
 Scopes are requested by Sim at authorization time; you generally do not need to pre-declare them, but Google and Microsoft require you to enable the corresponding APIs on the project/app first (for example Gmail API, Drive API, Calendar API).
 
+Each integration page ends with an **OAuth Scopes** section listing its redirect URI, environment variables, and every scope Sim requests, for example [Gmail](/integrations/gmail#oauth-scopes). Use it for providers that make you declare scopes on the app, such as Slack, and to confirm a connected account was granted everything Sim needs.
+
 </Step>
 
 <Step>
@@ -111,13 +113,15 @@ One app registration in [Entra ID](https://entra.microsoft.com) covers all of th
 
 | Environment variables | Provider IDs |
 |---|---|
-| `MICROSOFT_CLIENT_ID`<br />`MICROSOFT_CLIENT_SECRET` | `outlook`, `onedrive`, `sharepoint`, `microsoft-teams`, `microsoft-excel`, `microsoft-word`, `microsoft-planner`, `microsoft-dataverse`, `microsoft-ad` |
+| `MICROSOFT_CLIENT_ID`<br />`MICROSOFT_CLIENT_SECRET` | `outlook`, `onedrive`, `sharepoint`, `microsoft-teams`, `microsoft-excel`, `microsoft-word`, `microsoft-planner`, `microsoft-powerbi`, `microsoft-dataverse`, `microsoft-ad` |
 
 The same variables also power "Sign in with Microsoft".
 
+For Power BI, register `<NEXT_PUBLIC_APP_URL>/api/auth/oauth2/callback/microsoft-powerbi` as a **Web** redirect URI. Sim requests the delegated Power BI API scopes `Workspace.Read.All`, `Report.Read.All`, and `Dataset.ReadWrite.All` with the explicit `https://analysis.windows.net/powerbi/api/` resource prefix, plus identity and offline-access scopes. Connect an organizational account from its home tenant. Power BI uses a separate connection from Microsoft Graph integrations; Credential Groups and service-principal authentication are not supported in this version. See the [Power BI integration](/integrations/powerbi) for permissions and tenant settings.
+
 ### GitHub Search
 
-Self-hosted GitHub Search uses a GitHub App for account connections and organization installation indexing. Register your own App and configure the server variables below. Sim Cloud users use the [GitHub Search setup flow](/search/github#add-a-repository) directly.
+Self-hosted GitHub Search uses a GitHub App for personal account connections and optional organization repository boundaries. Register your own App and configure the server variables below. Sim Cloud users use the [GitHub Search setup flow](/search/github#add-a-repository) directly.
 
 <Steps>
 <Step>
@@ -150,28 +154,33 @@ Authorization starts from Sim so the callback can finish the pending connection.
 
 For an existing deployment, deploy the application with the setup callback before changing the App registration. Use a separate GitHub App for each deployment origin, such as staging and production, so installation approval returns to the instance that started it. Keep the existing user authorization callback above unchanged.
 
-The connector polls GitHub's API and does not need a webhook.
+Live Search queries GitHub's API on demand and does not need a webhook. Ordinary knowledge-base connectors and explicitly restored legacy Search use their separate polling path.
 
 </Step>
 <Step>
 
 #### Set read permissions
 
-Expand **Permissions → Repository permissions**. Set **Contents → Access: Read-only**; leave the mandatory **Metadata** permission at **Read-only**.
+Expand **Permissions → Repository permissions**. Set **Contents**, **Issues**, and **Pull requests** to **Read-only**; leave mandatory **Metadata** at **Read-only**. Contents supports code reads; Issues and Pull requests allow the connected member’s App user token to search and read private issues and pull requests.
 
 <Image className="mx-auto h-auto w-full max-w-md" src="/static/search/github-app-repository-permissions.jpg" alt="GitHub repository permissions with Contents set to Read-only and Metadata shown as mandatory Read-only" width={768} height={929} />
 
 Expand **Account permissions** and set **Email addresses → Access: Read-only**.
+
+Expand **Organization permissions** and set **Members → Access: Read-only**. Sim uses this to verify that the person connecting an organization installation is an organization owner. Existing installations must approve this permission update; repository read access alone cannot verify ownership.
 
 <Image className="mx-auto h-auto w-full max-w-md" src="/static/search/github-app-email-permission.jpg" alt="GitHub account permissions with only Email addresses selected for Read-only access" width={768} height={929} />
 
 | Permission area | Permission | Access |
 |---|---|---|
 | Repository | Contents | Read-only |
+| Repository | Issues | Read-only |
+| Repository | Pull requests | Read-only |
+| Organization | Members | Read-only |
 | Repository | Metadata | Read-only |
 | Account | Email addresses | Read-only |
 
-Leave every other permission at **No access**. Sim does not need issue, pull-request, administration, or write permissions. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) explains these settings.
+Leave other permissions at **No access**. Search does not need administration or write permissions. Existing installations must approve the additional issue and pull-request read permissions; members may need to reconnect. The service-side installation token remains narrowed to repository contents/metadata to verify source coverage; content search uses the member’s App user token. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) explains these settings.
 
 GitHub App user tokens use these permissions rather than OAuth scopes. An empty `scope` value in the token response is expected; see GitHub's [user token reference](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app).
 
@@ -200,7 +209,7 @@ The private key must include its PEM header, footer, and contents. Sim accepts a
 
 Keep the private key and client secret in the deployment's server configuration; organization admins select installations in Sim without entering these secrets.
 
-If you run Search indexing on Trigger.dev, configure the same five variables in its matching environment. The app server and indexing worker both need the App credentials; updating the app's secret store alone does not update a separately configured worker.
+The live Search application needs these five variables. If a worker also indexes ordinary GitHub knowledge bases, configure the variables in that worker’s matching environment too. Updating the app’s secret store does not update a separately configured worker. Live Search does not schedule a GitHub indexing worker.
 
 The **Client ID** is different from the numeric **App ID**. Use credentials from **Developer settings → GitHub Apps**. `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` belong to the separate GitHub sign-in integration and remain unchanged. Search does not read `GITHUB_REPO_CLIENT_ID` or `GITHUB_REPO_CLIENT_SECRET`.
 
@@ -208,12 +217,12 @@ Keep **Expire user authorization tokens** enabled so Sim receives the refresh to
 
 Complete the installation through [the GitHub Search source setup](/search/github#add-a-repository).
 
-If you replace a deployment's GitHub App, an organization admin selects **Settings → Sources → More → Refresh connection settings**. When Search is disabled, use **Connected accounts → Providers → Update configurations** in organization settings. This applies the deployment's current App configuration to all existing providers while preserving their option IDs. Accounts whose App configuration changed must reconnect. Then reconnect personal GitHub accounts and connect an installation of the new App. Reconnecting alone cannot update the organization's saved App configuration.
+If you replace a deployment's GitHub App, an organization admin selects **Settings → Credential Groups → Providers → Update configurations**. This applies the deployment's current App configuration to all existing providers while preserving their option IDs. Accounts whose App configuration changed must reconnect. Then reconnect personal GitHub accounts and connect an installation of the new App. Reconnecting alone cannot update the organization's saved App configuration.
 
 </Step>
 </Steps>
 
-If GitHub rejects `redirect_uri`, compare the App's registered callback with `NEXT_PUBLIC_APP_URL` followed by `/api/auth/oauth2/callback/github-repositories`. Keep wildcard matching disabled. If installation indexing is unavailable, confirm all five `GITHUB_APP_*` variables belong to the same App and include a complete RSA private key.
+If GitHub rejects `redirect_uri`, compare the App's registered callback with `NEXT_PUBLIC_APP_URL` followed by `/api/auth/oauth2/callback/github-repositories`. Keep wildcard matching disabled. If App installation setup is unavailable, confirm all five `GITHUB_APP_*` variables belong to the same App and include a complete RSA private key.
 
 GitHub workflow blocks and knowledge-base token connections continue to use personal access tokens.
 
@@ -258,13 +267,25 @@ read/write (`account`, `repository`, `repository:write`, `pullrequest`, `pullreq
 `pipeline`, `pipeline:write`, and `webhook`). The webhook permission is required for automatic
 trigger subscription management.
 
+Some providers need more setup than a client ID, secret, and redirect URI:
+
+| Service | Extra setup |
+|---|---|
+| Asana | Sim requests the `default` scope. Enable **Full permissions** under the app's OAuth settings, or Asana rejects the authorization. |
+| Attio | Enable the scopes listed on the [Attio page](/integrations/attio#oauth-scopes) in the app's Developer console; Attio grants scopes from the app, not the authorization request. |
+| Cal.com | Sim does not send a `scope` parameter, so connecting works only with a legacy Cal.com OAuth client: one with no scopes configured, or only `READ_BOOKING` and `READ_PROFILE`. Cal.com requires at least one scope on new clients and rejects their authorization without a `scope` parameter. |
+| DocuSign | `DOCUSIGN_AUTH_HOST` defaults to the demo host `account-d.docusign.com`. Set it to `account.docusign.com` for production accounts. |
+| Microsoft | Azure AD, Teams, and Planner request permissions that need tenant admin consent. For Dataverse and Dynamics 365, add the **Dynamics CRM** API's delegated `user_impersonation` permission. |
+| Notion | Enable the integration's **Read content**, **Update content**, **Insert content**, **Read comments**, **Insert comments**, and **User information with email addresses** capabilities. |
+| Zoho Desk and ManageEngine | Both use one Zoho client. Register both `zoho-desk` and `manageengine-sdp` redirect URIs on it if you use both. |
+
 ### Services with a different flow
 
 | Service | Configuration | Notes |
 |---|---|---|
 | **Instagram** | `INSTAGRAM_CLIENT_ID` / `INSTAGRAM_CLIENT_SECRET` | Instagram App ID/Secret from the Meta App Dashboard (Instagram → API setup with Instagram login). Redirect URI: `/api/auth/oauth2/callback/instagram`. **Publishing requires cloud object storage** — Meta fetches a public HTTPS URL, so local-disk storage will not work. |
 | **Shopify** | `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` | Redirect URI: `/api/auth/oauth2/callback/shopify`. Per-shop install flow. |
-| **Trello** | `TRELLO_API_KEY` | API-key based, not OAuth 2.0. Callback: `/api/auth/trello/callback`. |
+| **Trello** | `TRELLO_API_KEY` | API-key based, not OAuth 2.0. Callback: `/api/auth/trello/callback`. Add your Sim origin (`NEXT_PUBLIC_APP_URL`) to the API key's allowed origins, or Trello will not redirect back. |
 
 ## Non-OAuth integration credentials
 
@@ -304,7 +325,7 @@ When enabling the native Sim Slack trigger, configure all three variables togeth
 Your deployment must also be reachable from the provider's servers for webhook triggers to fire — a Sim instance on a private network can use polling triggers but not webhook triggers. Polling triggers additionally require the scheduler; see [Background Jobs](/platform/self-hosting/background-jobs).
 
 <FAQ items={[
-  { question: "Do I have to register an OAuth app for every integration?", answer: "Only for OAuth integrations your team uses. API-key integrations do not require an OAuth application. If an OAuth provider's credentials are unset, its connector cannot be connected. One Google app covers 15 connectors and one Microsoft app covers 9, so most deployments need only a handful of registrations."},
+  { question: "Do I have to register an OAuth app for every integration?", answer: "Only for OAuth integrations your team uses. API-key integrations do not require an OAuth application. If an OAuth provider's credentials are unset, its connector cannot be connected. One Google app covers 15 connectors and one Microsoft app covers 10, so most deployments need only a handful of registrations."},
   { question: "Users get a redirect_uri_mismatch error. What is wrong?", answer: "Almost always NEXT_PUBLIC_APP_URL does not match the URI registered with the provider. Check for http vs https, a trailing slash, an apex-vs-www difference, or a port. The URI Sim sends is built from NEXT_PUBLIC_APP_URL at request time."},
   { question: "Can I use the same OAuth app for staging and production?", answer: "Yes, if the provider allows multiple redirect URIs on one app — register both hosts. Providers that allow only one URI need a separate app per environment."},
   { question: "Why does the Instagram integration need cloud storage?", answer: "Meta fetches media from a public HTTPS URL rather than accepting an upload, so published files must live in S3, Azure Blob, or GCS. Local-disk storage cannot serve them. Gmail attachments and other integrations do not have this constraint." },

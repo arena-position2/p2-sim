@@ -1,30 +1,32 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { SIDEBAR_WIDTH } from '@/stores/constants'
-import type { SidebarState } from './types'
+import type { SidebarState } from '@/stores/sidebar/types'
 
 /**
  * The widest the expanded sidebar may be at a given viewport width: 30% of the
- * viewport, and never below {@link SIDEBAR_WIDTH.MIN}. A narrow window (where the
- * percentage falls under the minimum) still yields a usable rail instead of
- * collapsing it to nothing.
+ * viewport, capped at {@link SIDEBAR_WIDTH.MAX}. It can never drop below
+ * {@link SIDEBAR_WIDTH.MIN}, so a narrow window (where the percentage falls under
+ * the minimum) still yields a usable rail instead of collapsing it to nothing.
  *
  * The one definition of the ceiling — the resize handle reads it, and the
  * pre-paint script in `app/layout.tsx` mirrors it inline (it cannot import).
  */
 export function getMaxSidebarWidth(viewportWidth: number): number {
-  return Math.max(SIDEBAR_WIDTH.MIN, viewportWidth * SIDEBAR_WIDTH.MAX_PERCENTAGE)
+  return Math.max(
+    SIDEBAR_WIDTH.MIN,
+    Math.min(SIDEBAR_WIDTH.MAX, viewportWidth * SIDEBAR_WIDTH.MAX_PERCENTAGE)
+  )
 }
 
-/**
- * Clamps an expanded sidebar width into the valid range for the current viewport.
- * The upper bound can never drop below {@link SIDEBAR_WIDTH.MIN}.
- */
+/** Mobile navigation does not resize the saved desktop sidebar. */
 function clampSidebarWidth(width: number): number {
-  if (!Number.isFinite(width)) return SIDEBAR_WIDTH.DEFAULT
+  const target = Number.isFinite(width) ? width : SIDEBAR_WIDTH.DEFAULT
   const max =
-    typeof window === 'undefined' ? Number.POSITIVE_INFINITY : getMaxSidebarWidth(window.innerWidth)
-  return Math.min(Math.max(width, SIDEBAR_WIDTH.MIN), max)
+    typeof window === 'undefined' || window.innerWidth < 768
+      ? SIDEBAR_WIDTH.MAX
+      : getMaxSidebarWidth(window.innerWidth)
+  return Math.min(Math.max(target, SIDEBAR_WIDTH.MIN), max)
 }
 
 /**
@@ -78,6 +80,7 @@ export const useSidebarStore = create<SidebarState>()(
     (set, get) => ({
       workspaceDropdownOpen: false,
       sidebarWidth: SIDEBAR_WIDTH.DEFAULT,
+      renderedSidebarWidth: SIDEBAR_WIDTH.DEFAULT,
       isCollapsed: readCollapsedCookie(),
       _hasHydrated: false,
       setWorkspaceDropdownOpen: (isOpen) => set({ workspaceDropdownOpen: isOpen }),
@@ -85,20 +88,23 @@ export const useSidebarStore = create<SidebarState>()(
         if (get().isCollapsed) return
         const clampedWidth = clampSidebarWidth(width)
         set({ sidebarWidth: clampedWidth })
-        applySidebarWidths(clampedWidth, false)
+        get().syncWidth()
       },
       toggleCollapsed: () => {
-        const { isCollapsed, sidebarWidth } = get()
-        const nextCollapsed = !isCollapsed
-        const expandedWidth = clampSidebarWidth(sidebarWidth)
+        const nextCollapsed = !get().isCollapsed
         set({ isCollapsed: nextCollapsed })
         applyCollapsedCookie(nextCollapsed)
-        applySidebarWidths(expandedWidth, nextCollapsed)
+        get().syncWidth()
       },
       syncWidth: () => {
         const { isCollapsed, sidebarWidth } = get()
         const clampedWidth = clampSidebarWidth(sidebarWidth)
-        if (!isCollapsed && clampedWidth !== sidebarWidth) set({ sidebarWidth: clampedWidth })
+        set({
+          renderedSidebarWidth:
+            typeof window !== 'undefined' && window.innerWidth < 768
+              ? window.innerWidth
+              : clampedWidth,
+        })
         applySidebarWidths(clampedWidth, isCollapsed)
       },
       setHasHydrated: (hasHydrated) => set({ _hasHydrated: hasHydrated }),
@@ -116,7 +122,7 @@ export const useSidebarStore = create<SidebarState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.setHasHydrated(true)
-          applySidebarWidths(clampSidebarWidth(state.sidebarWidth), state.isCollapsed)
+          state.syncWidth()
         }
       },
       /** Only width is persisted; collapse lives in the cookie. */

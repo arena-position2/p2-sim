@@ -4,7 +4,6 @@ import { getScopesForService } from '@/lib/oauth/utils'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
 import { normalizeFileInput, SERVICE_ACCOUNT_SUBBLOCKS } from '@/blocks/utils'
-import type { GoogleDriveResponse } from '@/tools/google_drive/types'
 import { getTrigger } from '@/triggers'
 
 /**
@@ -17,7 +16,7 @@ const UPLOAD_FOLDER_FIELD = ['uploadFolderSelector', 'uploadManualFolderId'] as 
 /** The folder the poller watches — the trigger's own canonical pair. */
 const TRIGGER_FOLDER_FIELD = ['folderId', 'manualFolderId'] as const
 
-export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
+export const GoogleDriveBlock: BlockConfig = {
   type: 'google_drive',
   name: 'Google Drive',
   description: 'Manage files, folders, and permissions',
@@ -189,7 +188,6 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
     },
   },
   subBlocks: [
-    // Operation selector
     {
       id: 'operation',
       title: 'Operation',
@@ -222,7 +220,6 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       ],
       value: () => 'list',
     },
-    // Google Drive Credentials
     {
       id: 'credential',
       title: 'Google Drive Account',
@@ -244,7 +241,6 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       required: true,
     },
     ...SERVICE_ACCOUNT_SUBBLOCKS,
-    // Create/Upload File Fields
     {
       id: 'fileName',
       title: 'File Name',
@@ -253,7 +249,6 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       condition: { field: 'operation', value: ['create_file', 'upload'] },
       required: true,
     },
-    // File upload (basic mode) - binary files
     {
       id: 'fileUpload',
       title: 'Upload File',
@@ -265,7 +260,6 @@ export const GoogleDriveBlock: BlockConfig<GoogleDriveResponse> = {
       multiple: false,
       required: false,
     },
-    // Variable reference (advanced mode) - for referencing files from previous blocks
     {
       id: 'file',
       title: 'File Reference',
@@ -335,45 +329,6 @@ Return ONLY the file content - no explanations, no markdown code blocks, no extr
       mode: 'advanced',
       condition: { field: 'operation', value: ['create_file', 'upload'] },
     },
-    // Get Content Fields
-    // {
-    //   id: 'fileId',
-    //   title: 'Select File',
-    //   type: 'file-selector',
-    //   provider: 'google-drive',
-    //   serviceId: 'google-drive',
-    //   requiredScopes: [],
-    //   placeholder: 'Select a file',
-    //   condition: { field: 'operation', value: 'get_content' },
-    // },
-    // // Manual File ID input (shown only when no file is selected)
-    // {
-    //   id: 'fileId',
-    //   title: 'Or Enter File ID Manually',
-    //   type: 'short-input',
-    //   placeholder: 'ID of the file to get content from',
-    //   condition: {
-    //     field: 'operation',
-    //     value: 'get_content',
-    //     and: {
-    //       field: 'fileId',
-    //       value: '',
-    //     },
-    //   },
-    // },
-    // Export format for Google Workspace files
-    // {
-    //   id: 'mimeType',
-    //   title: 'Export Format',
-    //   type: 'dropdown',
-    //   options: [
-    //     { label: 'Plain Text', id: 'text/plain' },
-    //     { label: 'HTML', id: 'text/html' },
-    //   ],
-    //   placeholder: 'Optional: Choose export format for Google Workspace files',
-    //   condition: { field: 'operation', value: 'get_content' },
-    // },
-    // Create Folder Fields
     {
       id: 'fileName',
       title: 'Folder Name',
@@ -405,7 +360,6 @@ Return ONLY the file content - no explanations, no markdown code blocks, no extr
       mode: 'advanced',
       condition: { field: 'operation', value: 'create_folder' },
     },
-    // List Fields - Folder Selector (basic mode)
     {
       id: 'listFolderSelector',
       title: 'Select Folder',
@@ -469,7 +423,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       mode: 'advanced',
       condition: { field: 'operation', value: 'list' },
     },
-    // Download File Fields - File Selector (basic mode)
     {
       id: 'downloadFileSelector',
       title: 'Select File',
@@ -484,7 +437,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       condition: { field: 'operation', value: 'download' },
       required: true,
     },
-    // Manual File ID input (advanced mode)
     {
       id: 'downloadManualFileId',
       title: 'File ID',
@@ -495,7 +447,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       condition: { field: 'operation', value: 'download' },
       required: true,
     },
-    // Export format for Google Workspace files (download operation)
     {
       id: 'mimeType',
       title: 'Export Format',
@@ -530,7 +481,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       placeholder: 'Optional: Override the filename',
       condition: { field: 'operation', value: 'download' },
     },
-    // Search Files Fields
     {
       id: 'searchFolderSelector',
       title: 'Search in Folder',
@@ -574,7 +524,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       placeholder: 'Number of results (default: 20, max: 1000)',
       condition: { field: 'operation', value: 'search' },
     },
-    // Get File Info Fields
     {
       id: 'getFileSelector',
       title: 'Select File',
@@ -599,7 +548,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       condition: { field: 'operation', value: 'get_file' },
       required: true,
     },
-    // Copy File Fields
     {
       id: 'copyFileSelector',
       title: 'Select File to Copy',
@@ -655,7 +603,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       mode: 'advanced',
       condition: { field: 'operation', value: 'copy' },
     },
-    // Update File Fields
     {
       id: 'updateFileSelector',
       title: 'Select File to Update',
@@ -732,7 +679,6 @@ Return ONLY the description text - no explanations, no quotes, no extra text.`,
       mode: 'advanced',
       condition: { field: 'operation', value: 'update' },
     },
-    // Trash File Fields
     {
       id: 'trashFileSelector',
       title: 'Select File to Trash',
@@ -758,7 +704,6 @@ Return ONLY the description text - no explanations, no quotes, no extra text.`,
       condition: { field: 'operation', value: 'trash' },
       required: true,
     },
-    // Delete File Fields
     {
       id: 'deleteFileSelector',
       title: 'Select File to Delete',
@@ -784,7 +729,6 @@ Return ONLY the description text - no explanations, no quotes, no extra text.`,
       condition: { field: 'operation', value: 'delete' },
       required: true,
     },
-    // Share File Fields
     {
       id: 'shareFileSelector',
       title: 'Select File to Share',
@@ -897,7 +841,6 @@ Return ONLY the message text - no subject line, no greetings/signatures, no extr
         placeholder: 'Describe why you are sharing this file...',
       },
     },
-    // Unshare (Remove Permission) Fields
     {
       id: 'unshareFileSelector',
       title: 'Select File',
@@ -930,7 +873,6 @@ Return ONLY the message text - no subject line, no greetings/signatures, no extr
       condition: { field: 'operation', value: 'unshare' },
       required: true,
     },
-    // List Permissions Fields
     {
       id: 'listPermissionsFileSelector',
       title: 'Select File',
@@ -963,7 +905,6 @@ Return ONLY the message text - no subject line, no greetings/signatures, no extr
       mode: 'advanced',
       condition: { field: 'operation', value: 'list_permissions' },
     },
-    // Get File Content Fields
     {
       id: 'getContentFileSelector',
       title: 'Select File',
@@ -1029,7 +970,6 @@ Return ONLY the message text - no subject line, no greetings/signatures, no extr
       mode: 'advanced',
       condition: { field: 'operation', value: 'get_content' },
     },
-    // Move File Fields
     {
       id: 'moveFileSelector',
       title: 'Select File to Move',
@@ -1093,7 +1033,6 @@ Return ONLY the message text - no subject line, no greetings/signatures, no extr
       mode: 'advanced',
       condition: { field: 'operation', value: 'move' },
     },
-    // Search Files Fields
     {
       id: 'searchQuery',
       title: 'Search Query',
@@ -1139,7 +1078,6 @@ Return ONLY the query string - no explanations, no quotes around the whole thing
       mode: 'advanced',
       condition: { field: 'operation', value: 'search' },
     },
-    // Untrash File Fields
     {
       id: 'untrashFileSelector',
       title: 'Select File to Restore',
@@ -1429,7 +1367,6 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
       condition: { field: 'operation', value: 'delete_comment' },
       required: true,
     },
-    // Get Drive Info has no additional fields (just needs credential)
     ...getTrigger('google_drive_poller').subBlocks,
   ],
   tools: {
@@ -1516,14 +1453,12 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
       params: (params) => {
         const {
           oauthCredential,
-          // Folder canonical params (per-operation)
           uploadFolderId,
           createFolderParentId,
           listFolderId,
           searchFolderId,
           copyDestFolderId,
           moveDestFolderId,
-          // File canonical params (per-operation)
           downloadFileId,
           getFileId,
           getContentFileId,
@@ -1542,7 +1477,6 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
           listCommentsFileId,
           createCommentFileId,
           deleteCommentFileId,
-          // File upload
           file,
           mimeType,
           operation,
@@ -1568,10 +1502,8 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
           ...rest
         } = params
 
-        // Normalize file input - handles both basic (file-upload) and advanced (short-input) modes
         const normalizedFile = normalizeFileInput(file, { single: true })
 
-        // Resolve folderId based on operation
         let effectiveFolderId: string | undefined
         switch (params.operation) {
           case 'create_file':
@@ -1589,7 +1521,6 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
             break
         }
 
-        // Resolve fileId based on operation
         let effectiveFileId: string | undefined
         switch (params.operation) {
           case 'download':
@@ -1648,7 +1579,6 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
             break
         }
 
-        // Resolve destinationFolderId for copy/move operations
         let effectiveDestinationFolderId: string | undefined
         if (params.operation === 'copy') {
           effectiveDestinationFolderId = copyDestFolderId?.trim() || undefined
@@ -1656,18 +1586,14 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
           effectiveDestinationFolderId = moveDestFolderId?.trim() || undefined
         }
 
-        // Convert starred dropdown to boolean
         const starredValue = starred === 'true' ? true : starred === 'false' ? false : undefined
 
-        // Convert sendNotification dropdown to boolean
         const sendNotificationValue =
           sendNotification === 'true' ? true : sendNotification === 'false' ? false : undefined
 
-        // Convert removeFromCurrent dropdown to boolean
         const removeFromCurrentValue =
           removeFromCurrent === 'true' ? true : removeFromCurrent === 'false' ? false : undefined
 
-        // Convert includeRevisions dropdown to boolean
         const includeRevisionsValue =
           includeRevisions === 'true' ? true : includeRevisions === 'false' ? false : undefined
 
@@ -1706,7 +1632,7 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
           pageToken: effectivePageToken?.trim() || undefined,
           query: effectiveQuery,
           mimeType: effectiveMimeType === 'auto' ? undefined : effectiveMimeType,
-          type: shareType, // Map shareType to type for share tool
+          type: shareType,
           starred: starredValue,
           sendNotification: sendNotificationValue,
           removeFromCurrent: removeFromCurrentValue,
@@ -1721,13 +1647,11 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
   inputs: {
     operation: { type: 'string', description: 'Operation to perform' },
     oauthCredential: { type: 'string', description: 'Google Drive access token' },
-    // Folder canonical params (per-operation)
     uploadFolderId: { type: 'string', description: 'Parent folder for upload/create' },
     createFolderParentId: { type: 'string', description: 'Parent folder for create folder' },
     listFolderId: { type: 'string', description: 'Folder to list files from' },
     copyDestFolderId: { type: 'string', description: 'Destination folder for copy' },
     moveDestFolderId: { type: 'string', description: 'Destination folder for move' },
-    // File canonical params (per-operation)
     downloadFileId: { type: 'string', description: 'File to download' },
     getFileId: { type: 'string', description: 'File to get info for' },
     getContentFileId: { type: 'string', description: 'File to get content from' },
@@ -1746,19 +1670,15 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
     listCommentsFileId: { type: 'string', description: 'File to list comments for' },
     createCommentFileId: { type: 'string', description: 'File to comment on' },
     deleteCommentFileId: { type: 'string', description: 'File the comment belongs to' },
-    // Move operation inputs
     removeFromCurrent: {
       type: 'string',
       description: 'Whether to remove from current folder when moving',
     },
-    // Get content operation inputs
     includeRevisions: { type: 'string', description: 'Whether to include revision history' },
-    // Upload and Create inputs
     fileName: { type: 'string', description: 'File or folder name' },
     file: { type: 'json', description: 'File to upload (UserFile object)' },
     content: { type: 'string', description: 'Text content to upload' },
     mimeType: { type: 'string', description: 'File MIME type or export format' },
-    // List operation inputs
     query: { type: 'string', description: 'Search query' },
     pageSize: { type: 'number', description: 'Results per page' },
     // Search operation inputs
@@ -1767,22 +1687,18 @@ Return ONLY the comment text - no explanations, no quotes, no extra formatting.`
     searchFolderSelector: { type: 'string', description: 'Selected folder to limit search to' },
     searchManualFolderId: { type: 'string', description: 'Manual folder ID to limit search to' },
     pageToken: { type: 'string', description: 'Pagination token from a previous nextPageToken' },
-    // Copy operation inputs
     newName: { type: 'string', description: 'New name for copied file' },
-    // Update operation inputs
     name: { type: 'string', description: 'New name for file' },
     description: { type: 'string', description: 'New description for file' },
     starred: { type: 'string', description: 'Star or unstar the file' },
     addParents: { type: 'string', description: 'Folder IDs to add file to' },
     removeParents: { type: 'string', description: 'Folder IDs to remove file from' },
-    // Share operation inputs
     shareType: { type: 'string', description: 'Type of sharing (user, group, domain, anyone)' },
     role: { type: 'string', description: 'Permission role' },
     email: { type: 'string', description: 'Email address to share with' },
     domain: { type: 'string', description: 'Domain to share with' },
     sendNotification: { type: 'string', description: 'Send notification email' },
     emailMessage: { type: 'string', description: 'Custom notification message' },
-    // Unshare operation inputs
     permissionId: { type: 'string', description: 'Permission ID to remove' },
     exportMimeType: { type: 'string', description: 'Target MIME type to export to' },
     revisionId: { type: 'string', description: 'Revision ID to retrieve' },

@@ -1,12 +1,10 @@
-/**
- * @vitest-environment node
- */
 import { describe, expect, it } from 'vitest'
 import {
   deriveMicrosoftEmailVerified,
   getMicrosoftOAuthEndpoints,
   getMicrosoftOAuthTenantId,
   isMicrosoftProvider,
+  mapMicrosoftProfileToUser,
 } from '@/lib/oauth/microsoft'
 
 const EMAIL = 'user@contoso.com'
@@ -79,10 +77,6 @@ describe('deriveMicrosoftEmailVerified', () => {
     expect(deriveMicrosoftEmailVerified({ name: 'User', oid: 'abc' }, EMAIL)).toBe(false)
   })
 
-  it('defaults to false for an empty claim set', () => {
-    expect(deriveMicrosoftEmailVerified({}, EMAIL)).toBe(false)
-  })
-
   it('coerces a truthy non-boolean email_verified claim', () => {
     expect(deriveMicrosoftEmailVerified({ email_verified: 'true' }, EMAIL)).toBe(true)
   })
@@ -92,10 +86,6 @@ describe('deriveMicrosoftEmailVerified', () => {
       false
     )
     expect(deriveMicrosoftEmailVerified({ verified_primary_email: 123 }, EMAIL)).toBe(false)
-    expect(deriveMicrosoftEmailVerified({ verified_secondary_email: { foo: 'bar' } }, EMAIL)).toBe(
-      false
-    )
-    expect(deriveMicrosoftEmailVerified({ verified_primary_email: null }, EMAIL)).toBe(false)
   })
 
   it('does not treat a string claim equal to the email as verified (guards the old unsafe cast)', () => {

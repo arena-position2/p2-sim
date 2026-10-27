@@ -2,7 +2,11 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import { IMAGE_BLOCK_PROVIDER_OPTIONS } from '@/lib/image-generation/block-model-config'
+import {
+  IMAGE_BLOCK_PROVIDER_OPTIONS,
+  IMAGE_GENERATOR_DEFAULT_MODEL,
+  IMAGE_GENERATOR_DEFAULT_PROVIDER,
+} from '@/lib/image-generation/block-model-config'
 import { ImageGeneratorV2Block } from '@/blocks/blocks/image_generator'
 import { AGENT_TOOL_BLOCK_TYPES } from '@/blocks/utils'
 import { imageGenerateTool } from '@/tools/image/generate'
@@ -99,6 +103,20 @@ describe('ImageGeneratorV2Block', () => {
     )
   })
 
+  it('defaults provider to Google Gemini and model to Nano Banana 2', () => {
+    const providerSubBlock = ImageGeneratorV2Block.subBlocks.find(
+      (subBlock) => subBlock.id === 'provider'
+    )
+    const modelSubBlock = ImageGeneratorV2Block.subBlocks.find(
+      (subBlock) => subBlock.id === 'model'
+    )
+
+    expect(IMAGE_GENERATOR_DEFAULT_PROVIDER).toBe('gemini')
+    expect(IMAGE_GENERATOR_DEFAULT_MODEL).toBe('gemini-3.1-flash-image-preview')
+    expect(providerSubBlock?.defaultValue).toBe(IMAGE_GENERATOR_DEFAULT_PROVIDER)
+    expect(modelSubBlock?.defaultValue).toBe(IMAGE_GENERATOR_DEFAULT_MODEL)
+  })
+
   it('allows clearing provider without hiding the model field', () => {
     const providerSubBlock = ImageGeneratorV2Block.subBlocks.find(
       (subBlock) => subBlock.id === 'provider'
@@ -108,7 +126,7 @@ describe('ImageGeneratorV2Block', () => {
     )
 
     expect(providerSubBlock?.clearable).toBe(true)
-    expect(providerSubBlock?.value?.({})).toBe('')
+    expect(modelSubBlock?.clearable).toBe(true)
     expect(modelSubBlock?.condition).toBeUndefined()
   })
 
@@ -132,14 +150,17 @@ describe('ImageGeneratorV2Block', () => {
     expect(nanoBanana2Resolution?.value?.({})).toBe('')
   })
 
-  it('keeps all optional image_generator_v2 combobox and dropdown fields clearable without editor defaults', () => {
+  it('keeps optional image_generator_v2 combobox and dropdown fields clearable without editor defaults', () => {
     const optionalFieldTypes = new Set(['combobox', 'dropdown'])
     const requiredFieldIds = new Set(['prompt', 'size'])
+    // Provider/Model intentionally carry editor defaults (Gemini + Nano Banana 2).
+    const defaultedFieldIds = new Set(['provider', 'model'])
 
     const optionalConfiguredFields = ImageGeneratorV2Block.subBlocks.filter(
       (subBlock) =>
         optionalFieldTypes.has(subBlock.type) &&
         !requiredFieldIds.has(subBlock.id) &&
+        !defaultedFieldIds.has(subBlock.id) &&
         subBlock.required !== true
     )
 

@@ -1,5 +1,6 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
+import { compareStrings } from '@sim/utils/string'
 import { decryptSecret } from '@/lib/core/security/encryption'
 import { isLargeArrayManifest } from '@/lib/execution/payloads/large-array-manifest-metadata'
 import { isLargeValueRef } from '@/lib/execution/payloads/large-value-ref'
@@ -68,7 +69,13 @@ export type ResolvedSecretIncompletenessReason =
   | 'knowledge-result-provenance-unavailable'
   | 'knowledge-row-missing'
   | 'knowledge-row-content-mismatch'
+  | 'knowledge-response-capacity-exceeded'
   | 'table-result-provenance-unavailable'
+  /**
+   * A table result carried run-state or enrichment error text, captured from executor output that
+   * can hold resolved secret plaintext, with no provenance persisted beside it.
+   */
+  | 'table-run-state-provenance-unavailable'
   | 'mounted-file-provenance-unavailable'
   | 'workspace-file-provenance-unknown'
   | 'file-source-unidentified'
@@ -151,6 +158,7 @@ const ORIGINATING_FAULT_REASONS = new Set<ResolvedSecretIncompletenessReason>([
   'client-tool-seal-failed',
   'knowledge-row-missing',
   'knowledge-row-content-mismatch',
+  'knowledge-response-capacity-exceeded',
   'mothership-response-unreadable',
   'structural-input-root-unprojected',
   'backfill-checkpoint-unusable',
@@ -441,12 +449,6 @@ export interface CreateResolvedSecretTraceRegistryOptions {
    * `{{NAME}}` and are omitted from exported provenance envelopes.
    */
   workspaceUnredactedKeys?: readonly string[]
-}
-
-function compareStrings(left: string, right: string): number {
-  if (left < right) return -1
-  if (left > right) return 1
-  return 0
 }
 
 function cloneProvenanceScope(scope: ResolvedSecretTraceScopeV1): ResolvedSecretTraceScopeV1 {

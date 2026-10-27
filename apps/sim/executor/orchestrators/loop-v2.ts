@@ -17,7 +17,6 @@ import type { EdgeManagerV2 } from '@/executor/execution/edge-manager-v2'
 import type { LoopScope } from '@/executor/execution/state'
 import type { BlockStateController, ContextExtensions } from '@/executor/execution/types'
 import type { ExecutionContext, NormalizedBlockOutput } from '@/executor/types'
-import type { LoopConfigWithNodes } from '@/executor/types/loop'
 import { createReferencePattern } from '@/executor/utils/reference-validation'
 import { projectResolvedSecretDiagnosticError } from '@/executor/utils/resolved-secret-content-projection'
 import { mergeSubflowSecretProvenance } from '@/executor/utils/subflow-secret-provenance'
@@ -421,7 +420,7 @@ export class LoopOrchestratorV2 {
    * on the next outer iteration.
    */
   private resetNestedLoopScopes(loopId: string, ctx: ExecutionContext): void {
-    const loopConfig = this.dag.loopConfigs.get(loopId) as LoopConfigWithNodes | undefined
+    const loopConfig = this.dag.loopConfigs.get(loopId) as SerializedLoop | undefined
     if (!loopConfig) return
 
     for (const nodeId of loopConfig.nodes) {
@@ -458,7 +457,7 @@ export class LoopOrchestratorV2 {
    * next outer loop iteration.
    */
   private resetNestedParallelScopes(loopId: string, ctx: ExecutionContext): void {
-    const loopConfig = this.dag.loopConfigs.get(loopId) as LoopConfigWithNodes | undefined
+    const loopConfig = this.dag.loopConfigs.get(loopId) as SerializedLoop | undefined
     if (!loopConfig) return
 
     for (const nodeId of loopConfig.nodes) {
@@ -534,7 +533,7 @@ export class LoopOrchestratorV2 {
     if (visited.has(loopId)) return new Set()
     visited.add(loopId)
 
-    const loopConfig = this.dag.loopConfigs.get(loopId) as LoopConfigWithNodes | undefined
+    const loopConfig = this.dag.loopConfigs.get(loopId) as SerializedLoop | undefined
     if (!loopConfig) return new Set()
 
     const sentinelStartId = buildSentinelStartId(loopId)
@@ -636,7 +635,7 @@ export class LoopOrchestratorV2 {
   }
 
   restoreLoopEdges(loopId: string): void {
-    const loopConfig = this.dag.loopConfigs.get(loopId) as LoopConfigWithNodes | undefined
+    const loopConfig = this.dag.loopConfigs.get(loopId) as SerializedLoop | undefined
     if (!loopConfig) {
       logger.warn('Loop config not found for edge restoration', { loopId })
       return
@@ -687,7 +686,7 @@ export class LoopOrchestratorV2 {
     if (!this.edgeManager) return
 
     const sentinelIds = new Set<string>()
-    for (const [candidateLoopId, config] of this.dag.loopConfigs) {
+    for (const [candidateLoopId] of this.dag.loopConfigs) {
       if (candidateLoopId === loopId) continue
       if (this.isLoopNestedInside(loopId, candidateLoopId)) {
         sentinelIds.add(buildSentinelEndId(candidateLoopId))

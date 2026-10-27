@@ -4,11 +4,11 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { getPublicFileContentContract } from '@/lib/api/contracts/public-shares'
 import { parseRequest } from '@/lib/api/server'
-import { resolveServableDoc } from '@/lib/copilot/tools/server/files/doc-compile'
 import { validateDeploymentAuth } from '@/lib/core/security/deployment-auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { assertKnownSizeWithinLimit } from '@/lib/core/utils/stream-limits'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
+import { resolveServableDoc } from '@/lib/mothership/tools/server/files/doc-compile'
 import { enforcePublicFileRateLimit } from '@/lib/public-shares/rate-limit'
 import { resolveActiveShareByToken } from '@/lib/public-shares/share-manager'
 import { downloadFile } from '@/lib/uploads/core/storage-service'
@@ -17,7 +17,7 @@ import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { isSimPageSource, SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
 import { renderSimPageDocumentWithAssets } from '@/lib/workspace-files/page-document.server'
 import {
-  createErrorResponse,
+  createFileErrorResponse,
   createFileResponse,
   FileNotFoundError,
   getContentType,
@@ -163,9 +163,11 @@ export const GET = withRouteHandler(
     } catch (error) {
       logger.error('Error serving public shared file:', error)
       if (error instanceof FileNotFoundError) {
-        return createErrorResponse(error)
+        return createFileErrorResponse(error)
       }
-      return createErrorResponse(error instanceof Error ? error : new Error('Failed to serve file'))
+      return createFileErrorResponse(
+        error instanceof Error ? error : new Error('Failed to serve file')
+      )
     }
   }
 )

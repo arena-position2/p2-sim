@@ -1,7 +1,7 @@
 import { exaHosting } from '@/tools/exa/hosting'
 import type { ExaFindSimilarLinksParams, ExaFindSimilarLinksResponse } from '@/tools/exa/types'
 import { applyFreshness, parseCommaList, resolveCategory } from '@/tools/exa/utils'
-import type { ToolConfig } from '@/tools/types'
+import type { ToolConfig, ToolHostingConfig } from '@/tools/types'
 
 /**
  * Exa has deprecated `/findSimilar` in favor of running a `/search` with a query
@@ -18,7 +18,7 @@ export const findSimilarLinksTool: ToolConfig<
     'Find webpages similar to a given URL using Exa AI. Deprecated by Exa in favor of Search — prefer Search for new workflows.',
   version: '2.0.0',
 
-  hosting: exaHosting,
+  hosting: exaHosting as unknown as ToolHostingConfig<ExaFindSimilarLinksParams>,
 
   params: {
     url: {

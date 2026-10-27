@@ -1,7 +1,11 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
-import { readChatUpload } from '@/lib/copilot/tools/handlers/upload-file-reader'
+import { readChatUpload } from '@/lib/mothership/tools/handlers/upload-file-reader'
 import { isImageFileType } from '@/lib/uploads/utils/file-utils'
+import {
+  formatOversizedUploadInlineNote,
+  shouldAutoInlineTextUploadBody,
+} from '@/local-copilot/lib/context/chat-uploads'
 import { isWorkflowContextPointer } from '@/local-copilot/lib/context/open-workflow'
 import { getMessageContentText } from '@/local-copilot/lib/providers/message-content'
 import type { ChatMessage, ChatMessageContentPart } from '@/local-copilot/lib/providers/types'
@@ -48,23 +52,54 @@ function formatContextEntries(contexts?: CopilotContextEntry[]): string {
   return contexts.map(formatContextEntry).filter(Boolean).join('\n\n')
 }
 
-function parseUploadedFileContext(
-  content: string
-): { displayName: string; mediaType: string } | null {
+/**
+ * Parses mothership `uploaded_file` context lines like
+ * `File "name.html" (text/html, 63000 bytes) uploaded.`
+ */
+export function parseUploadedFileContext(content: string): {
+  displayName: string
+  mediaType: string
+  size?: number
+} | null {
   const nameMatch = content.match(/^File "([^"]+)"/)
-  const typeMatch = content.match(/\(([^,]+),/)
+  const metaMatch = content.match(/\(([^,]+),\s*(\d+)\s*bytes\)/i)
+  const typeOnlyMatch = content.match(/\(([^,)]+)(?:,|\))/)
   const displayName = nameMatch?.[1]?.trim()
-  const mediaType = typeMatch?.[1]?.trim()
+  const mediaType = metaMatch?.[1]?.trim() || typeOnlyMatch?.[1]?.trim()
   if (!displayName || !mediaType) return null
-  return { displayName, mediaType }
+  const sizeRaw = metaMatch?.[2]
+  const size =
+    sizeRaw !== undefined && Number.isFinite(Number(sizeRaw)) ? Number(sizeRaw) : undefined
+  return size !== undefined ? { displayName, mediaType, size } : { displayName, mediaType }
 }
 
 async function inlineChatUpload(
   displayName: string,
   mediaType: string,
-  chatId: string
+  chatId: string,
+  knownSize?: number
 ): Promise<{ text?: string; image?: ChatMessageContentPart } | null> {
   try {
+    // Images stay vision-inlined regardless of byte size.
+    if (
+      !isImageFileType(mediaType) &&
+      typeof knownSize === 'number' &&
+      !shouldAutoInlineTextUploadBody(knownSize)
+    ) {
+      logger.info('Skipping oversized chat upload inline for Arena Copilot', {
+        chatId,
+        displayName,
+        knownSize,
+      })
+      return {
+        text: formatOversizedUploadInlineNote({
+          filename: displayName,
+          size: knownSize,
+          mediaType,
+        }),
+      }
+    }
+
     const readResult = await readChatUpload(displayName, chatId)
     if (!readResult) return null
 
@@ -82,11 +117,30 @@ async function inlineChatUpload(
       }
     }
 
-    if (!isImageFileType(mediaType) && readResult.content.trim()) {
-      return { text: `Contents of "${displayName}":\n${readResult.content}` }
+    if (isImageFileType(mediaType)) {
+      return null
     }
 
-    return null
+    const content = readResult.content.trim()
+    if (!content) return null
+
+    if (!shouldAutoInlineTextUploadBody(content.length)) {
+      logger.info('Clamping oversized chat upload inline after read for Arena Copilot', {
+        chatId,
+        displayName,
+        contentLength: content.length,
+        knownSize,
+      })
+      return {
+        text: formatOversizedUploadInlineNote({
+          filename: displayName,
+          size: typeof knownSize === 'number' ? knownSize : content.length,
+          mediaType,
+        }),
+      }
+    }
+
+    return { text: `Contents of "${displayName}":\n${content}` }
   } catch (error) {
     logger.warn('Failed to inline chat upload for Arena Copilot', {
       chatId,
@@ -100,6 +154,7 @@ async function inlineChatUpload(
 /**
  * Builds the current user turn for Arena Copilot, including upload context text and
  * inline vision blocks for image attachments tracked on the mothership chat.
+ * Large text uploads are pointer-only — full bytes stay in uploads/ until read/grep.
  */
 export async function buildLocalCopilotUserTurn(
   params: BuildLocalCopilotUserTurnParams
@@ -115,7 +170,12 @@ export async function buildLocalCopilotUserTurn(
       const parsed = parseUploadedFileContext(entry.content)
       if (!parsed) continue
       inlinedUploadNames.add(parsed.displayName)
-      const inlined = await inlineChatUpload(parsed.displayName, parsed.mediaType, params.chatId)
+      const inlined = await inlineChatUpload(
+        parsed.displayName,
+        parsed.mediaType,
+        params.chatId,
+        parsed.size
+      )
       if (inlined?.text) supplementalText.push(inlined.text)
       if (inlined?.image) imageParts.push(inlined.image)
     }
@@ -126,7 +186,8 @@ export async function buildLocalCopilotUserTurn(
       const inlined = await inlineChatUpload(
         attachment.filename,
         attachment.media_type,
-        params.chatId
+        params.chatId,
+        attachment.size
       )
       if (inlined?.text) supplementalText.push(inlined.text)
       if (inlined?.image) imageParts.push(inlined.image)

@@ -249,6 +249,7 @@ export class LoggingSession {
   private traceLargeValueAccess: LargeValueStoreContext = {}
   private executionDeadlineAt?: Date
   private persistedCompletionStatus: PersistedWorkflowExecutionStatus | null = null
+  private lastCompletionError: string | null = null
 
   constructor(
     workflowId: string,
@@ -724,7 +725,7 @@ export class LoggingSession {
       >
       // Non-model billable charges (standalone tool/integration costs). Carried
       // through so the partition can't be silently dropped at this boundary.
-      charges?: Record<string, { total: number }>
+      charges?: Record<string, { total: number; toolName?: string }>
       external?: Record<
         string,
         {
@@ -752,7 +753,7 @@ export class LoggingSession {
     finalizationPath: ExecutionFinalizationPath
     completionFailure?: string
     level?: 'info' | 'error'
-    status?: 'completed' | 'failed' | 'cancelled' | 'pending' | 'skipped'
+    status?: 'completed' | 'failed' | 'cancelled' | 'pending'
   }): Promise<void> {
     const executionState = this.withResolvedSecretTraceProvenance(
       params.executionState,
@@ -767,7 +768,7 @@ export class LoggingSession {
       finalOutput: params.finalOutput,
       traceSpans: params.traceSpans,
       workflowInput: params.workflowInput,
-      executionState: params.executionState,
+      executionState,
       finalizationPath: params.finalizationPath,
       completionFailure: params.completionFailure,
       isResume: this.isResume,
@@ -1386,7 +1387,8 @@ export class LoggingSession {
         traceSpans: traceSpans || [],
         workflowInput,
         finalChatOutput,
-        status: 'skipped',
+        // Persisted vocabulary has no `skipped`; keep Arena skip semantics via finalOutput.
+        status: 'completed',
       })
 
       this.completed = true
@@ -1609,6 +1611,7 @@ export class LoggingSession {
   }
 
   async safeCompleteWithError(params?: SessionErrorCompleteParams): Promise<void> {
+    this.lastCompletionError = params?.error?.message ?? null
     return this.runCompletionAttempt('error', () => this._safeCompleteWithErrorImpl(params))
   }
 
@@ -1797,6 +1800,7 @@ export class LoggingSession {
     isError: boolean
     finalizationPath: ExecutionFinalizationPath
     finalOutput?: Record<string, unknown>
+    executionState?: SerializableExecutionState
     status?: 'completed' | 'failed' | 'cancelled' | 'pending'
   }): Promise<void> {
     if (this.completed || this.completing) {

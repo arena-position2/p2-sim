@@ -57,7 +57,7 @@ export const agentTool: ToolConfig<AgentParams, AgentResponse> = {
     },
   },
 
-  hosting: firecrawlHosting(),
+  hosting: firecrawlHosting<AgentParams>(),
 
   request: {
     modelInput: {

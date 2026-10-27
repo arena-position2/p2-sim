@@ -1,11 +1,16 @@
 import { createWriteStream, type WriteStream } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { db } from '@sim/db'
 import { usageLog } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
+import { isRecordLike } from '@sim/utils/object'
 import { sql } from 'drizzle-orm'
 import {
   MOTHERSHIP_CHAT_ATTRIBUTION_SOURCES,
   parseUpdateCostBillingMessageId,
 } from '@/lib/billing/core/usage-attribution-backfill'
+
+const logger = createLogger('MothershipChatAttribution')
 
 export type ReconciliationMode = 'audit' | 'dry-run' | 'apply' | 'verify' | 'rollback'
 
@@ -524,7 +529,7 @@ async function closeArtifact(stream: WriteStream | null) {
 export async function runMothershipChatAttributionReconciliation(
   options: MothershipChatAttributionReconciliationOptions
 ): Promise<MothershipChatAttributionReconciliationResult> {
-  const log = options.log ?? ((message: string) => console.log(message))
+  const log = options.log ?? ((message: string) => logger.info(message))
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE
   const maxBatches = options.maxBatches ?? Number.POSITIVE_INFINITY
   const scope = options.scope
@@ -564,7 +569,7 @@ export async function runMothershipChatAttributionReconciliation(
   const shouldWrite = mode === 'apply'
   const shouldPaginateFully = mode === 'audit' || mode === 'dry-run' || mode === 'apply'
 
-  if (shouldPaginateFully && mode !== 'verify') {
+  if (shouldPaginateFully) {
     // Apply mode re-queries chat_id IS NULL each batch (no offset). Audit/dry-run
     // paginate with offset so the full scope is reported without mutation.
     const useOffset = !shouldWrite
@@ -708,12 +713,15 @@ async function rollbackFromArtifact(
   log: (message: string) => void
 ): Promise<MothershipChatAttributionReconciliationResult> {
   const beforeCosts = await snapshotScopedCosts(scope)
-  const file = Bun.file(artifactPath)
-  if (!(await file.exists())) {
-    throw new Error(`Rollback artifact not found: ${artifactPath}`)
+  let text: string
+  try {
+    text = await readFile(artifactPath, 'utf8')
+  } catch (error) {
+    if (isRecordLike(error) && error.code === 'ENOENT') {
+      throw new Error(`Rollback artifact not found: ${artifactPath}`)
+    }
+    throw error
   }
-
-  const text = await file.text()
   const ids: string[] = []
   for (const line of text.split('\n')) {
     if (!line.trim()) continue

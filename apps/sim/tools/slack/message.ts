@@ -60,12 +60,6 @@ export const slackMessageTool: InternalToolConfig<SlackMessageParams, SlackMessa
       visibility: 'user-or-llm',
       description: 'Slack user ID for direct messages (e.g., U1234567890)',
     },
-    userId: {
-      type: 'string',
-      required: false,
-      visibility: 'user-or-llm',
-      description: 'Alias for dmUserId (Slack user ID, e.g., U1234567890)',
-    },
     text: {
       type: 'string',
       required: true,
@@ -116,10 +110,9 @@ export const slackMessageTool: InternalToolConfig<SlackMessageParams, SlackMessa
           'id',
         ])
       const dmUserId = normalizeId(params.dmUserId, ['user_id', 'id'])
-      const userId = normalizeId(params.userId, ['user_id', 'id'])
 
       const hasChannel = Boolean(channel)
-      const hasDmUser = Boolean(dmUserId || userId)
+      const hasDmUser = Boolean(dmUserId)
 
       const destinationType: 'channel' | 'dm' = (() => {
         const explicit =
@@ -146,10 +139,10 @@ export const slackMessageTool: InternalToolConfig<SlackMessageParams, SlackMessa
 
       const isDM = destinationType === 'dm'
       const finalChannel = isDM ? undefined : channel
-      const finalUserId = isDM ? dmUserId || userId : undefined
+      const finalUserId = isDM ? dmUserId : undefined
 
       if (isDM && !finalUserId) {
-        throw new Error('For destinationType=dm, provide dmUserId (or userId).')
+        throw new Error('For destinationType=dm, provide dmUserId.')
       }
       if (!isDM && !finalChannel) {
         throw new Error('For destinationType=channel, provide channel (or channelId).')

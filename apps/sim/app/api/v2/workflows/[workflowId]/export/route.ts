@@ -3,6 +3,50 @@ import { defineV2JsonRoute, v2ApiKeyAuth, v2RateLimits } from '@/lib/api/server/
 import { v2WorkflowErrorPolicies } from '@/lib/workflows/api'
 import { exportWorkflow } from '@/lib/workflows/application/import-export'
 import { workflowOperations } from '@/lib/workflows/application/operations'
+import type { BlockState } from '@/stores/workflows/workflow/types'
+
+/**
+ * The export contract requires layout flags to be present (possibly undefined).
+ * Stored blocks omit them until a user toggles the control.
+ */
+function presentExportBlocks(blocks: Record<string, BlockState>) {
+  return Object.fromEntries(
+    Object.entries(blocks).map(([id, block]) => {
+      const data = block.data
+      return [
+        id,
+        {
+          ...block,
+          horizontalHandles: block.horizontalHandles,
+          height: block.height,
+          advancedMode: block.advancedMode,
+          errorEnabled: block.errorEnabled,
+          retry: block.retry,
+          triggerMode: block.triggerMode,
+          locked: block.locked,
+          data: data
+            ? {
+                ...data,
+                parentId: data.parentId,
+                extent: data.extent,
+                width: data.width,
+                height: data.height,
+                collection: data.collection,
+                count: data.count,
+                loopType: data.loopType,
+                whileCondition: data.whileCondition,
+                doWhileCondition: data.doWhileCondition,
+                parallelType: data.parallelType,
+                batchSize: data.batchSize,
+                type: data.type,
+                canonicalModes: data.canonicalModes,
+              }
+            : undefined,
+        },
+      ]
+    })
+  )
+}
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -22,11 +66,16 @@ export const GET = defineV2JsonRoute({
   mapInput: ({ params, query }) => ({
     workflowId: params.workflowId,
     includeReferences: query.includeReferences === true,
+    includeWorkspaceBindings: query.includeWorkspaceBindings,
   }),
   useCase: exportWorkflow,
   present: ({ payload, folderPath }) => ({
     data: {
       ...payload,
+      state: {
+        ...payload.state,
+        blocks: presentExportBlocks(payload.state.blocks),
+      },
       workflow: {
         id: payload.workflow.id,
         name: payload.workflow.name,

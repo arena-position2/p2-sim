@@ -3,7 +3,11 @@ import {
   defineCommunicationToolContract,
   slackBlocksSchema,
 } from '@/lib/api/contracts/tools/communication/shared'
-import type { ContractBodyInput, ContractJsonResponse } from '@/lib/api/contracts/types'
+import type {
+  ContractBody,
+  ContractBodyInput,
+  ContractJsonResponse,
+} from '@/lib/api/contracts/types'
 import { RawFileInputArraySchema } from '@/lib/uploads/utils/file-schemas'
 
 export const slackSendMessageBodySchema = z
@@ -157,7 +161,7 @@ export const slackDownloadContract = defineCommunicationToolContract(
 )
 
 export type SlackSendMessageBody = ContractBodyInput<typeof slackSendMessageContract>
-export type SlackReadMessagesBody = ContractBodyInput<typeof slackReadMessagesContract>
+export type SlackReadMessagesBody = ContractBody<typeof slackReadMessagesContract>
 export type SlackReactionBody = ContractBodyInput<typeof slackAddReactionContract>
 export type SlackDeleteMessageBody = ContractBodyInput<typeof slackDeleteMessageContract>
 export type SlackUpdateMessageBody = ContractBodyInput<typeof slackUpdateMessageContract>

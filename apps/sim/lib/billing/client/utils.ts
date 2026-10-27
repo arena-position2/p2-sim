@@ -11,7 +11,6 @@ import {
 import { DEFAULT_FREE_CREDITS } from '@/lib/billing/constants'
 import { isFree, isPro } from '@/lib/billing/plan-helpers'
 import { hasUsableSubscriptionAccess } from '@/lib/billing/subscriptions/utils'
-import { USAGE_PILL_COLORS } from './consts'
 import type { BillingStatus, SubscriptionData, UsageData } from './types'
 
 const defaultUsage: UsageData = {
@@ -186,17 +185,4 @@ export function canUpgrade(
 ): boolean {
   const status = getSubscriptionStatus(subscriptionData)
   return isFree(status.plan) || isPro(status.plan)
-}
-
-/**
- * Get the appropriate filled pill color based on usage thresholds.
- *
- * @param isCritical - Whether usage is at critical level (blocked or >= 90%)
- * @param isWarning - Whether usage is at warning level (>= 75% but < critical)
- * @returns CSS color value for filled pills
- */
-export function getFilledPillColor(isCritical: boolean, isWarning: boolean): string {
-  if (isCritical) return USAGE_PILL_COLORS.AT_LIMIT
-  if (isWarning) return USAGE_PILL_COLORS.WARNING
-  return USAGE_PILL_COLORS.FILLED
 }

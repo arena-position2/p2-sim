@@ -12,6 +12,9 @@
  */
 export const APP_ENTRY_PATH = '/home'
 
+/** Keeps the landing page visible even when the viewer is signed in. */
+export const LANDING_HREF = '/?home'
+
 /**
  * The workspace picker: resolves to the viewer's most recent workspace. Use it only
  * where the viewer explicitly asked for workspaces; the default landing is
@@ -21,6 +24,9 @@ export const WORKSPACES_PATH = '/workspace'
 
 /** Opens full settings in the viewer's most recent accessible workspace. */
 export const WORKSPACE_SETTINGS_PATH = `${WORKSPACES_PATH}?redirect=settings`
+
+/** Platform-admin agent access request inbox (`NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS`). */
+export const AGENT_ACCESS_REQUEST_PATH = '/agent-access-request'
 
 /** Root of the organization surface; `/o` alone resolves like {@link APP_ENTRY_PATH}. */
 const ORGANIZATIONS_PATH = '/o'
@@ -36,6 +42,8 @@ export function organizationRoutes(organizationId: string) {
     home: `${root}/home`,
     search: `${root}/search`,
     integrations: `${root}/integrations`,
+    memberSecrets: `${root}/integrations/secrets`,
+    organizationSecrets: `${root}/settings/integrations/secrets`,
     skills: `${root}/skills`,
     settings: `${root}/settings`,
     searchProvider: (connectorType: string) =>
@@ -47,7 +55,8 @@ export function organizationRoutes(organizationId: string) {
   } as const
 }
 
-function isPathOrDescendant(pathname: string, root: string): boolean {
+/** Whether `pathname` is `root` itself or a route beneath it. */
+export function isPathOrDescendant(pathname: string, root: string): boolean {
   return pathname === root || pathname.startsWith(`${root}/`)
 }
 
@@ -60,5 +69,32 @@ export function isAppSurfacePath(pathname: string): boolean {
     isPathOrDescendant(pathname, APP_ENTRY_PATH) ||
     isPathOrDescendant(pathname, WORKSPACES_PATH) ||
     isPathOrDescendant(pathname, ORGANIZATIONS_PATH)
+  )
+}
+
+/**
+ * Non-app routes that must never appear in search results: deployed chats,
+ * paused-run resume links, invitations, unsubscribe links, shared files, the
+ * legacy `/w` redirects, the design playground, and account, self-host, and
+ * upgrade utility pages.
+ */
+const NOINDEX_PATH_ROOTS = [
+  '/chat',
+  '/resume',
+  '/invite',
+  '/unsubscribe',
+  '/f',
+  '/w',
+  '/playground',
+  '/account',
+  '/selfhost',
+  '/upgrade',
+] as const
+
+/** Whether a pathname is an app or utility surface that search engines must not index. */
+export function isNoindexPath(pathname: string): boolean {
+  return (
+    isAppSurfacePath(pathname) ||
+    NOINDEX_PATH_ROOTS.some((root) => isPathOrDescendant(pathname, root))
   )
 }

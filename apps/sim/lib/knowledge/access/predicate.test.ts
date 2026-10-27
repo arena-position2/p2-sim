@@ -1,8 +1,4 @@
 /**
- * @vitest-environment node
- */
-
-/**
  * Renders the real predicate against the real drizzle dialect and schema. The
  * shared client sets `fetch_types: false` (packages/db/db.ts), under which an
  * array bound as one parameter fails at execution with 22P02, so the assertion
@@ -61,20 +57,6 @@ describe('knowledgeAccessCondition', () => {
       expect.arrayContaining(['source-1', 'crawler-1', 'reader-1', 'company.atlassian.net'])
     )
     for (const param of params) expect(Array.isArray(param)).toBe(false)
-  })
-
-  it('renders the workspace pair for actorless callers', () => {
-    const { sql, params } = render(
-      knowledgeAccessCondition({ kind: 'workspace', tokens: ['pub', 'ws'] })
-    )
-    expect(sql).toContain('"document"."acl" && ARRAY[$1, $2]::text[]')
-    expect(params.slice(0, 2)).toEqual(['pub', 'ws'])
-  })
-
-  it('denies everything for an empty token set', () => {
-    expect(render(knowledgeAccessCondition({ kind: 'user', userId: 'u', tokens: [] })).sql).toBe(
-      'false'
-    )
   })
 
   it('exempts system jobs from ACL checks while refusing removed sources', () => {

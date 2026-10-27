@@ -89,7 +89,7 @@ export function getRequestContext(): RequestContext | undefined {
  * No-op outside a request context.
  */
 export function setRequestTraceId(traceId: string): void {
-  const store = storage.getStore()
+  const store = requestContextStorage.current.getStore()
   if (store && traceId) store.traceId = traceId
 }
 
@@ -112,7 +112,7 @@ export interface SetRequestAuthOptions {
  * request's origin is known. No-op outside a request context.
  */
 export function setRequestAuth(auth: RequestAuth, options: SetRequestAuthOptions = {}): void {
-  const store = storage.getStore()
+  const store = requestContextStorage.current.getStore()
   if (!store) return
   if (options.preserveExisting && store.auth) return
   store.auth = auth

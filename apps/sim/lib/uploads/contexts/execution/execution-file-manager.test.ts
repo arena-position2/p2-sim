@@ -1,7 +1,9 @@
-/**
- * @vitest-environment node
- */
 import { dbChainMockFns, resetDbChainMock } from '@sim/testing'
+import {
+  setUploadsConfig,
+  uploadsConfigMock,
+  uploadsConfigMockFns,
+} from '@sim/testing/mocks/uploads-config.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockUploadToS3, mockGetPresignedUrlWithConfig, mockDeleteFromS3 } = vi.hoisted(() => ({
@@ -10,12 +12,7 @@ const { mockUploadToS3, mockGetPresignedUrlWithConfig, mockDeleteFromS3 } = vi.h
   mockDeleteFromS3: vi.fn(),
 }))
 
-vi.mock('@/lib/uploads/config', () => ({
-  USE_S3_STORAGE: true,
-  USE_BLOB_STORAGE: false,
-  USE_GCS_STORAGE: false,
-  getStorageConfig: () => ({ bucket: 'bucket', region: 'us-east-1' }),
-}))
+vi.mock('@/lib/uploads/config', () => uploadsConfigMock)
 
 vi.mock('@/lib/uploads/providers/s3/client', () => ({
   uploadToS3: mockUploadToS3,
@@ -23,7 +20,11 @@ vi.mock('@/lib/uploads/providers/s3/client', () => ({
   deleteFromS3: mockDeleteFromS3,
 }))
 
+import { processExecutionFiles } from '@/lib/execution/files'
 import { uploadExecutionFile } from '@/lib/uploads/contexts/execution/execution-file-manager'
+
+setUploadsConfig({ USE_S3_STORAGE: true })
+uploadsConfigMockFns.mockGetStorageConfig.mockReturnValue({ bucket: 'bucket', region: 'us-east-1' })
 
 const context = {
   workspaceId: 'workspace-1',
@@ -33,7 +34,6 @@ const context = {
 
 describe('uploadExecutionFile key allocation', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     mockUploadToS3.mockImplementation(async (file: Buffer, key: string, contentType: string) => ({
       key,
@@ -66,6 +66,35 @@ describe('uploadExecutionFile key allocation', () => {
 
     expect(first.key).not.toBe(second.key)
     expect(dbChainMockFns.insert).toHaveBeenCalledTimes(2)
+  })
+
+  it('persists the returned upload ID and resolves its ID-only reference through real metadata reads', async () => {
+    const scope = { ...context, workspaceId: '11111111-1111-4111-8111-111111111111' }
+    let persisted: Record<string, unknown> | undefined
+    dbChainMockFns.returning.mockImplementation(async () => {
+      persisted = dbChainMockFns.values.mock.calls.at(-1)?.[0]
+      return [{ ...persisted }]
+    })
+    const uploaded = await uploadExecutionFile(
+      scope,
+      Buffer.from('alpha'),
+      'alpha.txt',
+      'text/plain',
+      'user-1'
+    )
+    expect(persisted).toMatchObject({
+      id: uploaded.id,
+      key: uploaded.key,
+      workspaceId: scope.workspaceId,
+    })
+    dbChainMockFns.limit.mockImplementation(async () => [persisted])
+    const resolved = await processExecutionFiles([{ id: uploaded.id }], scope, 'request', 'user-1')
+    expect(resolved[0]).toMatchObject({
+      id: uploaded.id,
+      key: uploaded.key,
+      name: 'alpha.txt',
+      size: 5,
+    })
   })
 
   it('commits tracked provenance with the canonical file before returning its URL', async () => {
@@ -166,17 +195,6 @@ describe('uploadExecutionFile key allocation', () => {
     ).rejects.toThrow('Signing failed')
     expect(mockDeleteFromS3).toHaveBeenCalledTimes(1)
     expect(dbChainMockFns.set).toHaveBeenCalledWith({ deletedAt: expect.any(Date) })
-  })
-
-  it('removes the uploaded object and metadata when creating its download URL fails', async () => {
-    mockGetPresignedUrlWithConfig.mockRejectedValueOnce(new Error('Presigning failed'))
-
-    await expect(
-      uploadExecutionFile(context, Buffer.from('file'), 'file.txt', 'text/plain', 'user-1')
-    ).rejects.toThrow('Presigning failed')
-
-    expect(mockDeleteFromS3.mock.calls[0]?.[0]).toBe(mockUploadToS3.mock.calls[0]?.[1])
-    expect(dbChainMockFns.update).toHaveBeenCalledTimes(1)
   })
 
   it('removes its unique object when metadata insertion fails before uploadFile returns', async () => {

@@ -802,14 +802,10 @@ export class ExecutionEngineV2 {
         if (agentInputs.memoryType) {
           try {
             const { memoryService } = await import('@/executor/handlers/agent/memory')
-            const lastUserMsg = { role: 'user' as const, content: userPrompt }
-            await memoryService.appendToMemory(
-              this.context,
-              agentInputs,
-              { role: 'assistant', content: intentResult.skipResponse },
-              firstAgentBlock.id,
-              lastUserMsg
-            )
+            await memoryService.appendToMemory(this.context, agentInputs, {
+              role: 'assistant',
+              content: intentResult.skipResponse,
+            })
           } catch (memoryError) {
             logger.warn('Failed to persist skip response to memory', { error: memoryError })
           }

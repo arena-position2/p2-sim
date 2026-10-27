@@ -1,5 +1,6 @@
 import { createLogger } from '@sim/logger'
-import { getErrorMessage, toError } from '@sim/utils/errors'
+import { getErrorMessage } from '@sim/utils/errors'
+import { adoptToolFailure, markFailureKind } from '@/lib/core/errors/failure-log'
 import { normalizeStringRecord, normalizeWorkflowVariables } from '@/lib/core/utils/records'
 import {
   isNonRetryableExecutionError,
@@ -16,7 +17,7 @@ import {
   extractBaseBlockId,
   extractBranchIndex,
   isBranchNodeId,
-} from '@/executor/utils/subflow-utils'
+} from '@/executor/utils/subflow-node-id-codec'
 import { CONDITION_READS_ENVIRONMENT_KEY } from '@/executor/variables/resolver'
 import type { SerializedBlock } from '@/serializer/types'
 import { executeTool } from '@/tools'
@@ -39,7 +40,14 @@ type ConditionEvaluation =
   | { status: 'matched'; index: number }
   | { status: 'no-match' }
   | { status: 'expression-threw'; index: number; message: string }
-  | { status: 'no-verdict'; message: string; retryable: boolean; timedOut: boolean }
+  | {
+      status: 'no-verdict'
+      message: string
+      retryable: boolean
+      timedOut: boolean
+      /** The failed tool result's output, so a terminal error carries its logged mark. */
+      output?: unknown
+    }
 
 /**
  * Wraps one expression as a boolean test, on its own line so a trailing line
@@ -172,6 +180,7 @@ async function runConditionCode(
         userId: ctx.userId,
         isDeployedContext: ctx.isDeployedContext,
         enforceCredentialAccess: ctx.enforceCredentialAccess,
+        blockId: currentNodeId,
       },
     },
     { executionContext: ctx }
@@ -214,6 +223,7 @@ async function evaluateConditionList(
       message,
       retryable: result.retryable !== false,
       timedOut: isTimeoutFailure(result.error),
+      output: result.output,
     }
   }
 
@@ -293,9 +303,12 @@ async function evaluateSingleCondition(
 
   if (!result.success) {
     if (result.retryable === false) {
-      throw new NonRetryableExecutionError(result.error ?? 'Condition evaluation is indeterminate')
+      throw adoptToolFailure(
+        new NonRetryableExecutionError(result.error ?? 'Condition evaluation is indeterminate'),
+        result
+      )
     }
-    throw new Error(result.error ?? 'Condition evaluation failed')
+    throw adoptToolFailure(new Error(result.error ?? 'Condition evaluation failed'), result)
   }
 
   return Boolean(result.output?.result)
@@ -342,13 +355,14 @@ export class ConditionBlockHandler implements BlockHandler {
       (conn) => conn.source === baseBlockId
     )
 
-    const { selectedConnection, selectedCondition } = await this.evaluateConditions(
-      conditions,
-      outgoingConnections || [],
-      evalContext,
-      ctx,
-      block.id
-    )
+    const { selectedConnection, selectedCondition, conditionResult } =
+      await this.evaluateConditions(
+        conditions,
+        outgoingConnections || [],
+        evalContext,
+        ctx,
+        block.id
+      )
 
     if (!selectedCondition) {
       return {
@@ -356,6 +370,7 @@ export class ConditionBlockHandler implements BlockHandler {
         conditionResult: false,
         selectedPath: null,
         selectedOption: null,
+        selectedTitle: null,
       }
     }
 
@@ -364,9 +379,10 @@ export class ConditionBlockHandler implements BlockHandler {
       ctx.decisions.condition.set(decisionKey, selectedCondition.id)
       return {
         ...((sourceOutput as any) || {}),
-        conditionResult: true,
+        conditionResult,
         selectedPath: null,
         selectedOption: selectedCondition.id,
+        selectedTitle: selectedCondition.title,
       }
     }
 
@@ -380,13 +396,14 @@ export class ConditionBlockHandler implements BlockHandler {
 
     return {
       ...((sourceOutput as any) || {}),
-      conditionResult: true,
+      conditionResult,
       selectedPath: {
         blockId: targetBlock.id,
         blockType: targetBlock.metadata?.id || DEFAULTS.BLOCK_TYPE,
         blockTitle: targetBlock.metadata?.name || DEFAULTS.BLOCK_TITLE,
       },
       selectedOption: selectedCondition.id,
+      selectedTitle: selectedCondition.title,
     }
   }
 
@@ -446,6 +463,13 @@ export class ConditionBlockHandler implements BlockHandler {
   ): Promise<{
     selectedConnection: { target: string; sourceHandle?: string } | null
     selectedCondition: ConditionEntry | null
+    /**
+     * The chosen branch's own test. Only a matched expression is a truthy test:
+     * the else branch fires precisely because every test was false, so reporting
+     * it as `true` inverted a downstream `<gate.conditionResult>` on the else
+     * path — and persisted the inversion into the trace.
+     */
+    conditionResult: boolean
   }> {
     const elseIndex = conditions.findIndex((condition) => isElseConditionTitle(condition.title))
     const testable = elseIndex === -1 ? conditions : conditions.slice(0, elseIndex)
@@ -455,13 +479,14 @@ export class ConditionBlockHandler implements BlockHandler {
     const selectedCondition = matched ?? elseCondition
 
     if (!selectedCondition) {
-      return { selectedConnection: null, selectedCondition: null }
+      return { selectedConnection: null, selectedCondition: null, conditionResult: false }
     }
 
     return {
       selectedConnection:
         this.findConnectionForCondition(outgoingConnections, selectedCondition.id) ?? null,
       selectedCondition,
+      conditionResult: matched !== null,
     }
   }
 
@@ -492,12 +517,18 @@ export class ConditionBlockHandler implements BlockHandler {
       case 'no-match':
         return null
       case 'expression-threw':
-        logger.error('Failed to evaluate condition', { conditionCount: conditions.length })
-        throw conditionError(conditions[evaluation.index], evaluation.message)
+        /** The author's expression threw; the block executor logs it once. */
+        throw markFailureKind(
+          conditionError(conditions[evaluation.index], evaluation.message),
+          'user'
+        )
       case 'no-verdict':
         if (!evaluation.retryable) {
-          throw new NonRetryableExecutionError(
-            `Evaluation error in condition "${conditions[0].title}": ${evaluation.message}`
+          throw adoptToolFailure(
+            new NonRetryableExecutionError(
+              `Evaluation error in condition "${conditions[0].title}": ${evaluation.message}`
+            ),
+            evaluation
           )
         }
         // Retrying one branch at a time is what recovers a batch the sandbox
@@ -507,8 +538,7 @@ export class ConditionBlockHandler implements BlockHandler {
         // failure as it stands. The whole list was one call, so no single
         // branch owns that failure; name the first, where evaluation started.
         if (evaluation.timedOut || ctx.abortSignal?.aborted) {
-          logger.error('Failed to evaluate conditions', { conditionCount: conditions.length })
-          throw conditionError(conditions[0], evaluation.message)
+          throw adoptToolFailure(conditionError(conditions[0], evaluation.message), evaluation)
         }
         logger.warn('Batched condition evaluation produced no verdict, retrying one at a time', {
           conditionCount: conditions.length,
@@ -533,7 +563,6 @@ export class ConditionBlockHandler implements BlockHandler {
         )
         if (conditionMet) return condition
       } catch (error) {
-        logger.error('Failed to evaluate condition', { errorName: toError(error).name })
         throw conditionError(
           condition,
           getErrorMessage(error, 'Condition evaluation failed'),

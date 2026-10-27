@@ -1,6 +1,10 @@
+import { createLogger } from '@sim/logger'
+import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
-import { env } from '@/lib/core/config/env'
-import { getArenaToken } from '@/app/api/tools/arena/utils/get-token'
+import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
+import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
+
+const logger = createLogger('ArenaGetMyTasks')
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -23,28 +27,28 @@ export async function GET(req: NextRequest) {
     withinMinutes = parsed
   }
 
-  const tokenObject = await getArenaToken(req, workflowId)
-  if (tokenObject.found === false) {
+  const resolved = await resolveArenaCaller(req, workflowId)
+  if (!resolved.found) {
     return NextResponse.json(
-      { error: 'Failed to get my tasks', details: tokenObject.reason },
+      { error: 'Failed to get my tasks', details: resolved.reason },
       { status: 400 }
     )
   }
-  const { arenaToken } = tokenObject
+  const { caller } = resolved
 
   try {
-    const arenaBackendBaseUrl = env.ARENA_BACKEND_BASE_URL
-    const arenaUrl = new URL(`${arenaBackendBaseUrl}/sol/v1/tasks/get-my-tasks`)
-    if (withinMinutes !== undefined) {
-      arenaUrl.searchParams.set('withinMinutes', String(withinMinutes))
-    }
+    const path =
+      withinMinutes !== undefined
+        ? `/sol/v1/tasks/get-my-tasks?withinMinutes=${encodeURIComponent(String(withinMinutes))}`
+        : '/sol/v1/tasks/get-my-tasks'
 
-    const res = await fetch(arenaUrl.toString(), {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        authorisation: arenaToken || '',
-      },
+    const res = await arenaSolFetch({
+      mode: caller.mode,
+      userId: caller.userId,
+      pathOrUrl: path,
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+      init: { method: 'GET', headers: { 'Content-Type': 'application/json' } },
     })
 
     const responseData = await res.json()
@@ -57,6 +61,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(responseData, { status: res.status })
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to get my tasks', details: error }, { status: 500 })
+    if (error instanceof ArenaAuthError) {
+      return NextResponse.json({ error: error.message }, { status: 401 })
+    }
+    const message = getErrorMessage(error, 'Failed to get my tasks')
+    logger.error('Get my tasks failed', { message, workflowId })
+    return NextResponse.json({ error: 'Failed to get my tasks', details: message }, { status: 500 })
   }
 }

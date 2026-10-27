@@ -6,14 +6,10 @@
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
-    "bun": ">=1.4.1",
+    "bun": ">=1.4.2",
     "node": ">=20.0.0"
   },
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
     "./load": {
       "types": "./src/load.ts",
       "default": "./src/load.ts"
@@ -56,6 +52,6 @@
     "@sim/tsconfig": "workspace:*",
     "@types/node": "24.2.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.0"
+    "vitest": "^5.0.1"
   }
 }

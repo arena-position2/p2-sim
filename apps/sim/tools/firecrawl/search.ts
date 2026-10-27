@@ -34,7 +34,7 @@ export const searchTool: ToolConfig<SearchParams, SearchResponse> = {
     },
   },
 
-  hosting: firecrawlHosting(),
+  hosting: firecrawlHosting<SearchParams>(),
 
   request: {
     modelInput: {

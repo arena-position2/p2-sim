@@ -3,6 +3,7 @@ import { user, userArenaDetails } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { getHumanArenaAccessToken } from '@/lib/arena/tokens'
 import { getSession } from '@/lib/auth'
 import { verifyInternalToken } from '@/lib/auth/internal'
 
@@ -19,7 +20,7 @@ function isAllowedEmail(email: string): boolean {
 
 /**
  * Resolves the authorized user id: from session, or from query param when request uses internal token.
- * Caller must pass logged-in userId (and optionally email) as params; when using session, param userId must match session user.
+ * Caller must pass logged-in userId as a param; when using session, that param must match the session user.
  */
 async function resolveAuthorizedUserId(
   req: NextRequest
@@ -29,7 +30,6 @@ async function resolveAuthorizedUserId(
 > {
   const { searchParams } = new URL(req.url)
   const paramUserId = searchParams.get('userId')?.trim()
-  const paramEmail = searchParams.get('email')?.trim()
 
   const session = await getSession()
   if (session?.user?.id) {
@@ -103,7 +103,6 @@ export async function GET(req: NextRequest) {
 
     const details = await db
       .select({
-        arenaToken: userArenaDetails.arenaToken,
         timezone: userArenaDetails.timezone,
         persona: userArenaDetails.persona,
       })
@@ -111,7 +110,8 @@ export async function GET(req: NextRequest) {
       .where(eq(userArenaDetails.userIdRef, userId))
       .limit(1)
 
-    if (details.length === 0 || !details[0].arenaToken) {
+    const arenaToken = await getHumanArenaAccessToken(userId)
+    if (!arenaToken) {
       return NextResponse.json(
         { found: false, reason: 'Arena token not found for user' },
         { status: 404 }
@@ -123,9 +123,9 @@ export async function GET(req: NextRequest) {
       userId,
       name,
       email,
-      arenaToken: details[0].arenaToken,
-      timezone: details[0].timezone ?? null,
-      persona: details[0].persona ?? null,
+      arenaToken,
+      timezone: details[0]?.timezone ?? null,
+      persona: details[0]?.persona ?? null,
     })
   } catch (err) {
     logger.error('Error fetching Arena token for user', err)

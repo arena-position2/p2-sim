@@ -3,32 +3,13 @@ import type {
   SlackInstallationPrincipal,
 } from '@sim/auth/principal'
 import { createLogger } from '@sim/logger'
-import { toError } from '@sim/utils/errors'
+import { getErrorMessage, toError } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import { isRecordLike } from '@sim/utils/object'
 import { resolveOrganizationBillingAttribution } from '@/lib/billing/core/billing-attribution'
-import { createRunSegment, updateRunStatus } from '@/lib/copilot/async-runs/repository'
-import { buildCopilotRequestPayload } from '@/lib/copilot/chat/payload'
-import {
-  buildPersistedAssistantMessage,
-  normalizeMessage,
-  withStoppedContentBlock,
-} from '@/lib/copilot/chat/persisted-message'
-import { finalizeAssistantTurn } from '@/lib/copilot/chat/terminal-state'
-import { prepareCopilotEnvironmentContext } from '@/lib/copilot/environment-context'
-import { runHeadlessCopilotLifecycle } from '@/lib/copilot/request/lifecycle/headless'
-import {
-  acquirePendingChatStream,
-  cleanupAbortMarker,
-  getChatStreamLockOwners,
-  registerActiveStream,
-  releasePendingChatStream,
-  startAbortPoller,
-  unregisterActiveStream,
-} from '@/lib/copilot/request/session/abort'
-import type { OrchestratorResult } from '@/lib/copilot/request/types'
 import { authorizeOrganizationOperation } from '@/lib/core/application/organization-authorization'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
+import { getBaseUrl } from '@/lib/core/utils/urls'
 import { getSlackSearchSender } from '@/lib/internal/slack/search-client'
 import { knowledgeOperations } from '@/lib/knowledge/application/operations'
 import { authorizeSlackSearchInstallation } from '@/lib/knowledge/application/slack-search/authorization'
@@ -48,6 +29,29 @@ import {
   requireSlackSearchTurnLease,
   wasSlackSearchTurnStopped,
 } from '@/lib/knowledge/application/slack-search/turns'
+import { loadCopilotSearchIntegrations } from '@/lib/mothership/application/load-search-integrations'
+import { createRunSegment, updateRunStatus } from '@/lib/mothership/async-runs/repository'
+import { buildCopilotRequestPayload } from '@/lib/mothership/chat/payload'
+import {
+  buildPersistedAssistantMessage,
+  normalizeMessage,
+  withStoppedContentBlock,
+} from '@/lib/mothership/chat/persisted-message'
+import { finalizeAssistantTurn } from '@/lib/mothership/chat/terminal-state'
+import { prepareCopilotEnvironmentContext } from '@/lib/mothership/environment-context'
+import { runHeadlessCopilotLifecycle } from '@/lib/mothership/request/lifecycle/headless'
+import {
+  acquirePendingChatStream,
+  cleanupAbortMarker,
+  getChatStreamLockOwners,
+  registerActiveStream,
+  releasePendingChatStream,
+  startAbortPoller,
+  unregisterActiveStream,
+} from '@/lib/mothership/request/session/abort'
+import { isExplicitStopReason } from '@/lib/mothership/request/session/abort-reason'
+import type { OrchestratorResult } from '@/lib/mothership/request/types'
+import { organizationRoutes } from '@/lib/navigation/paths'
 import { SlackSearchAssistantStream } from '@/lib/slack-search/assistant-stream'
 import { deliverSlackSearchConnections } from '@/lib/slack-search/connections'
 import {
@@ -193,6 +197,7 @@ export async function runSlackSearchAssistant(
     const executionId = generateId()
     const run = await createRunSegment({
       executionId,
+      organizationId: installation.organizationId,
       chatId: chat.id,
       userId,
       streamId: messageId,
@@ -206,6 +211,10 @@ export async function runSlackSearchAssistant(
       channel: job.message.channelId,
       threadTs: slackSearchThreadTimestamp(job.message),
       slackUserId: job.message.userId,
+      integrationsUrl: new URL(
+        organizationRoutes(installation.organizationId).integrations,
+        getBaseUrl()
+      ).href,
       controller,
       registry: environmentContext.resolvedSecretTraceRegistry,
       beforeDelivery: checkAccess,
@@ -225,18 +234,22 @@ export async function runSlackSearchAssistant(
         }),
     })
     stream = responseStream
-    const payload = await buildCopilotRequestPayload(
-      {
-        message: job.message.query,
+    const payload = await buildCopilotRequestPayload({
+      message: job.message.query,
+      userId,
+      userMessageId: messageId,
+      organizationId: installation.organizationId,
+      chatId: chat.id,
+      mode: 'assistant',
+      workspaceContext: await loadCopilotSearchIntegrations({
         userId,
-        userMessageId: messageId,
         organizationId: installation.organizationId,
         chatId: chat.id,
-        mode: 'assistant',
-        model: '',
-      },
-      { selectedModel: '' }
-    )
+        messageId,
+        signal: controller.signal,
+      }),
+      model: '',
+    })
     const billingAttribution = await resolveOrganizationBillingAttribution({
       actorUserId: userId,
       organizationId: installation.organizationId,
@@ -288,7 +301,6 @@ export async function runSlackSearchAssistant(
           ]
         : []),
       recordSlackSearchOutcome(installation, 'assistant_or_delivery_failed'),
-      ...(runId ? [updateRunStatus(runId, 'error')] : []),
     ])
     const errors = outcomes.flatMap((outcome) =>
       outcome.status === 'rejected' ? [outcome.reason] : []
@@ -363,6 +375,31 @@ export async function runSlackSearchAssistant(
         ? new AggregateError([failure, error], 'Slack turn and history persistence failed')
         : toError(error)
     } finally {
+      if (runId) {
+        /**
+         * This turn admitted its own run, so it records the one terminal status no other
+         * path will, after its outcome and response were saved: any failure, including
+         * a failed save, ends it as an error unless its user stopped it.
+         */
+        let cancelled = failed && isExplicitStopReason(controller.signal.reason)
+        if (failed && !cancelled) {
+          try {
+            cancelled = await wasSlackSearchTurnStopped(turnId, leaseId)
+          } catch (error) {
+            logger.warn('Slack turn Stop could not be read; recording its run as an error', {
+              turnId,
+              error: getErrorMessage(error),
+            })
+          }
+        }
+        try {
+          await updateRunStatus(runId, !failure ? 'complete' : cancelled ? 'cancelled' : 'error')
+        } catch (error) {
+          failure = failure
+            ? new AggregateError([failure, error], 'Slack turn run status could not be recorded')
+            : toError(error)
+        }
+      }
       unregisterActiveStream(messageId)
       await releasePendingChatStream(chat.id, messageId)
       await cleanupAbortMarker(messageId)

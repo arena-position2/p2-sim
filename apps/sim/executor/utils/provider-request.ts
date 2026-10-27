@@ -33,7 +33,12 @@ export async function executeBlockProviderRequest({
     throw new Error('Unauthorized')
   }
 
-  if (request.workspaceId) {
+  /**
+   * Deployed chat runs as a system principal authorized by chat auth, not
+   * workspace membership. Re-checking the billing/actor userId here rejects
+   * visitors who may run the agent without a workspace seat.
+   */
+  if (request.workspaceId && ctx.principal?.kind !== 'system') {
     const workspaceAccess = await checkWorkspaceAccess(request.workspaceId, ctx.userId)
     if (!workspaceAccess.hasAccess) {
       throw new Error('Forbidden')

@@ -39,9 +39,7 @@ describe('toCopilotServerToolContext', () => {
 
   it('defaults missing userPermission to write so create_file is not denied', () => {
     expect(toCopilotServerToolContext(baseCtx()).userPermission).toBe('write')
-    expect(toCopilotServerToolContext(baseCtx({ userPermission: '' })).userPermission).toBe(
-      'write'
-    )
+    expect(toCopilotServerToolContext(baseCtx({ userPermission: '' })).userPermission).toBe('write')
     expect(toCopilotServerToolContext(baseCtx({ userPermission: 'read' })).userPermission).toBe(
       'read'
     )

@@ -118,6 +118,8 @@ interface IsolatedVMTaskRequest {
   bootstrap: string
   brokers: string[]
   finalize: string
+  /** Evaluate `code` as an ES module named `filename` that may import only `modules`. */
+  userModule?: { filename: string; modules: Record<string, string> }
 }
 
 /**

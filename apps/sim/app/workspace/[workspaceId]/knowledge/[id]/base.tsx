@@ -40,7 +40,6 @@ import { generateId } from '@sim/utils/id'
 import { format } from 'date-fns'
 import { useParams, useRouter } from 'next/navigation'
 import { useQueryState, useQueryStates } from 'nuqs'
-import { usePostHog } from 'posthog-js/react'
 import { getDocumentIcon } from '@/components/icons/document-icons'
 import {
   ALL_TAG_SLOTS,
@@ -55,37 +54,38 @@ import {
 } from '@/lib/knowledge/documents/types'
 import { type FilterFieldType, getOperatorsForFieldType } from '@/lib/knowledge/filters/types'
 import type { DocumentData } from '@/lib/knowledge/types'
-import { captureEvent } from '@/lib/posthog/client'
 import { formatFileSize } from '@/lib/uploads/utils/file-utils'
 import { SEARCH_DEBOUNCE_MS } from '@/lib/url-state'
-import type {
-  BreadcrumbItem,
-  FilterTag,
-  ResourceAction,
-  ResourceCell,
-  ResourceRow,
-  SelectableConfig,
-  SortConfig,
-} from '@/app/workspace/[workspaceId]/components'
-import {
-  FILTER_SECTION_LABEL_CLASS,
-  FloatingOverflowText,
-  Resource,
-  ResourceNotFound,
-  resourceListState,
-  SearchHighlight,
-} from '@/app/workspace/[workspaceId]/components'
 import {
   FOLDERED_RESOURCE_HEADERS,
   folderBreadcrumbItems,
   folderedResourceListHref,
   useFolderAncestors,
 } from '@/app/workspace/[workspaceId]/components/folders'
+import { FloatingOverflowText } from '@/app/workspace/[workspaceId]/components/resource/components/floating-overflow-text'
 import {
   DocumentsEmptyState,
   ResourceListLoading,
   ResourceNoResults,
 } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state'
+import type {
+  BreadcrumbItem,
+  ResourceAction,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-header'
+import type {
+  FilterTag,
+  SortConfig,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import { FILTER_SECTION_LABEL_CLASS } from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import { resourceListState } from '@/app/workspace/[workspaceId]/components/resource/is-resource-list-empty'
+import type {
+  ResourceCell,
+  ResourceRow,
+  SelectableConfig,
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
+import { Resource } from '@/app/workspace/[workspaceId]/components/resource/resource'
+import { ResourceNotFound } from '@/app/workspace/[workspaceId]/components/resource/resource-not-found'
+import { SearchHighlight } from '@/app/workspace/[workspaceId]/components/search-highlight/search-highlight'
 /**
  * Deep import on purpose: the `[documentId]/components` barrel also exports `ChunkEditor`,
  * which needs exact token counts and therefore `js-tiktoken` (~2.5 MB gzip of BPE rank
@@ -134,6 +134,7 @@ import {
   useUpdateDocument,
   useUpdateKnowledgeBase,
 } from '@/hooks/queries/kb/knowledge'
+import { useCaptureWhenReady } from '@/hooks/use-capture-when-ready'
 import { useContextMenu } from '@/hooks/use-context-menu'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useDebouncedSearchSetter } from '@/hooks/use-debounced-search-setter'
@@ -319,14 +320,11 @@ export function KnowledgeBase({
     addConnectorParam.key,
     addConnectorParam.parser
   )
-  const posthog = usePostHog()
-
-  useEffect(() => {
-    captureEvent(posthog, 'knowledge_base_opened', {
-      knowledge_base_id: id,
-      knowledge_base_name: passedKnowledgeBaseName ?? 'Unknown',
-    })
-  }, [id, passedKnowledgeBaseName, posthog])
+  useCaptureWhenReady(
+    'knowledge_base_opened',
+    { knowledge_base_id: id, knowledge_base_name: passedKnowledgeBaseName ?? 'Unknown' },
+    id
+  )
 
   useOAuthReturnForKBConnectors(id)
   const userPermissions = useUserPermissionsContext()
@@ -440,7 +438,6 @@ export function KnowledgeBase({
   const {
     isOpen: isContextMenuOpen,
     position: contextMenuPosition,
-    menuRef,
     handleContextMenu: baseHandleContextMenu,
     closeMenu: closeContextMenu,
   } = useContextMenu()
@@ -1392,7 +1389,9 @@ export function KnowledgeBase({
           }}
           overlay={
             <ActionBar
-              className={totalPages > 1 ? 'bottom-[72px]' : undefined}
+              className={
+                totalPages > 1 ? 'bottom-[max(72px,env(safe-area-inset-bottom))]' : undefined
+              }
               selectedCount={selectedDocuments.size}
               onEnable={disabledCount > 0 ? handleBulkEnable : undefined}
               onDisable={enabledCount > 0 ? handleBulkDisable : undefined}
@@ -1505,7 +1504,6 @@ export function KnowledgeBase({
         onOpenChange={setShowAddDocumentsModal}
         knowledgeBaseId={id}
         knowledgeBaseName={knowledgeBaseName}
-        chunkingConfig={knowledgeBase?.chunkingConfig}
       />
 
       {showAddConnectorModal && knowledgeBase && (

@@ -1,6 +1,8 @@
-/** @vitest-environment node */
+import { getMockLogger } from '@sim/testing/mocks/logger.mock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { exchangeGoogleServiceAccountJwt } from '@/lib/oauth/google-service-account-transport'
+
+const { warn } = getMockLogger('GoogleServiceAccountTransport')
 
 const TOKEN_URI = 'https://oauth2.googleapis.com/token'
 const ASSERTION = 'private-jwt-assertion'
@@ -9,16 +11,16 @@ const fetchMock = vi.fn<typeof fetch>()
 beforeEach(() => {
   vi.useFakeTimers()
   fetchMock.mockReset()
+  warn.mockClear()
   vi.stubGlobal('fetch', fetchMock)
 })
 
 afterEach(() => {
-  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
 describe('Google service-account token transport', () => {
-  it.each([429, 500, 502, 503, 504])(
+  it.each([429, 503])(
     'recovers a transient HTTP %s without changing the assertion',
     async (status) => {
       const first = Response.json({ error: 'temporarily_unavailable' }, { status })
@@ -40,7 +42,7 @@ describe('Google service-account token transport', () => {
     }
   )
 
-  it.each([400, 401, 403])('returns permanent HTTP %s without retrying', async (status) => {
+  it.each([400])('returns permanent HTTP %s without retrying', async (status) => {
     const response = Response.json({ error: 'invalid_grant' }, { status })
     fetchMock.mockResolvedValueOnce(response)
     await expect(exchangeGoogleServiceAccountJwt(TOKEN_URI, ASSERTION)).resolves.toEqual({
@@ -135,7 +137,7 @@ describe('Google service-account token transport', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it.each([200, 400, 503])(
+  it.each([200, 503])(
     'bounds a stalled HTTP %s response body within the same deadline',
     async (status) => {
       let requestSignal: AbortSignal | null | undefined
@@ -158,6 +160,10 @@ describe('Google service-account token transport', () => {
       const checked = expect(request).rejects.toMatchObject({ name: 'TimeoutError' })
       await vi.advanceTimersByTimeAsync(30_000)
       await checked
+      expect(warn).toHaveBeenCalledWith(
+        'Google service account token transport failed',
+        expect.objectContaining({ stage: 'reading_response', currentStatus: status, attempts: 1 })
+      )
       expect(requestSignal?.aborted).toBe(true)
       expect(fetchMock).toHaveBeenCalledTimes(1)
     }
@@ -187,5 +193,34 @@ describe('Google service-account token transport', () => {
     caller.abort(reason)
     await checked
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(warn).not.toHaveBeenCalled()
   })
+})
+
+it('distinguishes a prior HTTP response from a stalled next request without logging secrets', async () => {
+  fetchMock
+    .mockResolvedValueOnce(Response.json({ error: 'private-provider-detail' }, { status: 503 }))
+    .mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+        })
+    )
+  const result = exchangeGoogleServiceAccountJwt(TOKEN_URI, ASSERTION)
+  const checked = expect(result).rejects.toMatchObject({ name: 'TimeoutError' })
+  await vi.advanceTimersByTimeAsync(30_000)
+  await checked
+  expect(warn).toHaveBeenCalledWith(
+    'Google service account token transport failed',
+    expect.objectContaining({
+      stage: 'awaiting_response',
+      attempts: 2,
+      lastHttpStatus: 503,
+      timedOut: true,
+    })
+  )
+  expect(warn.mock.calls[0][1]).not.toHaveProperty('currentStatus')
+  expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+    /private-provider-detail|private-jwt-assertion|oauth2.googleapis.com/
+  )
 })

@@ -2,10 +2,10 @@ import { db } from '@sim/db'
 import { chat } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { and, eq, isNull, or } from 'drizzle-orm'
-import type { NextRequest } from 'next/server'
+import type { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { addCorsHeaders } from '@/app/api/chat/utils'
-import { createErrorResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('DeployedChatThreadAuth')
 
@@ -13,6 +13,19 @@ export interface ActiveDeployedChatDeployment {
   id: string
   workflowId: string
   isActive: boolean
+}
+
+type DeployedChatThreadErrorResponse = NextResponse<{ error: string; code: string }>
+
+function codedErrorResponse(
+  message: string,
+  status: number,
+  request: NextRequest
+): DeployedChatThreadErrorResponse {
+  return addCorsHeaders(
+    createCodedErrorResponse(message, status),
+    request
+  ) as DeployedChatThreadErrorResponse
 }
 
 /**
@@ -24,7 +37,7 @@ export async function resolveDeployedChatThreadAccess(
   request: NextRequest
 ): Promise<
   | { ok: true; deployment: ActiveDeployedChatDeployment; executingUserId: string }
-  | { ok: false; response: ReturnType<typeof createErrorResponse> }
+  | { ok: false; response: DeployedChatThreadErrorResponse }
 > {
   const deploymentResult = await db
     .select({
@@ -45,7 +58,7 @@ export async function resolveDeployedChatThreadAccess(
     logger.warn(`[${requestId}] Chat not found for identifier: ${identifier}`)
     return {
       ok: false,
-      response: addCorsHeaders(createErrorResponse('Chat not found', 404), request),
+      response: codedErrorResponse('Chat not found', 404, request),
     }
   }
 
@@ -55,10 +68,7 @@ export async function resolveDeployedChatThreadAccess(
     logger.warn(`[${requestId}] Chat is not active: ${identifier}`)
     return {
       ok: false,
-      response: addCorsHeaders(
-        createErrorResponse('This chat is currently unavailable', 403),
-        request
-      ),
+      response: codedErrorResponse('This chat is currently unavailable', 403, request),
     }
   }
 
@@ -68,7 +78,7 @@ export async function resolveDeployedChatThreadAccess(
     logger.info(`[${requestId}] Unauthorized deployed chat thread request: missing session user`)
     return {
       ok: false,
-      response: addCorsHeaders(createErrorResponse('Authentication required', 401), request),
+      response: codedErrorResponse('Authentication required', 401, request),
     }
   }
 

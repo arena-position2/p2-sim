@@ -32,6 +32,7 @@ export const CURRENT_BROWSER_TOOL_NAMES = [
   'browser_list_tabs',
   'browser_list_sessions',
   'browser_list_downloads',
+  'browser_save_download',
   'browser_wait_for',
   'browser_snapshot',
   'browser_find',
@@ -42,11 +43,13 @@ export const CURRENT_BROWSER_TOOL_NAMES = [
   'browser_click_at',
   'browser_type',
   'browser_fill_form',
+  'browser_batch',
   'browser_insert_text',
   'browser_press_key',
   'browser_scroll',
   'browser_select_option',
   'browser_set_checked',
+  'browser_upload_file',
   'browser_hover',
   'browser_drag',
   'browser_zoom',
@@ -54,27 +57,34 @@ export const CURRENT_BROWSER_TOOL_NAMES = [
 
 export type CurrentBrowserToolName = (typeof CURRENT_BROWSER_TOOL_NAMES)[number]
 
-export const RETIRED_BROWSER_TOOL_NAMES = ['browser_request_takeover'] as const
+const RETIRED_BROWSER_TOOL_NAMES = ['browser_request_takeover'] as const
 
-export const BROWSER_TOOL_NAMES = [
-  ...CURRENT_BROWSER_TOOL_NAMES,
-  ...RETIRED_BROWSER_TOOL_NAMES,
-] as const
+const BROWSER_TOOL_NAMES = [...CURRENT_BROWSER_TOOL_NAMES, ...RETIRED_BROWSER_TOOL_NAMES] as const
 
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number]
 
-export const BROWSER_WAIT_FOR_DEFAULT_TIMEOUT_MS = 10_000
-export const BROWSER_WAIT_FOR_MAX_TIMEOUT_MS = 120_000
-export const BROWSER_WAIT_FOR_RENDERER_GRACE_MS = 15_000
+const BROWSER_WAIT_FOR_DEFAULT_TIMEOUT_MS = 10_000
+const BROWSER_WAIT_FOR_MAX_TIMEOUT_MS = 120_000
+const BROWSER_WAIT_FOR_RENDERER_GRACE_MS = 15_000
 export const BROWSER_TOOL_AUTHORIZATION_TIMEOUT_MS = 8_000
 export const BROWSER_NAVIGATION_NATIVE_WATCHDOG_MS = 60_000
 export const BROWSER_TOOL_QUEUE_WAIT_TIMEOUT_MS = BROWSER_NAVIGATION_NATIVE_WATCHDOG_MS
 const BROWSER_RENDERER_TRANSPORT_GRACE_MS = 2_000
-export const BROWSER_NAVIGATION_RENDERER_TIMEOUT_MS =
+const BROWSER_NAVIGATION_RENDERER_TIMEOUT_MS =
   BROWSER_TOOL_AUTHORIZATION_TIMEOUT_MS +
   BROWSER_TOOL_QUEUE_WAIT_TIMEOUT_MS +
   BROWSER_NAVIGATION_NATIVE_WATCHDOG_MS +
   BROWSER_RENDERER_TRANSPORT_GRACE_MS
+
+/**
+ * The desktop exchanges browser-agent file bytes with the app here: POST streams a file named by
+ * a claimed `browser_upload_file` call, PUT stores a completed download for `browser_save_download`.
+ */
+export const BROWSER_FILE_TRANSFER_PATH = '/api/desktop/tool/file'
+/** Per-file byte ceiling for browser uploads and saved downloads, enforced on both sides. */
+export const BROWSER_FILE_TRANSFER_MAX_BYTES = 100 * 1024 * 1024
+/** Files one `browser_upload_file` call may attach. */
+export const BROWSER_UPLOAD_MAX_FILES = 10
 
 /**
  * Normalizes the model-visible `browser_wait_for.timeoutMs` consistently in
@@ -104,6 +114,9 @@ export function browserToolRendererTimeoutMs(
     case 'browser_reload':
     case 'browser_open_tab':
     case 'browser_switch_tab':
+    case 'browser_upload_file':
+    case 'browser_save_download':
+    case 'browser_batch':
       return BROWSER_NAVIGATION_RENDERER_TIMEOUT_MS
     case 'browser_wait_for':
       return (
@@ -116,7 +129,7 @@ export function browserToolRendererTimeoutMs(
   }
 }
 
-export const BROWSER_THEMES = ['system', 'light', 'dark'] as const
+const BROWSER_THEMES = ['system', 'light', 'dark'] as const
 
 /** Sim appearance preference mirrored into browser-tab media queries. */
 export type BrowserTheme = (typeof BROWSER_THEMES)[number]
@@ -136,6 +149,46 @@ export function isBrowserToolName(name: string): name is BrowserToolName {
 export function isCurrentBrowserToolName(name: string): name is CurrentBrowserToolName {
   return CURRENT_BROWSER_TOOL_NAME_SET.has(name)
 }
+
+/**
+ * Which browser tools only observe the page (read it, list it, wait on it) and never act on it.
+ * Repeating one cannot cause a side effect, and one can never collide with what the user is doing.
+ */
+export const BROWSER_TOOL_OBSERVES_ONLY = {
+  browser_navigate: false,
+  browser_open_url: false,
+  browser_go_back: false,
+  browser_go_forward: false,
+  browser_reload: false,
+  browser_open_tab: false,
+  browser_switch_tab: false,
+  browser_close_tab: false,
+  browser_list_tabs: true,
+  browser_list_sessions: true,
+  browser_list_downloads: true,
+  browser_save_download: false,
+  browser_wait_for: true,
+  browser_snapshot: true,
+  browser_find: true,
+  browser_read_text: true,
+  browser_screenshot: true,
+  browser_extract: true,
+  browser_click: false,
+  browser_click_at: false,
+  browser_type: false,
+  browser_fill_form: false,
+  browser_batch: false,
+  browser_insert_text: false,
+  browser_press_key: false,
+  browser_scroll: false,
+  browser_select_option: false,
+  browser_set_checked: false,
+  browser_upload_file: false,
+  browser_hover: false,
+  browser_drag: false,
+  browser_zoom: false,
+  browser_request_takeover: false,
+} as const satisfies Readonly<Record<BrowserToolName, boolean>>
 
 export function isBrowserTheme(value: unknown): value is BrowserTheme {
   return typeof value === 'string' && BROWSER_THEME_SET.has(value)
@@ -239,6 +292,14 @@ export interface BrowserPanelAction {
     /** Compatibility response for installed shells with the retired navigation gate. */
     | 'respond-site-permission'
     | 'takeover-done'
+    /**
+     * Declares that this renderer shows page dialogs. Until it arrives, the
+     * shell keeps answering them itself, so an older renderer never leaves a
+     * page blocked on a dialog nobody can see.
+     */
+    | 'enable-page-dialogs'
+    /** Answers {@link BrowserPageState.dialog}; `allowed` is Leave. */
+    | 'respond-dialog'
   /** Absolute URL for `navigate` (typed into the panel's URL bar). */
   url?: string
   /** Stable tab id for `switch-tab` and `close-tab`. */
@@ -251,10 +312,16 @@ export interface BrowserPanelAction {
   claim?: boolean
   /** Optional free-text instruction submitted with `takeover-done`. */
   takeoverResponse?: string
-  /** Exact pending permission request being answered. */
+  /** Exact pending permission request or dialog being answered. */
   requestId?: string
-  /** User decision for a permission response. */
+  /** User decision for a permission or dialog response. */
   allowed?: boolean
+}
+
+/** A leave-site decision awaiting the user's answer in browser chrome. */
+export interface BrowserPageDialog {
+  requestId: string
+  kind: 'beforeunload'
 }
 
 export type BrowserMediaDevice = 'microphone' | 'camera'
@@ -291,6 +358,8 @@ export interface BrowserPageState {
   mediaPermissionRequest?: BrowserMediaPermissionRequest
   /** Legacy request from installed shells that still require a site-origin prompt. */
   sitePermissionRequest?: BrowserSitePermissionRequest
+  /** Page dialog awaiting the user's answer. Optional for older shells. */
+  dialog?: BrowserPageDialog
 }
 
 /** A recoverable top-level page problem rendered by Sim instead of a blank native view. */

@@ -1,6 +1,6 @@
 import { db } from '@sim/db'
 import { document, knowledgeConnector } from '@sim/db/schema'
-import { and, asc, eq, inArray, isNotNull, isNull, lt, type SQL, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNotNull, isNull, lt, type SQL, sql } from 'drizzle-orm'
 import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
 import type { DbOrTx } from '@/lib/db/types'
 import {
@@ -13,6 +13,10 @@ import {
   isGoogleCompanySource,
 } from '@/lib/knowledge/connectors/google-company-scheduler'
 import {
+  type ImageAdmissionState,
+  imageExtractionPolicyFor,
+} from '@/lib/knowledge/connectors/image-admission'
+import {
   beginListingCheckpoint,
   type ListingCheckpoint,
   readListingCheckpoint,
@@ -23,13 +27,24 @@ import {
   connectorPartitionWorkStore,
 } from '@/lib/knowledge/connectors/partition-store'
 import {
+  type ReconciliationWalk,
+  walkReconciliationWindows,
+} from '@/lib/knowledge/connectors/reconciliation-window'
+import {
+  IMAGES_DEFERRED_NOTICE,
   SOURCE_CONTENT_ERROR,
   SOURCE_PERMISSION_ERROR,
 } from '@/lib/knowledge/connectors/sync-limits'
-import { assertSyncLeaseHeldInTx, type SyncRunLease } from '@/lib/knowledge/connectors/sync-lock'
+import {
+  assertSyncLeaseHeldInTx,
+  type LeaseTransaction,
+  leaseTransaction,
+  type SyncRunLease,
+} from '@/lib/knowledge/connectors/sync-lock'
 import {
   type KnowledgeBaseOwner,
   persistSourceDocumentFailures,
+  revokeDocumentAcls,
 } from '@/lib/knowledge/connectors/sync-persistence'
 import {
   buildReconciliationHoldNotice,
@@ -43,7 +58,11 @@ import {
   processDocOps,
   resolvePreviousOwnedCount,
   resolveReconciliationDeleteCap,
+  staleSeen,
+  storedHashIsCurrent,
 } from '@/lib/knowledge/connectors/sync-primitives'
+import { hasVisibleUserDocuments } from '@/lib/knowledge/connectors/user-document-visibility'
+import { SEMANTIC_IMAGE_MIME_TYPES } from '@/lib/knowledge/documents/image-extraction-policy'
 import { hardDeleteDocuments } from '@/lib/knowledge/documents/service'
 import { SIM_SEARCH_SYNC_INTERVAL_MINUTES } from '@/lib/sim-search/constants'
 import { googleCompanyUserContextSchema } from '@/connectors/google-workspace/company-work'
@@ -57,6 +76,7 @@ interface ContentPassInput {
     listingCheckpoint?: unknown
     lastSyncDocCount?: number | null
     syncIntervalMinutes?: number
+    imageRemovalPending?: boolean
   }
   connectorConfig: ConnectorConfig
   sourceConfig: Record<string, unknown>
@@ -81,13 +101,26 @@ interface ContentPassInput {
   ) => Promise<{ permissionsIncomplete: boolean } | undefined>
 }
 
+/** The image fields of a listing checkpoint that a page persists alongside its seen stamps. */
+function imageCountOf(state: ImageAdmissionState): ImageAdmissionState {
+  return {
+    imageExtractionsAdmitted: state.imageExtractionsAdmitted,
+    imagesDeferred: state.imagesDeferred,
+  }
+}
+
 /** One durable content cycle shared by content-owned and member-visibility connectors. */
 export async function runConnectorContentPass(input: ContentPassInput) {
-  const withLease = <T>(fn: (tx: DbOrTx) => Promise<T>) =>
+  const { matchContentHash } = input.connectorConfig
+  /** The lease is proved last, so no write waits on document rows while holding the connector row. */
+  const withLease: LeaseTransaction = (fn) =>
     db.transaction(async (tx) => {
+      const written = await fn(tx)
       await assertSyncLeaseHeldInTx(tx, input.connectorId, input.lease)
-      return fn(tx)
+      return written
     })
+  /** ACL revocations fire the projection fan-out, so each of their pages is also bounded. */
+  const withAclPage = leaseTransaction(input.connectorId, input.lease)
   const readGenerationStartedAt = async (tx: DbOrTx): Promise<Date> => {
     const [clock] = await tx.execute<{ startedAt: string }>(
       sql`SELECT statement_timestamp()::text AS "startedAt"`
@@ -99,7 +132,11 @@ export async function runConnectorContentPass(input: ContentPassInput) {
   }
   let checkpoint = readListingCheckpoint(input.connector.listingCheckpoint, input.fingerprint)
   /** A Full resync must revisit documents before an ordinary listing's saved cursor. */
-  if (!checkpoint || (input.forceRehydrate && !checkpoint.forceRehydrate)) {
+  if (
+    !checkpoint ||
+    (input.forceRehydrate && !checkpoint.forceRehydrate) ||
+    (input.fullSync && !checkpoint.fullSync)
+  ) {
     checkpoint = await withLease(async (tx) => {
       const next = beginListingCheckpoint({
         fingerprint: input.fingerprint,
@@ -117,6 +154,7 @@ export async function runConnectorContentPass(input: ContentPassInput) {
     })
   }
   let hydratedCount = 0
+  let storedImageCount = imageCountOf(checkpoint)
   const syncIntervalMinutes = effectiveConnectorSyncIntervalMinutes(
     input.documentAccess,
     input.connector.syncIntervalMinutes ?? SIM_SEARCH_SYNC_INTERVAL_MINUTES
@@ -133,6 +171,7 @@ export async function runConnectorContentPass(input: ContentPassInput) {
         provider: input.connector.connectorType,
         listDocuments: input.connectorConfig.listDocuments,
         isListingCursorInvalidError: input.connectorConfig.isListingCursorInvalidError,
+        hasVisibleDocuments: (user) => hasVisibleUserDocuments(input.connectorId, user.email),
         syncIntervalMinutes,
         store: {
           get: (...args) => companyStore().get(...args),
@@ -165,40 +204,36 @@ export async function runConnectorContentPass(input: ContentPassInput) {
           const prior = corpus.priorByExternalId.get(item.externalId)
           return (
             prior &&
-            (!prior.contentHash ||
-              prior.contentHash !== item.contentHash ||
+            (!storedHashIsCurrent(prior.contentHash, item.contentHash, matchContentHash) ||
               prior.storageKey === null)
           )
         })
         /** Revoke grants without matching stored content, retaining the content crawl's observation for EOF reconciliation. */
         if (changed.length)
-          await withLease(async (tx) => {
-            for (let offset = 0; offset < changed.length; offset += 500) {
-              await tx
-                .update(document)
-                .set({ acl: [], aclRequirements: [], aclVerifiedAt: null })
-                .where(
-                  and(
-                    eq(document.connectorId, input.connectorId),
-                    inArray(
-                      document.externalId,
-                      changed.slice(offset, offset + 500).map((item) => item.externalId)
-                    ),
-                    isNull(document.archivedAt)
-                  )
-                )
-            }
-          })
+          await revokeDocumentAcls(
+            withAclPage,
+            changed.map((item) => item.externalId),
+            (batch) =>
+              and(
+                eq(document.connectorId, input.connectorId),
+                inArray(document.externalId, batch),
+                isNull(document.archivedAt)
+              ),
+            { beforePage: input.lease.beatIfDue }
+          )
       }
       const state = createSyncRunState(input.result)
       const startedAt = new Date(cycle.startedAt)
       const remaining = documents.filter((item) => {
         const prior = corpus.priorByExternalId.get(item.externalId)
-        if (page.permissionsOnly) return prior?.contentHash !== item.contentHash
+        if (page.permissionsOnly)
+          return !storedHashIsCurrent(prior?.contentHash, item.contentHash, matchContentHash)
         if (
           !prior?.sourceSeenAt ||
           prior.sourceSeenAt < startedAt ||
-          (company && prior.contentHash !== null && prior.contentHash !== item.contentHash)
+          (company &&
+            prior.contentHash !== null &&
+            !storedHashIsCurrent(prior.contentHash, item.contentHash, matchContentHash))
         )
           return true
         /** A crash after persisting a failed batch must not erase its failure evidence. */
@@ -235,9 +270,27 @@ export async function runConnectorContentPass(input: ContentPassInput) {
                 and(
                   eq(document.connectorId, input.connectorId),
                   inArray(document.externalId, attemptedIds.slice(offset, offset + 500)),
-                  isNull(document.archivedAt)
+                  isNull(document.archivedAt),
+                  staleSeen(startedAt)
                 )
               )
+          }
+          const imageCount = imageCountOf(cycle)
+          if (
+            imageCount.imageExtractionsAdmitted !== storedImageCount.imageExtractionsAdmitted ||
+            imageCount.imagesDeferred !== storedImageCount.imagesDeferred
+          ) {
+            /**
+             * Merged into the stored checkpoint with the batch's seen stamps, so a restart in the
+             * middle of this page still counts the images it already read.
+             */
+            await tx
+              .update(knowledgeConnector)
+              .set({
+                listingCheckpoint: sql`${knowledgeConnector.listingCheckpoint} || ${JSON.stringify(imageCount)}::jsonb`,
+              })
+              .where(input.lease.stillHeld())
+            storedImageCount = imageCount
           }
         })
       }
@@ -246,6 +299,8 @@ export async function runConnectorContentPass(input: ContentPassInput) {
         corpus,
         forceRehydrate: !page.permissionsOnly && cycle.forceRehydrate,
         state,
+        matchContentHash,
+        imagePolicy: imageExtractionPolicyFor(input.connector.connectorType),
       })
       const pendingIds = new Set(pendingOps.map((op) => op.extDoc.externalId))
       await persistAttempted(remaining.filter((item) => !pendingIds.has(item.externalId)))
@@ -255,9 +310,11 @@ export async function runConnectorContentPass(input: ContentPassInput) {
         state,
         pendingOps,
         forceRehydrate: !page.permissionsOnly && cycle.forceRehydrate,
-        onBatchComplete: async (attempted) => {
+        matchContentHash,
+        imageAdmission: cycle,
+        onBatchComplete: async (attempted, heldBackExisting) => {
           hydratedCount += attempted.filter((item) => item.contentDeferred).length
-          await persistAttempted(attempted)
+          await persistAttempted([...attempted, ...heldBackExisting])
         },
       })
       if (!finished) return false
@@ -269,8 +326,8 @@ export async function runConnectorContentPass(input: ContentPassInput) {
         if (state.failedExternalIds.has(item.externalId)) return false
         const stored = permissionCorpus.priorByExternalId.get(item.externalId)
         return Boolean(
-          stored?.contentHash &&
-            stored.contentHash === item.contentHash &&
+          stored &&
+            storedHashIsCurrent(stored.contentHash, item.contentHash, matchContentHash) &&
             stored.storageKey !== null
         )
       })
@@ -290,6 +347,7 @@ export async function runConnectorContentPass(input: ContentPassInput) {
               and(
                 eq(document.connectorId, input.connectorId),
                 inArray(document.externalId, verified.slice(offset, offset + 500)),
+                isNotNull(document.deletedAt),
                 isNotNull(document.contentHash),
                 isNull(document.archivedAt)
               )
@@ -316,24 +374,94 @@ export async function runConnectorContentPass(input: ContentPassInput) {
       company?.didCommit(next.cursor)
     },
   })
-  const reconciliation = checkpoint.complete
-    ? await reconcileCompletedListing(input, checkpoint, withLease)
-    : { finished: false, notice: null }
+  const imagesRemoved = await removeDisabledImages(input)
+  /** Images the removal has not reached yet are unlisted, so reconciling now would count them as absent. */
+  const reconciliation =
+    checkpoint.complete && imagesRemoved
+      ? await reconcileCompletedListing(input, checkpoint, withLease, withAclPage)
+      : { finished: false, notice: null }
+  /** Unverified permissions, an incomplete listing and unrefreshed content are independent holds; an admin needs each, one per line. */
+  const holdNotice =
+    [
+      checkpoint.permissionFailures ? SOURCE_PERMISSION_ERROR : null,
+      reconciliation.notice,
+      checkpoint.contentFailures ? SOURCE_CONTENT_ERROR : null,
+      checkpoint.imagesDeferred ? IMAGES_DEFERRED_NOTICE : null,
+    ]
+      .filter(Boolean)
+      .join('\n') || null
   return {
     checkpoint,
-    complete: checkpoint.complete && reconciliation.finished,
-    holdNotice: checkpoint.permissionFailures
-      ? SOURCE_PERMISSION_ERROR
-      : (reconciliation.notice ?? (checkpoint.contentFailures ? SOURCE_CONTENT_ERROR : null)),
+    complete: checkpoint.complete && reconciliation.finished && imagesRemoved,
+    holdNotice,
     hydratedCount,
   }
+}
+
+/**
+ * Removes the indexed vision images a settings change queued for removal
+ * (`imageRemovalPending`), then clears the flag. Turning images off is a setting
+ * change, not a source deletion, so it skips the soft-delete and the
+ * mass-deletion hold that guard a listing which suddenly lost documents;
+ * switching back reads the images again.
+ */
+export async function removeDisabledImages(
+  input: Pick<
+    ContentPassInput,
+    'connectorId' | 'connector' | 'lease' | 'leaseKind' | 'runId' | 'deadlineAt' | 'result'
+  >
+): Promise<boolean> {
+  if (!input.connector.imageRemovalPending) return true
+  /** Walks by id through `doc_connector_reconciliation_v2_idx`, so each page resumes where the last ended. */
+  let afterId: string | undefined
+  while (true) {
+    if (Date.now() >= input.deadlineAt) return false
+    await input.lease.beatIfDue()
+    const rows = await db
+      .select({ id: document.id })
+      .from(document)
+      .where(
+        and(
+          eq(document.connectorId, input.connectorId),
+          inArray(document.mimeType, [...SEMANTIC_IMAGE_MIME_TYPES]),
+          eq(document.userExcluded, false),
+          isNull(document.archivedAt),
+          afterId ? gt(document.id, afterId) : undefined
+        )
+      )
+      .orderBy(document.id)
+      .limit(25)
+    if (rows.length === 0) break
+    afterId = rows.at(-1)?.id
+    const removed = await hardDeleteDocuments(
+      rows.map((row) => row.id),
+      input.runId,
+      input.connectorId,
+      input.connector.knowledgeBaseId,
+      {
+        connectorId: input.connectorId,
+        knowledgeBaseId: input.connector.knowledgeBaseId,
+        syncLockToken: input.runId,
+        lease: input.leaseKind,
+      }
+    )
+    /** Nothing removable is left, e.g. a row detached from this connector mid-walk. */
+    if (removed === 0) break
+    input.result.docsDeleted += removed
+  }
+  await db
+    .update(knowledgeConnector)
+    .set({ imageRemovalPending: false })
+    .where(input.lease.stillHeld())
+  return true
 }
 
 /** Reconciles absence only after EOF, with bounded queries and the existing deletion guards. */
 async function reconcileCompletedListing(
   input: ContentPassInput,
   checkpoint: ListingCheckpoint,
-  withLease: <T>(fn: (tx: DbOrTx) => Promise<T>) => Promise<T>
+  withLease: LeaseTransaction,
+  withAclPage: LeaseTransaction
 ): Promise<{ finished: boolean; notice: string | null }> {
   if (checkpoint.unsafe || (checkpoint.listingFailures?.count ?? 0) > 0)
     return {
@@ -348,34 +476,32 @@ async function reconcileCompletedListing(
     eq(document.userExcluded, false),
     isNull(document.archivedAt)
   )
-  const seenOrder = sql`COALESCE(${document.sourceSeenAt}, '-infinity'::timestamp)`
-  const absent = and(owned, sql`${seenOrder} < ${sql.param(startedAt, document.sourceSeenAt)}`)
+  const absent = and(owned, staleSeen(startedAt))
+  const aclAbsent = and(absent, sql`cardinality(${document.acl}) > 0`)
   const soft = and(absent, isNull(document.deletedAt))
   const hard = checkpoint.fullSync ? absent : and(absent, lt(document.deletedAt, startedAt))
-  /** Text preserves PostgreSQL microseconds; decoding the cursor as Date can repeat a page. */
-  type Cursor = { id: string; seenAt: string }
-  const loadBatch = (condition: SQL | undefined, limit: number, after?: Cursor) =>
-    db
-      .select({
-        id: document.id,
-        seenAt: sql<string>`${seenOrder}::text`,
-        deletedAt: document.deletedAt,
-      })
-      .from(document)
-      .where(
-        and(
-          condition,
-          after
-            ? sql`(${seenOrder}, ${document.id}) > (${after.seenAt}::timestamp, ${after.id})`
-            : undefined
-        )
-      )
-      .orderBy(seenOrder, asc(document.id))
-      .limit(limit)
-  const [{ ownedCount, listedCount, softCount, hardCount }] = await db
+  /**
+   * Walks by id through `doc_connector_reconciliation_v2_idx`, filtering absence per row, so no
+   * walk depends on `source_seen_at` order and the listing's seen stamps stay HOT.
+   */
+  const walk = (
+    condition: SQL | undefined,
+    pageSize: number,
+    onPage: ReconciliationWalk['onPage']
+  ) =>
+    walkReconciliationWindows({
+      connectorId: input.connectorId,
+      condition,
+      pageSize,
+      deadlineAt: input.deadlineAt,
+      beforePage: input.lease.beatIfDue,
+      onPage,
+    })
+  const [{ ownedCount, listedCount, aclCount, softCount, hardCount }] = await db
     .select({
       ownedCount: sql<number>`count(*)::int`,
       listedCount: sql<number>`count(*) FILTER (WHERE ${document.sourceSeenAt} >= ${sql.param(startedAt, document.sourceSeenAt)})::int`,
+      aclCount: sql<number>`count(*) FILTER (WHERE ${aclAbsent})::int`,
       softCount: sql<number>`count(*) FILTER (WHERE ${soft})::int`,
       hardCount: sql<number>`count(*) FILTER (WHERE ${hard})::int`,
     })
@@ -403,38 +529,20 @@ async function reconcileCompletedListing(
       softHeld,
       hardHeld
     )
-  if (input.documentAccess === 'admin') {
-    let after: Cursor | undefined
-    for (;;) {
-      if (Date.now() >= input.deadlineAt) return { finished: false, notice }
-      await input.lease.beatIfDue()
-      const rows = await loadBatch(and(absent, sql`cardinality(${document.acl}) > 0`), 500, after)
-      if (rows.length === 0) break
-      await withLease((tx) =>
-        tx
-          .update(document)
-          .set({ acl: [], aclRequirements: [], aclVerifiedAt: null })
-          .where(
-            and(
-              absent,
-              inArray(
-                document.id,
-                rows.map((row) => row.id)
-              )
-            )
-          )
+  if (input.documentAccess === 'admin' && aclCount > 0) {
+    const { finished } = await walk(aclAbsent, 500, async (rows) => {
+      await revokeDocumentAcls(
+        withAclPage,
+        rows.map((row) => row.id),
+        (batch) => and(absent, inArray(document.id, batch)),
+        { beforePage: input.lease.beatIfDue }
       )
-      after = rows.at(-1)
-    }
+    })
+    if (!finished) return { finished: false, notice }
   }
   if (!allowDeletion) return { finished: true, notice }
-  if (!checkpoint.fullSync && !softHeld) {
-    let after: Cursor | undefined
-    for (;;) {
-      if (Date.now() >= input.deadlineAt) return { finished: false, notice }
-      await input.lease.beatIfDue()
-      const rows = await loadBatch(soft, 500, after)
-      if (rows.length === 0) break
+  if (!checkpoint.fullSync && !softHeld && softCount > 0) {
+    const { finished } = await walk(soft, 500, async (rows) => {
       const removed = await withLease((tx) =>
         tx
           .update(document)
@@ -451,21 +559,14 @@ async function reconcileCompletedListing(
           .returning({ id: document.id })
       )
       input.result.docsDeleted += removed.length
-      after = rows.at(-1)
-    }
+    })
+    if (!finished) return { finished: false, notice }
   }
-  if (!hardHeld) {
-    let after: Cursor | undefined
-    for (;;) {
-      if (Date.now() >= input.deadlineAt) return { finished: false, notice }
-      await input.lease.beatIfDue()
-      const rows = await loadBatch(hard, 25, after)
-      if (rows.length === 0) break
+  if (!hardHeld && hardCount > 0) {
+    const { finished } = await walk(hard, 25, async (rows) => {
       /** Report newly removed documents once; purging existing tombstones is storage cleanup. */
       for (const tombstoned of [false, true]) {
-        const ids = rows
-          .filter((row) => (row.deletedAt !== null) === tombstoned)
-          .map((row) => row.id)
+        const ids = rows.filter((row) => row.tombstoned === tombstoned).map((row) => row.id)
         if (ids.length === 0) continue
         const removed = await hardDeleteDocuments(
           ids,
@@ -481,8 +582,8 @@ async function reconcileCompletedListing(
         )
         if (!tombstoned) input.result.docsDeleted += removed
       }
-      after = rows.at(-1)
-    }
+    })
+    if (!finished) return { finished: false, notice }
   }
   return { finished: true, notice }
 }

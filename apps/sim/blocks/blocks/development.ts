@@ -2,7 +2,6 @@ import { DevelopmentIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
 import { IntegrationType } from '@/blocks/types'
 import { normalizeFileInput } from '@/blocks/utils'
-import type { DevelopmentGenerateAppResponse } from '@/tools/development/types'
 
 let _inflightRepoFetch: Promise<Array<{ label: string; id: string }>> | null = null
 
@@ -34,7 +33,7 @@ async function fetchDevelopmentRepos(): Promise<Array<{ label: string; id: strin
   return _inflightRepoFetch
 }
 
-export const DevelopmentBlock: BlockConfig<DevelopmentGenerateAppResponse> = {
+export const DevelopmentBlock: BlockConfig = {
   type: 'development',
   name: 'Development',
   description: 'Generate or edit a production-ready Next.js app from your idea',

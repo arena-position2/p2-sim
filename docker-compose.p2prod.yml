@@ -1,6 +1,6 @@
 services:
   simstudio:
-    image: ghcr.io/arenadeveloper02/p2-sim-simstudio:${IMAGE_TAG:-dev}
+    image: ghcr.io/arena-position2/p2-sim-simstudio:${IMAGE_TAG:-dev}
     restart: unless-stopped
     ports:
       - '3000:3000'
@@ -59,7 +59,7 @@ services:
       start_period: 10s
 
   realtime:
-    image: ghcr.io/arenadeveloper02/p2-sim-realtime:${IMAGE_TAG:-dev}
+    image: ghcr.io/arena-position2/p2-sim-realtime:${IMAGE_TAG:-dev}
     restart: unless-stopped
     ports:
       - '3002:3002'
@@ -90,7 +90,7 @@ services:
   # Kept for optional manual runs (`docker compose run --rm migrations`).
   # Deploy scripts intentionally do not start this service — migrations are applied manually.
   migrations:
-    image: ghcr.io/arenadeveloper02/p2-sim-migrations:${IMAGE_TAG:-dev}
+    image: ghcr.io/arena-position2/p2-sim-migrations:${IMAGE_TAG:-dev}
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-simstudio}
     depends_on:

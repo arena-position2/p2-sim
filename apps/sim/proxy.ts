@@ -1,7 +1,9 @@
 import { createLogger } from '@sim/logger'
 import { getSessionCookie } from 'better-auth/cookies'
 import { type NextRequest, NextResponse } from 'next/server'
-import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
+import { resolveSimMcpHostPath } from '@/lib/api/mcp/host-routing'
+import { SIM_MCP_ROUTE_PATH } from '@/lib/api/mcp/urls'
+import { APP_ENTRY_PATH, isNoindexPath } from '@/lib/navigation/paths'
 import { isOAuthAuthorizationCallback, resolveAuthRedirect } from '@/app/(auth)/auth-redirect'
 import { sendToProfound } from './lib/analytics/profound'
 import {
@@ -9,7 +11,7 @@ import {
   buildArenaSimResumeUrl,
 } from './lib/auth/arena-sim-resume'
 import { getEnv } from './lib/core/config/env'
-import { isAuthDisabled, isLocalLoginEnabled } from './lib/core/config/env-flags'
+import { isAuthDisabled, isDev, isHosted, isLocalLoginEnabled } from './lib/core/config/env-flags'
 import { apiCorsPatch } from './lib/core/security/api-cors'
 import { generateRuntimeCSP } from './lib/core/security/csp'
 import { getClientIp } from './lib/core/utils/request'
@@ -306,20 +308,18 @@ function handleRootPathRedirects(
 ): NextResponse | null {
   const url = request.nextUrl
 
-  if (url.pathname !== '/') {
+  if (url.pathname !== '/' || url.searchParams.has('home')) {
     return null
   }
 
-  // Always redirect root path to workspace when authenticated.
-  // For root path, redirect authenticated users to workspace
-  // Unless they have a 'home' query parameter (e.g., ?home)
-  // This allows intentional navigation to the homepage from anywhere in the app
+  // `?home` is checked above — authenticated users reach APP_ENTRY; others follow
+  // upstream self-hosted login redirect, then Arena SSO via redirectUnauthenticated.
   if (hasActiveSession) {
-    const isBrowsingHome = url.searchParams.has('home')
-    if (!isBrowsingHome) {
-      return NextResponse.redirect(new URL(APP_ENTRY_PATH, request.url))
-    }
-    return null
+    return NextResponse.redirect(new URL(APP_ENTRY_PATH, request.url))
+  }
+
+  if (!isHosted && !isDev) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return redirectUnauthenticated(request)
@@ -376,15 +376,17 @@ function handleSecurityFiltering(request: NextRequest): NextResponse | null {
     pathname.startsWith('/api/webhooks/tiktok') ||
     pathname.startsWith('/api/webhooks/agentmail')
   const isMcpEndpoint = pathname.startsWith('/api/mcp/')
-  const isMcpOauthDiscoveryEndpoint =
+  const isMcpDiscoveryEndpoint =
     pathname.startsWith('/.well-known/oauth-authorization-server') ||
-    pathname.startsWith('/.well-known/oauth-protected-resource')
+    pathname.startsWith('/.well-known/oauth-protected-resource') ||
+    pathname === '/.well-known/openai-apps-challenge'
   const isSuspicious = SUSPICIOUS_UA_PATTERNS.some((pattern) => pattern.test(userAgent))
 
   // Block suspicious requests, but exempt machine-to-machine endpoints that may
   // legitimately omit User-Agent headers (webhooks and MCP protocol discovery/calls).
-  if (isSuspicious && !isWebhookEndpoint && !isMcpEndpoint && !isMcpOauthDiscoveryEndpoint) {
-    logger.warn('Blocked suspicious request', {
+  if (isSuspicious && !isWebhookEndpoint && !isMcpEndpoint && !isMcpDiscoveryEndpoint) {
+    // Scanner traffic (empty or tool user agents probing /admin.php etc.); the 403 is the response.
+    logger.debug('Blocked suspicious request', {
       userAgent,
       ip: getClientIp(request),
       url: request.url,
@@ -412,6 +414,18 @@ function handleSecurityFiltering(request: NextRequest): NextResponse | null {
 
 export function proxy(request: NextRequest) {
   const url = request.nextUrl
+
+  const mcpPath = resolveSimMcpHostPath(request.headers.get('host'), url.pathname)
+  if (mcpPath === 'not_found') return new NextResponse(null, { status: 404 })
+  if (mcpPath && mcpPath !== url.pathname) {
+    const rewrite = NextResponse.rewrite(new URL(`${mcpPath}${url.search}`, request.url))
+    if (mcpPath !== SIM_MCP_ROUTE_PATH) return rewrite
+    /** The endpoint keeps the `/api` CORS policy it has on the app host; its metadata sets its own. */
+    const policy = resolveApiCorsPolicy(request)
+    if (request.method === 'OPTIONS') return buildPreflightResponse(policy)
+    applyCorsHeaders(rewrite, policy)
+    return rewrite
+  }
 
   if (url.pathname.startsWith('/api/')) {
     const policy = resolveApiCorsPolicy(request)
@@ -461,9 +475,16 @@ export function proxy(request: NextRequest) {
     return applyIndexingPolicy(request, response)
   }
 
-  // Chat pages are publicly accessible embeds — CSP is set in next.config.ts headers
+  // `/chat/*` requires a Better Auth session, same as `/workspace` — Arena SSO
+  // resume when missing (configured hub, e.g. app.thearena.ai /sso/sim-resume).
   if (url.pathname.startsWith('/chat/')) {
-    return applyIndexingPolicy(request, NextResponse.next())
+    if (!hasActiveSession) {
+      return track(request, redirectUnauthenticated(request))
+    }
+    const response = NextResponse.next()
+    response.headers.set('Content-Security-Policy', generateRuntimeCSP())
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    return track(request, response)
   }
 
   // Arena redirect SSO callback / error — no Better Auth session yet
@@ -492,14 +513,15 @@ export function proxy(request: NextRequest) {
 
   response.headers.set('Content-Security-Policy', generateRuntimeCSP())
   response.headers.set('X-Content-Type-Options', 'nosniff')
-  // response.headers.set('X-Frame-Options', 'SAMEORIGIN')
 
   return applyIndexingPolicy(request, response)
 }
 
 /**
- * Keeps non-production Arena agent hosts (dev/test/sandbox) out of search results.
- * Only `agent.thearena.ai` is indexable.
+ * Keeps non-production Arena agent hosts out of search results. Only
+ * `agent.thearena.ai` is indexable. App and utility paths are noindex on every
+ * host, including redirects, so a signed-out crawler bounced from
+ * `/workspace/*` still sees the directive.
  *
  * `noindex` rather than a robots.txt `Disallow` is deliberate: a disallowed URL
  * can still be indexed when linked externally, and blocking the crawl stops
@@ -513,7 +535,7 @@ function applyIndexingPolicy(request: NextRequest, response: NextResponse): Next
     request.headers.get('host') ||
     request.nextUrl.host
 
-  if (!isSearchIndexableHost(host)) {
+  if (!isSearchIndexableHost(host) || isNoindexPath(request.nextUrl.pathname)) {
     response.headers.set('X-Robots-Tag', 'noindex, nofollow')
   }
 
@@ -546,8 +568,10 @@ export const config = {
     '/session-required',
     '/auth/arena-sso-callback',
     '/auth/arena-sso-error',
-    '/api/:path*', // Runtime CORS
-    // Catch-all for other pages, excluding static assets and public directories
-    '/((?!api/|api$|_next/static|_next/image|ingest|favicon.ico|logo/|landing/|static/|footer/|social/|enterprise/|favicon/|twitter/|robots.txt|sitemap.xml).*)',
+    // Runtime CORS. The desktop's raw upload routes are left out: running the proxy makes Next
+    // buffer the body, cutting it off at its 10 MB proxy limit, and those bodies are whole files.
+    '/api/((?!desktop/tool/(?:import|file)$).*)',
+    // Next's image optimizer fetches public editorial images without a User-Agent.
+    '/((?!api/|api$|_next/static|_next/image|(?:blog|changelog)/.*\\.(?:avif|gif|jpe?g|png|svg|webp)$|ingest|favicon.ico|logo/|landing/|static/|footer/|social/|enterprise/|favicon/|twitter/|robots.txt|sitemap.xml).*)',
   ],
 }

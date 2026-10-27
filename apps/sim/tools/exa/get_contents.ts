@@ -1,7 +1,7 @@
 import { exaHosting } from '@/tools/exa/hosting'
 import type { ExaGetContentsParams, ExaGetContentsResponse } from '@/tools/exa/types'
 import { applyFreshness, buildExtras, parseCommaList } from '@/tools/exa/utils'
-import type { ToolConfig } from '@/tools/types'
+import type { ToolConfig, ToolHostingConfig } from '@/tools/types'
 
 export const getContentsTool: ToolConfig<ExaGetContentsParams, ExaGetContentsResponse> = {
   id: 'exa_get_contents',
@@ -10,7 +10,7 @@ export const getContentsTool: ToolConfig<ExaGetContentsParams, ExaGetContentsRes
     'Retrieve the contents of webpages using Exa AI. Returns the title, text content, and optional summaries for each URL.',
   version: '2.0.0',
 
-  hosting: exaHosting,
+  hosting: exaHosting as unknown as ToolHostingConfig<ExaGetContentsParams>,
 
   params: {
     urls: {

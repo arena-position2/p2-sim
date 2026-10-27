@@ -12,13 +12,13 @@ import {
 import { isEqual } from 'es-toolkit'
 import { useParams } from 'next/navigation'
 import type { FilterRule, SortRule } from '@/lib/table/query-builder/constants'
+import type { FallbackModelEntry } from '@/lib/workflows/blocks/fallback-models'
 import {
   CheckboxList,
   Code,
   ComboBox,
   ConditionInput,
   CredentialSelector,
-  DateInput,
   DocumentTagEntry,
   Dropdown,
   EvalInput,
@@ -34,13 +34,13 @@ import {
   McpServerSelector,
   McpToolSelector,
   MessagesInput,
+  ModelFallbackList,
   ResponseFormat,
   ScheduleInfo,
   SelectorInput,
   type SelectorOverrides,
   ShortInput,
   SkillInput,
-  SlackDateInput,
   SlackDateRangeSelector,
   SliderInput,
   SortBuilder,
@@ -373,7 +373,7 @@ const renderLabel = (
             {!wandState.isSearchActive ? (
               <Button
                 variant='active'
-                className='-my-1 h-5 px-2 py-0 text-xs'
+                className='-my-1 h-5 py-0 text-xs'
                 onClick={wandState.onSearchClick}
               >
                 Generate
@@ -411,6 +411,7 @@ const renderLabel = (
                   placeholder='Generate with AI...'
                 />
                 <Button
+                  aria-label='Generate'
                   variant='primary'
                   disabled={!wandState.searchQuery.trim() || wandState.isStreaming}
                   onMouseDown={(e: React.MouseEvent) => {
@@ -1056,31 +1057,6 @@ function SubBlockComponent({
           />
         )
 
-      case 'date-input':
-        // Use Slack-specific date input for Slack blocks with date fields
-        if (blockType === 'slack' && (config.id === 'fromDate' || config.id === 'toDate')) {
-          return (
-            <SlackDateInput
-              blockId={blockId}
-              subBlockId={config.id}
-              placeholder={config.placeholder}
-              isPreview={isPreview}
-              previewValue={previewValue as any}
-              disabled={isDisabled}
-            />
-          )
-        }
-        return (
-          <DateInput
-            blockId={blockId}
-            subBlockId={config.id}
-            placeholder={config.placeholder}
-            isPreview={isPreview}
-            previewValue={previewValue as any}
-            disabled={isDisabled}
-          />
-        )
-
       case 'file-upload':
         return (
           <FileUpload
@@ -1381,6 +1357,27 @@ function SubBlockComponent({
         }
         return <ModalComponent blockId={blockId} isPreview={isPreview} disabled={isDisabled} />
       }
+      case 'model-fallback-list':
+        return (
+          <ModelFallbackList
+            blockId={blockId}
+            subBlockId={config.id}
+            isPreview={isPreview}
+            previewValue={previewValue as FallbackModelEntry[] | null | undefined}
+            previewPrimary={
+              isPreview
+                ? {
+                    model: subBlockValues?.model?.value,
+                    reasoningEffort: subBlockValues?.reasoningEffort?.value,
+                    thinkingLevel: subBlockValues?.thinkingLevel?.value,
+                    verbosity: subBlockValues?.verbosity?.value,
+                  }
+                : undefined
+            }
+            disabled={isDisabled}
+          />
+        )
+
       case 'messages-input':
         return (
           <MessagesInput
@@ -1554,7 +1551,6 @@ function SubBlockComponent({
           onCopy: handleCopy,
         },
         labelSuffix,
-        false,
         externalLink,
         dependencyContext
       )}

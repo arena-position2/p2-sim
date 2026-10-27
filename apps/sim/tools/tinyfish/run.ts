@@ -29,7 +29,7 @@ export const runTool: ToolConfig<TinyFishRunParams, TinyFishRunResponse> = {
 
   params: { ...AUTOMATION_TOOL_PARAMS },
 
-  hosting: tinyfishAgentHosting(),
+  hosting: tinyfishAgentHosting<TinyFishRunParams>(),
 
   request: {
     url: `${TINYFISH_AGENT_API_BASE}/v1/automation/run`,

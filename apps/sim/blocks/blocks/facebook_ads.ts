@@ -7,7 +7,6 @@ import {
 } from '@/lib/workspaces/is-admin-workspace'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
-import type { FacebookAdsQueryResponse } from '@/tools/facebook_ads/index'
 
 const FACEBOOK_ADS_COND_NEVER = '__facebook_ads_cond_never__'
 
@@ -60,7 +59,7 @@ function facebookAdsNonAdminOnlyCondition(values?: Record<string, unknown>) {
   return { field: 'query', value: FACEBOOK_ADS_COND_NEVER, not: true as const }
 }
 
-export const FacebookAdsBlock: BlockConfig<FacebookAdsQueryResponse> = {
+export const FacebookAdsBlock: BlockConfig = {
   type: 'facebook_ads',
   name: 'Facebook Ads',
   description: 'Query Facebook Ads data with natural language',

@@ -3,9 +3,10 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
+import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { RawFileInputArraySchema, RawFileInputSchema } from '@/lib/uploads/utils/file-schemas'
 import { processFilesToUserFiles } from '@/lib/uploads/utils/file-utils'
-import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
+import { downloadServableFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
 import { UNIPILE_BASE_URL } from '@/tools/unipile/types'
 
 const logger = createLogger('UnipileStartChatAPI')
@@ -90,9 +91,14 @@ export async function POST(request: NextRequest) {
     if (Array.isArray(data.attachments) && data.attachments.length > 0) {
       const attachmentFiles = processFilesToUserFiles(data.attachments, data.account_id, logger)
       for (const file of attachmentFiles) {
-        const buffer = await downloadFileFromStorage(file, data.account_id, logger)
+        const { buffer, contentType } = await downloadServableFileFromStorage(
+          file,
+          data.account_id,
+          logger,
+          { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+        )
         const blob = new Blob([new Uint8Array(buffer)], {
-          type: file.type || 'application/octet-stream',
+          type: contentType || file.type || 'application/octet-stream',
         })
         form.append('attachments', blob, file.name)
       }
@@ -107,9 +113,14 @@ export async function POST(request: NextRequest) {
     ) {
       const [voiceFile] = processFilesToUserFiles([data.voice_message], data.account_id, logger)
       if (voiceFile) {
-        const buffer = await downloadFileFromStorage(voiceFile, data.account_id, logger)
+        const { buffer, contentType } = await downloadServableFileFromStorage(
+          voiceFile,
+          data.account_id,
+          logger,
+          { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+        )
         const blob = new Blob([new Uint8Array(buffer)], {
-          type: voiceFile.type || 'application/octet-stream',
+          type: contentType || voiceFile.type || 'application/octet-stream',
         })
         form.append('voice_message', blob, voiceFile.name)
       }
@@ -124,9 +135,14 @@ export async function POST(request: NextRequest) {
     ) {
       const [videoFile] = processFilesToUserFiles([data.video_message], data.account_id, logger)
       if (videoFile) {
-        const buffer = await downloadFileFromStorage(videoFile, data.account_id, logger)
+        const { buffer, contentType } = await downloadServableFileFromStorage(
+          videoFile,
+          data.account_id,
+          logger,
+          { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+        )
         const blob = new Blob([new Uint8Array(buffer)], {
-          type: videoFile.type || 'application/octet-stream',
+          type: contentType || videoFile.type || 'application/octet-stream',
         })
         form.append('video_message', blob, videoFile.name)
       }

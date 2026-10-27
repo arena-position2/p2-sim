@@ -182,10 +182,10 @@ function namespaceSubBlockId(subBlock: SubBlockConfig, triggerId: string): SubBl
  * are merged into a single block (e.g., ...getTrigger('a').subBlocks, ...getTrigger('b').subBlocks).
  */
 export function getTrigger(triggerId: string): TriggerConfig {
-  const trigger = TRIGGER_REGISTRY[triggerId]
-  if (!trigger) {
+  if (!isTriggerValid(triggerId)) {
     throw new Error(`Trigger not found: ${triggerId}`)
   }
+  const trigger = TRIGGER_REGISTRY[triggerId]
 
   // Filter out deprecated trigger-save subblocks from legacy stored data
   const subBlocks = trigger.subBlocks
@@ -235,7 +235,7 @@ export function getAllTriggers(): TriggerConfig[] {
 }
 
 export function isTriggerValid(triggerId: string): boolean {
-  return triggerId in TRIGGER_REGISTRY
+  return Object.hasOwn(TRIGGER_REGISTRY, triggerId)
 }
 
 export type { TriggerConfig } from '@/triggers/types'

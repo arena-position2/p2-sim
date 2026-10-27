@@ -1,19 +1,38 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
-import { isRecordLike, omit } from '@sim/utils/object'
-import { projectToolResultForCopilot } from '@/lib/copilot/request/tools/resolved-secret-result'
-import type { ToolExecutionResult } from '@/lib/copilot/tool-executor/types'
+import { isRecordLike, omit, toRecord, toRecordOrNull } from '@sim/utils/object'
+import {
+  durableSecretProvenanceFromRegistry,
+  importDurableSecretProvenance,
+} from '@/lib/execution/durable-secret-provenance'
+import type { AgentConversationSession } from '@/lib/memory/conversation-types'
+import {
+  AGENT_MEMORY_RETRIEVAL_TOOL_ID,
+  type AgentMemoryRetrievalBinding,
+} from '@/lib/memory/retrieval-tool-types'
+import { projectToolResultForCopilot } from '@/lib/mothership/request/tools/resolved-secret-result'
+import type { ToolExecutionResult } from '@/lib/mothership/tool-executor/types'
 import {
   CHILD_EXECUTION_ID_OUTPUT_KEY,
   CHILD_TRACE_DISABLED_OUTPUT_KEY,
 } from '@/executor/constants'
+import type { ExecutionTestHooks, MockedToolCall } from '@/executor/execution/types'
 import type { ExecutionContext } from '@/executor/types'
+import { projectResolvedSecretModelContent } from '@/executor/utils/resolved-secret-content-projection'
 import type { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
+import { stripCloneSuffixes } from '@/executor/utils/subflow-node-id-codec'
 import { getPreparedProviderToolInputProvenance } from '@/providers/tool-input-provenance'
+import type { ProviderId } from '@/providers/types'
 import { type ExecuteToolOptions, executeTool } from '@/tools'
+import { getToolParams } from '@/tools/metadata'
 import type { ToolResponse } from '@/tools/types'
 
 export interface ProviderRuntimeContext {
+  agentConversation?: AgentConversationSession
+  agentMemoryContext?: { historyTokens?: number }
+  agentMemoryRetrieval?: AgentMemoryRetrievalBinding
+  conversationProvider?: { providerId: ProviderId; binding: string }
   resolvedSecretTraceRegistry?: ResolvedSecretTraceRegistry
   /** Trusted server execution context inherited by model-emitted tool calls. */
   executionContext?: ExecutionContext
@@ -33,6 +52,11 @@ export interface ProviderToolExecutionResult {
 }
 
 const providerRuntimeContext = new AsyncLocalStorage<ProviderRuntimeContext | undefined>()
+const logger = createLogger('ProviderRuntimeContext')
+
+export function getProviderRuntimeContext(): ProviderRuntimeContext | undefined {
+  return providerRuntimeContext.getStore()
+}
 
 export function runWithProviderRuntimeContext<T>(
   context: ProviderRuntimeContext | undefined,
@@ -104,13 +128,123 @@ function accumulateFailedFunctionToolCost(
   }
 }
 
+/** The arguments a model sent a tool: no internal context, credentials, or fixed configuration. */
+function modelSuppliedToolInput(
+  toolId: string,
+  params: Record<string, unknown>
+): Record<string, unknown> {
+  const declared = getToolParams(toolId)
+  // MCP and custom tools declare their arguments only in the schema the model was given.
+  const dynamicArgs = declared
+    ? undefined
+    : toRecord(toRecordOrNull(params._toolSchema)?.properties ?? {})
+  const input: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(params)) {
+    const visibility = declared?.[key]?.visibility
+    const isArgument = declared
+      ? Object.hasOwn(declared, key)
+      : Object.hasOwn(dynamicArgs ?? {}, key)
+    if (isArgument && visibility !== 'user-only' && visibility !== 'hidden') input[key] = value
+  }
+  return input
+}
+
+/** A test's answer to a tool call; a rejected mock becomes the tool's failure. */
+async function resolveMockedTool(
+  testHooks: ExecutionTestHooks,
+  call: MockedToolCall,
+  abortSignal: AbortSignal | undefined
+): Promise<ToolResponse> {
+  try {
+    return { success: true, output: await testHooks.resolveToolMock(call, abortSignal) }
+  } catch (error) {
+    if (abortSignal?.aborted) throw error
+    return { success: false, output: {}, error: getErrorMessage(error) }
+  }
+}
+
 export async function executeProviderTool(
   toolId: string,
   params: Parameters<typeof executeTool>[1],
   options: ExecuteProviderToolOptions = {}
 ): Promise<ProviderToolExecutionResult> {
   const runtimeContext = providerRuntimeContext.getStore()
+  const invocationId =
+    isRecordLike(params._context) && typeof params._context.invocationId === 'string'
+      ? params._context.invocationId
+      : undefined
+  const session = runtimeContext?.agentConversation
+  runtimeContext?.executionContext?.abortSignal?.throwIfAborted()
   const executionToolId = runtimeContext?.toolIdByWireId?.get(toolId) ?? toolId
+  const memoryRetrieval =
+    executionToolId === AGENT_MEMORY_RETRIEVAL_TOOL_ID &&
+    toolId === runtimeContext?.agentMemoryRetrieval?.tool.id
+      ? runtimeContext?.agentMemoryRetrieval
+      : undefined
+  const recorded =
+    invocationId && !memoryRetrieval ? await session?.getReplayResult(invocationId) : undefined
+  if (recorded) {
+    if (
+      runtimeContext?.resolvedSecretTraceRegistry &&
+      recorded.provenance &&
+      !(await importDurableSecretProvenance(
+        runtimeContext.resolvedSecretTraceRegistry,
+        recorded.provenance,
+        recorded.rawResponse
+      ))
+    ) {
+      throw Object.assign(new Error('Recorded tool result provenance could not be restored'), {
+        retryable: false,
+      })
+    }
+    logger.info('Replayed a recorded Agent tool result')
+    const rawResponse = isRecordLike(recorded.rawResponse.output.cost)
+      ? {
+          ...recorded.rawResponse,
+          output: {
+            ...recorded.rawResponse.output,
+            cost: {
+              ...recorded.rawResponse.output.cost,
+              input: 0,
+              output: 0,
+              toolCost: 0,
+              total: 0,
+            },
+          },
+        }
+      : recorded.rawResponse
+    return {
+      rawResponse,
+      modelResponse:
+        session?.getRecordedResult?.(invocationId!)?.modelResponse ?? recorded.modelResponse,
+    }
+  }
+  const recordResult = async (
+    result: ProviderToolExecutionResult
+  ): Promise<ProviderToolExecutionResult> => {
+    try {
+      if (session && invocationId) {
+        await session.recordToolResult({
+          invocationId,
+          ...result,
+          ...(runtimeContext?.resolvedSecretTraceRegistry
+            ? {
+                provenance: durableSecretProvenanceFromRegistry(
+                  runtimeContext.resolvedSecretTraceRegistry,
+                  result.rawResponse
+                ),
+              }
+            : {}),
+        })
+        const retained = session.getRecordedResult?.(invocationId)
+        if (retained && !memoryRetrieval)
+          return { ...result, modelResponse: retained.modelResponse }
+      }
+    } catch {
+      logger.warn('Agent tool result durability unavailable')
+    }
+    return result
+  }
   const registry =
     options.resolvedSecretTraceRegistry ?? runtimeContext?.resolvedSecretTraceRegistry
 
@@ -129,27 +263,59 @@ export async function executeProviderTool(
         : registry.forkForToolCall()
     : undefined
 
+  const callerContext = options.executionContext ?? runtimeContext?.executionContext
+  const testHooks = callerContext?.testHooks
+  const callerBlockId =
+    isRecordLike(params._context) && typeof params._context.blockId === 'string'
+      ? stripCloneSuffixes(params._context.blockId)
+      : undefined
+  if (
+    testHooks &&
+    callerBlockId &&
+    !memoryRetrieval &&
+    testHooks.mocksTool(callerBlockId, executionToolId)
+  ) {
+    const input = projectResolvedSecretModelContent(
+      modelSuppliedToolInput(executionToolId, params),
+      registry
+    )
+    const response: ToolResponse = input.safe
+      ? await resolveMockedTool(
+          testHooks,
+          { blockId: callerBlockId, toolId: executionToolId, input: toRecord(input.value) },
+          callerContext?.abortSignal
+        )
+      : {
+          success: false,
+          output: {},
+          error: `Mocked tool "${executionToolId}" has inputs whose secrets cannot be redacted`,
+        }
+    return { rawResponse: response, modelResponse: response }
+  }
+
   try {
     const executionContext = options.executionContext ?? runtimeContext?.executionContext
-    const result = await executeTool(executionToolId, params, {
-      ...options,
-      ...(executionContext ? { executionContext } : {}),
-      resolvedSecretTraceRegistry: toolCallRegistry,
-    })
+    const result = memoryRetrieval
+      ? await memoryRetrieval.execute(params)
+      : await executeTool(executionToolId, params, {
+          ...options,
+          ...(executionContext ? { executionContext } : {}),
+          resolvedSecretTraceRegistry: toolCallRegistry,
+        })
     accumulateFailedFunctionToolCost(
       executionToolId,
       result,
       runtimeContext?.failedFunctionToolCost
     )
     if (!registry || !toolCallRegistry) {
-      return { rawResponse: result, modelResponse: withoutChildTraceHandle(result) }
+      return recordResult({ rawResponse: result, modelResponse: withoutChildTraceHandle(result) })
     }
 
     const modelResponse = withoutChildTraceHandle(
       toProviderModelResponse(result, projectToolResultForCopilot(result, toolCallRegistry))
     )
     registry.mergeToolCallRegistry(toolCallRegistry)
-    return { rawResponse: result, modelResponse }
+    return recordResult({ rawResponse: result, modelResponse })
   } catch (error) {
     if (!registry || !toolCallRegistry) throw error
     const errorName =
@@ -167,6 +333,6 @@ export async function executeProviderTool(
       rawResponse,
       projectToolResultForCopilot(rawResponse, toolCallRegistry)
     )
-    return { rawResponse, modelResponse }
+    return recordResult({ rawResponse, modelResponse })
   }
 }

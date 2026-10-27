@@ -5,7 +5,7 @@
  * `function_execute`, `search_online`, …). Shared handlers and generated JSON
  * schemas use Cloud catalog ids (`create_empty_file`, `manage_knowledge_base`,
  * `run_function`, `web_search`, …). Arena→server mapping lives in
- * `@/lib/copilot/tools/arena-server-tool-aliases` (shared with the server
+ * `@/lib/mothership/tools/arena-server-tool-aliases` (shared with the server
  * router). This module adds Cloud→Arena remaps for hallucinated tool names.
  */
 
@@ -18,7 +18,7 @@ export {
   isArenaAliasedServerTool,
   isArenaFilePipelineTool,
   toServerRegistryToolName,
-} from '@/lib/copilot/tools/arena-server-tool-aliases'
+} from '@/lib/mothership/tools/arena-server-tool-aliases'
 
 /** Cloud/training names that should execute as Arena leaf tools. */
 export const FILE_WRITE_ALIAS_NAMES = [
@@ -41,6 +41,7 @@ const CLOUD_TO_ARENA_TOOL_NAME: Readonly<Record<string, string>> = {
   manage_knowledge_base: 'knowledge_base',
   web_search: 'search_online',
   run_function: 'function_execute',
+  save_upload: 'materialize_file',
 }
 
 export type ResolvedLocalCopilotToolName =

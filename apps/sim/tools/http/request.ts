@@ -96,6 +96,8 @@ export const requestTool: ToolConfig<RequestParams, RequestResponse> = {
     },
   },
 
+  timeoutParamIsDeadline: true,
+
   request: {
     timeout: 600000, // 10 minutes for API block requests
     allowSameOrigin: true,

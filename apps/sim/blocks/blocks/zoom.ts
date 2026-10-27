@@ -5,7 +5,6 @@ import { resolveWorkspaceIdForAdminCheck } from '@/lib/workspaces/is-admin-works
 import { resolveZoomAdminAccessForUi } from '@/lib/workspaces/zoom-admin-access-cache'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
-import type { ZoomResponse } from '@/tools/zoom/types'
 import { getTrigger } from '@/triggers'
 
 const ZOOM_MEETING_SUBBLOCK_OPS = [
@@ -14,7 +13,7 @@ const ZOOM_MEETING_SUBBLOCK_OPS = [
   'zoom_delete_meeting',
   'zoom_get_meeting_invitation',
   'zoom_get_meeting_recordings',
-  'zoom_delete_recording',
+  // zoom_delete_recording is hidden: Zoom returns "No permission." for this operation.
   'zoom_list_past_participants',
 ] as const
 
@@ -41,7 +40,7 @@ const ZOOM_OPERATION_OPTIONS = [
   },
   { label: 'Get Meeting Recordings', id: 'zoom_get_meeting_recordings' },
   { label: 'Download Transcript/File', id: 'zoom_download_transcript' },
-  { label: 'Delete Recording', id: 'zoom_delete_recording' },
+  // zoom_delete_recording is hidden: Zoom returns "No permission." for this operation.
   { label: 'List Past Participants', id: 'zoom_list_past_participants' },
 ] as const
 
@@ -82,7 +81,7 @@ function personalZoomMeetingSubblockCondition(values: Record<string, unknown> | 
  */
 const MEETING_FIELD = ['meetingSelector', 'meetingId'] as const
 
-export const ZoomBlock: BlockConfig<ZoomResponse> = {
+export const ZoomBlock: BlockConfig = {
   type: 'zoom',
   name: 'Zoom',
   description: 'Create and manage Zoom meetings and recordings',
@@ -125,11 +124,6 @@ export const ZoomBlock: BlockConfig<ZoomResponse> = {
         ],
         zoom_get_meeting_recordings: [
           { text: 'Fetch recordings of meeting', field: MEETING_FIELD, core: true },
-        ],
-        zoom_delete_recording: [
-          'Delete recordings',
-          { text: 'from meeting', field: MEETING_FIELD, core: true },
-          { text: ', recording file', field: 'recordingId' },
         ],
         zoom_list_past_participants: [
           { text: 'List participants of past meeting', field: MEETING_FIELD, core: true },
@@ -526,34 +520,8 @@ Return ONLY the date string - no explanations, no quotes, no extra text.`,
         value: ['zoom_get_account_recordings_with_transcript'],
       },
     },
-    // Recording ID for delete
-    {
-      id: 'recordingId',
-      title: 'Recording ID',
-      type: 'short-input',
-      placeholder: 'Specific recording file ID (optional)',
-      mode: 'advanced',
-      condition: {
-        field: 'operation',
-        value: ['zoom_delete_recording'],
-      },
-    },
-    // Delete action
-    {
-      id: 'deleteAction',
-      title: 'Delete Action',
-      type: 'dropdown',
-      options: [
-        { label: 'Move to Trash', id: 'trash' },
-        { label: 'Permanently Delete', id: 'delete' },
-      ],
-      value: () => 'trash',
-      mode: 'advanced',
-      condition: {
-        field: 'operation',
-        value: ['zoom_delete_recording'],
-      },
-    },
+    // recordingId and deleteAction are hidden with zoom_delete_recording:
+    // Zoom returns "No permission." for this operation.
     // Delete options
     {
       id: 'occurrenceId',
@@ -608,7 +576,7 @@ Return ONLY the date string - no explanations, no quotes, no extra text.`,
       'zoom_get_account_recordings_with_transcript',
       'zoom_download_transcript',
       'zoom_get_meeting_recordings',
-      'zoom_delete_recording',
+      // zoom_delete_recording is hidden: Zoom returns "No permission." for this operation.
       'zoom_list_past_participants',
     ],
     config: {
@@ -759,17 +727,7 @@ Return ONLY the date string - no explanations, no quotes, no extra text.`,
               meetingId: params.meetingId.trim(),
             }
 
-          case 'zoom_delete_recording':
-            if (!params.meetingId?.trim()) {
-              throw new Error('Meeting ID is required.')
-            }
-            return {
-              ...baseParams,
-              meetingId: params.meetingId.trim(),
-              recordingId: params.recordingId,
-              action: params.deleteAction,
-            }
-
+          // zoom_delete_recording is hidden: Zoom returns "No permission." for this operation.
           case 'zoom_list_past_participants':
             if (!params.meetingId?.trim()) {
               throw new Error('Meeting ID is required.')

@@ -2,6 +2,7 @@ import type { Logger } from '@sim/logger'
 import { omit } from '@sim/utils/object'
 import type { StorageContext } from '@/lib/uploads'
 import { ORG_LOGOS_S3_PREFIX } from '@/lib/uploads/contexts/org-logos/utils'
+import { normalizeMimeType } from '@/lib/uploads/utils/mime'
 import {
   ACCEPTED_FILE_TYPES,
   isAlphanumericExtension,
@@ -10,14 +11,6 @@ import {
 } from '@/lib/uploads/utils/validation'
 import { isUuid } from '@/executor/constants'
 import type { UserFile } from '@/executor/types'
-
-interface FileAttachment {
-  id: string
-  key: string
-  filename: string
-  media_type: string
-  size: number
-}
 
 export interface MessageContent {
   type: 'text' | 'image' | 'document' | 'audio' | 'video'
@@ -33,7 +26,6 @@ export interface MessageContent {
  * Mapping of MIME types to content types
  */
 export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document' | 'audio' | 'video'> = {
-  // Images
   'image/jpeg': 'image',
   'image/jpg': 'image',
   'image/png': 'image',
@@ -48,7 +40,6 @@ export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document' | 'audio' | 
   'image/x-icon': 'image',
   'image/vnd.microsoft.icon': 'image',
 
-  // Documents
   'application/pdf': 'document',
   'text/plain': 'document',
   'text/vtt': 'document',
@@ -66,7 +57,6 @@ export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document' | 'audio' | 
   'text/markdown': 'document',
   'application/rtf': 'document',
 
-  // Audio
   'audio/mpeg': 'audio', // .mp3
   'audio/mp3': 'audio',
   'audio/mp4': 'audio', // .m4a
@@ -84,7 +74,6 @@ export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document' | 'audio' | 
   'audio/x-aac': 'audio',
   'audio/opus': 'audio',
 
-  // Video
   'video/mp4': 'video',
   'video/mpeg': 'video',
   'video/quicktime': 'video', // .mov
@@ -213,7 +202,7 @@ export function getFileExtension(filename: string): string {
  * merge) to exactly the files that can be open in that editor.
  */
 export function isMarkdownFile(file: { type?: string | null; name: string }): boolean {
-  if (file.type === 'text/markdown') return true
+  if (normalizeMimeType(file.type) === 'text/markdown') return true
   const ext = getFileExtension(file.name)
   return ext === 'md' || ext === 'markdown'
 }
@@ -299,11 +288,10 @@ export function isArchiveFileName(filename: string): boolean {
  * `files/`, so this points at the explicit one-time extract step.
  */
 export function buildArchiveExtractGuidance(name: string): string {
-  return `"${name}" is a .zip archive — its contents can't be read directly. Extract it once with save_upload(fileNames: ["${name}"], operation: "extract"), then read the unpacked files under files/ (e.g. glob("files/<archive>/**") then read("files/<archive>/<path>/content")).`
+  return `"${name}" is a .zip archive — its contents can't be read directly. Mount it into the chat sandbox with run_code (inputs.files: [{"path": "uploads/${name}", "sandboxPath": "/tmp/${name}"}]) and unzip it there; persist anything worth keeping with \`files upload @<path>\`.`
 }
 
 const EXTENSION_TO_MIME: Record<string, string> = {
-  // Images
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
@@ -318,7 +306,6 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   avif: 'image/avif',
   ico: 'image/x-icon',
 
-  // Documents
   pdf: 'application/pdf',
   txt: 'text/plain',
   vtt: 'text/vtt',
@@ -338,11 +325,9 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   yml: 'application/x-yaml',
   rtf: 'application/rtf',
 
-  // Archives
   zip: 'application/zip',
   gz: 'application/gzip',
 
-  // Code / plain-text source
   py: 'text/x-python',
   js: 'text/javascript',
   mjs: 'text/javascript',
@@ -385,7 +370,6 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   gql: 'text/x-graphql',
   proto: 'text/x-protobuf',
 
-  // Audio
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',
   wav: 'audio/wav',
@@ -395,7 +379,6 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   aac: 'audio/aac',
   opus: 'audio/opus',
 
-  // Video
   mp4: 'video/mp4',
   mov: 'video/quicktime',
   avi: 'video/x-msvideo',
@@ -527,26 +510,7 @@ export function isAbortError(error: unknown): boolean {
   )
 }
 
-/**
- * Heuristic: whether `error` is a transient network/connection failure that's
- * worth retrying (vs. a deterministic 4xx/auth/validation error). Sniffs the
- * message because browsers and servers report these without standardized codes.
- */
-export function isNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  const message = error.message.toLowerCase()
-  return (
-    message.includes('network') ||
-    message.includes('fetch') ||
-    message.includes('connection') ||
-    message.includes('timeout') ||
-    message.includes('timed out') ||
-    message.includes('econnreset')
-  )
-}
-
 const MIME_TO_EXTENSION: Record<string, string> = {
-  // Images
   'image/jpeg': 'jpg',
   'image/jpg': 'jpg',
   'image/png': 'png',
@@ -561,7 +525,6 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'image/x-icon': 'ico',
   'image/vnd.microsoft.icon': 'ico',
 
-  // Documents
   'application/pdf': 'pdf',
   'text/plain': 'txt',
   'text/vtt': 'vtt',
@@ -579,7 +542,6 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'text/markdown': 'md',
   'application/rtf': 'rtf',
 
-  // Audio
   'audio/mpeg': 'mp3',
   'audio/mp3': 'mp3',
   'audio/mp4': 'm4a',
@@ -597,7 +559,6 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'audio/x-aac': 'aac',
   'audio/opus': 'opus',
 
-  // Video
   'video/mp4': 'mp4',
   'video/mpeg': 'mpg',
   'video/quicktime': 'mov',
@@ -607,7 +568,6 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'video/x-matroska': 'mkv',
   'video/webm': 'webm',
 
-  // Archives
   'application/zip': 'zip',
   'application/x-zip-compressed': 'zip',
   'application/gzip': 'gz',
@@ -679,7 +639,6 @@ export function validateKnowledgeBaseFile(
     return `File "${file.name}" is too large. Maximum size is ${maxSizeMB}MB.`
   }
 
-  // Check MIME type first
   if (ACCEPTED_FILE_TYPES.includes(file.type)) {
     return null
   }
@@ -1077,16 +1036,11 @@ export function processFilesToUserFiles(
 export function sanitizeFilenameForMetadata(filename: string): string {
   return (
     filename
-      // Remove non-ASCII characters (keep only printable ASCII 0x20-0x7E)
       .replace(/[^\x20-\x7E]/g, '')
       // Remove characters that are problematic in HTTP headers
       .replace(/["\\]/g, '')
-      // Replace multiple spaces with single space
       .replace(/\s+/g, ' ')
-      // Trim whitespace
-      .trim() ||
-    // Provide fallback if completely sanitized
-    'file'
+      .trim() || 'file'
   )
 }
 

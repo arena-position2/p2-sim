@@ -2,14 +2,15 @@
 
 import { forwardRef, useContext, useState } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
+import { MENU_STYLES } from '#menu-styles'
 import { ChevronDown } from '../../icons'
 import { cn } from '../../lib/cn'
 import { Calendar, formatDateLabel, formatDateRangeLabel } from '../calendar/calendar'
 import { chipVariants, TRIGGER_BORDER_CLASS } from '../chip/chip'
-import { chipContentLabelClass, chipIconSlotClass } from '../chip/chip-chrome'
+import { chipContentLabelClass, chipIconSlotClass } from '../chip/chrome'
 import { InsideModalContext } from '../modal/modal'
 import { OverflowText } from '../overflow-text/overflow-text'
-import { POPOVER_ANIMATION_CLASSES } from '../popover/popover-animation'
+import { POPOVER_ANIMATION_CLASSES } from '../popover/animation'
 
 interface ChipDatePickerBaseProps {
   /**
@@ -62,9 +63,11 @@ interface ChipDatePickerRangeProps extends ChipDatePickerBaseProps {
   showTime?: boolean
   /** Called on Apply with the ordered range bounds. */
   onRangeChange: (start: string, end: string) => void
+  /** Called on Clear, so a committed range can be dropped by whoever owns it. */
+  onClear?: () => void
 }
 
-export type ChipDatePickerProps = ChipDatePickerSingleProps | ChipDatePickerRangeProps
+type ChipDatePickerProps = ChipDatePickerSingleProps | ChipDatePickerRangeProps
 
 /**
  * Date counterpart to {@link ChipDropdown} — a chip-styled trigger that opens a
@@ -147,7 +150,8 @@ const ChipDatePicker = forwardRef<HTMLButtonElement, ChipDatePickerProps>(
             data-native-surface-overlay=''
             className={cn(
               POPOVER_ANIMATION_CLASSES,
-              'z-[var(--z-popover)] origin-[--radix-popover-content-transform-origin] rounded-xl border border-[var(--border-1)] bg-[var(--bg)] shadow-xs'
+              MENU_STYLES.surface,
+              'z-[var(--z-popover)] origin-[--radix-popover-content-transform-origin]'
             )}
           >
             {props.mode === 'range' ? (
@@ -161,6 +165,7 @@ const ChipDatePicker = forwardRef<HTMLButtonElement, ChipDatePickerProps>(
                   setOpen(false)
                 }}
                 onCancel={() => setOpen(false)}
+                onClear={props.onClear}
               />
             ) : (
               <Calendar

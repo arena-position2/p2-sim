@@ -13,6 +13,10 @@ import {
 } from '@/lib/uploads/utils/file-utils'
 import type { UserFile } from '@/executor/types'
 import {
+  getNativeConversationMessage,
+  retainConversationMessageSource,
+} from '@/providers/conversation-metadata'
+import {
   getProviderFileAttachment,
   INLINE_ATTACHMENT_MAX_BYTES,
   LARGE_FILE_PATH_THRESHOLD_BYTES,
@@ -31,6 +35,7 @@ export type AttachmentProvider =
   | 'fireworks'
   | 'together'
   | 'baseten'
+  | 'nebius'
   | 'ollama'
   | 'vllm'
   | 'litellm'
@@ -172,6 +177,7 @@ const PROVIDER_SUPPORTED_LABELS: Record<AttachmentProvider, string> = {
   fireworks: 'images through image_url message parts on vision models',
   together: 'images through image_url message parts on vision models',
   baseten: 'images through image_url message parts on vision models',
+  nebius: 'images through image_url message parts on vision models',
   ollama: 'images through image_url message parts on vision models',
   vllm: 'images through image_url message parts on multimodal models',
   litellm: 'images through image_url message parts on multimodal models',
@@ -196,6 +202,7 @@ export function getAttachmentProvider(providerId: ProviderId | string): Attachme
   if (providerId === 'fireworks') return 'fireworks'
   if (providerId === 'together') return 'together'
   if (providerId === 'baseten') return 'baseten'
+  if (providerId === 'nebius') return 'nebius'
   if (providerId === 'ollama' || providerId === 'ollama-cloud') return 'ollama'
   if (providerId === 'vllm') return 'vllm'
   if (providerId === 'litellm') return 'litellm'
@@ -419,6 +426,7 @@ function isMimeTypeSupportedByProvider(
     case 'fireworks':
     case 'together':
     case 'baseten':
+    case 'nebius':
     case 'ollama':
     case 'vllm':
     case 'litellm':
@@ -844,13 +852,17 @@ export function formatMessagesForProvider(
   }
 
   return messages.map((message) => {
+    const nativeMessage = getNativeConversationMessage(message, 'chat-completions')
+    if (nativeMessage && typeof nativeMessage === 'object' && !Array.isArray(nativeMessage)) {
+      message = retainConversationMessageSource(message, { ...message, ...nativeMessage })
+    }
     if (!message.files?.length || (message.role !== 'user' && message.role !== 'assistant')) {
       return message as ProviderFormattedMessage
     }
 
     if (provider === 'openrouter') {
       const { files: _omit, ...rest } = message
-      return {
+      return retainConversationMessageSource(message, {
         ...rest,
         content: buildOpenRouterMessageContent(
           message.content,
@@ -858,15 +870,15 @@ export function formatMessagesForProvider(
           providerId,
           projectFilename
         ) as string | Array<Record<string, unknown>>,
-      }
+      })
     }
 
     const { files: _omit, ...rest } = message
-    return {
+    return retainConversationMessageSource(message, {
       ...rest,
       content: buildOpenAICompatibleChatContent(message.content, message.files, providerId) as
         | string
         | Array<Record<string, unknown>>,
-    }
+    })
   })
 }

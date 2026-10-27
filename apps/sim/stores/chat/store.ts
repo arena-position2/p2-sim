@@ -44,6 +44,13 @@ function createInitialState() {
   >
 }
 
+function persistedPreviewUrl(previewUrl: string | undefined): string | undefined {
+  if (!previewUrl || previewUrl.startsWith('blob:') || previewUrl.startsWith('data:')) {
+    return undefined
+  }
+  return previewUrl
+}
+
 /**
  * Safe storage adapter that handles QuotaExceededError gracefully
  * Sanitizes messages before storing to prevent localStorage quota issues
@@ -323,7 +330,7 @@ export const useChatStore = create<ChatState>()(
       }),
       {
         name: 'chat-store',
-        storage: safeStorageAdapter,
+        storage: safeStorageAdapter as unknown as PersistStorage<unknown>,
         version: 1,
         /**
          * v0 stored messages newest-first; v1 stores them in insertion
@@ -340,8 +347,9 @@ export const useChatStore = create<ChatState>()(
           return persistedState
         },
         /**
-         * Persist only the durable chat state — message history (with transient
-         * blob `previewUrl`s stripped since they are not valid across reloads),
+         * Persist only the durable chat state — message history (blob and data
+         * `previewUrl`s are stripped because they do not survive a reload; a
+         * stored file URL is kept so the attachment is still visible),
          * per-workflow output selections and conversation ids, and the floating
          * chat's open state, position, and dimensions. Actions and any transient
          * UI flags are intentionally excluded.
@@ -357,7 +365,7 @@ export const useChatStore = create<ChatState>()(
             ...msg,
             attachments: msg.attachments?.map((att) => ({
               ...att,
-              previewUrl: undefined,
+              previewUrl: persistedPreviewUrl(att.previewUrl),
             })),
           })),
         }),

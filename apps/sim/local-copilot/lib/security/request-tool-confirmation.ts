@@ -1,6 +1,6 @@
-import { ASYNC_TOOL_CONFIRMATION_STATUS } from '@/lib/copilot/async-runs/lifecycle'
-import { upsertAsyncToolCall } from '@/lib/copilot/async-runs/repository'
-import { waitForToolConfirmation } from '@/lib/copilot/persistence/tool-confirm'
+import { ASYNC_TOOL_CONFIRMATION_STATUS } from '@/lib/mothership/async-runs/lifecycle'
+import { upsertAsyncToolCall } from '@/lib/mothership/async-runs/repository'
+import { waitForToolConfirmation } from '@/lib/mothership/persistence/tool-confirm'
 
 export type LocalToolConfirmationDecision =
   | 'approved'

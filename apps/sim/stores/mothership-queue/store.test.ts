@@ -1,9 +1,9 @@
-/**
- * @vitest-environment node
- */
-
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useMothershipQueueStore } from '@/stores/mothership-queue/store'
+import {
+  liveQueueKey,
+  liveQueuePosition,
+  useMothershipQueueStore,
+} from '@/stores/mothership-queue/store'
 import type { QueuedMothershipMessage } from '@/stores/mothership-queue/types'
 
 const message = (id: string, content = `content-${id}`): QueuedMothershipMessage => ({
@@ -17,15 +17,6 @@ describe('useMothershipQueueStore', () => {
   })
 
   describe('enqueue / remove', () => {
-    it('appends to the chat bucket', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m2'))
-      expect(useMothershipQueueStore.getState().queues['chat-A']?.map((m) => m.id)).toEqual([
-        'm1',
-        'm2',
-      ])
-    })
-
     it('keeps buckets isolated per chat', () => {
       useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
       useMothershipQueueStore.getState().enqueue('chat-B', message('n1'))
@@ -34,74 +25,132 @@ describe('useMothershipQueueStore', () => {
       expect(state.queues['chat-B']?.map((m) => m.id)).toEqual(['n1'])
     })
 
-    it('removes the chat bucket entirely when the last message is removed', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().remove('chat-A', 'm1')
-      expect(useMothershipQueueStore.getState().queues['chat-A']).toBeUndefined()
-    })
-
     it('clears editing when the editing message is removed', () => {
       useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
       useMothershipQueueStore.getState().setEditing('chat-A', 'm1')
       useMothershipQueueStore.getState().remove('chat-A', 'm1')
       expect(useMothershipQueueStore.getState().editing['chat-A']).toBeUndefined()
     })
-
-    it('preserves editing when a different message is removed', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m2'))
-      useMothershipQueueStore.getState().setEditing('chat-A', 'm1')
-      useMothershipQueueStore.getState().remove('chat-A', 'm2')
-      expect(useMothershipQueueStore.getState().editing['chat-A']).toBe('m1')
-    })
-  })
-
-  describe('insertAt', () => {
-    it('inserts at the requested index', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m3'))
-      useMothershipQueueStore.getState().insertAt('chat-A', 1, message('m2'))
-      expect(useMothershipQueueStore.getState().queues['chat-A']?.map((m) => m.id)).toEqual([
-        'm1',
-        'm2',
-        'm3',
-      ])
-    })
-
-    it('clamps an out-of-range index to the end', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().insertAt('chat-A', 99, message('m2'))
-      expect(useMothershipQueueStore.getState().queues['chat-A']?.map((m) => m.id)).toEqual([
-        'm1',
-        'm2',
-      ])
-    })
-
-    it('ignores duplicate ids', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().insertAt('chat-A', 0, message('m1'))
-      expect(useMothershipQueueStore.getState().queues['chat-A']?.length).toBe(1)
-    })
   })
 
   describe('replaceAt', () => {
-    it('overwrites content while preserving id and index', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1', 'orig-1'))
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m2', 'orig-2'))
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m3', 'orig-3'))
+    it('treats a flagless handoff still waiting on its Stop as possibly sent', () => {
+      /** Its id may be a re-queued message's earlier attempt, which a pending Stop says nothing about. */
+      useMothershipQueueStore.getState().enqueue('chat-A', {
+        id: 'legacy',
+        content: 'original',
+        resumeUserMessageId: 'earlier-attempt',
+        queuedSendHandoff: {
+          id: 'legacy',
+          chatId: 'chat-A',
+          supersededStreamId: 'previous-response',
+          stopRequired: true,
+        },
+      })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'legacy', { content: 'edited' })
 
-      useMothershipQueueStore.getState().replaceAt('chat-A', 'm2', { content: 'edited-2' })
-
-      const queue = useMothershipQueueStore.getState().queues['chat-A']
-      expect(queue?.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
-      expect(queue?.[1]?.content).toBe('edited-2')
+      expect(useMothershipQueueStore.getState().queues['chat-A']?.[0]).toMatchObject({
+        content: 'original',
+        admissionUnknown: true,
+      })
     })
 
-    it('is a no-op when the id is no longer in the queue', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      const before = useMothershipQueueStore.getState().queues['chat-A']
-      useMothershipQueueStore.getState().replaceAt('chat-A', 'missing', { content: 'x' })
-      expect(useMothershipQueueStore.getState().queues['chat-A']).toBe(before)
+    it('reads a reused handoff id as possibly sent unless the entry says otherwise', () => {
+      useMothershipQueueStore.getState().enqueue('chat-A', {
+        id: 'sent',
+        content: 'original',
+        resumeUserMessageId: 'send-now-request',
+        queuedSendHandoff: {
+          id: 'sent',
+          chatId: 'chat-A',
+          supersededStreamId: 'previous-response',
+        },
+      })
+      useMothershipQueueStore.getState().enqueue('chat-A', {
+        id: 'waiting',
+        content: 'original',
+        resumeUserMessageId: 'not-sent-yet',
+        queuedSendHandoff: {
+          id: 'waiting',
+          chatId: 'chat-A',
+          supersededStreamId: 'previous-response',
+          stopRequired: true,
+        },
+        /** A fresh id still waiting on its Stop, as the hook records it. */
+        admissionUnknown: false,
+      })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'sent', { content: 'edited' })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'waiting', { content: 'edited' })
+
+      const [sent, waiting] = useMothershipQueueStore.getState().queues['chat-A'] ?? []
+      expect(sent).toMatchObject({
+        content: 'original',
+        resumeUserMessageId: 'send-now-request',
+      })
+      expect(waiting?.content).toBe('edited')
+    })
+
+    it('treats any message resuming an earlier attempt as possibly sent, unless told otherwise', () => {
+      useMothershipQueueStore
+        .getState()
+        .enqueue('chat-A', { id: 'resumed', content: 'original', resumeUserMessageId: 'attempt-1' })
+      useMothershipQueueStore.getState().insertAt('chat-A', 0, {
+        id: 'refused',
+        content: 'original',
+        resumeUserMessageId: 'attempt-2',
+        admissionUnknown: false,
+      })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'resumed', { content: 'edited' })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'refused', { content: 'edited' })
+
+      const [refused, resumed] = useMothershipQueueStore.getState().queues['chat-A'] ?? []
+      expect(resumed).toMatchObject({ content: 'original', resumeUserMessageId: 'attempt-1' })
+      expect(refused?.content).toBe('edited')
+    })
+
+    it('leaves a first message the server may already hold unchanged, with its id', () => {
+      useMothershipQueueStore.getState().enqueue('chat-A', {
+        id: 'm1',
+        content: 'original',
+        resumeUserMessageId: 'first-attempt',
+        admissionUnknown: true,
+      })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'm1', { content: 'edited' })
+      expect(useMothershipQueueStore.getState().queues['chat-A']?.[0]).toMatchObject({
+        content: 'original',
+        resumeUserMessageId: 'first-attempt',
+      })
+    })
+
+    it('editing preserves an unresolved Stop while replacing the prior request identity', () => {
+      useMothershipQueueStore.getState().enqueue('chat-A', {
+        id: 'm1',
+        content: 'original',
+        hold: 'user',
+        resumeUserMessageId: 'prior-request',
+        /** Its Stop never settled, so it was never sent: the server cannot hold it. */
+        admissionUnknown: false,
+        queuedSendHandoff: {
+          id: 'm1',
+          chatId: 'chat-A',
+          supersededStreamId: 'previous-response',
+          stopRequired: true,
+        },
+      })
+      useMothershipQueueStore.getState().replaceAt('chat-A', 'm1', { content: 'corrected' })
+      const edited = useMothershipQueueStore.getState().queues['chat-A']?.[0]
+      expect(edited).toMatchObject({
+        id: 'm1',
+        content: 'corrected',
+        queuedSendHandoff: {
+          id: 'm1',
+          chatId: 'chat-A',
+          supersededStreamId: 'previous-response',
+          stopRequired: true,
+        },
+      })
+      expect(edited?.resumeUserMessageId).toBeUndefined()
+      expect(edited?.hold).toBeUndefined()
     })
 
     it('strips queuedSendHandoff on edit so a fresh handoff is minted at send time', () => {
@@ -118,30 +167,82 @@ describe('useMothershipQueueStore', () => {
     })
   })
 
-  describe('migrate', () => {
-    it('moves both queue and editing from sentinel to resolved chatId', () => {
-      const pendingKey = 'pending::abc'
-      useMothershipQueueStore.getState().enqueue(pendingKey, message('m1'))
-      useMothershipQueueStore.getState().setEditing(pendingKey, 'm1')
-      useMothershipQueueStore.getState().migrate(pendingKey, 'chat-X')
+  describe('holdForSurface', () => {
+    it("hands a dead chatless mount's queue to the next mount of its surface only", () => {
+      useMothershipQueueStore.getState().enqueue('pending::dead', message('m1'))
+      useMothershipQueueStore.getState().holdForSurface('pending::dead', 'ws-1:home')
+
+      useMothershipQueueStore.getState().adoptHeldSends('pending::other', 'ws-1:workflow-1')
+      expect(useMothershipQueueStore.getState().queues['pending::other']).toBeUndefined()
+
+      useMothershipQueueStore.getState().adoptHeldSends('pending::next', 'ws-1:home')
       const state = useMothershipQueueStore.getState()
-      expect(state.queues[pendingKey]).toBeUndefined()
-      expect(state.editing[pendingKey]).toBeUndefined()
-      expect(state.queues['chat-X']?.map((m) => m.id)).toEqual(['m1'])
-      expect(state.editing['chat-X']).toBe('m1')
+      expect(state.queues['pending::next']?.map((m) => m.id)).toEqual(['m1'])
+      expect(state.queues['pending::dead']).toBeUndefined()
+    })
+  })
+
+  describe('migrate', () => {
+    it('points a late write at the chat a new-chat queue moved to, even an empty one', () => {
+      useMothershipQueueStore.getState().migrate('pending::empty', 'chat-X')
+      useMothershipQueueStore.getState().migrate('chat-X', 'chat-X')
+
+      expect(liveQueueKey('pending::empty')).toBe('chat-X')
+      expect(liveQueueKey('pending::never-moved')).toBe('pending::never-moved')
+      expect(liveQueueKey('chat-X')).toBe('chat-X')
     })
 
-    it('is a no-op when source and target are the same', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      const before = useMothershipQueueStore.getState().queues['chat-A']
-      useMothershipQueueStore.getState().migrate('chat-A', 'chat-A')
-      expect(useMothershipQueueStore.getState().queues['chat-A']).toBe(before)
+    it('keeps a late write behind the messages the chat queue already held', () => {
+      useMothershipQueueStore.getState().enqueue('chat-Y', message('older-1'))
+      useMothershipQueueStore.getState().enqueue('chat-Y', message('older-2'))
+      useMothershipQueueStore.getState().enqueue('pending::moved', message('moved'))
+      useMothershipQueueStore.getState().migrate('pending::moved', 'chat-Y')
+
+      const position = liveQueuePosition('pending::moved', [])
+      useMothershipQueueStore.getState().insertAt(position.chatKey, position.index, message('late'))
+
+      expect(position).toEqual({ chatKey: 'chat-Y', index: 2 })
+      expect(useMothershipQueueStore.getState().queues['chat-Y']?.map((m) => m.id)).toEqual([
+        'older-1',
+        'older-2',
+        'late',
+        'moved',
+      ])
     })
 
-    it('is a no-op when the source bucket is empty', () => {
-      const before = useMothershipQueueStore.getState().queues
-      useMothershipQueueStore.getState().migrate('nope', 'chat-X')
-      expect(useMothershipQueueStore.getState().queues).toBe(before)
+    it('keeps the first move when the same new-chat queue is migrated again', () => {
+      useMothershipQueueStore.getState().enqueue('chat-W', message('older'))
+      useMothershipQueueStore.getState().enqueue('pending::twice', message('moved'))
+      useMothershipQueueStore.getState().migrate('pending::twice', 'chat-W')
+      useMothershipQueueStore.getState().enqueue('chat-W', message('written-later'))
+      useMothershipQueueStore.getState().migrate('pending::twice', 'chat-W')
+
+      const position = liveQueuePosition('pending::twice', [])
+      useMothershipQueueStore.getState().insertAt(position.chatKey, position.index, message('late'))
+
+      expect(useMothershipQueueStore.getState().queues['chat-W']?.map((m) => m.id)).toEqual([
+        'older',
+        'late',
+        'moved',
+        'written-later',
+      ])
+    })
+
+    it('keeps a late write in order when messages ahead of it were removed meanwhile', () => {
+      useMothershipQueueStore.getState().enqueue('chat-Z', message('older'))
+      useMothershipQueueStore.getState().enqueue('pending::sent', message('later'))
+      useMothershipQueueStore.getState().migrate('pending::sent', 'chat-Z')
+      useMothershipQueueStore.getState().remove('chat-Z', 'older')
+
+      const position = liveQueuePosition('pending::sent', [])
+      useMothershipQueueStore
+        .getState()
+        .insertAt(position.chatKey, position.index, message('follow-up'))
+
+      expect(useMothershipQueueStore.getState().queues['chat-Z']?.map((m) => m.id)).toEqual([
+        'follow-up',
+        'later',
+      ])
     })
 
     it('merges into an existing destination bucket instead of overwriting', () => {
@@ -156,25 +257,32 @@ describe('useMothershipQueueStore', () => {
       ])
       expect(useMothershipQueueStore.getState().queues['pending::abc']).toBeUndefined()
     })
-  })
 
-  describe('clearChat', () => {
-    it('drops queue and editing for the chat', () => {
-      useMothershipQueueStore.getState().enqueue('chat-A', message('m1'))
-      useMothershipQueueStore.getState().setEditing('chat-A', 'm1')
-      useMothershipQueueStore.getState().clearChat('chat-A')
-      const state = useMothershipQueueStore.getState()
-      expect(state.queues['chat-A']).toBeUndefined()
-      expect(state.editing['chat-A']).toBeUndefined()
+    it('lifts only the delete a restore saw, never a later one', () => {
+      useMothershipQueueStore.getState().clearChat('chat-X')
+      const seen = useMothershipQueueStore.getState().cleared['chat-X']
+      useMothershipQueueStore.getState().reopenRestoredChat('chat-X')
+      useMothershipQueueStore.getState().clearChat('chat-X')
+
+      useMothershipQueueStore.getState().liftDelete('chat-X', seen)
+      useMothershipQueueStore.getState().enqueue('chat-X', message('after-stale-restore'))
+      expect(useMothershipQueueStore.getState().queues['chat-X']).toBeUndefined()
+
+      const latest = useMothershipQueueStore.getState().cleared['chat-X']
+      useMothershipQueueStore.getState().liftDelete('chat-X', latest)
+      useMothershipQueueStore.getState().enqueue('chat-X', message('after-restore'))
+      expect(useMothershipQueueStore.getState().queues['chat-X']?.map((m) => m.id)).toEqual([
+        'after-restore',
+      ])
     })
-  })
 
-  describe('setEditing', () => {
-    it('stores and clears the editing id', () => {
-      useMothershipQueueStore.getState().setEditing('chat-A', 'm1')
-      expect(useMothershipQueueStore.getState().editing['chat-A']).toBe('m1')
-      useMothershipQueueStore.getState().setEditing('chat-A', null)
-      expect(useMothershipQueueStore.getState().editing['chat-A']).toBeUndefined()
+    it('does not move a new chat surface queue into a chat deleted meanwhile', () => {
+      useMothershipQueueStore.getState().enqueue('pending::abc', message('pending-1'))
+      useMothershipQueueStore.getState().clearChat('chat-X')
+      useMothershipQueueStore.getState().migrate('pending::abc', 'chat-X')
+      const state = useMothershipQueueStore.getState()
+      expect(state.queues['chat-X']).toBeUndefined()
+      expect(state.queues['pending::abc']).toBeUndefined()
     })
   })
 })

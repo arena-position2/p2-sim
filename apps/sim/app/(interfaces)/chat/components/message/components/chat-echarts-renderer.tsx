@@ -34,7 +34,7 @@ if (typeof window !== 'undefined') {
   if ('requestIdleCallback' in window) {
     window.requestIdleCallback(prefetch, { timeout: 3000 })
   } else {
-    window.setTimeout(prefetch, 1000)
+    setTimeout(prefetch, 1000)
   }
 }
 

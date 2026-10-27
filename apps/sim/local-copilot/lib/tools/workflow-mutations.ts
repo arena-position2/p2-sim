@@ -1,12 +1,12 @@
 import { getErrorMessage, toError } from '@sim/utils/errors'
-import type { ToolCallResult } from '@/lib/copilot/request/types'
-import { executeCreateWorkflow } from '@/lib/copilot/tools/handlers/workflow/mutations'
-import { editWorkflowServerTool } from '@/lib/copilot/tools/server/workflow/edit-workflow'
+import type { ToolCallResult } from '@/lib/mothership/request/types'
+import { executeCreateWorkflow } from '@/lib/mothership/tools/handlers/workflow/mutations'
+import { editWorkflowServerTool } from '@/lib/mothership/tools/server/workflow/edit-workflow'
 import {
   normalizeEditWorkflowArgs,
   resolveEditWorkflowOperations,
-} from '@/lib/copilot/tools/server/workflow/edit-workflow/normalize-args'
-import type { EditWorkflowParams } from '@/lib/copilot/tools/server/workflow/edit-workflow/types'
+} from '@/lib/mothership/tools/server/workflow/edit-workflow/normalize-args'
+import type { EditWorkflowParams } from '@/lib/workflows/editing/types'
 
 export interface LocalCopilotMutationContext {
   userId: string

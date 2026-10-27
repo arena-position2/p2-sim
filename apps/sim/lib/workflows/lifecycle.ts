@@ -16,10 +16,12 @@ import { env } from '@/lib/core/config/env'
 import { PlatformEvents } from '@/lib/core/telemetry'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { getSocketServerUrl } from '@/lib/core/utils/urls'
+import type { DbTransaction } from '@/lib/db/types'
 import { mcpPubSub } from '@/lib/mcp/pubsub'
 import { releaseWebhookPathClaims } from '@/lib/webhooks/path-claims'
 import { supersedeInFlightDeploymentOperations } from '@/lib/workflows/persistence/deployment-operations'
 import { getWorkflowById } from '@/lib/workflows/utils'
+import { lockActiveWorkspace } from '@/lib/workspaces/active-workspace'
 
 const logger = createLogger('WorkflowLifecycle')
 
@@ -27,6 +29,7 @@ interface ArchiveWorkflowOptions {
   requestId: string
   notifySocket?: boolean
   archivedAt?: Date
+  strictExternalCleanup?: boolean
 }
 
 async function notifyWorkflowArchived(workflowId: string, requestId: string): Promise<void> {
@@ -52,7 +55,8 @@ async function notifyWorkflowArchived(workflowId: string, requestId: string): Pr
 
 async function cleanupExternalWebhooksForWorkflow(
   workflowId: string,
-  requestId: string
+  requestId: string,
+  strict = false
 ): Promise<void> {
   try {
     const { cleanupExternalWebhook } = await import('@/lib/webhooks/provider-subscriptions')
@@ -71,8 +75,11 @@ async function cleanupExternalWebhooksForWorkflow(
 
     for (const webhookData of webhooksToCleanup) {
       try {
-        await cleanupExternalWebhook(webhookData.webhook, webhookData.workflow, requestId)
+        await cleanupExternalWebhook(webhookData.webhook, webhookData.workflow, requestId, {
+          throwOnError: strict,
+        })
       } catch (error) {
+        if (strict) throw error
         logger.warn(
           `[${requestId}] Failed to cleanup external webhook ${webhookData.webhook.id} for workflow ${workflowId}`,
           { error }
@@ -80,6 +87,7 @@ async function cleanupExternalWebhooksForWorkflow(
       }
     }
   } catch (error) {
+    if (strict) throw error
     logger.warn(`[${requestId}] Error during external webhook cleanup for workflow ${workflowId}`, {
       error,
     })
@@ -106,87 +114,14 @@ export async function archiveWorkflow(
     .from(workflowMcpTool)
     .where(and(eq(workflowMcpTool.workflowId, workflowId), isNull(workflowMcpTool.archivedAt)))
 
-  await db.transaction(async (tx) => {
-    await supersedeInFlightDeploymentOperations(tx, workflowId)
-    await releaseWebhookPathClaims(tx, workflowId)
+  await db.transaction((tx) => archiveWorkflowsInTransaction(tx, [workflowId], now))
 
-    await tx
-      .update(workflowSchedule)
-      .set({
-        archivedAt: now,
-        updatedAt: now,
-        status: 'disabled',
-        nextRunAt: null,
-        lastQueuedAt: null,
-      })
-      .where(and(eq(workflowSchedule.workflowId, workflowId), isNull(workflowSchedule.archivedAt)))
-
-    await tx
-      .update(webhook)
-      .set({
-        archivedAt: now,
-        updatedAt: now,
-        isActive: false,
-      })
-      .where(and(eq(webhook.workflowId, workflowId), isNull(webhook.archivedAt)))
-
-    await tx
-      .update(chat)
-      .set({
-        archivedAt: now,
-        updatedAt: now,
-        isActive: false,
-      })
-      .where(and(eq(chat.workflowId, workflowId), isNull(chat.archivedAt)))
-
-    await tx
-      .update(workflowMcpTool)
-      .set({
-        archivedAt: now,
-        updatedAt: now,
-      })
-      .where(and(eq(workflowMcpTool.workflowId, workflowId), isNull(workflowMcpTool.archivedAt)))
-
-    await tx
-      .update(workflowDeploymentVersion)
-      .set({
-        isActive: false,
-      })
-      .where(eq(workflowDeploymentVersion.workflowId, workflowId))
-
-    await tx
-      .update(workflow)
-      .set({
-        archivedAt: now,
-        updatedAt: now,
-        isDeployed: false,
-        isPublicApi: false,
-      })
-      .where(and(eq(workflow.id, workflowId), isNull(workflow.archivedAt)))
-  })
-
-  try {
-    PlatformEvents.workflowDeleted({
-      workflowId,
-      workspaceId: existingWorkflow.workspaceId || undefined,
-    })
-  } catch {}
-
-  if (options.notifySocket !== false) {
-    await notifyWorkflowArchived(workflowId, options.requestId)
-  }
-
-  await cleanupExternalWebhooksForWorkflow(workflowId, options.requestId)
-
-  if (existingWorkflow.workspaceId && mcpPubSub && affectedWorkflowMcpServers.length > 0) {
-    const uniqueServerIds = [...new Set(affectedWorkflowMcpServers.map((row) => row.serverId))]
-    for (const serverId of uniqueServerIds) {
-      mcpPubSub.publishWorkflowToolsChanged({
-        serverId,
-        workspaceId: existingWorkflow.workspaceId,
-      })
-    }
-  }
+  await finishWorkflowArchive(
+    workflowId,
+    existingWorkflow.workspaceId,
+    affectedWorkflowMcpServers.map((row) => row.serverId),
+    options
+  )
 
   return {
     archived: true,
@@ -249,6 +184,8 @@ export async function restoreWorkflow(
   const archivedAt = existingWorkflow.archivedAt
 
   await db.transaction(async (tx) => {
+    if (existingWorkflow.workspaceId) await lockActiveWorkspace(tx, existingWorkflow.workspaceId)
+
     await tx
       .update(workflow)
       .set({
@@ -363,17 +300,134 @@ export async function disableUserResources(userId: string): Promise<void> {
 
   const { archiveWorkspace } = await import('@/lib/workspaces/lifecycle')
 
+  /** Revoked first: the keys are the ban's access boundary, and an archive may fail. */
+  await db.delete(apiKey).where(eq(apiKey.userId, userId))
+
   const ownedWorkspaces = await db
     .select({ id: workspace.id })
     .from(workspace)
     .where(and(eq(workspace.ownerId, userId), isNull(workspace.archivedAt)))
 
-  await Promise.all([
-    ...ownedWorkspaces.map((w) => archiveWorkspace(w.id, { requestId })),
-    db.delete(apiKey).where(eq(apiKey.userId, userId)),
-  ])
+  for (const row of ownedWorkspaces) {
+    await archiveWorkspace(row.id, { requestId, expectedOwnerId: userId })
+  }
 
   logger.info(
     `[${requestId}] Disabled resources for user ${userId}: archived ${ownedWorkspaces.length} workspaces, deleted API keys`
   )
+}
+
+/**
+ * Durable archive state shared by single-workflow and compound Project archival. Each
+ * statement covers the whole batch, so the round trips do not grow with its size.
+ */
+export async function archiveWorkflowsInTransaction(
+  tx: DbTransaction,
+  workflowIds: readonly string[],
+  now: Date
+): Promise<void> {
+  if (workflowIds.length === 0) return
+  await supersedeInFlightDeploymentOperations(tx, workflowIds)
+  await releaseWebhookPathClaims(tx, workflowIds)
+
+  await tx
+    .update(workflowSchedule)
+    .set({
+      archivedAt: now,
+      updatedAt: now,
+      status: 'disabled',
+      nextRunAt: null,
+      lastQueuedAt: null,
+    })
+    .where(
+      and(inArray(workflowSchedule.workflowId, workflowIds), isNull(workflowSchedule.archivedAt))
+    )
+
+  await tx
+    .update(webhook)
+    .set({
+      archivedAt: now,
+      updatedAt: now,
+      isActive: false,
+    })
+    .where(and(inArray(webhook.workflowId, workflowIds), isNull(webhook.archivedAt)))
+
+  await tx
+    .update(chat)
+    .set({
+      archivedAt: now,
+      updatedAt: now,
+      isActive: false,
+    })
+    .where(and(inArray(chat.workflowId, workflowIds), isNull(chat.archivedAt)))
+
+  await tx
+    .update(workflowMcpTool)
+    .set({
+      archivedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(inArray(workflowMcpTool.workflowId, workflowIds), isNull(workflowMcpTool.archivedAt))
+    )
+
+  await tx
+    .update(workflowDeploymentVersion)
+    .set({
+      isActive: false,
+    })
+    .where(
+      and(
+        inArray(workflowDeploymentVersion.workflowId, workflowIds),
+        eq(workflowDeploymentVersion.isActive, true)
+      )
+    )
+
+  await tx
+    .update(workflow)
+    .set({
+      archivedAt: now,
+      updatedAt: now,
+      isDeployed: false,
+      isPublicApi: false,
+    })
+    .where(and(inArray(workflow.id, workflowIds), isNull(workflow.archivedAt)))
+}
+
+/** Best-effort external notifications run only after durable archive state commits. */
+export async function finishWorkflowArchive(
+  workflowId: string,
+  workspaceId: string | null,
+  serverIds: string[],
+  options: ArchiveWorkflowOptions
+): Promise<void> {
+  try {
+    PlatformEvents.workflowDeleted({
+      workflowId,
+      workspaceId: workspaceId || undefined,
+    })
+  } catch {}
+
+  if (options.notifySocket !== false) {
+    await notifyWorkflowArchived(workflowId, options.requestId)
+  }
+
+  await cleanupExternalWebhooksForWorkflow(
+    workflowId,
+    options.requestId,
+    options.strictExternalCleanup
+  )
+
+  if (workspaceId && mcpPubSub) {
+    for (const serverId of new Set(serverIds)) {
+      try {
+        mcpPubSub.publishWorkflowToolsChanged({ serverId, workspaceId })
+      } catch (error) {
+        logger.warn(
+          `[${options.requestId}] MCP tools-changed publish failed for server ${serverId}`,
+          { error }
+        )
+      }
+    }
+  }
 }

@@ -1,4 +1,4 @@
-import { TOOL_RUNTIME_SCHEMAS } from '@/lib/copilot/generated/tool-schemas-v1'
+import { TOOL_RUNTIME_SCHEMAS } from '@/lib/mothership/generated/tool-schemas-v1'
 import { toServerRegistryToolName } from '@/local-copilot/lib/tools/resolve-tool-name-alias'
 import type { LocalCopilotToolDefinition } from '@/local-copilot/lib/types'
 

@@ -16,10 +16,11 @@ describe('toServerRegistryToolName', () => {
     expect(toServerRegistryToolName('edit_content')).toBe('apply_file_edit')
   })
 
-  it('maps KB, search, and sandbox Arena names onto Cloud ids', () => {
+  it('maps KB, search, sandbox, and upload Arena names onto Cloud ids', () => {
     expect(toServerRegistryToolName('knowledge_base')).toBe('manage_knowledge_base')
     expect(toServerRegistryToolName('search_online')).toBe('web_search')
     expect(toServerRegistryToolName('function_execute')).toBe('run_function')
+    expect(toServerRegistryToolName('materialize_file')).toBe('save_upload')
   })
 
   it('leaves other tools unchanged', () => {
@@ -38,6 +39,7 @@ describe('resolveLocalCopilotToolName', () => {
       ['manage_knowledge_base', 'knowledge_base'],
       ['web_search', 'search_online'],
       ['run_function', 'function_execute'],
+      ['save_upload', 'materialize_file'],
     ] as const) {
       expect(resolveLocalCopilotToolName(cloud)).toEqual({ kind: 'ok', name: arena })
     }
@@ -62,6 +64,7 @@ describe('isArenaFilePipelineTool / isArenaAliasedServerTool', () => {
     expect(isArenaAliasedServerTool('knowledge_base')).toBe(true)
     expect(isArenaAliasedServerTool('search_online')).toBe(true)
     expect(isArenaAliasedServerTool('function_execute')).toBe(true)
+    expect(isArenaAliasedServerTool('materialize_file')).toBe(true)
     expect(isArenaAliasedServerTool('user_table')).toBe(false)
   })
 })

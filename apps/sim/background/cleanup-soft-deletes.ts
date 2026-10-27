@@ -1,5 +1,6 @@
 import { db, dbFor } from '@sim/db'
 import {
+  changelogRelease,
   copilotChats,
   document,
   folder as folderTable,
@@ -9,6 +10,7 @@ import {
   userTableDefinitions,
   workflow,
   workflowMcpServer,
+  workflowTest,
   workspaceFile,
   workspaceFiles,
 } from '@sim/db/schema'
@@ -19,6 +21,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import { type CleanupJobPayload, runCleanupWithLimits } from '@/lib/billing/cleanup-dispatcher'
 import {
   decrementStorageUsageForBillingContextInTx,
+  lockWorkspaceStorageForMutationInTx,
   resolveStorageBillingContext,
   type StorageBillingContext,
 } from '@/lib/billing/storage'
@@ -40,10 +43,12 @@ import {
   resolveCleanupOwnerScope,
 } from '@/lib/cleanup/resource-scope'
 import { deduplicateFolderName } from '@/lib/folders/naming'
+import { settleDetachedConnectorReservations } from '@/lib/knowledge/connectors/detachment'
 import { hardDeleteDocuments } from '@/lib/knowledge/documents/service'
 import type { StorageContext } from '@/lib/uploads'
 import { isUsingCloudStorage, StorageService } from '@/lib/uploads'
 import { allocateUniqueWorkspaceFileName } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
+import { releaseWorkspaceFileVersionsForPurgeInTx } from '@/lib/uploads/contexts/workspace/workspace-file-versions'
 import { deleteFileMetadata } from '@/lib/uploads/server/metadata'
 import { getWorkspaceFileSize } from '@/lib/uploads/shared/types'
 import { deduplicateWorkflowName } from '@/lib/workflows/utils'
@@ -253,6 +258,9 @@ async function deleteExpiredLegacyWorkspaceFileRows(
   return result
 }
 
+/** Contexts whose bytes count toward the workspace's billed storage: owned bodies are billed too. */
+const BILLED_FILE_CONTEXTS: readonly StorageContext[] = ['workspace', 'test', 'changelog']
+
 async function deleteExpiredUnbilledWorkspaceFileRows(
   rows: WorkspaceFileScope['multiContextRows'],
   retentionDate: Date,
@@ -261,7 +269,7 @@ async function deleteExpiredUnbilledWorkspaceFileRows(
   const result = { deleted: 0, failed: 0 }
   const rowsByContext = new Map<StorageContext, WorkspaceFileScope['multiContextRows']>()
   for (const row of rows) {
-    if (row.context === 'workspace') continue
+    if (BILLED_FILE_CONTEXTS.includes(row.context)) continue
     const bucket = rowsByContext.get(row.context)
     if (bucket) bucket.push(row)
     else rowsByContext.set(row.context, [row])
@@ -303,7 +311,7 @@ async function deleteExpiredBillableWorkspaceFileRows(
   const result = { deleted: 0, failed: 0 }
   const rowsByWorkspace = new Map<string, WorkspaceFileScope['multiContextRows']>()
   for (const row of rows) {
-    if (row.context !== 'workspace') continue
+    if (!BILLED_FILE_CONTEXTS.includes(row.context)) continue
     if (!row.workspaceId) {
       result.failed++
       logger.error(`[${label}/workspaceFiles] Billable row has no workspace attribution`, {
@@ -332,16 +340,40 @@ async function deleteExpiredBillableWorkspaceFileRows(
     for (const batch of chunkArray(workspaceRows, DEFAULT_DELETE_CHUNK_SIZE)) {
       try {
         const deletedCount = await db.transaction(async (tx) => {
+          await lockWorkspaceStorageForMutationInTx(tx, workspaceId)
+          const fileIds = batch.map(({ id }) => id)
+          await tx
+            .delete(workflowTest)
+            .where(
+              and(
+                inArray(workflowTest.bodyFileId, fileIds),
+                isNotNull(workflowTest.deletedAt),
+                lt(workflowTest.deletedAt, retentionDate)
+              )
+            )
+          await tx.delete(changelogRelease).where(
+            inArray(
+              changelogRelease.bodyFileId,
+              tx
+                .select({ id: workspaceFiles.id })
+                .from(workspaceFiles)
+                .where(
+                  and(
+                    inArray(workspaceFiles.id, fileIds),
+                    isNotNull(workspaceFiles.deletedAt),
+                    lt(workspaceFiles.deletedAt, retentionDate)
+                  )
+                )
+            )
+          )
+          await releaseWorkspaceFileVersionsForPurgeInTx(tx, fileIds, retentionDate)
           const deletedRows = await tx
             .delete(workspaceFiles)
             .where(
               and(
-                inArray(
-                  workspaceFiles.id,
-                  batch.map(({ id }) => id)
-                ),
+                inArray(workspaceFiles.id, fileIds),
                 eq(workspaceFiles.workspaceId, workspaceId),
-                eq(workspaceFiles.context, 'workspace'),
+                inArray(workspaceFiles.context, BILLED_FILE_CONTEXTS),
                 isNotNull(workspaceFiles.deletedAt),
                 lt(workspaceFiles.deletedAt, retentionDate)
               )
@@ -439,11 +471,17 @@ async function cleanupExpiredKnowledgeBases(
       isNotNull(knowledgeBase.deletedAt),
       lt(knowledgeBase.deletedAt, retentionDate)
     ),
-    onBatch: (rows: { id: string }[]) =>
-      hardDeleteKnowledgeBaseDocuments(
-        rows.map(({ id }) => id),
-        label
-      ),
+    /**
+     * The bases' DELETE cascades their connectors away, so a detached connector's reservation is
+     * settled here: an overdrawn one before the documents (their deletion floors usage at zero),
+     * the rest after them, so a deletion that fails partway leaves every step's ledger consistent.
+     */
+    onBatch: async (rows: { id: string }[]) => {
+      const knowledgeBaseIds = rows.map(({ id }) => id)
+      await settleDetachedConnectorReservations(knowledgeBaseIds, 'overdrawn')
+      await hardDeleteKnowledgeBaseDocuments(knowledgeBaseIds, label)
+      await settleDetachedConnectorReservations(knowledgeBaseIds, 'remaining')
+    },
   }
   return scope.kind === 'workspace'
     ? chunkedBatchDelete({ ...options, workspaceIds: scope.ids })

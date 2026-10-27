@@ -1,11 +1,11 @@
 import { z } from 'zod'
-import { defineRouteContract } from '@/lib/api/contracts'
 import {
   MAX_ID_LENGTH,
   organizationIdSchema,
   workflowIdSchema,
   workspaceIdSchema,
 } from '@/lib/api/contracts/primitives'
+import { defineRouteContract } from '@/lib/api/contracts/types'
 import { MAX_SELECTOR_OPTIONS } from '@/lib/selectors/limits'
 import { type SelectorKey, selectorManifest } from '@/lib/selectors/manifest'
 import { selectorContextKeys } from '@/lib/selectors/types'

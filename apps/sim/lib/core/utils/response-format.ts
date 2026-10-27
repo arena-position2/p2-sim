@@ -1,4 +1,6 @@
 import { createLogger } from '@sim/logger'
+import { getErrorMessage } from '@sim/utils/errors'
+import { isRecordLike } from '@sim/utils/object'
 import { materializeLargeValueRefSyncOrThrow } from '@/lib/execution/payloads/cache'
 import { isLargeArrayManifest } from '@/lib/execution/payloads/large-array-manifest-metadata'
 import { isLargeValueRef } from '@/lib/execution/payloads/large-value-ref'
@@ -23,14 +25,11 @@ export function extractFieldsFromSchema(schema: any): Field[] {
   // Handle legacy format with fields array
   if (Array.isArray(schema.fields)) {
     return schema.fields
-      .filter(
-        (field): field is { name: string; type?: string; description?: string } =>
-          field &&
-          typeof field === 'object' &&
-          typeof field.name === 'string' &&
-          field.name.trim() !== ''
-      )
-      .map((field) => ({
+      .filter((field: unknown): field is { name: string; type?: string; description?: string } => {
+        if (!isRecordLike(field)) return false
+        return typeof field.name === 'string' && field.name.trim() !== ''
+      })
+      .map((field: { name: string; type?: string; description?: string }) => ({
         name: field.name.trim(),
         type: field.type || 'string',
         description: field.description,
@@ -89,40 +88,11 @@ export function parseResponseFormatSafely(
     }
     return responseFormatValue
   } catch (error) {
-    logger.warn(`Failed to parse response format for block ${blockId}:`, error)
+    // User configuration that falls back to the block's default outputs (the editor's lint
+    // reports it); every output-schema derivation re-reads it, so it is not warning-worthy.
+    logger.debug('Failed to parse response format', { blockId, message: getErrorMessage(error) })
     return null
   }
-}
-
-/**
- * Extract field values from a parsed JSON object based on selected output paths
- * Used for both workspace and chat client field extraction
- */
-export function extractFieldValues(
-  parsedContent: any,
-  selectedOutputs: string[],
-  blockId: string
-): Record<string, any> {
-  const extractedValues: Record<string, any> = {}
-
-  for (const outputId of selectedOutputs) {
-    const blockIdForOutput = extractBlockIdFromOutputId(outputId)
-
-    if (blockIdForOutput !== blockId) {
-      continue
-    }
-
-    const path = extractPathFromOutputId(outputId, blockIdForOutput)
-
-    if (path) {
-      const current = traverseObjectPathInternal(parsedContent, path)
-      if (current !== undefined) {
-        extractedValues[path] = current
-      }
-    }
-  }
-
-  return extractedValues
 }
 
 /**
@@ -152,7 +122,7 @@ export function parseOutputContentSafely(output: any): any {
   if (typeof output.content === 'string') {
     try {
       return JSON.parse(output.content)
-    } catch (e) {
+    } catch {
       // Fallback to original structure if parsing fails
       return output
     }

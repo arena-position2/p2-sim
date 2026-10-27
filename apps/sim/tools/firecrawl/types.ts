@@ -403,6 +403,8 @@ export interface ExtractResponse extends ToolResponse {
     jobId: string
     success: boolean
     data: Record<string, any>
+    /** Absent when Firecrawl reported no credit count, so hosted-key billing can reject it. */
+    creditsUsed?: number
   }
 }
 
@@ -566,18 +568,3 @@ export interface FirecrawlCreditUsageResponse extends ToolResponse {
     billingPeriodEnd?: string | null
   }
 }
-
-export type FirecrawlResponse =
-  | ScrapeResponse
-  | SearchResponse
-  | FirecrawlCrawlResponse
-  | MapResponse
-  | ExtractResponse
-  | AgentResponse
-  | ParseResponse
-  | FirecrawlCrawlStatusResponse
-  | FirecrawlCancelCrawlResponse
-  | FirecrawlBatchScrapeResponse
-  | FirecrawlBatchScrapeStatusResponse
-  | FirecrawlExtractStatusResponse
-  | FirecrawlCreditUsageResponse

@@ -1,4 +1,3 @@
-import type { Edge } from 'reactflow'
 import { getAccurateTokenCount, truncateToTokenLimit } from '@/lib/tokenization/accurate'
 import { sanitizeForExport } from '@/lib/workflows/sanitization/json-sanitizer'
 import { getMessageContentText } from '@/local-copilot/lib/providers/message-content'
@@ -557,7 +556,7 @@ function buildCompactWorkflowState(
     return summary
   })
 
-  const edges = workflow.edges.map((edge: Edge) => ({
+  const edges = workflow.edges.map((edge) => ({
     id: edge.id,
     source: edge.source,
     target: edge.target,

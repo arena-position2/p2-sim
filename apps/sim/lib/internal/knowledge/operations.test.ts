@@ -1,19 +1,21 @@
-/**
- * @vitest-environment node
- */
+import { createExecutorPrincipal } from '@sim/testing/factories/principal.factory'
+import {
+  billingAttributionMock,
+  billingAttributionMockFns,
+} from '@sim/testing/mocks/billing-attribution.mock'
+import {
+  knowledgeSearchUseCaseMock,
+  knowledgeSearchUseCaseMockFns,
+} from '@sim/testing/mocks/knowledge-search-use-case.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  resolveBillingAttribution: vi.fn(),
   listKnowledgeTags: { execute: vi.fn() },
-  searchKnowledge: { execute: vi.fn() },
   syncKnowledgeConnector: { execute: vi.fn() },
   connectorSynced: vi.fn(),
 }))
 
-vi.mock('@/lib/billing/core/billing-attribution', () => ({
-  resolveBillingAttribution: mocks.resolveBillingAttribution,
-}))
+vi.mock('@/lib/billing/core/billing-attribution', () => billingAttributionMock)
 
 vi.mock('@/lib/knowledge/api/internal-route', () => ({
   internalKnowledgeActorUserId: (principal: { subjectUserId?: string }) =>
@@ -62,9 +64,7 @@ vi.mock('@/lib/knowledge/application/documents', () => ({
   upsertKnowledgeDocument: { execute: vi.fn() },
 }))
 
-vi.mock('@/lib/knowledge/application/search', () => ({
-  searchKnowledge: mocks.searchKnowledge,
-}))
+vi.mock('@/lib/knowledge/application/search', () => knowledgeSearchUseCaseMock)
 
 vi.mock('@/lib/knowledge/application/tags', () => ({
   listKnowledgeTags: mocks.listKnowledgeTags,
@@ -86,17 +86,15 @@ import {
   syncConnectorOperation,
 } from '@/lib/internal/knowledge/operations'
 
-const principal = {
-  kind: 'delegated' as const,
-  serviceId: 'executor' as const,
+const { mockResolveBillingAttribution } = billingAttributionMockFns
+const { mockSearchKnowledgeExecute } = knowledgeSearchUseCaseMockFns
+
+const principal = createExecutorPrincipal({
   subjectUserId: 'trusted-user',
-  workspaceId: 'workspace-1',
-  delegationId: 'delegation-1',
   audience: 'sim:knowledge',
-  issuedAt: new Date('2026-01-01T00:00:00.000Z'),
   expiresAt: new Date('2026-01-01T00:05:00.000Z'),
-  delegationContext: { kind: 'workflow_execution' as const, workflowId: 'workflow-1' },
-}
+  delegationContext: { kind: 'workflow_execution', workflowId: 'workflow-1' },
+})
 
 function createContext(): KnowledgeOperationContext {
   return { principal, headers: new Headers({ 'x-billing': 'snapshot' }) }
@@ -131,7 +129,7 @@ describe('Knowledge direct operations', () => {
 
   it('bills the knowledge-base workspace without asserting the workflow workspace', async () => {
     const attribution = { actorUserId: 'trusted-user', workspaceId: 'workspace-2' }
-    mocks.resolveBillingAttribution.mockResolvedValue(attribution)
+    mockResolveBillingAttribution.mockResolvedValue(attribution)
     mocks.syncKnowledgeConnector.execute.mockImplementation(async ({ input }) => {
       await expect(input.resolveBillingAttribution('workspace-2')).resolves.toBe(attribution)
       return {
@@ -145,7 +143,7 @@ describe('Knowledge direct operations', () => {
 
     const result = await syncConnectorOperation('kb-1', 'connector-1', false, context)
 
-    expect(mocks.resolveBillingAttribution).toHaveBeenCalledWith({
+    expect(mockResolveBillingAttribution).toHaveBeenCalledWith({
       actorUserId: 'trusted-user',
       workspaceId: 'workspace-2',
     })
@@ -166,7 +164,7 @@ describe('Knowledge direct operations', () => {
   })
 
   it('searches by knowledge base id without asserting the workflow workspace', async () => {
-    mocks.searchKnowledge.execute.mockResolvedValue({
+    mockSearchKnowledgeExecute.mockResolvedValue({
       results: [],
       query: 'answer',
       knowledgeBaseIds: ['kb-1'],
@@ -182,7 +180,7 @@ describe('Knowledge direct operations', () => {
       context
     )
 
-    expect(mocks.searchKnowledge.execute).toHaveBeenCalledWith({
+    expect(mockSearchKnowledgeExecute).toHaveBeenCalledWith({
       principal,
       input: expect.objectContaining({
         knowledgeBaseIds: ['kb-1'],
@@ -193,7 +191,7 @@ describe('Knowledge direct operations', () => {
       }),
       request: { headers: context.headers },
     })
-    expect(mocks.searchKnowledge.execute.mock.calls[0][0].input).not.toHaveProperty('workspaceId')
+    expect(mockSearchKnowledgeExecute.mock.calls[0][0].input).not.toHaveProperty('workspaceId')
     expect(result.body).toEqual({
       success: true,
       data: {
@@ -208,7 +206,7 @@ describe('Knowledge direct operations', () => {
   })
 
   it('presents embedding identity as chunkId so the search contract can validate results', async () => {
-    mocks.searchKnowledge.execute.mockResolvedValue({
+    mockSearchKnowledgeExecute.mockResolvedValue({
       results: [
         {
           embeddingId: 'embedding-1',
@@ -222,6 +220,8 @@ describe('Knowledge direct operations', () => {
           chunkIndex: 0,
           metadata: {},
           similarity: 0.8,
+          rankScore: 0.42,
+          rank: 1,
         },
       ],
       query: 'answer',
@@ -250,6 +250,8 @@ describe('Knowledge direct operations', () => {
             chunkIndex: 0,
             metadata: {},
             similarity: 0.8,
+            rankScore: 0.42,
+            rank: 1,
             knowledgeBaseId: 'kb-1',
             chunkId: 'embedding-1',
             workspaceId: 'workspace-1',

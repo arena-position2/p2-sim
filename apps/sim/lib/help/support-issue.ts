@@ -70,9 +70,12 @@ export async function uploadHelpSupportAttachments(
 }
 
 export async function persistHelpSupportIssue(input: PersistHelpSupportIssueInput): Promise<void> {
+  if (!input.userId) {
+    throw new Error('Help support issue requires a signed-in user')
+  }
   await db.insert(helpSupportIssue).values({
     id: input.id,
-    userId: input.userId ?? null,
+    userId: input.userId,
     userEmail: input.userEmail,
     workspaceId: input.workspaceId ?? null,
     workflowId: input.workflowId ?? null,

@@ -4,18 +4,19 @@ import {
   assertOperationCapability,
   assertOperationOAuthPolicy,
 } from '@/lib/core/application/operation'
+import { defineWorkspaceOperation } from '@/lib/core/application/workspace-operation'
 
 export type AuditLogPrincipal = Extract<
   Principal,
-  { kind: 'session' | 'personal_api_key' | 'oauth_access_token' }
+  { kind: 'session' | 'personal_api_key' | 'oauth_access_token' | 'delegated' }
 >
 
 export interface AuditLogOperation<Id extends string = string> extends ApplicationOperation<Id> {
   readonly authority: 'organization_admin'
   readonly organizationRoles: readonly ['admin', 'owner']
   readonly workspaceApiKey: 'deny'
-  readonly oauthScope: 'api:read'
-  readonly principalKinds: readonly ['session', 'personal_api_key', 'oauth_access_token']
+  readonly oauthScope?: 'api:read'
+  readonly principalKinds: readonly AuditLogPrincipal['kind'][]
 }
 
 function defineAuditLogOperation<const Id extends string>(
@@ -32,6 +33,15 @@ function defineAuditLogOperation<const Id extends string>(
 }
 
 export const auditLogOperations = {
+  // permission-group-exempt: exporting the organization audit trail requires organization administrator authority
+  export: defineAuditLogOperation({
+    id: 'audit_logs.export',
+    capability: 'none',
+    authority: 'organization_admin',
+    organizationRoles: ['admin', 'owner'],
+    workspaceApiKey: 'deny',
+    principalKinds: ['session'],
+  }),
   // permission-group-exempt: the organization audit trail is authorized by organization admin or owner role, a scope no workspace-shaped permission group can name
   list: defineAuditLogOperation({
     id: 'audit_logs.list',
@@ -40,7 +50,7 @@ export const auditLogOperations = {
     authority: 'organization_admin',
     organizationRoles: ['admin', 'owner'],
     workspaceApiKey: 'deny',
-    principalKinds: ['session', 'personal_api_key', 'oauth_access_token'],
+    principalKinds: ['session', 'personal_api_key', 'oauth_access_token', 'delegated'],
   }),
   // permission-group-exempt: same organization-admin authority as the list it expands; no group key names the audit trail
   readDetail: defineAuditLogOperation({
@@ -50,6 +60,26 @@ export const auditLogOperations = {
     authority: 'organization_admin',
     organizationRoles: ['admin', 'owner'],
     workspaceApiKey: 'deny',
-    principalKinds: ['session', 'personal_api_key', 'oauth_access_token'],
+    principalKinds: ['session', 'personal_api_key', 'oauth_access_token', 'delegated'],
+  }),
+} as const
+
+/** Private workspace reads retain the public operation identity and require current Mothership access. */
+export const copilotAuditLogOperations = {
+  list: defineWorkspaceOperation({
+    id: auditLogOperations.list.id,
+    minimumRole: 'read',
+    workspaceApiKey: 'deny',
+    capability: 'copilot.use',
+    principalKinds: ['delegated'],
+    delegatedServices: ['copilot'],
+  }),
+  readDetail: defineWorkspaceOperation({
+    id: auditLogOperations.readDetail.id,
+    minimumRole: 'read',
+    workspaceApiKey: 'deny',
+    capability: 'copilot.use',
+    principalKinds: ['delegated'],
+    delegatedServices: ['copilot'],
   }),
 } as const

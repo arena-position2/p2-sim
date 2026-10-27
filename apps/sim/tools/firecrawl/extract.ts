@@ -85,7 +85,7 @@ export const extractTool: ToolConfig<ExtractParams, ExtractResponse> = {
     },
   },
 
-  hosting: firecrawlHosting(),
+  hosting: firecrawlHosting<ExtractParams>(),
 
   request: {
     modelInput: {

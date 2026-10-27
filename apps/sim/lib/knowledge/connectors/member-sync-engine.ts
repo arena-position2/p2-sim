@@ -11,7 +11,13 @@ import {
   knowledgeDocumentObservation,
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
-import { getErrorMessage, toError } from '@sim/utils/errors'
+import {
+  getErrorMessage,
+  getTransientDatabaseFailure,
+  type TransientDatabaseFailureClass,
+  toError,
+} from '@sim/utils/errors'
+import { chunkArray } from '@sim/utils/helpers'
 import { generateId } from '@sim/utils/id'
 import { randomInt } from '@sim/utils/random'
 import { and, asc, eq, gt, inArray, isNull, lte, notExists, sql } from 'drizzle-orm'
@@ -40,6 +46,8 @@ import {
   syncContextForToken,
 } from '@/lib/knowledge/connectors/access-token'
 import { getConnectorFailureDiagnostic } from '@/lib/knowledge/connectors/connector-error'
+import type { ImageAdmissionState } from '@/lib/knowledge/connectors/image-admission'
+import { requiresConnectorIndexing } from '@/lib/knowledge/connectors/indexing-policy'
 import {
   beginListingCheckpoint,
   type ListingCheckpoint,
@@ -54,34 +62,52 @@ import {
 } from '@/lib/knowledge/connectors/member-access'
 import {
   applyMemberDocumentLifecycle,
+  lockProjectionPage,
   materializeDocumentAcls,
   recordMemberObservations,
+  rematerializeDocumentAcls,
   removeMemberObservationsForDocuments,
   removeUnseenMemberObservations,
+  renewMemberObservationsInScopes,
+  resurrectObservedDocuments,
   rewriteConnectorAcls,
+  tombstoneDocumentsObservedOnlyBy,
 } from '@/lib/knowledge/connectors/member-observations'
 import { inviteWorkspaceMembersToCredentialGroup } from '@/lib/knowledge/connectors/member-provisioning'
-import { runConnectorContentPass } from '@/lib/knowledge/connectors/sync-content-pass'
+import {
+  removeDisabledImages,
+  runConnectorContentPass,
+} from '@/lib/knowledge/connectors/sync-content-pass'
+import { resolveDatabaseRetryDelayMs } from '@/lib/knowledge/connectors/sync-database-retry'
 import {
   deferConnectorSync,
   getConnectorSyncDeferral,
 } from '@/lib/knowledge/connectors/sync-deferral'
 import {
+  ACL_CHANGE_BATCH_SIZE,
+  ACL_WRITE_BATCH_SIZE,
   CONNECTOR_AUTO_DISABLED_ERROR,
   CONNECTOR_FAILURE_BACKOFF_CAP_MINUTES,
   connectorFailureBackoffMinutes,
+  IMAGES_DEFERRED_NOTICE,
   MAX_CONSECUTIVE_FAILURES,
   MEMBER_CHANGE_FEED_FULL_RECRAWL_MINUTES,
   MEMBER_FULL_RECRAWL_MINUTES,
+  MEMBER_SCOPE_RENEW_AFTER_MS,
+  MEMBER_SCOPE_RENEWAL_BUDGET_MS,
+  MEMBER_SCOPE_RENEWAL_PREFIX_BATCH,
   MEMBER_SUSPENDED_PURGE_DAYS,
   MEMBER_SYNC_MAX_PAGES_PER_MEMBER,
   MEMBER_SYNC_SOFT_BUDGET_SECONDS,
+  noticeRequiresFullListing,
   SOURCE_CONTENT_ERROR,
 } from '@/lib/knowledge/connectors/sync-limits'
 import {
+  aclPageTransaction,
   assertSyncLeaseHeldInTx,
   createMemberSyncLease,
   holdsMemberSyncLockToken,
+  type LeaseTransaction,
   MEMBER_LOCKABLE_CONNECTOR_STATUSES,
   SyncLockLostException,
   stillHoldsMemberSyncLock,
@@ -95,17 +121,21 @@ import {
   ConnectorSyncCapacityError,
   classifyListing,
   classifySuspectListing,
+  countLiveConnectorDocuments,
   createSyncRunState,
+  keepsRecordedDocCount,
   loadPageCorpus,
   processDocOps,
   RETRY_WINDOW_DAYS,
   runChangeFeedPass,
+  staleSeen,
   sweepStuckDocuments,
 } from '@/lib/knowledge/connectors/sync-primitives'
 import { getRetryAfterMs } from '@/lib/knowledge/documents/utils'
 import { getConnectorRequiredScopes } from '@/connectors/auth'
 import { CONNECTOR_REGISTRY } from '@/connectors/registry.server'
 import type {
+  AccessibleScopePage,
   ConnectorConfig,
   ExternalDocument,
   SyncResult,
@@ -115,8 +145,6 @@ import { PER_MEMBER_LISTING_CONTEXT } from '@/connectors/utils'
 
 const logger = createLogger('ConnectorMemberSyncEngine')
 
-/** Observers tried, in listing order, before a document's hydration is given up on. */
-const HYDRATION_OBSERVER_ATTEMPTS = 3
 /** A minted token is reused for this long before the member is re-minted. */
 const MEMBER_TOKEN_REUSE_MS = 45 * 60 * 1000
 /** Members whose tokens one run keeps at once; a memory backstop, not a working-set limit. */
@@ -140,6 +168,8 @@ export interface MemberSyncResult extends SyncResult {
   docsListed: number
   docsHydratedOnce: number
   observationsAdded: number
+  /** Observations kept fresh because the source still grants the scope they fall under. */
+  observationsRenewed: number
   observationsRemoved: number
   docsTombstoned: number
   docsResurrected: number
@@ -189,6 +219,8 @@ interface MemberListingOutcome {
   resumable: boolean
   suspect: boolean
   contentFailures: boolean
+  /** Images this listing held back for the per-sync cap; the next listing must be full to offer them again. */
+  imagesDeferred: boolean
   /** Cursor to store when this outcome lands: a value, null to close the feed, undefined to leave it. */
   changeCursor: string | null | undefined
   checkpoint?: ListingCheckpoint
@@ -212,6 +244,7 @@ function emptyResult(): MemberSyncResult {
     docsListed: 0,
     docsHydratedOnce: 0,
     observationsAdded: 0,
+    observationsRenewed: 0,
     observationsRemoved: 0,
     docsTombstoned: 0,
     docsResurrected: 0,
@@ -318,6 +351,87 @@ export function buildMemberSyncFailureUpdate(
 }
 
 /**
+ * The connector row written after the database, not the source, failed a members-mode run. The
+ * members-mode counterpart of `buildSyncDatabaseRetryUpdate`: the breaker keeps only the source
+ * failures already counted, and the retry waits the delay `resolveDatabaseRetryDelayMs` chose.
+ */
+export function buildMemberSyncDatabaseRetryUpdate(
+  now: Date,
+  previousFailures: number | null | undefined,
+  errorMessage: string,
+  retryDelayMs: number
+) {
+  return {
+    memberSyncStatus: 'error' as const,
+    lastMemberSyncError: errorMessage,
+    nextMemberSyncAt: new Date(now.getTime() + retryDelayMs),
+    memberSyncConsecutiveFailures: previousFailures ?? 0,
+    memberSyncLockToken: null,
+    memberSyncLockLeaseAt: null,
+    updatedAt: now,
+  }
+}
+
+/**
+ * Whether a members-mode run moved the sync forward: it completed a member, or wrote documents.
+ * `docsDeleted` holds the document lifecycle's purges, which the run log records as `docs_purged`.
+ */
+export function memberRunMadeProgress(result: MemberSyncResult): boolean {
+  return result.membersCompleted + result.docsAdded + result.docsUpdated + result.docsDeleted > 0
+}
+
+/**
+ * The connector row a failed members-mode run writes. A deterministic capacity rejection waits for
+ * an operator, a transient database failure retries without touching the breaker, and anything
+ * else climbs the ladder toward auto-disable.
+ */
+export async function resolveMemberSyncFailureUpdate(
+  error: unknown,
+  failure: {
+    connectorId: string
+    runId: string
+    previousFailures: number
+    errorMessage: string
+    retryAfterMs?: number
+    /** Whether the run completed a member or wrote documents before it failed. */
+    madeProgress: boolean
+  }
+) {
+  const now = new Date()
+  if (error instanceof ConnectorSyncCapacityError) {
+    return {
+      memberSyncStatus: 'error' as const,
+      lastMemberSyncError: failure.errorMessage,
+      nextMemberSyncAt: null,
+      memberSyncConsecutiveFailures: failure.previousFailures,
+      memberSyncLockToken: null,
+      memberSyncLockLeaseAt: null,
+      updatedAt: now,
+    }
+  }
+  if (getTransientDatabaseFailure(error)) {
+    return buildMemberSyncDatabaseRetryUpdate(
+      now,
+      failure.previousFailures,
+      failure.errorMessage,
+      await resolveDatabaseRetryDelayMs({
+        kind: 'member',
+        connectorId: failure.connectorId,
+        runId: failure.runId,
+        previousFailures: failure.previousFailures,
+        madeProgress: failure.madeProgress,
+      })
+    )
+  }
+  return buildMemberSyncFailureUpdate(
+    now,
+    failure.previousFailures,
+    failure.errorMessage,
+    failure.retryAfterMs
+  )
+}
+
+/**
  * When a member who completed is next due: exactly one interval on, with no
  * jitter, so they are due whenever the connector's own (jittered) run lands.
  * Null on a manual-only connector: with its next manual run.
@@ -350,6 +464,16 @@ interface MemberSyncRun {
   deadlineAt: number
   result: MemberSyncResult
   lease: ReturnType<typeof createMemberSyncLease>
+  /**
+   * Documents whose observations this run removed, which the lifecycle checks
+   * for a remaining observer before anything else.
+   */
+  unobservedDocumentIds: Set<string>
+  /**
+   * Whether observations decide which documents exist: false when a dedicated
+   * content credential owns the corpus, which outlives its last observer.
+   */
+  tombstonesUnobserved: boolean
 }
 
 /** A token minted for a member, reused within the run until it ages out. */
@@ -411,25 +535,33 @@ function createMemberTokenCache(input: {
 }
 
 /**
- * Runs `fn` in a transaction that first proves this run still holds the
- * connector's member lease, taking the connector row's lock so the scheduler
- * cannot reclaim the lease mid-transaction. A run that stalled past the lease
+ * Runs `fn` in a transaction whose last statement proves this run still holds
+ * the connector's member lease, taking the connector row's lock so the
+ * scheduler cannot reclaim the lease before the transaction commits; a lost
+ * lease rolls everything `fn` wrote back. Proving it last keeps the connector
+ * row unlocked while `fn` waits on document rows. A run that stalled past the lease
  * TTL and resumed after a replacement took over therefore never lands its
- * observations or ACLs over the replacement's; it ends as superseded.
+ * observations or ACLs over the replacement's; it ends as superseded. A page
+ * that assigns ACLs passes `aclPage`: it writes at most one page, which fires
+ * the projection fan-out, so it takes the lock and statement bounds of every
+ * connector-lease ACL page. Other bodies keep the role's own timeouts.
  */
 async function withMemberLease<T>(
   run: Pick<MemberSyncRun, 'connectorId' | 'runId'>,
-  fn: (tx: DbOrTx) => Promise<T>
+  fn: (tx: DbOrTx) => Promise<T>,
+  options: { aclPage?: boolean } = {}
 ): Promise<T> {
-  return db.transaction(async (tx) => {
+  const body = async (tx: DbOrTx) => {
+    const written = await fn(tx)
     const [held] = await tx
       .select({ id: knowledgeConnector.id })
       .from(knowledgeConnector)
       .where(stillHoldsMemberSyncLock(run.connectorId, run.runId))
       .for('update')
     if (!held) throw new SyncLockLostException(run.connectorId)
-    return fn(tx)
-  })
+    return written
+  }
+  return options.aclPage ? aclPageTransaction(body) : db.transaction(body)
 }
 
 async function acquireMemberSyncLock(
@@ -513,9 +645,22 @@ function membershipRewrite(value: unknown): MembershipRewriteCheckpoint | null {
     : null
 }
 
-/** Keeps observations available until every changed ACL is rewritten, resuming by document identity. */
+/**
+ * Keeps observations available until every changed ACL is rewritten, resuming by document identity.
+ *
+ * For a member being removed, each page also tombstones the documents nobody
+ * else observes, in the transaction that advances the checkpoint: the
+ * member's deletion cascades its observations away, after which nothing
+ * records which documents it alone kept alive, and the absence reconcile does
+ * not run once no member with a completed listing remains. Only where
+ * observations decide existence (`tombstonesUnobserved`); a service-owned
+ * corpus outlives its last observer. A walk that is not a removal resurrects
+ * what the lifecycle would on each page, so pages a withdrawn removal already
+ * tombstoned come back with the member's restored ACLs in the same run.
+ */
 export async function resumeMembershipRewrites(
-  run: Pick<MemberSyncRun, 'connectorId' | 'runId' | 'deadlineAt' | 'lease'>
+  run: Pick<MemberSyncRun, 'connectorId' | 'runId' | 'deadlineAt' | 'lease'> &
+    Partial<Pick<MemberSyncRun, 'tombstonesUnobserved' | 'result'>>
 ): Promise<boolean> {
   for (;;) {
     if (Date.now() >= run.deadlineAt) return false
@@ -537,39 +682,71 @@ export async function resumeMembershipRewrites(
     if (!member) return true
     const checkpoint = membershipRewrite(member.checkpoint)
     if (!checkpoint) throw new Error('Invalid membership ACL checkpoint')
-    await withMemberLease(run, async (tx) => {
-      const documents = await tx
-        .select({ documentId: knowledgeDocumentObservation.documentId })
-        .from(knowledgeDocumentObservation)
-        .where(
-          and(
-            eq(knowledgeDocumentObservation.memberId, member.id),
-            checkpoint.cursor
-              ? gt(knowledgeDocumentObservation.documentId, checkpoint.cursor)
-              : undefined
+    await withMemberLease(
+      run,
+      async (tx) => {
+        const documents = await tx
+          .select({ documentId: knowledgeDocumentObservation.documentId })
+          .from(knowledgeDocumentObservation)
+          .where(
+            and(
+              eq(knowledgeDocumentObservation.memberId, member.id),
+              checkpoint.cursor
+                ? gt(knowledgeDocumentObservation.documentId, checkpoint.cursor)
+                : undefined
+            )
           )
+          .orderBy(asc(knowledgeDocumentObservation.documentId))
+          .limit(ACL_CHANGE_BATCH_SIZE)
+        /**
+         * The page is the leading documents whose chunks fit one page of projection rows, so the
+         * cursor only ever passes documents whose ACLs this transaction rewrote.
+         */
+        const { page } = await lockProjectionPage(
+          tx,
+          documents.map((row) => row.documentId)
         )
-        .orderBy(asc(knowledgeDocumentObservation.documentId))
-        .limit(500)
-      await materializeDocumentAcls(
-        run.connectorId,
-        documents.map((row) => row.documentId),
-        tx
-      )
-      if (documents.length === 0 && checkpoint.removeMember) {
-        await tx.delete(knowledgeConnectorMember).where(eq(knowledgeConnectorMember.id, member.id))
-      } else {
-        await tx
-          .update(knowledgeConnectorMember)
-          .set({
-            listingCheckpoint:
-              documents.length === 0
-                ? null
-                : { ...checkpoint, cursor: documents.at(-1)!.documentId },
-          })
-          .where(eq(knowledgeConnectorMember.id, member.id))
-      }
-    })
+        const pageDocuments = documents.slice(0, page.length)
+        await materializeDocumentAcls(
+          run.connectorId,
+          pageDocuments.map((row) => row.documentId),
+          tx
+        )
+        if (checkpoint.removeMember && run.tombstonesUnobserved && pageDocuments.length > 0) {
+          const tombstoned = await tombstoneDocumentsObservedOnlyBy(
+            tx,
+            run.connectorId,
+            member.id,
+            pageDocuments.map((row) => row.documentId)
+          )
+          if (run.result) run.result.docsTombstoned += tombstoned
+        }
+        if (!checkpoint.removeMember && run.tombstonesUnobserved && pageDocuments.length > 0) {
+          const resurrected = await resurrectObservedDocuments(
+            tx,
+            run.connectorId,
+            pageDocuments.map((row) => row.documentId)
+          )
+          if (run.result) run.result.docsResurrected += resurrected
+        }
+        if (documents.length === 0 && checkpoint.removeMember) {
+          await tx
+            .delete(knowledgeConnectorMember)
+            .where(eq(knowledgeConnectorMember.id, member.id))
+        } else {
+          await tx
+            .update(knowledgeConnectorMember)
+            .set({
+              listingCheckpoint:
+                documents.length === 0
+                  ? null
+                  : { ...checkpoint, cursor: pageDocuments.at(-1)!.documentId },
+            })
+            .where(eq(knowledgeConnectorMember.id, member.id))
+        }
+      },
+      { aclPage: true }
+    )
   }
 }
 
@@ -772,6 +949,9 @@ async function reconcileMembership(
                     memberSyncedThrough: null,
                     lastCompleteListingAt: null,
                     lastListedCount: null,
+                    scopeRenewedAt: null,
+                    scopeRenewalCursor: null,
+                    scopeRenewalStartedAt: null,
                   }
                 : {}),
               updatedAt: now,
@@ -979,6 +1159,9 @@ async function recordMemberFailure(
               changeCursor: null,
               memberSyncedThrough: null,
               lastCompleteListingAt: null,
+              scopeRenewedAt: null,
+              scopeRenewalCursor: null,
+              scopeRenewalStartedAt: null,
             }
           : {}),
         consecutiveFailures: failures,
@@ -997,6 +1180,123 @@ async function recordMemberFailure(
  */
 function isScopeUnavailableError(connectorConfig: ConnectorConfig, error: unknown): boolean {
   return connectorConfig.isListingScopeUnavailableError?.(error) === true
+}
+
+/**
+ * Keeps a member's access evidence fresh for a connector that grants access per
+ * container: their observations under every container the source still grants them
+ * are renewed, so evidence does not lapse while a listing that takes longer than the
+ * evidence window is still in progress, and lapses only for containers they lost.
+ * The container listing is paged and its cursor stored, so a renewal that outgrows
+ * one run resumes where it stopped instead of repeating its first pages. Best
+ * effort: a failure here leaves the listing to establish access itself.
+ */
+async function renewMemberAccessScopes(input: {
+  run: MemberSyncRun
+  member: MemberRow
+  connectorConfig: ConnectorConfig
+  sourceConfig: Record<string, unknown>
+  tokens: MemberTokenCache
+  syncContext: Record<string, unknown>
+}): Promise<void> {
+  const { run, member, connectorConfig } = input
+  if (!connectorConfig.listAccessibleScopes) return
+  const now = new Date()
+  const renewBefore = new Date(now.getTime() - MEMBER_SCOPE_RENEW_AFTER_MS)
+  /** Observations under lost containers stay stale, so only the member's own watermark says renewal is due. */
+  if (member.scopeRenewedAt && member.scopeRenewedAt > renewBefore) return
+  const deadlineAt = Math.min(run.deadlineAt, Date.now() + MEMBER_SCOPE_RENEWAL_BUDGET_MS)
+  /** A resumed pass keeps its start, so the watermark never claims more than the whole pass renewed. */
+  const passStartedAt = member.scopeRenewalStartedAt ?? now
+  let cursor = member.scopeRenewalCursor ?? undefined
+  /** Where the prefixes not yet renewed were read from; an unfinished pass resumes there. */
+  let batchCursor = cursor
+  let pending: string[] = []
+  let restartedExpiredCursor = false
+  let scopes = 0
+  let renewed = 0
+  let finished = false
+  const saveProgress = (values: Partial<typeof knowledgeConnectorMember.$inferInsert>) =>
+    withMemberLease(run, (tx) =>
+      tx
+        .update(knowledgeConnectorMember)
+        .set(values)
+        .where(eq(knowledgeConnectorMember.id, member.id))
+    )
+  try {
+    while (Date.now() < deadlineAt) {
+      let page: AccessibleScopePage
+      try {
+        page = await connectorConfig.listAccessibleScopes(
+          await input.tokens.get(member.id),
+          input.sourceConfig,
+          cursor,
+          input.syncContext
+        )
+      } catch (error) {
+        if (
+          !cursor ||
+          restartedExpiredCursor ||
+          connectorConfig.isListingCursorInvalidError?.(error) !== true
+        )
+          throw error
+        cursor = undefined
+        batchCursor = undefined
+        pending = []
+        restartedExpiredCursor = true
+        continue
+      }
+      if (page.nextCursor && page.nextCursor === cursor)
+        throw new Error('Access scope pagination did not advance')
+      scopes += page.prefixes.length
+      pending.push(...page.prefixes)
+      cursor = page.nextCursor
+      if (cursor && pending.length < MEMBER_SCOPE_RENEWAL_PREFIX_BATCH) continue
+      const renewal = await renewMemberObservationsInScopes({
+        connectorId: run.connectorId,
+        memberId: member.id,
+        scopePrefixes: pending,
+        renewBefore,
+        deadlineAt,
+        beforeBatch: run.lease.beatIfDue,
+        withLease: (fn) => withMemberLease(run, fn),
+      })
+      renewed += renewal.renewed
+      if (!renewal.finished) break
+      pending = []
+      batchCursor = cursor
+      if (!cursor) {
+        finished = true
+        await saveProgress({
+          scopeRenewedAt: passStartedAt,
+          scopeRenewalCursor: null,
+          scopeRenewalStartedAt: null,
+        })
+        break
+      }
+    }
+    if (!finished)
+      await saveProgress({
+        scopeRenewalCursor: batchCursor ?? null,
+        scopeRenewalStartedAt: passStartedAt,
+      })
+  } catch (error) {
+    if (error instanceof SyncLockLostException) throw error
+    logger.warn('Member access scope renewal failed; the listing will establish access', {
+      connectorId: run.connectorId,
+      memberId: member.id,
+      error: getErrorMessage(error),
+    })
+  } finally {
+    run.result.observationsRenewed += renewed
+    logger.info('Renewed member observations by access scope', {
+      connectorId: run.connectorId,
+      memberId: member.id,
+      scopes,
+      renewed,
+      finished,
+    })
+  }
 }
 
 interface MemberListing {
@@ -1039,7 +1339,7 @@ async function listForMember(input: {
     (!feed && !connectorConfig.supportsIncrementalSync) ||
     connectorConfig.supportsChangeFeed?.(sourceConfig) === false ||
     Boolean(member.listingCheckpoint) ||
-    member.lastError === SOURCE_CONTENT_ERROR ||
+    noticeRequiresFullListing(member.lastError) ||
     input.forceFull === true ||
     shouldListFully(
       member.memberSyncedThrough,
@@ -1199,15 +1499,20 @@ async function listForMember(input: {
 /**
  * Writes what one member's listing established: observations for everything
  * they saw, removals only after a full, complete, non-suspect listing or by
- * the change feed's explicit word, and the member's schedule, watermark, and
- * feed cursor. Returns the documents whose ACL changed.
+ * the change feed's explicit word, then the ACLs those decide through
+ * `rematerialize`, and only then the member's schedule, watermark, and feed
+ * cursor. The checkpoint lands last so a run that fails while rematerialising
+ * rereads the same listing or feed window; a replayed feed removal finds its
+ * observation already gone, so every document the feed names is rematerialised,
+ * not only the observations this call removed.
  */
 async function applyMemberListing(
   run: MemberSyncRun,
   outcome: MemberListingOutcome,
   documentIdByExternalId: Map<string, string>,
-  syncIntervalMinutes: number
-): Promise<Set<string>> {
+  syncIntervalMinutes: number,
+  rematerialize: (documentIds: Set<string>) => Promise<unknown>
+): Promise<void> {
   const affected = new Set<string>()
   const seenDocumentIds: string[] = []
   for (const externalId of outcome.seenExternalIds) {
@@ -1226,15 +1531,19 @@ async function applyMemberListing(
         break
       }
       await run.lease.beatIfDue()
-      const batch = await withMemberLease(run, (tx) =>
-        removeUnseenMemberObservations(
-          tx,
-          outcome.member.id,
-          outcome.observationRunId ?? run.runId,
-          async (removed) => {
-            await materializeDocumentAcls(run.connectorId, removed, tx)
-          }
-        )
+      const batch = await withMemberLease(
+        run,
+        (tx) =>
+          removeUnseenMemberObservations(
+            tx,
+            outcome.member.id,
+            outcome.observationRunId ?? run.runId,
+            async (removed) => {
+              await materializeDocumentAcls(run.connectorId, removed, tx)
+              for (const documentId of removed) run.unobservedDocumentIds.add(documentId)
+            }
+          ),
+        { aclPage: true }
       )
       run.result.observationsRemoved += batch.removed
       if (batch.finished) break
@@ -1268,13 +1577,23 @@ async function applyMemberListing(
         removedDocumentIds
       )
       run.result.observationsRemoved += removed.length
-      for (const documentId of removed) affected.add(documentId)
+      for (const documentId of removedDocumentIds) affected.add(documentId)
+      for (const documentId of removed) run.unobservedDocumentIds.add(documentId)
     }
+  })
+
+  await rematerialize(affected)
+
+  await withMemberLease(run, async (tx) => {
     await tx
       .update(knowledgeConnectorMember)
       .set({
         consecutiveFailures: 0,
-        lastError: outcome.contentFailures ? SOURCE_CONTENT_ERROR : null,
+        lastError: outcome.contentFailures
+          ? SOURCE_CONTENT_ERROR
+          : outcome.imagesDeferred
+            ? IMAGES_DEFERRED_NOTICE
+            : null,
         ...(outcome.mode === 'full' &&
         (!outcome.checkpoint || (outcome.checkpoint.complete && !outcome.checkpoint.unsafe))
           ? { lastListedCount: outcome.listedCount }
@@ -1298,7 +1617,6 @@ async function applyMemberListing(
 
   if (outcome.complete) run.result.membersCompleted += 1
   else run.result.membersIncomplete += 1
-  return affected
 }
 
 /** Exclusion pauses content ingestion, while observations must still track source access for restoration. */
@@ -1387,21 +1705,18 @@ async function syncDedicatedMemberContent(input: {
   })
   run.result.docsHydratedOnce = pass.hydratedCount
   const incompleteListing =
-    !pass.complete || pass.checkpoint.unsafe || pass.checkpoint.contentFailures
-  if (pass.checkpoint.contentFailures) run.result.listingIncomplete = true
+    !pass.complete ||
+    pass.checkpoint.unsafe ||
+    pass.checkpoint.contentFailures ||
+    pass.checkpoint.imagesDeferred
+  if (pass.checkpoint.contentFailures || pass.checkpoint.imagesDeferred)
+    run.result.listingIncomplete = true
   const contentNotice = pass.holdNotice
+  /** Counted before the lease transaction: a scan of the whole connector never holds its row. */
+  const count = keepsRecordedDocCount(pass.complete, connector)
+    ? null
+    : await countLiveConnectorDocuments(run.connectorId)
   await withMemberLease(run, async (tx) => {
-    const [{ count }] = await tx
-      .select({ count: sql<number>`count(*)::int` })
-      .from(document)
-      .where(
-        and(
-          eq(document.connectorId, run.connectorId),
-          eq(document.userExcluded, false),
-          isNull(document.archivedAt),
-          isNull(document.deletedAt)
-        )
-      )
     const now = new Date()
     await tx.insert(knowledgeConnectorSyncLog).values({
       id: run.runId,
@@ -1425,13 +1740,16 @@ async function syncDedicatedMemberContent(input: {
           ? { lastSyncAt: new Date(pass.checkpoint.startedAt) }
           : {}),
         ...(pass.complete ? { listingCheckpoint: null } : {}),
-        lastSyncDocCount: count,
+        ...(count === null ? {} : { lastSyncDocCount: count }),
         lastSyncError: contentNotice,
         updatedAt: now,
       })
       .where(stillHoldsMemberSyncLock(run.connectorId, run.runId))
   })
-  return { complete: pass.complete }
+  return {
+    complete: pass.complete,
+    imageExtractionsAdmitted: pass.checkpoint.imageExtractionsAdmitted,
+  }
 }
 
 async function completeMemberSync(
@@ -1506,6 +1824,7 @@ async function completeMemberSync(
         docsUnchanged: result.docsUnchanged,
         docsHydratedOnce: result.docsHydratedOnce,
         observationsAdded: result.observationsAdded,
+        observationsRenewed: result.observationsRenewed,
         observationsRemoved: result.observationsRemoved,
         docsTombstoned: result.docsTombstoned,
         docsResurrected: result.docsResurrected,
@@ -1540,13 +1859,19 @@ async function completeMemberSync(
   })
 }
 
-async function failMemberSyncLog(runId: string, result: MemberSyncResult, errorMessage: string) {
+async function failMemberSyncLog(
+  runId: string,
+  result: MemberSyncResult,
+  errorMessage: string,
+  databaseFailureClass?: TransientDatabaseFailureClass
+) {
   await db
     .update(knowledgeConnectorMemberSyncLog)
     .set({
       status: 'failed',
       completedAt: new Date(),
       errorMessage,
+      databaseFailureClass: databaseFailureClass ?? null,
       membersClaimed: result.membersClaimed,
       membersCompleted: result.membersCompleted,
       membersIncomplete: result.membersIncomplete,
@@ -1559,6 +1884,7 @@ async function failMemberSyncLog(runId: string, result: MemberSyncResult, errorM
       docsUnchanged: result.docsUnchanged,
       docsHydratedOnce: result.docsHydratedOnce,
       observationsAdded: result.observationsAdded,
+      observationsRenewed: result.observationsRenewed,
       observationsRemoved: result.observationsRemoved,
       docsTombstoned: result.docsTombstoned,
       docsResurrected: result.docsResurrected,
@@ -1605,12 +1931,21 @@ async function deferMemberSync(run: MemberSyncRun, syncIntervalMinutes: number):
  * group binding is gone, and suspends every member so their tokens leave
  * every ACL. Nothing is purged: re-enabling restores access from the retained
  * observations.
+ *
+ * Suspension lands first: a reader needs an active member's observation as
+ * well as an overlapping ACL, so suspending the members revokes their reads at
+ * once, and anything that rematerialises an ACL meanwhile computes nobody.
+ * Every ACL is then revoked in short lease-proving pages, and only after the
+ * last page does the connector flip to disabled: one statement over the whole
+ * connector outlasted the statement timeout, rolled back, and retried forever.
+ * No reader gains access between pages, and an interrupted run leaves the
+ * binding still gone, which sends the next run back here to finish. Returns false when the run's budget
+ * ended first; the caller re-dispatches.
  */
-async function disableMemberSync(run: MemberSyncRun, reason: string): Promise<void> {
+async function disableMemberSync(run: MemberSyncRun, reason: string): Promise<boolean> {
   const now = new Date()
-  /** Suspension, the ACLs it changes, and the disable itself land together, and only under the lease. */
-  await withMemberLease(run, async (tx) => {
-    await tx
+  await withMemberLease(run, (tx) =>
+    tx
       .update(knowledgeConnectorMember)
       .set({ status: 'suspended', suspendedAt: now, updatedAt: now })
       .where(
@@ -1619,24 +1954,49 @@ async function disableMemberSync(run: MemberSyncRun, reason: string): Promise<vo
           eq(knowledgeConnectorMember.status, 'active')
         )
       )
-    await tx
-      .update(document)
-      .set({ acl: [], aclRequirements: [], aclVerifiedAt: null })
-      .where(eq(document.connectorId, run.connectorId))
-    await tx
-      .update(knowledgeConnector)
-      .set({
-        memberSyncStatus: 'disabled',
-        lastMemberSyncError: reason,
-        nextMemberSyncAt: null,
-        memberSyncLockToken: null,
-        memberSyncLockLeaseAt: null,
-        updatedAt: now,
-      })
-      .where(holdsMemberSyncLockToken(run.connectorId, run.runId))
+  )
+  const revoked = await rewriteConnectorAcls(run.connectorId, EMPTY_ACL, {
+    deadlineAt: run.deadlineAt,
+    beforeBatch: run.lease.beatIfDue,
+    lease: run.lease,
   })
+  if (!revoked) {
+    logger.info('Member sync spent its budget revoking access before disabling', {
+      connectorId: run.connectorId,
+    })
+    return false
+  }
+  /** One statement that both proves the lease and hands it back with the disabled flag. */
+  const disabled = await db
+    .update(knowledgeConnector)
+    .set({
+      memberSyncStatus: 'disabled',
+      lastMemberSyncError: reason,
+      nextMemberSyncAt: null,
+      memberSyncLockToken: null,
+      memberSyncLockLeaseAt: null,
+      updatedAt: new Date(),
+    })
+    .where(stillHoldsMemberSyncLock(run.connectorId, run.runId))
+    .returning({ id: knowledgeConnector.id })
+  if (disabled.length === 0) throw new SyncLockLostException(run.connectorId)
   await failMemberSyncLog(run.runId, run.result, reason)
   logger.warn('Member sync disabled', { connectorId: run.connectorId, reason })
+  return true
+}
+
+/**
+ * Ends a run whose disable ran out of budget mid-revocation: the lease is
+ * handed back with members remaining, so the next run is dispatched at once
+ * and, finding the binding still gone, resumes the revocation.
+ */
+async function finishDisableLater(
+  run: MemberSyncRun,
+  syncIntervalMinutes: number
+): Promise<MemberSyncResult> {
+  run.result.membersRemaining = true
+  const landed = await completeMemberSync(run, syncIntervalMinutes)
+  return landed ? run.result : skipped(run.result, 'sync_superseded')
 }
 
 /**
@@ -1679,6 +2039,7 @@ export async function executeMemberSync(
 
   const [kbRow] = await db
     .select({
+      isSearchIndex: knowledgeBase.isSearchIndex,
       userId: knowledgeBase.userId,
       workspaceId: knowledgeBase.workspaceId,
       organizationId: knowledgeBase.organizationId,
@@ -1706,6 +2067,9 @@ export async function executeMemberSync(
       .where(eq(knowledgeConnector.id, connectorId))
     return skipped(result, 'knowledge_base_deleted')
   }
+  if (!requiresConnectorIndexing(kbRow.isSearchIndex))
+    return skipped(result, 'connector_not_syncable')
+
   if (!kbRow.workspaceId && !kbRow.organizationId) {
     throw new Error(
       `Knowledge base ${connectorBeforeLock.knowledgeBaseId} is missing workspace billing context`
@@ -1761,6 +2125,8 @@ export async function executeMemberSync(
       deadlineAt: runStartedAt.getTime() + MEMBER_SYNC_SOFT_BUDGET_SECONDS * 1000,
       result,
       lease: createMemberSyncLease(connectorId, runId),
+      unobservedDocumentIds: new Set(),
+      tombstonesUnobserved: !connector.credentialId,
     }
     await insertMemberSyncLog(runId, connectorId, runStartedAt)
 
@@ -1778,7 +2144,13 @@ export async function executeMemberSync(
         }
       }
       if (!connector.credentialGroupId || !connector.credentialGroupOptionId) {
-        await disableMemberSync(run, 'Connector is no longer attached to a Credential Group option')
+        if (
+          !(await disableMemberSync(
+            run,
+            'Connector is no longer attached to a Credential Group option'
+          ))
+        )
+          return finishDisableLater(run, connector.syncIntervalMinutes)
         return {
           ...skipped(result, 'connector_not_syncable'),
           error: 'Connector is no longer attached to a Credential Group option',
@@ -1835,7 +2207,7 @@ export async function executeMemberSync(
               kbOwner,
               billingAttribution,
             })
-          : { complete: true }
+          : { complete: true, imageExtractionsAdmitted: 0 }
         : undefined
       /**
        * Anyone who joined the workspace since the last run is invited now, so
@@ -1876,6 +2248,8 @@ export async function executeMemberSync(
       }
 
       const credentialIdByMemberId = new Map<string, string>()
+      /** One bounded ACL page under this run's lease. */
+      const aclPage: LeaseTransaction = (fn) => withMemberLease(run, fn, { aclPage: true })
       const tokens = createMemberTokenCache({
         run,
         connectorConfig,
@@ -1883,6 +2257,30 @@ export async function executeMemberSync(
         sourceConfig,
       })
 
+      /** A content pass that ran already removed disabled images; otherwise it happens here. */
+      let imageRemovalFinished = true
+      if (!(connector.credentialId && contentDue)) {
+        const deletedBefore = result.docsDeleted
+        imageRemovalFinished = await removeDisabledImages({
+          connectorId,
+          connector,
+          lease: run.lease,
+          leaseKind: 'member',
+          runId,
+          deadlineAt: run.deadlineAt,
+          result,
+        })
+        /** Image removals are purges too, so the run log counts them with the lifecycle's. */
+        result.docsPurged += result.docsDeleted - deletedBefore
+      }
+      /**
+       * One image budget for the whole run, not one per member listing, seeded by what
+       * the service-account pass already read.
+       */
+      const imageAdmission: ImageAdmissionState = {
+        imageExtractionsAdmitted: serviceContent?.imageExtractionsAdmitted ?? 0,
+        imagesDeferred: false,
+      }
       while (Date.now() < run.deadlineAt) {
         const member = await claimNextMember(run)
         if (!member) break
@@ -1895,6 +2293,8 @@ export async function executeMemberSync(
           ...PER_MEMBER_LISTING_CONTEXT,
         }
         let contentFailures = false
+        let imagesDeferred = false
+        imageAdmission.imagesDeferred = false
         const processPage = async (
           documents: ExternalDocument[],
           checkpoint: ListingCheckpoint,
@@ -1911,34 +2311,45 @@ export async function executeMemberSync(
                 )
               ).values(),
             ]
-            await withMemberLease(run, async (tx) => {
-              result.observationsAdded += await recordMemberObservations(
-                tx,
-                member.id,
-                documentIds,
-                checkpoint.generationId
-              )
-              await materializeDocumentAcls(connectorId, documentIds, tx)
-              if (durableCheckpoint && checkpoint.contentFailures) {
-                await tx
-                  .update(knowledgeConnectorMember)
-                  .set({ listingCheckpoint: checkpoint })
-                  .where(eq(knowledgeConnectorMember.id, member.id))
-              }
-              if (!serviceContent) {
-                for (let offset = 0; offset < documentIds.length; offset += 500) {
+            /**
+             * Observations and the read watermark land first, one lease transaction per
+             * {@link ACL_WRITE_BATCH_SIZE} documents (the failure checkpoint with the
+             * first, since forcing a later relist is the conservative side); only the
+             * documents whose ACL now differs are then rematerialised, in pages bounded
+             * by their projection rows. A crash in between leaves them hidden until the
+             * next run rematerialises every seen document, never shown too widely.
+             */
+            const pages =
+              documentIds.length > 0 ? chunkArray(documentIds, ACL_WRITE_BATCH_SIZE) : [[]]
+            for (const [index, page] of pages.entries()) {
+              await withMemberLease(run, async (tx) => {
+                result.observationsAdded += await recordMemberObservations(
+                  tx,
+                  member.id,
+                  page,
+                  checkpoint.generationId
+                )
+                if (index === 0 && durableCheckpoint && checkpoint.contentFailures) {
+                  await tx
+                    .update(knowledgeConnectorMember)
+                    .set({ listingCheckpoint: checkpoint })
+                    .where(eq(knowledgeConnectorMember.id, member.id))
+                }
+                if (!serviceContent && page.length > 0) {
                   await tx
                     .update(document)
                     .set({ sourceSeenAt: run.runStartedAt })
                     .where(
                       and(
                         eq(document.connectorId, connectorId),
-                        inArray(document.id, documentIds.slice(offset, offset + 500))
+                        inArray(document.id, page),
+                        staleSeen(run.runStartedAt)
                       )
                     )
                 }
-              }
-            })
+              })
+            }
+            await rematerializeDocumentAcls(connectorId, documentIds, aclPage, run.lease.beatIfDue)
             result.docsListed += attempted.length
           }
           if (!serviceContent) {
@@ -1983,6 +2394,7 @@ export async function executeMemberSync(
               corpus,
               forceRehydrate: false,
               state: pageState,
+              matchContentHash: connectorConfig.matchContentHash,
             })
             const pendingIds = new Set(pendingOps.map((op) => op.extDoc.externalId))
             await persistAttempted(documents.filter((item) => !pendingIds.has(item.externalId)))
@@ -1996,6 +2408,7 @@ export async function executeMemberSync(
               corpus,
               forceRehydrate: false,
               state: pageState,
+              matchContentHash: connectorConfig.matchContentHash,
               hydration: {
                 concurrency: connectorConfig.contentConcurrency,
                 getDocument: async (externalId) => {
@@ -2026,17 +2439,31 @@ export async function executeMemberSync(
               lease: run.lease,
               documentAccess: 'members',
               deadlineAt: durableCheckpoint ? run.deadlineAt : undefined,
-              onBatchComplete: async (attempted) => {
+              imageAdmission,
+              onBatchComplete: async (attempted, heldBackExisting) => {
                 result.docsHydratedOnce += attempted.filter((item) => item.contentDeferred).length
-                await persistAttempted(attempted)
+                await persistAttempted([...attempted, ...heldBackExisting])
               },
             })
+            if (imageAdmission.imagesDeferred) {
+              checkpoint.imagesDeferred = true
+              imagesDeferred = true
+              result.listingIncomplete = true
+            }
             if (rejectedCredentialError) throw rejectedCredentialError
             if (!finished) return false
           } else {
             await observeAttempted(documents)
           }
         }
+        await renewMemberAccessScopes({
+          run,
+          member,
+          connectorConfig,
+          sourceConfig,
+          tokens,
+          syncContext,
+        })
         const listed = await listForMember({
           run,
           member,
@@ -2083,19 +2510,28 @@ export async function executeMemberSync(
           complete: listed.complete,
           resumable: listed.resumable,
           suspect,
-          contentFailures: contentFailures || Boolean(listed.checkpoint?.contentFailures),
+          /**
+           * A listing still resuming relists fully regardless, so only this run's own failures are
+           * reported; the generation's failures carry over once it completes, forcing the next full
+           * listing that retries them.
+           */
+          contentFailures:
+            contentFailures || (!listed.resumable && Boolean(listed.checkpoint?.contentFailures)),
+          imagesDeferred:
+            imagesDeferred || (!listed.resumable && Boolean(listed.checkpoint?.imagesDeferred)),
           changeCursor: suspect ? undefined : listed.changeCursor,
           checkpoint: listed.checkpoint,
           observationRunId: listed.observationRunId,
         }
         const relevantIds = [...outcome.seenExternalIds, ...outcome.removedExternalIds]
-        const affected = await applyMemberListing(
+        await applyMemberListing(
           run,
           outcome,
           await loadDocumentIdsByExternalId(connectorId, relevantIds),
-          connector.syncIntervalMinutes
+          connector.syncIntervalMinutes,
+          (affected) =>
+            rematerializeDocumentAcls(connectorId, affected, aclPage, run.lease.beatIfDue)
         )
-        await withMemberLease(run, (tx) => materializeDocumentAcls(connectorId, affected, tx))
       }
 
       /** A service-owned corpus outlives its last observer; only the content pass removes it. */
@@ -2104,7 +2540,9 @@ export async function executeMemberSync(
          * Nobody has completed a listing yet — a connector that just entered
          * members mode, waiting for its first member to connect — so an
          * unobserved document says nothing about access and must not be
-         * tombstoned, let alone purged a week later.
+         * tombstoned, let alone purged a week later. What this run explicitly
+         * unobserved is tombstoned regardless, including after removing the
+         * last member that had completed a listing.
          */
         const [listed] = await db
           .select({ count: sql<number>`count(*)::int` })
@@ -2123,11 +2561,12 @@ export async function executeMemberSync(
           withLease: (fn) => withMemberLease(run, fn),
           deadlineAt: run.deadlineAt,
           allowRemoval: (listed?.count ?? 0) > 0,
+          unobservedDocumentIds: run.unobservedDocumentIds,
         })
-        result.docsTombstoned = lifecycle.tombstoned
-        result.docsResurrected = lifecycle.resurrected
-        result.docsPurged = lifecycle.purged
-        result.docsDeleted = lifecycle.purged
+        result.docsTombstoned += lifecycle.tombstoned
+        result.docsResurrected += lifecycle.resurrected
+        result.docsPurged += lifecycle.purged
+        result.docsDeleted += lifecycle.purged
         result.membersRemaining = !lifecycle.finished
       }
 
@@ -2144,6 +2583,7 @@ export async function executeMemberSync(
       result.membersRemaining =
         result.membersRemaining ||
         serviceContent?.complete === false ||
+        !imageRemovalFinished ||
         (await countDueMembers(run, binding)) > 0
       const landed = await completeMemberSync(run, connector.syncIntervalMinutes)
       if (!landed) {
@@ -2158,7 +2598,9 @@ export async function executeMemberSync(
       }
       logger.info('Member sync completed', { connectorId, runId, ...result })
       return result
-    } catch (error) {
+    } catch (caught) {
+      /** A failed disable of a gone binding replaces the error the failure path records. */
+      let error: unknown = caught
       if (error instanceof SyncLockLostException) {
         logger.warn('Member sync abandoned — lock was reclaimed while this run was executing', {
           connectorId,
@@ -2177,17 +2619,27 @@ export async function executeMemberSync(
         return skipped(result, 'connector_deleted_during_sync')
       }
       if (error instanceof MemberBindingGoneError) {
+        const bindingError = error
         try {
-          await disableMemberSync(run, error.message)
+          if (!(await disableMemberSync(run, bindingError.message)))
+            return await finishDisableLater(run, connector.syncIntervalMinutes)
+          return { ...skipped(result, 'connector_not_syncable'), error: bindingError.message }
         } catch (disableError) {
-          if (!(disableError instanceof SyncLockLostException)) throw disableError
-          logger.warn('Member sync abandoned — lock was reclaimed before it could be disabled', {
-            connectorId,
-            runId,
-          })
-          return skipped(result, 'sync_superseded')
+          if (disableError instanceof SyncLockLostException) {
+            logger.warn('Member sync abandoned — lock was reclaimed before it could be disabled', {
+              connectorId,
+              runId,
+            })
+            return skipped(result, 'sync_superseded')
+          }
+          /**
+           * A disable that failed part-way is an ordinary run failure: the log closes as failed
+           * and the lease is released under its own guard, instead of the run escaping with the
+           * connector left running until the stale-lease reclaim. The binding is still gone, so
+           * the next run resumes the revocation.
+           */
+          error = disableError
         }
-        return { ...skipped(result, 'connector_not_syncable'), error: error.message }
       }
 
       if (getConnectorSyncDeferral(error)) {
@@ -2221,24 +2673,22 @@ export async function executeMemberSync(
       const retryAfterMs = getRetryAfterMs(error)
       logger.error('Member sync failed', { connectorId, runId, error: errorMessage, diagnostic })
       try {
-        await failMemberSyncLog(runId, result, errorMessage)
-        const failureUpdate =
+        await failMemberSyncLog(
+          runId,
+          result,
+          errorMessage,
           error instanceof ConnectorSyncCapacityError
-            ? {
-                memberSyncStatus: 'error' as const,
-                lastMemberSyncError: errorMessage,
-                nextMemberSyncAt: null,
-                memberSyncConsecutiveFailures: connector.memberSyncConsecutiveFailures,
-                memberSyncLockToken: null,
-                memberSyncLockLeaseAt: null,
-                updatedAt: new Date(),
-              }
-            : buildMemberSyncFailureUpdate(
-                new Date(),
-                connector.memberSyncConsecutiveFailures,
-                errorMessage,
-                retryAfterMs
-              )
+            ? undefined
+            : getTransientDatabaseFailure(error)
+        )
+        const failureUpdate = await resolveMemberSyncFailureUpdate(error, {
+          connectorId,
+          runId,
+          previousFailures: connector.memberSyncConsecutiveFailures,
+          errorMessage,
+          retryAfterMs,
+          madeProgress: memberRunMadeProgress(result),
+        })
         const written = await db
           .update(knowledgeConnector)
           .set(failureUpdate)

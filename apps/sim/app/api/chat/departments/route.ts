@@ -7,7 +7,7 @@ import { getSession } from '@/lib/auth'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import { listAgentDepartments } from '@/lib/chat/arena-departments'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
-import { createErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('ChatDepartmentsAPI')
 
@@ -33,6 +33,6 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
     return createSuccessResponse({ departments })
   } catch (error) {
     logger.error('Error fetching agent departments:', error)
-    return createErrorResponse(getErrorMessage(error, 'Failed to fetch departments'), 500)
+    return createCodedErrorResponse(getErrorMessage(error, 'Failed to fetch departments'), 500)
   }
 })

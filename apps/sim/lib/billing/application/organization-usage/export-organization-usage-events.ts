@@ -83,7 +83,7 @@ export const exportOrganizationUsageEvents = defineAuthorizedOrganizationUsageUs
         // One derivation for both predicates, so the CSV covers exactly the rows the
         // summary and breakdowns aggregate over.
         ...ledgerFilter,
-        ...(input.source?.length ? { source: input.source } : {}),
+        ...(input.source?.length ? { sources: input.source } : {}),
         limit: EXPORT_PAGE_SIZE,
         ...(cursor ? { cursor } : {}),
         ...(cursorCreatedAt ? { cursorCreatedAt } : {}),

@@ -1,6 +1,7 @@
 import {
   ACCOUNT_SETTINGS_ITEMS,
   buildUnifiedSettingsCatalog,
+  isPlatformAdminEmailSettingsSection,
   isPlatformAdminSettingsSection,
   toSettingsHeaderMeta,
   type UnifiedNavigationSection,
@@ -9,7 +10,7 @@ import {
 } from '@/components/settings/navigation'
 import type { SettingsHeaderMeta } from '@/components/settings/settings-header'
 
-export { isPlatformAdminSettingsSection }
+export { isPlatformAdminEmailSettingsSection, isPlatformAdminSettingsSection }
 
 export type SettingsSection = UnifiedSettingsSection
 

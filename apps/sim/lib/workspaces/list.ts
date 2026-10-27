@@ -13,12 +13,14 @@ import {
   type WorkspaceCreationPolicy,
   type WorkspaceInviteFlags,
 } from '@/lib/workspaces/policy'
+import { presentWorkspace } from '@/lib/workspaces/response'
 import { listAccessibleWorkspaceRowsForUser, type WorkspaceScope } from '@/lib/workspaces/utils'
+import { listRecentWorkspaceIds, sortByVisitRecency } from '@/lib/workspaces/visits'
 
 type WorkspaceRow = typeof workspaceTable.$inferSelect
 
 /** Accessible workspace row decorated with the viewer's role and invite policy flags. */
-export type WorkspaceWithInviteFlags = WorkspaceRow &
+export type WorkspaceWithInviteFlags = ReturnType<typeof presentWorkspace> &
   WorkspaceInviteFlags & {
     role: 'owner' | 'admin' | 'member'
     permissions: PermissionType
@@ -34,6 +36,7 @@ export type WorkspaceWithInviteFlags = WorkspaceRow &
 
 /** The GET /api/workspaces payload assembled by {@link listWorkspacesForViewer}. */
 export interface WorkspaceListPayload {
+  /** Most recently visited first, then newest first. */
   workspaces: WorkspaceWithInviteFlags[]
   lastActiveWorkspaceId: string | null
   /** Workspace ids the viewer pinned to the top of the switcher. */
@@ -92,7 +95,7 @@ async function buildWorkspacesWithInviteFlags(
     const invitePolicy = evaluateWorkspaceInvitePolicy(workspaceDetails, { billedPlanCategory })
 
     return {
-      ...workspaceDetails,
+      ...presentWorkspace(workspaceDetails),
       role:
         workspaceDetails.ownerId === userId
           ? ('owner' as const)
@@ -108,8 +111,8 @@ async function buildWorkspacesWithInviteFlags(
 
 /**
  * Read-only assembly of the GET /api/workspaces payload for a viewer: accessible
- * workspaces with role/invite flags, the viewer's last active workspace id, and
- * the workspace creation policy.
+ * workspaces with role/invite flags in visit order, the viewer's last active
+ * workspace id, pins, and the workspace creation policy.
  *
  * Unlike the route, this performs no writes — no default-workspace creation and
  * no orphaned-workflow repair. Sidebar prefetch leaves empty lists uncached so
@@ -123,7 +126,7 @@ export async function listWorkspacesForViewer(params: {
   const { userId, activeOrganizationId, scope = 'active' } = params
 
   /** Workspace pins ride along here; see `pinnedResourceTypeSchema` for why. */
-  const [creationPolicy, workspaces, userSettings, workspacePins] = await Promise.all([
+  const [creationPolicy, workspaces, userSettings, workspacePins, recentIds] = await Promise.all([
     getWorkspaceCreationPolicy({ userId, activeOrganizationId }),
     listAccessibleWorkspaceRowsForUser(userId, scope).then((rows) =>
       buildWorkspacesWithInviteFlags(rows, userId)
@@ -137,11 +140,16 @@ export async function listWorkspacesForViewer(params: {
       .select({ resourceId: pinnedItem.resourceId })
       .from(pinnedItem)
       .where(and(eq(pinnedItem.userId, userId), eq(pinnedItem.resourceType, 'workspace'))),
+    listRecentWorkspaceIds(userId),
   ])
+  const orderedWorkspaces = sortByVisitRecency(workspaces, recentIds)
+  const [mostRecent] = orderedWorkspaces
+  const lastVisitedId = mostRecent && recentIds.includes(mostRecent.id) ? mostRecent.id : null
 
   return {
-    workspaces,
-    lastActiveWorkspaceId: userSettings[0]?.lastActiveWorkspaceId ?? null,
+    workspaces: orderedWorkspaces,
+    /** Visits supersede the settings column, which only predates them. */
+    lastActiveWorkspaceId: lastVisitedId ?? userSettings[0]?.lastActiveWorkspaceId ?? null,
     pinnedWorkspaceIds: workspacePins.map((row) => row.resourceId),
     creationPolicy,
   }

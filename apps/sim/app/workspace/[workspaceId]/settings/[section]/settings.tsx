@@ -2,147 +2,80 @@
 
 import { useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { usePostHog } from 'posthog-js/react'
-import { PermissionAccessBoundary } from '@/components/access-requests/permission-access-boundary'
 import { getSettingsPermissionConfigKey } from '@/components/settings/navigation'
 import { useSession } from '@/lib/auth/auth-client'
 import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
-import { captureEvent } from '@/lib/posthog/client'
+import { isPlatformAdminEmail } from '@/lib/permissions/platform-admin-emails'
 import { settingsPageTabSwitchEvent } from '@/app/arenaMixpanelEvents/mixpanelEvents'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import { General } from '@/app/workspace/[workspaceId]/settings/components/general/general'
 import { SettingsSectionProvider } from '@/app/workspace/[workspaceId]/settings/components/settings-panel'
 import {
   getSettingsSectionMeta,
+  isPlatformAdminEmailSettingsSection,
   isPlatformAdminSettingsSection,
   type SettingsSection,
 } from '@/app/workspace/[workspaceId]/settings/navigation'
+import { SECTION_MODULES } from '@/app/workspace/[workspaceId]/settings/section-warmers'
+import { PermissionAccessBoundary } from '@/ee/access-requests/components/permission-access-boundary'
+import { useCaptureWhenReady } from '@/hooks/use-capture-when-ready'
 
-const Admin = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/admin/admin').then((m) => m.Admin)
+const Admin = dynamic(() => SECTION_MODULES.admin().then((m) => m.Admin))
+const SkillShare = dynamic(() => SECTION_MODULES['skill-share']().then((m) => m.SkillShare))
+const AgentAccessRequest = dynamic(() =>
+  SECTION_MODULES['agent-access-request']().then((m) => m.AgentAccessRequest)
 )
-const SkillShare = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/skill-share/skill-share').then(
-    (m) => m.SkillShare
-  )
-)
-const ApiKeys = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/api-keys/api-keys').then(
-    (m) => m.ApiKeys
-  )
-)
-const BYOK = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/byok/byok').then((m) => m.BYOK)
-)
-const Forks = dynamic(() => import('@/ee/workspace-forking/components/forks').then((m) => m.Forks))
-const Secrets = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/secrets/secrets').then((m) => m.Secrets)
-)
+const ApiKeys = dynamic(() => SECTION_MODULES.apikeys().then((m) => m.ApiKeys))
+const BYOK = dynamic(() => SECTION_MODULES.byok().then((m) => m.BYOK))
+const Forks = dynamic(() => SECTION_MODULES.forks().then((m) => m.Forks))
+const Secrets = dynamic(() => SECTION_MODULES.secrets().then((m) => m.Secrets))
 const OrganizationConnectedAccounts = dynamic(() =>
-  import('@/ee/credential-groups/components/organization-connected-accounts').then(
-    (m) => m.OrganizationConnectedAccounts
-  )
+  SECTION_MODULES['connected-accounts']().then((m) => m.OrganizationConnectedAccounts)
 )
-const Sandboxes = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/sandboxes/sandboxes').then(
-    (m) => m.Sandboxes
-  )
-)
-const CustomTools = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/custom-tools/custom-tools').then(
-    (m) => m.CustomTools
-  )
-)
-const Inbox = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/inbox/inbox').then((m) => m.Inbox)
-)
-const MCP = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/mcp/mcp').then((m) => m.MCP)
-)
-const Mothership = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/mothership/mothership').then(
-    (m) => m.Mothership
-  )
-)
+const Sandboxes = dynamic(() => SECTION_MODULES.sandboxes().then((m) => m.Sandboxes))
+const CustomTools = dynamic(() => SECTION_MODULES['custom-tools']().then((m) => m.CustomTools))
+const Inbox = dynamic(() => SECTION_MODULES.inbox().then((m) => m.Inbox))
+const MCP = dynamic(() => SECTION_MODULES.mcp().then((m) => m.MCP))
+const Mothership = dynamic(() => SECTION_MODULES.mothership().then((m) => m.Mothership))
 const RecentlyDeleted = dynamic(() =>
-  import(
-    '@/app/workspace/[workspaceId]/settings/components/recently-deleted/recently-deleted'
-  ).then((m) => m.RecentlyDeleted)
+  SECTION_MODULES['recently-deleted']().then((m) => m.RecentlyDeleted)
 )
-const Usage = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/usage/usage').then((m) => m.Usage)
-)
-const SelfHost = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/self-host/self-host').then(
-    (m) => m.SelfHost
-  )
-)
-const Billing = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/billing/billing').then((m) => m.Billing)
-)
-const ArenaBilling = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/billing/billing').then((m) => m.Billing)
-)
-const Teammates = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/teammates/teammates').then(
-    (m) => m.Teammates
-  )
-)
-const TeamManagement = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/team-management/team-management').then(
-    (m) => m.TeamManagement
-  )
+const SelfHost = dynamic(() => SECTION_MODULES['self-host']().then((m) => m.SelfHost))
+const Billing = dynamic(() => SECTION_MODULES.billing().then((m) => m.Billing))
+const Teammates = dynamic(() => SECTION_MODULES.teammates().then((m) => m.Teammates))
+const TeamManagement = dynamic(() => SECTION_MODULES.organization().then((m) => m.TeamManagement))
+const OAuthAppsSettings = dynamic(() =>
+  SECTION_MODULES['oauth-apps']().then((m) => m.OAuthAppsSettings)
 )
 const WorkflowMcpServers = dynamic(() =>
-  import(
-    '@/app/workspace/[workspaceId]/settings/components/workflow-mcp-servers/workflow-mcp-servers'
-  ).then((m) => m.WorkflowMcpServers)
-)
-const OAuthAppsSettings = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/oauth-apps/oauth-apps').then(
-    (m) => m.OAuthAppsSettings
-  )
+  SECTION_MODULES['workflow-mcp-servers']().then((m) => m.WorkflowMcpServers)
 )
 const AccessControl = dynamic(() =>
-  import('@/ee/access-control/components/access-control').then((m) => m.AccessControl)
+  SECTION_MODULES['access-control']().then((m) => m.AccessControl)
 )
-const CustomBlocks = dynamic(() =>
-  import('@/ee/custom-blocks/components/custom-blocks').then((m) => m.CustomBlocks)
+const AccessRequestsSettings = dynamic(() =>
+  SECTION_MODULES.requests().then((m) => m.AccessRequestsSettings)
 )
-const AuditLogs = dynamic(() =>
-  import('@/ee/audit-logs/components/audit-logs').then((m) => m.AuditLogs)
-)
-const SSO = dynamic(() => import('@/ee/sso/components/sso-settings').then((m) => m.SSO))
+const CustomBlocks = dynamic(() => SECTION_MODULES['custom-blocks']().then((m) => m.CustomBlocks))
+const AuditLogs = dynamic(() => SECTION_MODULES['audit-logs']().then((m) => m.AuditLogs))
+const SSO = dynamic(() => SECTION_MODULES.sso().then((m) => m.SSO))
 const DataRetentionSettings = dynamic(() =>
-  import('@/ee/data-retention/components/data-retention-settings').then(
-    (m) => m.DataRetentionSettings
-  )
+  SECTION_MODULES['data-retention']().then((m) => m.DataRetentionSettings)
 )
 const DataDrainsSettings = dynamic(() =>
-  import('@/ee/data-drains/components/data-drains-settings').then((m) => m.DataDrainsSettings)
+  SECTION_MODULES['data-drains']().then((m) => m.DataDrainsSettings)
 )
 const OrganizationSecuritySettings = dynamic(() =>
-  import('@/components/settings/organization-security').then((m) => m.OrganizationSecuritySettings)
+  SECTION_MODULES.security().then((m) => m.OrganizationSecuritySettings)
 )
-const UsageMonitoring = dynamic(() =>
-  import('@/ee/organization-usage/components/usage-monitoring').then((m) => m.UsageMonitoring)
-)
-const Desktop = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/desktop/desktop').then((m) => m.Desktop)
-)
-const Browser = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/browser/browser').then((m) => m.Browser)
-)
-const Terminal = dynamic(() =>
-  import('@/app/workspace/[workspaceId]/settings/components/terminal/terminal').then(
-    (m) => m.Terminal
-  )
-)
+const UsageMonitoring = dynamic(() => SECTION_MODULES.usage().then((m) => m.UsageMonitoring))
+const Usage = dynamic(() => SECTION_MODULES['arena-usage']().then((m) => m.Usage))
+const Desktop = dynamic(() => SECTION_MODULES.desktop().then((m) => m.Desktop))
+const Browser = dynamic(() => SECTION_MODULES.browser().then((m) => m.Browser))
+const Terminal = dynamic(() => SECTION_MODULES.terminal().then((m) => m.Terminal))
 const WhitelabelingSettings = dynamic(() =>
-  import('@/ee/whitelabeling/components/whitelabeling-settings').then(
-    (m) => m.WhitelabelingSettings
-  )
+  SECTION_MODULES.whitelabeling().then((m) => m.WhitelabelingSettings)
 )
 
 interface SettingsPageProps {
@@ -163,37 +96,45 @@ function SettingsPageContent({ section }: SettingsPageProps) {
   const { data: session, isPending: sessionLoading } = useSession()
   const hostContext = useWorkspaceHostContext()
   const { billingEnabled } = useDeploymentShape()
-  const posthog = usePostHog()
 
   const isAdminRole = session?.user?.role === 'admin'
+  const isListedPlatformAdminEmail = isPlatformAdminEmail(session?.user?.email)
+  /**
+   * `arena-billing` is the sidebar's Billing row. It uses the same panel as
+   * `billing`; leaving it as its own section rendered the heading and no body.
+   */
   const normalizedSection: SettingsSection =
-    (section as string) === 'subscription' ? 'billing' : section
-
-  const isBillingSection = normalizedSection === 'billing' || normalizedSection === 'arena-billing'
+    (section as string) === 'subscription' || section === 'arena-billing' ? 'billing' : section
+  const isBillingSection = normalizedSection === 'billing'
   const canManageBilling = canManageWorkspaceBilling(hostContext, session?.user?.id)
   const billingRedirectToUsage =
     billingEnabled && isBillingSection && !sessionLoading && !canManageBilling
-
   const effectiveSection =
     !billingEnabled && normalizedSection === 'billing'
       ? 'general'
       : billingRedirectToUsage
-        ? 'usage'
+        ? 'arena-usage'
         : isPlatformAdminSettingsSection(normalizedSection) && !sessionLoading && !isAdminRole
           ? 'general'
-          : normalizedSection
+          : isPlatformAdminEmailSettingsSection(normalizedSection) &&
+              !sessionLoading &&
+              !isListedPlatformAdminEmail
+            ? 'general'
+            : normalizedSection
   const organizationId = hostContext.hostOrganizationId
   const meta = getSettingsSectionMeta(effectiveSection)
 
+  useCaptureWhenReady(
+    'settings_tab_viewed',
+    sessionLoading ? null : { plane: 'workspace', section: effectiveSection },
+    effectiveSection
+  )
+
   useEffect(() => {
     if (sessionLoading) return
-    captureEvent(posthog, 'settings_tab_viewed', {
-      plane: 'workspace',
-      section: effectiveSection,
-    })
     const label = effectiveSection.charAt(0).toUpperCase() + effectiveSection.slice(1)
     void settingsPageTabSwitchEvent({ Tabs: label })
-  }, [effectiveSection, sessionLoading, posthog])
+  }, [effectiveSection, sessionLoading])
 
   return (
     <SettingsSectionProvider section={effectiveSection} meta={meta ?? undefined}>
@@ -209,29 +150,35 @@ function SettingsPageContent({ section }: SettingsPageProps) {
         <AccessControl
           organizationId={organizationId}
           isOrganizationAdmin={hostContext.viewer.isHostOrganizationAdmin}
+          requestsHref={`/workspace/${hostContext.workspace.id}/settings/requests`}
+        />
+      )}
+      {effectiveSection === 'requests' && organizationId && (
+        <AccessRequestsSettings
+          scope={{ kind: 'workspace', workspaceId: hostContext.workspace.id }}
+          reviewOrganizationId={
+            hostContext.viewer.isHostOrganizationAdmin ? organizationId : undefined
+          }
         />
       )}
       {effectiveSection === 'custom-blocks' && <CustomBlocks />}
-      {effectiveSection === 'usage' && <Usage />}
-      {effectiveSection === 'oauth-apps' && <OAuthAppsSettings />}
       {effectiveSection === 'audit-logs' && organizationId && (
         <AuditLogs organizationId={organizationId} />
       )}
+      {effectiveSection === 'usage' && organizationId && (
+        <UsageMonitoring
+          organizationId={organizationId}
+          eventsHref={`/workspace/${hostContext.workspace.id}/settings/usage/events`}
+          auditLogsHref={`/workspace/${hostContext.workspace.id}/settings/audit-logs`}
+        />
+      )}
+      {effectiveSection === 'arena-usage' && <Usage />}
       {effectiveSection === 'apikeys' && <ApiKeys scope='combined' />}
       {billingEnabled && effectiveSection === 'billing' && (
         <Billing
           scope={organizationId ? 'organization' : 'account'}
           organizationId={organizationId ?? undefined}
-          governingWorkspaceName={hostContext.workspace.name}
           creditUsageHref={`/workspace/${hostContext.workspace.id}/settings/billing/credit-usage`}
-        />
-      )}
-      {effectiveSection === 'arena-billing' && (
-        <ArenaBilling
-          scope={organizationId ? 'organization' : 'account'}
-          organizationId={organizationId ?? undefined}
-          governingWorkspaceName={hostContext.workspace.name}
-          creditUsageHref={`/workspace/${hostContext.workspace.id}/settings/usage`}
         />
       )}
       {effectiveSection === 'teammates' && <Teammates />}
@@ -241,6 +188,7 @@ function SettingsPageContent({ section }: SettingsPageProps) {
           billingHref={`/workspace/${hostContext.workspace.id}/settings/billing`}
         />
       )}
+      {effectiveSection === 'oauth-apps' && <OAuthAppsSettings />}
       {effectiveSection === 'sso' && organizationId && <SSO organizationId={organizationId} />}
       {effectiveSection === 'data-retention' && organizationId && (
         <DataRetentionSettings organizationId={organizationId} />
@@ -265,6 +213,7 @@ function SettingsPageContent({ section }: SettingsPageProps) {
       {effectiveSection === 'self-host' && <SelfHost />}
       {effectiveSection === 'admin' && <Admin />}
       {effectiveSection === 'skill-share' && <SkillShare />}
+      {effectiveSection === 'agent-access-request' && <AgentAccessRequest />}
       {effectiveSection === 'mothership' && <Mothership />}
     </SettingsSectionProvider>
   )

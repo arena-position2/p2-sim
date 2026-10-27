@@ -351,24 +351,6 @@ Get all recordings for a specific Zoom meeting
 |     ↳ `recording_type` | string | Type of recording \(shared_screen, audio_only, etc.\) |
 | `files` | file[] | Downloaded recording files |
 
-### Zoom Delete Recording
-
-Delete cloud recordings for a Zoom meeting
-
-#### Input
-
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `meetingId` | string | Yes | The meeting ID or meeting UUID \(e.g., "1234567890" or "4444AAABBBccccc12345=="\) |
-| `recordingId` | string | No | Specific recording file ID to delete. If not provided, deletes all recordings. |
-| `action` | string | No | Delete action: "trash" \(move to trash\) or "delete" \(permanently delete\) |
-
-#### Output
-
-| Parameter | Type | Description |
-| --------- | ---- | ----------- |
-| `success` | boolean | Whether the recording was deleted successfully |
-
 ### Zoom List Past Participants
 
 List participants from a past Zoom meeting
@@ -400,8 +382,6 @@ List participants from a past Zoom meeting
 |   ↳ `pageSize` | number | Number of records per page |
 |   ↳ `totalRecords` | number | Total number of records |
 |   ↳ `nextPageToken` | string | Token for next page of results |
-
-
 
 ## Triggers
 
@@ -609,4 +589,29 @@ Trigger workflow on any Zoom webhook event
 | `event` | string | The webhook event type \(e.g., meeting.started, recording.completed\) |
 | `event_ts` | number | Unix timestamp in milliseconds when the event occurred |
 | `payload` | json | Complete webhook payload \(structure varies by event type\) |
+
+
+## OAuth Scopes
+
+Sim requests these scopes when someone connects a Zoom account. On a self-hosted deployment, register your own app with the provider using the settings below. See [Integrations & OAuth](/platform/self-hosting/integrations-oauth) for the full setup.
+
+| Setting | Value |
+| ------- | ----- |
+| Redirect URI | `<NEXT_PUBLIC_APP_URL>/api/auth/oauth2/callback/zoom` |
+| Environment variables | `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET` |
+
+| Scope | Description |
+| ----- | ----------- |
+| `user:read:user` | View Zoom profile information |
+| `meeting:write:meeting` | Create Zoom meetings |
+| `meeting:read:meeting` | View Zoom meeting details |
+| `meeting:read:list_meetings` | List Zoom meetings |
+| `meeting:update:meeting` | Update Zoom meetings |
+| `meeting:delete:meeting` | Delete Zoom meetings |
+| `meeting:read:invitation` | View Zoom meeting invitations |
+| `meeting:read:list_past_participants` | View past meeting participants |
+| `cloud_recording:read:list_user_recordings` | List Zoom cloud recordings |
+| `cloud_recording:read:list_recording_files` | View recording files |
+| `cloud_recording:delete:recording_file` | Delete individual cloud recording files |
+
 

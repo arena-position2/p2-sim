@@ -13,7 +13,11 @@ import {
 } from '@sim/realtime-protocol/constants'
 import { generateId } from '@sim/utils/id'
 import type { BlockRetryConfig } from '@sim/workflow-types/workflow'
-import { filterAcyclicEdges, getWorkflowBlockNameConflict } from '@sim/workflow-types/workflow'
+import {
+  filterAcyclicEdges,
+  getWorkflowBlockNameConflict,
+  isWorkflowBlockProtected,
+} from '@sim/workflow-types/workflow'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Edge } from '@xyflow/react'
 import { isEqual } from 'es-toolkit'
@@ -25,6 +29,7 @@ import {
   normalizeImageModelId,
   resolveImageProviderForModel,
 } from '@/lib/image-generation/block-model-config'
+import { WORKFLOW_EXTERNAL_UPDATE_EVENT } from '@/lib/workflows/external-update'
 import {
   type WorkflowSearchSubflowFieldId,
   workflowSearchSubflowFieldMatchesExpected,
@@ -59,7 +64,7 @@ import type {
   Position,
   WorkflowState,
 } from '@/stores/workflows/workflow/types'
-import { findAllDescendantNodes, isBlockProtected } from '@/stores/workflows/workflow/utils'
+import { findAllDescendantNodes } from '@/stores/workflows/workflow/utils'
 
 const logger = createLogger('CollaborativeWorkflow')
 
@@ -858,7 +863,7 @@ export function useCollaborativeWorkflow() {
       }
     }
 
-    const handleWorkflowUpdated = async (data: any) => {
+    const handleWorkflowUpdated = async (data: { workflowId: string }) => {
       const { workflowId } = data
       logger.info(`Workflow ${workflowId} has been updated externally`)
 
@@ -967,6 +972,12 @@ export function useCollaborativeWorkflow() {
     onWorkflowDeployed(handleWorkflowDeployed)
     onOperationConfirmed(handleOperationConfirmed)
     onOperationFailed(handleOperationFailed)
+    const handleToolUpdate = (event: Event) => {
+      if (event instanceof CustomEvent && typeof event.detail?.workflowId === 'string') {
+        void handleWorkflowUpdated({ workflowId: event.detail.workflowId })
+      }
+    }
+    window.addEventListener(WORKFLOW_EXTERNAL_UPDATE_EVENT, handleToolUpdate)
     window.addEventListener(WORKFLOW_DIFF_SETTLED_EVENT, handleDiffSettled)
 
     if (activeWorkflowId) {
@@ -977,6 +988,7 @@ export function useCollaborativeWorkflow() {
     }
 
     return () => {
+      window.removeEventListener(WORKFLOW_EXTERNAL_UPDATE_EVENT, handleToolUpdate)
       window.removeEventListener(WORKFLOW_DIFF_SETTLED_EVENT, handleDiffSettled)
     }
   }, [
@@ -1098,7 +1110,7 @@ export function useCollaborativeWorkflow() {
       const block = blocks[id]
 
       if (block) {
-        if (isBlockProtected(id, blocks)) {
+        if (isWorkflowBlockProtected(id, blocks)) {
           logger.error('Cannot rename locked block')
           toast({ message: 'Cannot rename locked blocks' })
           return { success: false, error: 'Block is locked' }
@@ -1195,14 +1207,14 @@ export function useCollaborativeWorkflow() {
         if (!block) continue
 
         // Skip protected blocks (locked or inside a locked ancestor)
-        if (isBlockProtected(id, currentBlocks)) continue
+        if (isWorkflowBlockProtected(id, currentBlocks)) continue
         validIds.push(id)
         previousStates[id] = block.enabled
 
         // If it's a loop or parallel, also capture descendants' previous states for undo/redo
         if (block.type === 'loop' || block.type === 'parallel') {
           findAllDescendantNodes(id, currentBlocks).forEach((descId) => {
-            if (!isBlockProtected(descId, currentBlocks)) {
+            if (!isWorkflowBlockProtected(descId, currentBlocks)) {
               previousStates[descId] = currentBlocks[descId]?.enabled ?? true
             }
           })
@@ -1398,7 +1410,7 @@ export function useCollaborativeWorkflow() {
 
       for (const id of ids) {
         const block = blocks[id]
-        if (block && !isBlockProtected(id, blocks)) {
+        if (block && !isWorkflowBlockProtected(id, blocks)) {
           previousStates[id] = block.horizontalHandles ?? false
           validIds.push(id)
         }

@@ -89,7 +89,7 @@ export const crawlTool: ToolConfig<FirecrawlCrawlParams, FirecrawlCrawlResponse>
     },
   },
 
-  hosting: firecrawlHosting(),
+  hosting: firecrawlHosting<FirecrawlCrawlParams>(),
 
   request: {
     modelInput: {

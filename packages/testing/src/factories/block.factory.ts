@@ -1,8 +1,6 @@
 import { generateRandomString } from '@sim/utils/random'
 import type { BlockData, BlockOutput, Position } from '../types'
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 /**
  * Options for creating a mock block.
  * All fields are optional - sensible defaults are provided.
@@ -109,17 +107,6 @@ export function createFunctionBlock(options: Omit<BlockFactoryOptions, 'type'> =
 }
 
 /**
- * Creates a condition block (branching logic).
- */
-export function createConditionBlock(options: Omit<BlockFactoryOptions, 'type'> = {}): any {
-  return createBlock({
-    ...options,
-    type: 'condition',
-    name: options.name ?? 'Condition',
-  })
-}
-
-/**
  * Creates a loop block (iteration container).
  */
 export function createLoopBlock(
@@ -168,17 +155,6 @@ export function createParallelBlock(
 }
 
 /**
- * Creates a router block (output routing).
- */
-export function createRouterBlock(options: Omit<BlockFactoryOptions, 'type'> = {}): any {
-  return createBlock({
-    ...options,
-    type: 'router',
-    name: options.name ?? 'Router',
-  })
-}
-
-/**
  * Creates an API block (HTTP requests).
  */
 export function createApiBlock(options: Omit<BlockFactoryOptions, 'type'> = {}): any {
@@ -186,38 +162,5 @@ export function createApiBlock(options: Omit<BlockFactoryOptions, 'type'> = {}):
     ...options,
     type: 'api',
     name: options.name ?? 'API',
-  })
-}
-
-/**
- * Creates a response block (workflow output).
- */
-export function createResponseBlock(options: Omit<BlockFactoryOptions, 'type'> = {}): any {
-  return createBlock({
-    ...options,
-    type: 'response',
-    name: options.name ?? 'Response',
-  })
-}
-
-/**
- * Creates a webhook trigger block.
- */
-export function createWebhookBlock(options: Omit<BlockFactoryOptions, 'type'> = {}): any {
-  return createBlock({
-    ...options,
-    type: 'webhook',
-    name: options.name ?? 'Webhook',
-  })
-}
-
-/**
- * Creates a knowledge block (vector search).
- */
-export function createKnowledgeBlock(options: Omit<BlockFactoryOptions, 'type'> = {}): any {
-  return createBlock({
-    ...options,
-    type: 'knowledge',
-    name: options.name ?? 'Knowledge',
   })
 }

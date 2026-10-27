@@ -1,3 +1,4 @@
+import { prepareConversationGeneration } from '@/providers/conversation-generation'
 /**
  * Live Anthropic streaming tool loop.
  *
@@ -20,8 +21,13 @@ import {
   buildAnthropicUsageCost,
   buildAnthropicUsageTokens,
   createAnthropicUsageAccumulator,
+  toAnthropicModelUsage,
 } from '@/providers/anthropic/usage'
 import { checkForForcedToolUsage } from '@/providers/anthropic/utils'
+import {
+  captureProviderConversationStep,
+  recordProviderConversationToolError,
+} from '@/providers/conversation-history'
 import { executeProviderTool } from '@/providers/runtime-context'
 import type { AgentStreamEvent, ToolCallEndStatus } from '@/providers/stream-events'
 import {
@@ -174,11 +180,8 @@ export function createAnthropicStreamingToolLoopStream(
             turnPayload.tool_choice = { type: 'none' }
           }
 
-          // Forced tool_choice vs thinking — same rules as silent loop.
-          const thinkingEnabled = !!payload.thinking
           if (
             !finalSynthesis &&
-            !thinkingEnabled &&
             typeof originalToolChoice === 'object' &&
             hasUsedForcedTool &&
             forcedToolNames.length > 0
@@ -191,7 +194,6 @@ export function createAnthropicStreamingToolLoopStream(
             }
           } else if (
             !finalSynthesis &&
-            !thinkingEnabled &&
             hasUsedForcedTool &&
             typeof originalToolChoice === 'object'
           ) {
@@ -199,7 +201,10 @@ export function createAnthropicStreamingToolLoopStream(
           }
 
           const modelStart = Date.now()
-          const messageStream = anthropic.messages.stream(turnPayload, streamOptions)
+          const messageStream = anthropic.messages.stream(
+            await prepareConversationGeneration(request, 'anthropic', turnPayload),
+            streamOptions
+          )
           activeMessageStream = messageStream
 
           const textChunks: string[] = []
@@ -279,6 +284,13 @@ export function createAnthropicStreamingToolLoopStream(
               settleOpenTools(controller, openToolStarts, 'error')
               throw new Error('Anthropic returned tool use during final synthesis')
             }
+            await captureProviderConversationStep(
+              request,
+              'anthropic',
+              finalMessage.content,
+              toAnthropicModelUsage(finalMessage.usage)
+            )
+
             const executableToolUses = toolsExecutable ? toolUses : []
             const cappedTextTurn =
               finalMessage.stop_reason === 'max_tokens' && openToolStarts.size === 0
@@ -339,6 +351,12 @@ export function createAnthropicStreamingToolLoopStream(
 
                   const tool = request.tools?.find((t) => t.id === toolName)
                   if (!tool) {
+                    await recordProviderConversationToolError(
+                      request,
+                      toolUse.id,
+                      toolName,
+                      `Tool "${toolName}" is not available`
+                    )
                     const value = {
                       toolUse,
                       toolName,
@@ -421,6 +439,12 @@ export function createAnthropicStreamingToolLoopStream(
                     throw error
                   }
 
+                  await recordProviderConversationToolError(
+                    request,
+                    toolUse.id,
+                    toolName,
+                    getErrorMessage(error, 'Tool execution failed')
+                  )
                   logger.error('Error processing tool call:', { error, toolName })
                   const value = {
                     toolUse,
@@ -452,16 +476,7 @@ export function createAnthropicStreamingToolLoopStream(
             const toolResultBlocks: Anthropic.Messages.ToolResultBlockParam[] = []
 
             for (const value of orderedResults) {
-              const {
-                toolUse,
-                toolName,
-                toolArgs,
-                toolParams,
-                result,
-                startTime,
-                endTime,
-                duration,
-              } = value
+              const { toolUse, toolName, toolParams, result, startTime, endTime, duration } = value
               const modelResult = 'modelResult' in value ? value.modelResult : result
 
               timeSegments.push({

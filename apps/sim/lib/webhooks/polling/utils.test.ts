@@ -1,64 +1,42 @@
-/**
- * @vitest-environment node
- */
-import { account } from '@sim/db/schema'
-import { dbChainMockFns, queueTableRows, resetDbChainMock } from '@sim/testing'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { dbChainMockFns, resetDbChainMock } from '@sim/testing'
+import { authOAuthUtilsMock } from '@sim/testing/mocks/auth-oauth-utils.mock'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { sqlCalls } = vi.hoisted(() => ({
-  sqlCalls: [] as Array<{ strings: readonly string[]; values: unknown[] }>,
-}))
-
-vi.mock('drizzle-orm', () => {
-  const sql = (strings: readonly string[], ...values: unknown[]) => {
-    const node = { strings, values }
-    sqlCalls.push(node)
-    return node
-  }
-  // Identity, so an interpolated value still shows up verbatim in `values`.
-  sql.param = (value: unknown) => value
-  sql.join = (fragments: unknown[], separator: unknown) => ({ fragments, separator })
-  return {
-    sql,
-    and: vi.fn(),
-    eq: vi.fn((field: unknown, value: unknown) => ({ field, value })),
-    isNull: vi.fn(),
-    ne: vi.fn(),
-    or: vi.fn(),
-  }
-})
-vi.mock('@/lib/oauth/credential-service', () => ({
-  getOAuthToken: vi.fn(),
-  refreshAccessTokenIfNeeded: vi.fn(),
-  resolveOAuthAccountId: vi.fn(),
-}))
+vi.mock('@/lib/oauth/credential-service', () => authOAuthUtilsMock)
 vi.mock('@/triggers/constants', () => ({ MAX_CONSECUTIVE_FAILURES: 5 }))
 
+import { sql } from 'drizzle-orm'
 import {
-  getOAuthToken,
-  refreshAccessTokenIfNeeded,
-  resolveOAuthAccountId,
-} from '@/lib/oauth/credential-service'
-import type { WebhookRecord } from '@/lib/webhooks/polling/types'
-import { resolveOAuthCredential, updateWebhookProviderConfig } from '@/lib/webhooks/polling/utils'
+  isPollBackedOff,
+  PollFetchError,
+  readPollRetryAfterMs,
+  recordPollSourceFailure,
+  updateWebhookProviderConfig,
+} from '@/lib/webhooks/polling/utils'
 
 afterAll(resetDbChainMock)
 
-const logger = { error: vi.fn() } as never
+const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() } as never
 
+/** Every value interpolated into a `sql` template, with `sql.param(value)` binds unwrapped. */
 function allInterpolatedValues(): unknown[] {
-  return sqlCalls.flatMap((c) => c.values)
-}
-
-function allSqlText(): string {
-  return sqlCalls.map((c) => c.strings.join('')).join(' ')
+  const params = new Map(
+    vi
+      .mocked(sql.param)
+      .mock.results.map((result, index) => [
+        result.value,
+        vi.mocked(sql.param).mock.calls[index][0],
+      ])
+  )
+  return vi
+    .mocked(sql)
+    .mock.calls.flatMap(([, ...values]) => values)
+    .map((value) => (params.has(value) ? params.get(value) : value))
 }
 
 describe('updateWebhookProviderConfig (atomic jsonb merge)', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
-    sqlCalls.length = 0
   })
 
   it('merges defined keys (null preserved) and removes undefined keys', async () => {
@@ -72,96 +50,84 @@ describe('updateWebhookProviderConfig (atomic jsonb merge)', () => {
     expect(allInterpolatedValues()).toContain(JSON.stringify({ historyId: 'h1', nulled: null }))
     expect(allInterpolatedValues()).toContain('cleared')
   })
+})
 
-  it('uses merge only (no key-removal expression) when nothing is undefined', async () => {
-    await updateWebhookProviderConfig('wh-1', { historyId: 'h1' }, logger)
+describe('poll source backoff', () => {
+  const pollStartedAt = Date.parse('2026-10-09T12:00:00.000Z')
+  const minutes = (count: number) => count * 60_000
 
-    expect(allInterpolatedValues()).toContain(JSON.stringify({ historyId: 'h1' }))
-    expect(allInterpolatedValues().some((v) => Array.isArray(v))).toBe(false)
+  beforeEach(() => {
+    resetDbChainMock()
+    vi.useFakeTimers({ now: pollStartedAt + 30_000 })
   })
 
-  it('casts the json column to jsonb for the merge and back to json for storage', async () => {
-    await updateWebhookProviderConfig('wh-1', { historyId: 'h1', cleared: undefined }, logger)
+  afterEach(() => {
+    vi.useRealTimers()
+  })
 
-    const sqlText = allSqlText()
-    // Column (interpolated as a value) is cast to jsonb: `COALESCE(<col>::jsonb, ...)`
-    expect(sqlText).toContain('COALESCE(::jsonb')
-    // Merge runs in jsonb space, result cast back to the json column: `(<expr>)::json`
-    expect(sqlText).toContain(')::json')
+  /** Records one source failure on a webhook whose config carries `previousFailures`, returning the merged config update. */
+  async function failOnce(previousFailures: number, error: unknown = new Error('feed down')) {
+    await recordPollSourceFailure(
+      {
+        id: 'wh-1',
+        providerConfig: previousFailures ? { pollSourceFailures: previousFailures } : {},
+      },
+      pollStartedAt,
+      error,
+      'poll failed',
+      logger
+    )
+    const merged = allInterpolatedValues().find(
+      (value) => typeof value === 'string' && value.includes('pollBackoffUntil')
+    )
+    return JSON.parse(String(merged)) as Record<string, unknown>
+  }
+
+  it.each([
+    { previousFailures: 0, waitMinutes: 1 },
+    { previousFailures: 1, waitMinutes: 2 },
+    { previousFailures: 4, waitMinutes: 16 },
+    { previousFailures: 40, waitMinutes: 60 },
+  ])(
+    'after $previousFailures earlier source failures, waits about $waitMinutes minutes from the poll start',
+    async ({ previousFailures, waitMinutes }) => {
+      const stored = await failOnce(previousFailures)
+      const waitMs = Date.parse(String(stored.pollBackoffUntil)) - pollStartedAt
+
+      expect(stored.pollSourceFailures).toBe(previousFailures + 1)
+      expect(waitMs).toBeGreaterThanOrEqual(minutes(waitMinutes) * 0.8)
+      expect(waitMs).toBeLessThanOrEqual(minutes(waitMinutes) * 1.2)
+    }
+  )
+
+  it('keeps a webhook backed off until its window ends', () => {
+    const until = pollStartedAt + minutes(16)
+    const stored = { pollBackoffUntil: new Date(until).toISOString() }
+
+    expect(isPollBackedOff(stored, until - minutes(1))).toBe(true)
+    expect(isPollBackedOff(stored, until)).toBe(false)
+  })
+
+  it("waits out a Retry-After longer than the failure backoff, counted from the source's answer", async () => {
+    const stored = await failOnce(0, new PollFetchError('rate limited', 429, minutes(10)))
+    expect(Date.parse(String(stored.pollBackoffUntil))).toBe(Date.now() + minutes(10))
+  })
+
+  it('ignores a missing or malformed window', () => {
+    for (const config of [{}, { pollBackoffUntil: 'not-a-date' }, { pollBackoffUntil: 42 }, null]) {
+      expect(isPollBackedOff(config, pollStartedAt)).toBe(false)
+    }
   })
 })
 
-describe('resolveOAuthCredential (single-credential polling)', () => {
-  const makeWebhook = (providerConfig: Record<string, unknown>): WebhookRecord =>
-    ({ id: 'wh-1', providerConfig }) as unknown as WebhookRecord
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    resetDbChainMock()
-  })
-
-  it('resolves via credentialId: account lookup then token refresh', async () => {
-    vi.mocked(resolveOAuthAccountId).mockResolvedValue({
-      accountId: 'acc-1',
-    } as Awaited<ReturnType<typeof resolveOAuthAccountId>>)
-    queueTableRows(account, [{ userId: 'owner-1' }])
-    vi.mocked(refreshAccessTokenIfNeeded).mockResolvedValue('tok-abc')
-
-    const token = await resolveOAuthCredential(
-      makeWebhook({ credentialId: 'cred-1' }),
-      'google-email',
-      'req-1'
-    )
-
-    expect(token).toBe('tok-abc')
-    expect(resolveOAuthAccountId).toHaveBeenCalledWith('cred-1')
-    expect(refreshAccessTokenIfNeeded).toHaveBeenCalledWith('acc-1', 'owner-1', 'req-1')
-    expect(getOAuthToken).not.toHaveBeenCalled()
-  })
-
-  it('throws when the credential cannot be resolved to an OAuth account', async () => {
-    vi.mocked(resolveOAuthAccountId).mockResolvedValue(null)
-
-    await expect(
-      resolveOAuthCredential(makeWebhook({ credentialId: 'cred-gone' }), 'google-email', 'req-1')
-    ).rejects.toThrow('Failed to resolve OAuth account for credential cred-gone')
-  })
-
-  it('throws when the resolved account row does not exist', async () => {
-    vi.mocked(resolveOAuthAccountId).mockResolvedValue({
-      accountId: 'acc-missing',
-    } as Awaited<ReturnType<typeof resolveOAuthAccountId>>)
-
-    await expect(
-      resolveOAuthCredential(makeWebhook({ credentialId: 'cred-1' }), 'google-email', 'req-1')
-    ).rejects.toThrow('Credential cred-1 not found for webhook wh-1')
-  })
-
-  it('falls back to the legacy userId path via getOAuthToken', async () => {
-    vi.mocked(getOAuthToken).mockResolvedValue('tok-legacy')
-
-    const token = await resolveOAuthCredential(
-      makeWebhook({ userId: 'user-1' }),
-      'outlook',
-      'req-1'
-    )
-
-    expect(token).toBe('tok-legacy')
-    expect(getOAuthToken).toHaveBeenCalledWith('user-1', 'outlook')
-    expect(resolveOAuthAccountId).not.toHaveBeenCalled()
-  })
-
-  it('throws when neither credentialId nor userId is present', async () => {
-    await expect(resolveOAuthCredential(makeWebhook({}), 'gmail', 'req-1')).rejects.toThrow(
-      'Missing credential info for webhook wh-1'
-    )
-  })
-
-  it('throws when the legacy userId path yields no token', async () => {
-    vi.mocked(getOAuthToken).mockResolvedValue(null)
-
-    await expect(
-      resolveOAuthCredential(makeWebhook({ userId: 'user-1' }), 'outlook', 'req-1')
-    ).rejects.toThrow('Failed to get outlook access token for webhook wh-1')
+describe('readPollRetryAfterMs', () => {
+  it.each([
+    { header: '120', body: '', expected: 120_000 },
+    { header: null, body: '{"description":"Too Many Requests: FLOOD_WAIT_12"}', expected: 12_000 },
+    { header: null, body: 'FLOOD_WAIT_999999', expected: 24 * 60 * 60_000 },
+    { header: '9999999', body: '', expected: 24 * 60 * 60_000 },
+    { header: null, body: 'rate limited', expected: null },
+  ])('reads $header / $body', ({ header, body, expected }) => {
+    expect(readPollRetryAfterMs(header, body)).toBe(expected)
   })
 })

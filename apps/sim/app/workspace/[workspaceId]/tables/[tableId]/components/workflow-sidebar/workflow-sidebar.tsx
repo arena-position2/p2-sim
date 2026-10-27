@@ -150,7 +150,7 @@ export function WorkflowSidebar(props: WorkflowSidebarProps) {
       role='dialog'
       aria-label='Configure workflow'
       className={cn(
-        'absolute top-0 right-0 bottom-0 z-[var(--z-modal)] flex w-[400px] flex-col overflow-hidden border-[var(--border)] border-l bg-[var(--bg)] transition-transform duration-200 ease-out',
+        'absolute top-0 right-0 bottom-0 z-[var(--z-modal)] flex w-full flex-col overflow-hidden border-[var(--border)] border-l bg-[var(--bg)] transition-transform duration-200 ease-out motion-reduce:transition-none md:w-[400px]',
         open ? 'translate-x-0 shadow-overlay' : 'translate-x-full'
       )}
     >
@@ -630,14 +630,15 @@ export function WorkflowSidebarBody({
 
   return (
     <div className='flex h-full flex-col'>
-      <div className='flex min-h-[48px] items-center justify-between border-[var(--border)] border-b px-3 py-[8.5px]'>
+      <div className='flex min-h-[48px] items-center justify-between border-[var(--border)] border-b px-3 py-[8.5px] max-md:pointer-coarse:py-0.5'>
         <div className='flex min-w-0 items-center gap-1.5'>
           {showBackButton && (
             <Button
               variant='ghost'
               size='sm'
               onClick={onBack}
-              className='size-7 flex-none p-1!'
+              iconPadding='sm'
+              className='size-7 flex-none max-md:pointer-coarse:size-11'
               aria-label='Back to enrichments'
             >
               <ArrowLeft className='size-[14px]' />
@@ -651,7 +652,8 @@ export function WorkflowSidebarBody({
           variant='ghost'
           size='sm'
           onClick={onClose}
-          className='size-7 flex-none p-1!'
+          iconPadding='sm'
+          className='size-7 flex-none max-md:pointer-coarse:size-11'
           aria-label='Close'
         >
           <X className='size-[14px]' />
@@ -702,7 +704,7 @@ export function WorkflowSidebarBody({
                   </div>
                 ) : workflowState.data ? (
                   <>
-                    <div className='[&_.react-flow__handle]:hidden! h-full w-full [&_*:active]:cursor-grabbing! [&_*]:cursor-grab!'>
+                    <div className='[&_.react-flow__handle]:hidden! size-full [&_*:active]:cursor-grabbing! [&_*]:cursor-grab!'>
                       <PreviewWorkflow
                         workflowState={workflowState.data}
                         height={160}
@@ -718,6 +720,7 @@ export function WorkflowSidebarBody({
                       <Tooltip.Root>
                         <Tooltip.Trigger asChild>
                           <Button
+                            aria-label='Open workflow'
                             type='button'
                             variant='ghost'
                             onClick={() =>
@@ -868,10 +871,21 @@ export function WorkflowSidebarBody({
       </div>
 
       <div className='flex items-center justify-end gap-2 border-[var(--border)] border-t px-2 py-3'>
-        <Button variant='default' size='sm' onClick={onClose}>
+        <Button
+          variant='default'
+          size='sm'
+          onClick={onClose}
+          className='max-md:pointer-coarse:min-h-11 max-md:pointer-coarse:min-w-11'
+        >
           Cancel
         </Button>
-        <Button variant='primary' size='sm' onClick={handleSave} disabled={saveDisabled}>
+        <Button
+          variant='primary'
+          size='sm'
+          onClick={handleSave}
+          disabled={saveDisabled}
+          className='max-md:pointer-coarse:min-h-11 max-md:pointer-coarse:min-w-11'
+        >
           {saveDisabled ? 'Saving…' : 'Save'}
         </Button>
       </div>

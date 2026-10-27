@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ChipLink,
   ChipModal,
@@ -9,14 +9,19 @@ import {
   ChipModalField,
   ChipModalFooter,
   ChipModalHeader,
-  writeTextToClipboard,
 } from '@sim/emcn'
 import { SlackIcon } from '@/components/icons'
+import { SlackAppManifest } from '@/components/integrations/slack-app-manifest'
+import { isDesktopApp } from '@/lib/desktop'
 import {
   SLACK_SEARCH_DEFAULT_DESCRIPTION,
   SLACK_SEARCH_DEFAULT_NAME,
 } from '@/lib/slack-search/manifest'
-import { useSlackSearchManifest, useStartSlackSearchOAuth } from '@/hooks/queries/slack-search'
+import {
+  useConnectCustomSlackSearch,
+  useSlackSearchManifest,
+  useStartSlackSearchOAuth,
+} from '@/hooks/queries/slack-search'
 
 interface SlackSearchSetupWizardProps {
   organizationId: string
@@ -36,32 +41,25 @@ export function SlackSearchSetupWizard({
   initialName,
   onClose,
 }: SlackSearchSetupWizardProps) {
+  const nativeAbort = useRef<AbortController | null>(null)
+  useEffect(() => () => nativeAbort.current?.abort(), [])
+  const close = () => {
+    nativeAbort.current?.abort()
+    onClose()
+  }
   const name = initialName ?? SLACK_SEARCH_DEFAULT_NAME
   const description = SLACK_SEARCH_DEFAULT_DESCRIPTION
   const prepare = useSlackSearchManifest(organizationId, name)
   const oauth = useStartSlackSearchOAuth()
-  const [step, setStep] = useState<'manifest' | 'credentials' | 'install'>('manifest')
+  const connect = useConnectCustomSlackSearch()
+  const [step, setStep] = useState<'manifest' | 'credentials' | 'token'>('manifest')
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [signingSecret, setSigningSecret] = useState('')
-  const [configurationCopied, setConfigurationCopied] = useState(false)
-  const [copyError, setCopyError] = useState<Error | null>(null)
-  const error = prepare.error ?? oauth.error ?? copyError
-  const busy = oauth.isPending
+  const [botToken, setBotToken] = useState('')
+  const error = prepare.error ?? oauth.error ?? connect.error
+  const busy = oauth.isPending || connect.isPending
   const configuredAppId = appId ?? prepare.data?.existingApp?.appId
-
-  async function copyConfiguration() {
-    if (!prepare.data) throw new Error('Slack app configuration is not ready')
-    setCopyError(null)
-    try {
-      await writeTextToClipboard(prepare.data.manifest)
-      setConfigurationCopied(true)
-    } catch {
-      setCopyError(
-        new Error('Could not copy the app configuration. Allow clipboard access and try again.')
-      )
-    }
-  }
 
   const shared = mode
     ? mode === 'shared'
@@ -71,32 +69,45 @@ export function SlackSearchSetupWizard({
       )
 
   function installShared() {
+    const controller = new AbortController()
+    nativeAbort.current = controller
     oauth.mutate(
-      { organizationId, installationId, name, description, mode: 'shared' },
       {
-        onSuccess: ({ authorizationUrl }) => window.location.assign(authorizationUrl),
+        organizationId,
+        installationId,
+        name,
+        description,
+        mode: 'shared',
+        signal: controller.signal,
+      },
+      {
+        onSuccess: (result) => {
+          if (result) window.location.assign(result.authorizationUrl)
+          else onClose()
+        },
       }
     )
   }
 
   function advance() {
     if (step === 'manifest') {
+      setStep('token')
+    } else if (step === 'token') {
       setStep('credentials')
-    } else if (step === 'credentials') {
-      setStep('install')
     } else {
-      oauth.mutate(
+      connect.mutate(
         {
           organizationId,
           installationId,
           name,
           description,
+          botToken: botToken.trim(),
           ...(clientId.trim() ? { clientId: clientId.trim() } : {}),
           ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
           ...(signingSecret.trim() ? { signingSecret: signingSecret.trim() } : {}),
         },
         {
-          onSuccess: ({ authorizationUrl }) => window.location.assign(authorizationUrl),
+          onSuccess: onClose,
         }
       )
     }
@@ -107,11 +118,11 @@ export function SlackSearchSetupWizard({
       <ChipModal
         open
         onOpenChange={(open) => {
-          if (!open) onClose()
+          if (!open) close()
         }}
         srTitle='Sim Search in Slack'
       >
-        <ChipModalHeader icon={SlackIcon} onClose={onClose}>
+        <ChipModalHeader icon={SlackIcon} onClose={close}>
           Sim Search in Slack
         </ChipModalHeader>
         <ChipModalBody>
@@ -124,7 +135,7 @@ export function SlackSearchSetupWizard({
           )}
         </ChipModalBody>
         <ChipModalFooter
-          onCancel={onClose}
+          onCancel={close}
           defaultAction='dismiss'
           secondaryActions={
             prepare.error
@@ -145,14 +156,14 @@ export function SlackSearchSetupWizard({
     return (
       <ChipModal
         open
-        dismissDisabled={busy}
+        dismissDisabled={connect.isPending || (oauth.isPending && !isDesktopApp())}
         onOpenChange={(open) => {
-          if (!open) onClose()
+          if (!open) close()
         }}
         srTitle='Install the Sim Search app'
         size='sm'
       >
-        <ChipModalHeader icon={SlackIcon} onClose={onClose}>
+        <ChipModalHeader icon={SlackIcon} onClose={close}>
           Install the Sim Search app
         </ChipModalHeader>
         <ChipModalBody>
@@ -168,7 +179,7 @@ export function SlackSearchSetupWizard({
           </ChipModalError>
         </ChipModalBody>
         <ChipModalFooter
-          onCancel={onClose}
+          onCancel={close}
           secondaryActions={
             prepare.error || !prepare.data.sharedAppId
               ? [
@@ -196,37 +207,51 @@ export function SlackSearchSetupWizard({
         : 'Create Slack app'
       : step === 'credentials'
         ? 'Slack app credentials'
-        : installationId
-          ? 'Reconnect in Slack'
-          : 'Install in Slack'
+        : 'Install Slack app'
 
   return (
     <ChipModal
       open
-      dismissDisabled={busy}
+      dismissDisabled={connect.isPending || (oauth.isPending && !isDesktopApp())}
       onOpenChange={(open) => {
-        if (!open) onClose()
+        if (!open) close()
       }}
       srTitle={title}
       size='md'
     >
-      <ChipModalHeader icon={SlackIcon} onClose={onClose}>
+      <ChipModalHeader icon={SlackIcon} onClose={close}>
         {title}
       </ChipModalHeader>
       <ChipModalBody>
         {step === 'manifest' && (
-          <p className='px-2 text-[var(--text-secondary)] text-sm'>
-            {configuredAppId
-              ? configurationCopied
-                ? 'Configuration copied. In Slack, replace the JSON under App Manifest and save.'
-                : 'Copy the configuration, then replace the JSON under App Manifest in Slack.'
-              : 'Create the app in Slack, then return here to add its credentials.'}
-          </p>
+          <ChipModalField type='custom' title='App manifest'>
+            <SlackAppManifest
+              manifest={prepare.data.manifest}
+              createAppUrl={configuredAppId ? undefined : prepare.data.createAppUrl}
+              disabled={Boolean(prepare.error)}
+            />
+            <p className='text-[var(--text-secondary)] text-sm'>
+              {configuredAppId
+                ? 'In your Slack app, open App Manifest, replace the JSON, and save changes.'
+                : 'Create Slack app opens Slack with this manifest already filled in. Select your workspace, review the configuration, and click Create.'}
+            </p>
+            {configuredAppId && (
+              <ChipLink
+                className='w-fit'
+                href={`https://api.slack.com/apps/${encodeURIComponent(configuredAppId)}`}
+                target='_blank'
+                rel='noopener noreferrer'
+              >
+                Open app settings
+              </ChipLink>
+            )}
+          </ChipModalField>
         )}
         {step === 'credentials' && (
           <>
             <p className='px-2 text-[var(--text-secondary)] text-sm'>
-              Find these values under Basic Information in your Slack app.
+              Open Basic Information → App Credentials in the same Slack app. Copy these values,
+              then connect the app to Sim.
             </p>
             <ChipModalField
               type='input'
@@ -268,18 +293,27 @@ export function SlackSearchSetupWizard({
             />
           </>
         )}
-        {step === 'install' && (
-          <p className='px-2 text-[var(--text-secondary)] text-sm'>
-            {installationId
-              ? 'Approve the updated permissions for'
-              : 'Choose your workspace and approve'}{' '}
-            {name} in Slack.
-          </p>
+        {step === 'token' && (
+          <>
+            <p className='px-2 text-[var(--text-secondary)] text-sm'>
+              Open OAuth &amp; Permissions in Slack, choose Install to Workspace (or Reinstall to
+              Workspace), and approve access. Then copy the Bot User OAuth Token below.
+            </p>
+            <ChipModalField
+              type='input'
+              title='Bot User OAuth Token'
+              value={botToken}
+              onChange={setBotToken}
+              inputType='password'
+              placeholder='xoxb-...'
+              required
+            />
+          </>
         )}
         <ChipModalError>{error?.message}</ChipModalError>
       </ChipModalBody>
       <ChipModalFooter
-        onCancel={onClose}
+        onCancel={close}
         secondaryActions={
           prepare.error
             ? [
@@ -289,27 +323,7 @@ export function SlackSearchSetupWizard({
                   disabled: prepare.isFetching,
                 },
               ]
-            : step === 'manifest'
-              ? configuredAppId && !configurationCopied
-                ? [{ label: 'Copy configuration', onClick: () => void copyConfiguration() }]
-                : [
-                    {
-                      custom: (
-                        <ChipLink
-                          href={
-                            configuredAppId
-                              ? `https://api.slack.com/apps/${encodeURIComponent(configuredAppId)}`
-                              : prepare.data.createAppUrl
-                          }
-                          target='_blank'
-                          rel='noopener noreferrer'
-                        >
-                          {configuredAppId ? 'Open app settings' : 'Create app'}
-                        </ChipLink>
-                      ),
-                    },
-                  ]
-              : undefined
+            : undefined
         }
         primaryAdjacentAction={
           step === 'manifest'
@@ -319,19 +333,21 @@ export function SlackSearchSetupWizard({
                 disabled: busy,
                 onClick: () => {
                   oauth.reset()
-                  setStep(step === 'install' ? 'credentials' : 'manifest')
+                  connect.reset()
+                  setStep(step === 'credentials' ? 'token' : 'manifest')
                 },
               }
         }
         primaryAction={{
-          label: busy ? 'Connecting…' : step === 'install' ? title : 'Continue',
+          label: busy ? 'Connecting…' : step === 'credentials' ? 'Connect app' : 'Continue',
           onClick: advance,
           disabled:
             busy ||
-            (step === 'manifest'
-              ? Boolean(configuredAppId && !configurationCopied)
-              : !installationId &&
-                (!clientId.trim() || !clientSecret.trim() || !signingSecret.trim())),
+            Boolean(prepare.error) ||
+            (step === 'token' && !botToken.trim()) ||
+            (step === 'credentials' &&
+              !installationId &&
+              (!clientId.trim() || !clientSecret.trim() || !signingSecret.trim())),
         }}
       />
     </ChipModal>

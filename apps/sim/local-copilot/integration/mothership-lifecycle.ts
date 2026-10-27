@@ -11,36 +11,36 @@ import {
   MothershipStreamV1ToolMode,
   MothershipStreamV1ToolOutcome,
   MothershipStreamV1ToolPhase,
-} from '@/lib/copilot/generated/mothership-stream-v1'
-import type { VfsSnapshotV1 } from '@/lib/copilot/generated/vfs-snapshot-v1'
+} from '@/lib/mothership/generated/mothership-stream-v1'
+import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import {
   createFilePreviewAdapterState,
   type FilePreviewAdapterState,
   processFilePreviewStreamEvent,
-} from '@/lib/copilot/request/go/file-preview-adapter'
+} from '@/lib/mothership/request/go/file-preview-adapter'
 import {
   handleSubagentRouting,
   sseHandlers,
   subAgentHandlers,
-} from '@/lib/copilot/request/handlers'
+} from '@/lib/mothership/request/handlers'
 import {
   flushSubagentThinkingBlock,
   flushThinkingBlock,
-} from '@/lib/copilot/request/handlers/types'
-import type { CopilotLifecycleOptions } from '@/lib/copilot/request/lifecycle/run'
+} from '@/lib/mothership/request/handlers/types'
+import type { CopilotLifecycleOptions } from '@/lib/mothership/request/lifecycle/run'
 import {
   isSubagentSpanStreamEvent,
   isToolCallStreamEvent,
   LOCAL_STATUS_PHASE,
-} from '@/lib/copilot/request/session'
-import { handleResourceSideEffects } from '@/lib/copilot/request/tools/resources'
+} from '@/lib/mothership/request/session'
+import { handleResourceSideEffects } from '@/lib/mothership/request/tools/resources'
 import type {
   ExecutionContext,
   OrchestratorOptions,
   StreamEvent,
   StreamingContext,
-} from '@/lib/copilot/request/types'
-import { persistChatResources } from '@/lib/copilot/resources/persistence'
+} from '@/lib/mothership/request/types'
+import { persistChatResources } from '@/lib/mothership/resources/persistence'
 import {
   extractLocalFileChatResources,
   stripLocalFileBodyToolParams,

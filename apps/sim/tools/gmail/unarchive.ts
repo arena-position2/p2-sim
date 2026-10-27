@@ -100,9 +100,9 @@ export const gmailUnarchiveV2Tool: InternalToolConfig<GmailMarkReadParams, Gmail
       return {
         success: true,
         output: {
-          id: metadata?.id ?? null,
-          threadId: metadata?.threadId ?? null,
-          labelIds: metadata?.labelIds ?? null,
+          id: metadata?.id,
+          threadId: metadata?.threadId,
+          labelIds: metadata?.labelIds,
         },
       }
     },

@@ -1,11 +1,11 @@
 import { truncate } from '@sim/utils/string'
 import type { WorkflowState } from '@sim/workflow-types/workflow'
-import { documentLayoutFollowUpHint } from '@/lib/copilot/chat/document-format-guidance'
 import { REDACTED_MARKER } from '@/lib/core/security/redaction'
+import { documentLayoutFollowUpHint } from '@/lib/mothership/chat/document-format-guidance'
 import { sanitizeForCopilot } from '@/lib/workflows/sanitization/json-sanitizer'
 import { getBlock } from '@/blocks/registry'
 import { MAX_POPULATE_EDITS } from '@/local-copilot/lib/agent/limits'
-import type { ArtifactStore } from '@/local-copilot/lib/context/artifacts'
+import type { ArtifactStore, ArtifactStub } from '@/local-copilot/lib/context/artifacts'
 import {
   LOAD_COPILOT_ARTIFACT_TOOL_NAME,
   maybeOffloadToolResult,
@@ -145,6 +145,91 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 /**
+ * True when `workflowState` is already Copilot-shaped (`sanitizeForCopilot` output),
+ * not a full editor {@link WorkflowState}. Re-sanitizing Copilot blocks used to
+ * crash with `Object.entries(undefined)` because they lack `subBlocks`.
+ */
+export function isAlreadyCopilotSanitizedWorkflowState(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  const blocks = record.blocks
+  if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks)) return false
+
+  const blockValues = Object.values(blocks as Record<string, unknown>)
+  if (blockValues.length === 0) {
+    // Empty Copilot payload is `{ blocks: {} }` with no edges array.
+    return !Array.isArray(record.edges)
+  }
+
+  for (const block of blockValues) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) continue
+    const entry = block as Record<string, unknown>
+    if ('subBlocks' in entry) return false
+    if (typeof entry.type === 'string') return true
+  }
+
+  return false
+}
+
+function resolveCopilotSanitizedWorkflowState(workflowState: unknown): unknown {
+  if (!workflowState || typeof workflowState !== 'object') return undefined
+  if (isAlreadyCopilotSanitizedWorkflowState(workflowState)) {
+    return workflowState
+  }
+  const state = workflowState as WorkflowState
+  return sanitizeForCopilot({
+    blocks: state.blocks ?? {},
+    edges: state.edges ?? [],
+    loops: state.loops ?? {},
+    parallels: state.parallels ?? {},
+  })
+}
+
+/**
+ * Pulls model-facing hints from `block_not_found` skipped items that include
+ * `details.suggestions` (from the edit engine).
+ */
+function formatBlockNotFoundFollowUpHint(skippedItems: unknown): string | undefined {
+  if (!Array.isArray(skippedItems) || skippedItems.length === 0) return undefined
+
+  const lines: string[] = []
+  for (const item of skippedItems) {
+    const row = asRecord(item)
+    if (row.type !== 'block_not_found') continue
+    const details = asRecord(row.details)
+    const suggestions = Array.isArray(details.suggestions) ? details.suggestions : []
+    const missingId = typeof row.blockId === 'string' ? row.blockId : 'unknown'
+    if (suggestions.length === 0) {
+      if (typeof row.reason === 'string' && row.reason.trim()) {
+        lines.push(row.reason.trim())
+      }
+      continue
+    }
+    const listed = suggestions
+      .map((suggestion) => {
+        const entry = asRecord(suggestion)
+        const id = typeof entry.blockId === 'string' ? entry.blockId : ''
+        const name = typeof entry.blockName === 'string' ? entry.blockName : ''
+        const type = typeof entry.blockType === 'string' ? entry.blockType : ''
+        if (!id) return null
+        return `block_id="${id}" (name "${name || id}", type ${type || 'unknown'})`
+      })
+      .filter((value): value is string => Boolean(value))
+    if (listed.length === 1) {
+      lines.push(
+        `Missing block "${missingId}" — delete/edit using ${listed[0]} instead. Do not invent ids.`
+      )
+    } else if (listed.length > 1) {
+      lines.push(
+        `Missing block "${missingId}" — candidates: ${listed.join('; ')}. Use a real block_id.`
+      )
+    }
+  }
+
+  return lines.length > 0 ? lines.join(' ') : undefined
+}
+
+/**
  * Builds the value passed into {@link formatToolResultForLlm} so failures with
  * an empty `result` still surface `error`, and bare success does not become `{}`.
  */
@@ -193,10 +278,7 @@ const FILE_TOOLS_NEEDING_EMPTY_GUARD = new Set([
  * When a file tool succeeds with a near-empty body, add an explicit hint so the
  * model does not invent "tools returned empty results."
  */
-function guardEmptyFileToolPayload(
-  toolName: string,
-  formatted: unknown
-): unknown {
+function guardEmptyFileToolPayload(toolName: string, formatted: unknown): unknown {
   if (!FILE_TOOLS_NEEDING_EMPTY_GUARD.has(toolName)) return formatted
   const record = asRecord(formatted)
   const keys = Object.keys(record).filter(
@@ -222,11 +304,21 @@ const FOLLOW_UP_FIELD_KEYS = [
   'needsFollowUpWrite',
   'needsFollowUpWorkspaceFile',
   'needsFollowUpEditContent',
+  'needsFollowUpPatchRepair',
   'needsFollowUpRun',
   'needsOAuthConnect',
   'followUpHint',
   'editPrecondition',
 ] as const
+
+const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
+  'search_not_found',
+  'search_ambiguous',
+  'search_looks_truncated',
+])
+
+const PATCH_REPAIR_FOLLOW_UP_HINT =
+  'Patch search did not match the live file (stale/truncated/ambiguous search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search, then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
 
 /**
  * Copies mandatory-follow-up flags onto an artifact stub so offload cannot
@@ -234,10 +326,10 @@ const FOLLOW_UP_FIELD_KEYS = [
  */
 function copyFollowUpFields(
   source: unknown,
-  stub: Record<string, unknown>
+  stub: Record<string, unknown> | ArtifactStub
 ): Record<string, unknown> {
   const record = asRecord(source)
-  const next = { ...stub }
+  const next: Record<string, unknown> = { ...stub }
   for (const key of FOLLOW_UP_FIELD_KEYS) {
     if (record[key] !== undefined) next[key] = record[key]
   }
@@ -589,7 +681,18 @@ export function formatToolResultForLlm(
     const record = asRecord(result)
     const data = asRecord(record.data)
     const operation = typeof data.operation === 'string' ? data.operation : ''
+    const errorType = typeof record.errorType === 'string' ? record.errorType : ''
     if (
+      record.success === false &&
+      (record.recoverable === true || RECOVERABLE_PATCH_ERROR_TYPES.has(errorType))
+    ) {
+      formatted = {
+        ...record,
+        recoverable: true,
+        needsFollowUpPatchRepair: true,
+        followUpHint: PATCH_REPAIR_FOLLOW_UP_HINT,
+      }
+    } else if (
       record.success !== false &&
       (operation === 'append' || operation === 'update' || operation === 'patch')
     ) {
@@ -615,21 +718,19 @@ export function formatToolResultForLlm(
     const next: Record<string, unknown> = { ...rest }
 
     if (workflowState && typeof workflowState === 'object') {
-      const state = workflowState as WorkflowState
-      next.copilotSanitizedWorkflowState = sanitizeForCopilot({
-        blocks: state.blocks ?? {},
-        edges: state.edges ?? [],
-        loops: state.loops ?? {},
-        parallels: state.parallels ?? {},
-      })
+      // edit_workflow already returns sanitizeForCopilot(graph) under workflowState.
+      // Pass that through — re-sanitizing Copilot-shaped blocks crashes.
+      next.copilotSanitizedWorkflowState = resolveCopilotSanitizedWorkflowState(workflowState)
     } else if (record.copilotSanitizedWorkflowState) {
       next.copilotSanitizedWorkflowState = record.copilotSanitizedWorkflowState
     }
 
     if (editWorkflowNeedsFollowUp(record)) {
       next.needsFollowUpEdit = true
-      next.followUpHint =
-        'Some operations were skipped, inputs rejected, or lint issues remain. Call edit_workflow again with corrected operations before finishing.'
+      const blockNotFoundHint = formatBlockNotFoundFollowUpHint(record.skippedItems)
+      next.followUpHint = blockNotFoundHint
+        ? `${blockNotFoundHint} Call edit_workflow again with corrected operations before finishing.`
+        : 'Some operations were skipped, inputs rejected, or lint issues remain. Call edit_workflow again with corrected operations before finishing.'
     } else if (classifyEditWorkflowPrecondition(record)) {
       const kind = classifyEditWorkflowPrecondition(record)!
       next.needsFollowUpEdit = true
@@ -645,7 +746,7 @@ export function formatToolResultForLlm(
     } else if (isOAuthOnlyEditResult(record)) {
       next.needsOAuthConnect = true
       next.followUpHint =
-        'Workflow structure is complete. The only remaining lint is a missing OAuth credential — call oauth_get_auth_link once, share the link, then STOP. Do not re-edit; edits cannot clear credential lint.'
+        'Workflow structure is complete. The only remaining lint is a missing OAuth credential — call oauth_get_auth_link once for each missing provider in this response, then STOP. Do not re-edit; edits cannot clear credential lint.'
     }
 
     if (
@@ -658,8 +759,7 @@ export function formatToolResultForLlm(
       // offload. The model already has workflowId + startBlockId.
       next.copilotSanitizedWorkflowState = undefined
       next.needsFollowUpPopulate = true
-      next.followUpHint =
-        `New workflow created. Do NOT create_workflow or get_workflow_context again. Call get_blocks_metadata once with every type you will add (e.g. { blockIds: ["agent","human_in_the_loop"] }), then edit_workflow using startBlockId. Up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls are OK. Human review uses type human_in_the_loop.`
+      next.followUpHint = `New workflow created. Do NOT create_workflow or get_workflow_context again. Call get_blocks_metadata once with every type you will add (e.g. { blockIds: ["agent","schedule","human_in_the_loop"] }), then edit_workflow using startBlockId. Do not load_copilot_artifact to re-read that metadata. Up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls are OK. Human review uses type human_in_the_loop. A daily time trigger is block type "schedule" (scheduleType "daily", dailyTime "09:00", timezone "Asia/Kolkata" for IST) — never "schedule_trigger". Put triggerMode next to inputs, not inside inputs. A named fetch-and-send sequence is canvas blocks of the current types (google_calendar_v2, gmail_v2, slack) wired in order, not Agent.tools. Omit Agent model unless metadata lists that exact current id.`
     }
 
     formatted = next
@@ -671,8 +771,8 @@ export function formatToolResultForLlm(
       ...record,
       followUpHint:
         metadataKeys.length === 0
-          ? 'No block metadata returned for the requested ids (often sunset/legacy names). Retry with current successors (e.g. image_generator → image_generator_v2, gmail → gmail_v2). To attach Image/Chart/Exa/etc. to an Agent, edit that Agent\'s tools array — do not add them as canvas blocks.'
-          : 'If you just created a workflow, call edit_workflow now to add blocks. To attach Image Generator / Chart Generator / Exa to an existing Agent, edit that Agent\'s tools array (type image_generator_v2 / chart_generator / exa) and update its messages/prompt so it chooses those tools from the user question — do not add those as canvas blocks and do not add a Function block as a substitute. Do not load_copilot_artifact unless a specific field id is missing from this result.',
+          ? "No block metadata returned for the requested ids (often sunset/legacy names). Retry with current successors (e.g. image_generator → image_generator_v2, gmail → gmail_v2). To attach Image/Chart/Exa/etc. to an Agent, edit that Agent's tools array — do not add them as canvas blocks."
+          : "If you just created a workflow, call edit_workflow now to add blocks. To attach Image Generator / Chart Generator / Exa to an existing Agent, edit that Agent's tools array (type image_generator_v2 / chart_generator / exa) and update its messages/prompt so it chooses those tools from the user question — do not add those as canvas blocks and do not add a Function block as a substitute. Do not load_copilot_artifact unless a specific field id is missing from this result.",
     }
   } else if (toolName === 'edit_content') {
     const record = asRecord(result)
@@ -791,6 +891,14 @@ function detectMandatoryFollowUpFromRecord(
     }
   }
 
+  if (parsed.needsFollowUpPatchRepair === true) {
+    return {
+      id: 'workspace_file:patch-repair',
+      hint: hint ?? PATCH_REPAIR_FOLLOW_UP_HINT,
+      resolveWith: ['read', 'grep', 'workspace_file'],
+    }
+  }
+
   if (parsed.needsFollowUpEdit === true) {
     const precondition =
       parsed.editPrecondition === 'metadata' ||
@@ -837,7 +945,7 @@ function detectMandatoryFollowUpFromRecord(
       id: 'edit_workflow:oauth',
       hint:
         hint ??
-        'Missing OAuth credential. Call oauth_get_auth_link once, share the link, then stop.',
+        'Missing OAuth credential. Call oauth_get_auth_link once for each missing provider in this response, then stop.',
       resolveWith: ['oauth_get_auth_link'],
     }
   }
@@ -877,6 +985,64 @@ function detectMandatoryFollowUpFromRecord(
 }
 
 /**
+ * Follow-ups that must still run after `workspace_file` / `create_file` even
+ * when the normal tool-round budget is exhausted — otherwise the turn ends with
+ * prepare-without-apply (no `edit_content`).
+ */
+export const WRITE_CRITICAL_FOLLOW_UP_IDS = new Set([
+  'workspace_file:edit-content',
+  'create_file:write',
+  'create_file:workspace-file',
+  'workspace_file:patch-repair',
+])
+
+/**
+ * True when a pending follow-up must complete a file write pipeline.
+ */
+export function hasWriteCriticalFollowUp(pending: MandatoryFollowUp[]): boolean {
+  return pending.some((item) => WRITE_CRITICAL_FOLLOW_UP_IDS.has(item.id))
+}
+
+/**
+ * Whether the agent loop may start another model round. Overflow past
+ * `maxToolRounds` is reserved for write-critical mandatory follow-ups.
+ */
+export function canEnterToolRound(options: {
+  round: number
+  maxToolRounds: number
+  maxForcedFollowUpRounds: number
+  pendingFollowUps: MandatoryFollowUp[]
+}): boolean {
+  if (options.round < options.maxToolRounds) return true
+  if (options.round >= options.maxToolRounds + options.maxForcedFollowUpRounds) return false
+  return hasWriteCriticalFollowUp(options.pendingFollowUps)
+}
+
+/**
+ * Whether to inject a mandatory-follow-up continuation when the model stopped
+ * with no tools. Write-critical follow-ups may use the last normal round and
+ * overflow rounds; other follow-ups keep the historical `maxToolRounds - 1` cap.
+ */
+export function canForceMandatoryFollowUp(options: {
+  round: number
+  maxToolRounds: number
+  maxForcedFollowUpRounds: number
+  forcedFollowUpRounds: number
+  pendingFollowUps: MandatoryFollowUp[]
+  postBuildAllows: boolean
+}): boolean {
+  if (options.pendingFollowUps.length === 0) return false
+  if (!options.postBuildAllows) return false
+  if (options.forcedFollowUpRounds >= options.maxForcedFollowUpRounds) return false
+
+  const hardCeil = options.maxToolRounds + options.maxForcedFollowUpRounds
+  if (options.round >= hardCeil - 1) return false
+
+  if (options.round < options.maxToolRounds - 1) return true
+  return hasWriteCriticalFollowUp(options.pendingFollowUps)
+}
+
+/**
  * Removes satisfied follow-ups after a resolving tool succeeds.
  */
 export function resolveMandatoryFollowUps(
@@ -896,7 +1062,10 @@ export function resolveMandatoryFollowUps(
   }
 
   if (toolName === 'workspace_file') {
-    next = next.filter((item) => item.id !== 'create_file:workspace-file')
+    next = next.filter(
+      (item) =>
+        item.id !== 'create_file:workspace-file' && item.id !== 'workspace_file:patch-repair'
+    )
   }
 
   if (toolName === 'create_file') {

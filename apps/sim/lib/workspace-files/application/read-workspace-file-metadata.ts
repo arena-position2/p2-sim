@@ -1,3 +1,4 @@
+import type { Principal } from '@sim/auth/principal'
 import type { ShareRecord } from '@/lib/api/contracts/public-shares'
 import type { AuthorizedWorkspaceUseCaseContext } from '@/lib/core/application'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
@@ -5,6 +6,8 @@ import { getShareForResource } from '@/lib/public-shares/share-manager'
 import {
   type ActiveWorkspaceFileContext,
   getWorkspaceFile,
+  getWorkspaceFileWithCurrentVersion,
+  type VersionedWorkspaceFileRecord,
   type WorkspaceFileRecord,
 } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
 import { defineAuthorizedWorkspaceFileUseCase } from '@/lib/workspace-files/application/authorized-workspace-file-use-case'
@@ -28,6 +31,11 @@ export interface ReadWorkspaceFileMetadataResult {
   share: ShareRecord | null
 }
 
+export interface ReadWorkspaceFileMetadataWithVersionResult
+  extends ReadWorkspaceFileMetadataResult {
+  file: VersionedWorkspaceFileRecord
+}
+
 async function executeReadWorkspaceFileMetadata({
   input,
   context,
@@ -40,6 +48,7 @@ async function executeReadWorkspaceFileMetadata({
     getWorkspaceFile(context.workspaceId, context.fileId, {
       includeDeleted: input.includeDeleted,
       throwOnError: true,
+      includeOwnedFiles: true,
     }),
     getShareForResource('file', context.fileId),
   ])
@@ -49,6 +58,33 @@ async function executeReadWorkspaceFileMetadata({
 
 export const readWorkspaceFileMetadata = defineAuthorizedWorkspaceFileUseCase({
   operation: fileOperations.readMetadata,
-  resolveContext: ({ input }) => resolveActiveWorkspaceFileContext(input),
+  resolveContext: ({ principal, input }) =>
+    resolveActiveWorkspaceFileContext({ ...input, ownedFilePrincipal: principal }),
   execute: executeReadWorkspaceFileMetadata,
+})
+
+/**
+ * The same read plus the current version number, for the public metadata surface. Kept separate so
+ * the many internal callers of {@link readWorkspaceFileMetadata} pay nothing for it.
+ */
+export const readWorkspaceFileMetadataWithVersion = defineAuthorizedWorkspaceFileUseCase({
+  operation: fileOperations.readMetadata,
+  resolveContext: ({
+    principal,
+    input,
+  }: {
+    principal: Principal
+    input: ReadWorkspaceFileMetadataInput
+  }) => resolveActiveWorkspaceFileContext({ ...input, ownedFilePrincipal: principal }),
+  async execute({ input, context }): Promise<ReadWorkspaceFileMetadataWithVersionResult> {
+    const [file, share] = await Promise.all([
+      getWorkspaceFileWithCurrentVersion(context.workspaceId, context.fileId, {
+        includeDeleted: input.includeDeleted,
+        includeOwnedFiles: true,
+      }),
+      getShareForResource('file', context.fileId),
+    ])
+    if (!file) throw new OrchestrationError('not_found', 'File not found')
+    return { file, share }
+  },
 })

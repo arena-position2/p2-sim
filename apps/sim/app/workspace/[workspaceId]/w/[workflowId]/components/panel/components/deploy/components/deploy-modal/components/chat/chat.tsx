@@ -6,23 +6,18 @@ import {
   ChipEmailsInput,
   ChipInput,
   ChipSelect,
-  cn,
-  Input,
   Label,
-  Loader,
   Skeleton,
   Switch,
   Textarea,
-  Tooltip,
 } from '@sim/emcn'
 import { TriangleAlert } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
-import { Check } from 'lucide-react'
 import { GeneratedPasswordInput } from '@/components/ui'
 import { useSession } from '@/lib/auth/auth-client'
+import { buildChatDeploymentUrl } from '@/lib/chat-deployments/urls'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
-import { getBaseUrl, getEmailDomain } from '@/lib/core/utils/urls'
 import { validateAllowlistEntry } from '@/lib/messaging/email/validation'
 import { formatInternalOutputSelector } from '@/lib/workflows/streaming/output-selector'
 import { OutputSelect } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/chat/components/output-select/output-select'
@@ -38,7 +33,6 @@ import {
 import type { ChatDetail } from '@/hooks/queries/deployments'
 import { usePermissionConfig } from '@/hooks/use-permission-config'
 import { useWorkflowStore } from '@/stores/workflows/workflow/store'
-import { useIdentifierValidation } from './hooks'
 import {
   getPasswordHelperText,
   getPasswordPlaceholder,
@@ -63,14 +57,9 @@ function dedupeStrings(values: readonly string[]): string[] {
   return result
 }
 
-const IDENTIFIER_PATTERN = /^[a-z0-9-]+$/
-
 interface ChatDeployProps {
   workflowId: string
   workflowWorkspaceId?: string
-  deploymentInfo: {
-    apiKey: string
-  } | null
   existingChat: ExistingChat | null
   isLoadingChat: boolean
   onRefetchChat: () => Promise<void>
@@ -148,7 +137,6 @@ function createInitialFormData(mode: 'chat' | 'app', sessionEmail?: string | nul
 export function ChatDeploy({
   workflowId,
   workflowWorkspaceId,
-  deploymentInfo,
   existingChat,
   isLoadingChat,
   onRefetchChat,
@@ -161,7 +149,6 @@ export function ChatDeploy({
   onDeploymentComplete,
   onDeployed,
   onVersionActivated,
-  chatAlreadyExists,
   mode = 'chat',
 }: ChatDeployProps) {
   const isAppMode = mode === 'app'
@@ -397,20 +384,6 @@ export function ChatDeploy({
       }))
     }
   }, [existingChat, isLoadingChat, workflowId, knowledgeResultOutputIds, isAppMode])
-
-  const handleOutputSelect = useCallback(
-    (newValues: string[]) => {
-      const removed = formData.selectedOutputBlocks.filter((id) => !newValues.includes(id))
-      const removedKnowledge = removed.filter((id) => knowledgeResultOutputIds.includes(id))
-      if (removedKnowledge.length > 0) {
-        setPendingOutputSelection(newValues)
-        setShowUnselectKnowledgeConfirm(true)
-      } else {
-        updateField('selectedOutputBlocks', newValues)
-      }
-    },
-    [formData.selectedOutputBlocks, knowledgeResultOutputIds, updateField]
-  )
 
   const handleConfirmUnselectKnowledge = useCallback(() => {
     if (pendingOutputSelection !== null) {
@@ -648,7 +621,9 @@ export function ChatDeploy({
                 placeholder='Select which block outputs to use'
                 disabled={chatSubmitting}
                 size='md'
+                variant='chip'
                 className='w-full'
+                disablePortal
               />
               {errors.outputBlocks && (
                 <p className='mt-[6.5px] text-[var(--text-error)] text-caption'>
@@ -660,9 +635,7 @@ export function ChatDeploy({
 
           <div className='flex items-center justify-between gap-3'>
             <div className='min-w-0'>
-              <Label className='block pl-0.5 text-[var(--text-primary)] text-small'>
-                Include thinking
-              </Label>
+              <Label className='block pl-0.5 text-small'>Include thinking</Label>
             </div>
             <Switch
               checked={formData.includeThinking}
@@ -674,9 +647,7 @@ export function ChatDeploy({
 
           <div className='flex items-center justify-between gap-3'>
             <div className='min-w-0'>
-              <Label className='block pl-0.5 text-[var(--text-primary)] text-small'>
-                Include tool calls
-              </Label>
+              <Label className='block pl-0.5 text-small'>Include tool calls</Label>
             </div>
             <Switch
               checked={formData.includeToolCalls}
@@ -759,7 +730,7 @@ export function ChatDeploy({
           {
             text: isAppMode
               ? 'This will remove the app deployment and make it unavailable to all users.'
-              : `This will remove the chat at "${getEmailDomain()}/chat/${existingChat?.identifier ?? ''}" and make it unavailable to all users.`,
+              : `This will remove the chat at "${buildChatDeploymentUrl(existingChat?.identifier ?? '').replace(/^https?:\/\//, '')}" and make it unavailable to all users.`,
             error: true,
           },
           ' This action cannot be undone.',
@@ -815,120 +786,6 @@ function LoadingSkeleton() {
           <Skeleton className='mt-[6.5px] h-[14px] w-[340px]' />
         </div>
       </div>
-    </div>
-  )
-}
-
-interface IdentifierInputProps {
-  value: string
-  onChange: (value: string) => void
-  originalIdentifier?: string
-  disabled?: boolean
-  onValidationChange?: (isValid: boolean) => void
-  isEditingExisting?: boolean
-}
-
-const getDomainPrefix = (() => {
-  const prefix = `${getEmailDomain()}/chat/`
-  return () => prefix
-})()
-
-function IdentifierInput({
-  value,
-  onChange,
-  originalIdentifier,
-  disabled = false,
-  onValidationChange,
-  isEditingExisting = false,
-}: IdentifierInputProps) {
-  const { isChecking, error, isValid } = useIdentifierValidation(
-    value,
-    originalIdentifier,
-    isEditingExisting
-  )
-
-  useEffect(() => {
-    onValidationChange?.(isValid)
-  }, [isValid, onValidationChange])
-
-  const handleChange = (newValue: string) => {
-    const lowercaseValue = newValue.toLowerCase()
-    onChange(lowercaseValue)
-  }
-
-  const fullUrl = `${getBaseUrl()}/chat/${value}`
-  const displayUrl = fullUrl.replace(/^https?:\/\//, '')
-
-  return (
-    <div>
-      <Label
-        htmlFor='chat-url'
-        className='mb-[6.5px] block pl-0.5 text-[var(--text-primary)] text-small'
-      >
-        URL
-      </Label>
-      <div
-        className={cn(
-          'relative flex items-stretch overflow-hidden rounded-sm border border-[var(--border-1)] bg-[var(--surface-5)]',
-          error && 'border-[var(--text-error)]'
-        )}
-      >
-        <div className='flex items-center whitespace-nowrap bg-[var(--surface-5)] pr-1.5 pl-2 text-[var(--text-secondary)] text-sm'>
-          {getDomainPrefix()}
-        </div>
-        <div className='relative flex-1'>
-          <Input
-            id='chat-url'
-            placeholder='my-chat'
-            value={value}
-            onChange={(e) => handleChange(e.target.value)}
-            required
-            disabled={disabled}
-            className={cn(
-              'rounded-none border-0 bg-transparent pl-0 shadow-none disabled:bg-transparent disabled:opacity-100',
-              (isChecking || (isValid && value)) && 'pr-8'
-            )}
-          />
-          {isChecking ? (
-            <div className='-translate-y-1/2 absolute top-1/2 right-2'>
-              <Loader className='size-4 text-[var(--text-tertiary)]' animate />
-            </div>
-          ) : (
-            isValid &&
-            value &&
-            value !== originalIdentifier && (
-              <Tooltip.Root>
-                <Tooltip.Trigger asChild>
-                  <div className='-translate-y-1/2 absolute top-1/2 right-2'>
-                    <Check className='size-4 text-[var(--brand-accent)]' />
-                  </div>
-                </Tooltip.Trigger>
-                <Tooltip.Content>
-                  <span>Name is available</span>
-                </Tooltip.Content>
-              </Tooltip.Root>
-            )
-          )}
-        </div>
-      </div>
-      {error && <p className='mt-[6.5px] text-[var(--text-error)] text-caption'>{error}</p>}
-      <p className='mt-[6.5px] truncate text-[var(--text-secondary)] text-xs'>
-        {isEditingExisting && value ? (
-          <>
-            Live at:{' '}
-            <a
-              href={fullUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-[var(--text-primary)] hover-hover:underline'
-            >
-              {displayUrl}
-            </a>
-          </>
-        ) : (
-          'The unique URL path where your chat will be accessible'
-        )}
-      </p>
     </div>
   )
 }
@@ -1031,9 +888,7 @@ function AuthSelector({
     <div className='space-y-[16px]'>
       {/* Access control selector intentionally commented — Arena deploy UX hides it.
       <div>
-        <Label className='mb-[6.5px] block pl-0.5 text-[var(--text-primary)] text-small'>
-          Access control
-        </Label>
+        <Label className='mb-[6.5px] block pl-0.5 text-small'>Access control</Label>
         <ChipButtonGroup
           value={authType}
           onValueChange={(val) => onAuthTypeChange(val as AuthType)}
@@ -1050,9 +905,7 @@ function AuthSelector({
 
       {authType === 'password' && (
         <div>
-          <Label className='mb-[6.5px] block pl-0.5 text-[var(--text-primary)] text-small'>
-            Password
-          </Label>
+          <Label className='mb-[6.5px] block pl-0.5 text-small'>Password</Label>
           <GeneratedPasswordInput
             value={password}
             onChange={handlePasswordChange}
@@ -1078,7 +931,7 @@ function AuthSelector({
 
       {(authType === 'email' || authType === 'sso') && (
         <div>
-          <Label className='mb-[6.5px] block pl-0.5 text-[var(--text-primary)] text-small'>
+          <Label className='mb-[6.5px] block pl-0.5 text-small'>
             {authType === 'email' ? 'Allowed emails' : 'Allowed SSO emails'}
           </Label>
           <ChipEmailsInput

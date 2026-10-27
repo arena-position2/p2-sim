@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import { describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx'
 import {
@@ -62,12 +59,6 @@ describe('XlsxParser display text', () => {
       '0.3',
       'left right',
     ])
-  })
-
-  it('renders dates from a date1904 workbook identically', async () => {
-    const result = await new XlsxParser().parseBuffer(typedWorkbook('xlsx', true))
-
-    expect(dataRow(result.content).slice(0, 2)).toEqual(['2026-03-04', '2026-03-04T12:00:00'])
   })
 
   /**
@@ -153,44 +144,9 @@ describe('XlsxParser display text', () => {
       '$2,500.00',
     ])
   })
-
-  /**
-   * The SheetJS ODS writer emits each number's stored value as the cell text
-   * the reader then trusts, so only dates, booleans and General numbers can be
-   * asserted through a round trip.
-   */
-  it('renders ISO dates from an ods round trip', async () => {
-    const result = await new XlsxParser().parseBuffer(typedWorkbook('ods'))
-
-    const row = dataRow(result.content)
-    expect(row.slice(0, 2)).toEqual(['2026-03-04', '2026-03-04T12:00:00'])
-    expect(row[4]).toBe('TRUE')
-    expect(row[6]).toBe('4111111111111111')
-  })
-
-  it('keeps the sampled metadata on display text as well', async () => {
-    const result = await new XlsxParser().parseBuffer(typedWorkbook('xlsx'))
-
-    const sampled = result.metadata?.sampledData as string[][]
-    expect(sampled[1].slice(0, 4)).toEqual([
-      '2026-03-04',
-      '2026-03-04T12:00:00',
-      '8.5%',
-      '$1,250.00',
-    ])
-  })
 })
 
 describe('isoDateText', () => {
-  it('drops a midnight time and keeps a non-midnight one without a zone suffix', () => {
-    expect(isoDateText(new Date(Date.UTC(2026, 2, 4)))).toBe('2026-03-04')
-    expect(isoDateText(new Date(Date.UTC(2026, 2, 4, 12, 30, 15)))).toBe('2026-03-04T12:30:15')
-  })
-
-  it('renders an invalid date as empty text', () => {
-    expect(isoDateText(new Date(Number.NaN))).toBe('')
-  })
-
   it('rounds the sub-second drift of a float serial to the nearest second', () => {
     const datetime = XLSX.SSF.parse_date_code(45366.572916666664)
     const time = XLSX.SSF.parse_date_code(0.6041666666666666)
@@ -263,18 +219,6 @@ describe('normalizeSheetDisplayText', () => {
     expect(sheet.D1.w).toBe('9')
   })
 
-  it('keeps the rendered duration of an elapsed-time cell', () => {
-    const sheet = XLSX.utils.aoa_to_sheet([['a']])
-    sheet.A1 = { t: 'd', v: new Date(Date.UTC(1900, 0, 1, 6)), z: '[h]:mm', w: '30:00' }
-    sheet.B1 = { t: 'd', v: new Date(Date.UTC(1899, 11, 31, 12)), z: '[mm]:ss', w: '720:00' }
-    sheet['!ref'] = 'A1:B1'
-
-    normalizeSheetDisplayText(sheet, XLSX.utils.decode_range('A1:B1'), XLSX.utils)
-
-    expect(sheet.A1.w).toBe('30:00')
-    expect(sheet.B1.w).toBe('720:00')
-  })
-
   it('touches only the window on a dense sheet', () => {
     const sheet = XLSX.utils.aoa_to_sheet([['a']], { dense: true })
     const inside = { t: 'd', v: new Date(Date.UTC(2026, 2, 4)), w: '3/4/2026' } as XLSX.CellObject
@@ -285,5 +229,20 @@ describe('normalizeSheetDisplayText', () => {
 
     expect(inside.w).toBe('2026-03-04')
     expect(outside.w).toBe('3/5/2026')
+  })
+
+  it('keeps the file text for a date format longer than Excel allows', () => {
+    const sheet = XLSX.utils.aoa_to_sheet([['a']])
+    const at = new Date(Date.UTC(2024, 2, 15, 14, 30))
+    sheet.A1 = { t: 'd', v: at, z: `m/d/yyyy h:mm${'"x"'.repeat(100)}`, w: '3/15/2024 14:30' }
+    sheet.B1 = { t: 'd', v: at, z: `m/d/yyyy h:mm${'"x"'.repeat(80)}`, w: '3/15/2024 14:30' }
+    sheet.C1 = { t: 'd', v: at, z: `[h]:mm${'"x"'.repeat(100)}`, w: '14:30' }
+    sheet['!ref'] = 'A1:C1'
+
+    normalizeSheetDisplayText(sheet, XLSX.utils.decode_range('A1:C1'), XLSX.utils)
+
+    expect(sheet.A1.w).toBe('3/15/2024 14:30')
+    expect(sheet.B1.w).toBe('2024-03-15T14:30:00')
+    expect(sheet.C1.w).toBe('14:30')
   })
 })

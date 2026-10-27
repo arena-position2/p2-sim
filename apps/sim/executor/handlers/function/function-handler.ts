@@ -1,4 +1,4 @@
-import { normalizeSecretMountPolicy } from '@/lib/copilot/secret-mount-policy'
+import { adoptToolFailure } from '@/lib/core/errors/failure-log'
 import { getRemainingExecutionMs } from '@/lib/core/execution-limits'
 import {
   normalizeRecord,
@@ -9,6 +9,7 @@ import { DEFAULT_EXECUTION_TIMEOUT_MS } from '@/lib/execution/constants'
 import { DEFAULT_CODE_LANGUAGE } from '@/lib/execution/languages'
 import { NonRetryableExecutionError } from '@/lib/execution/non-retryable-error'
 import { mergeFileKeys, mergeLargeValueKeys } from '@/lib/execution/payloads/access-keys'
+import { normalizeSecretMountPolicy } from '@/lib/mothership/secret-mount-policy'
 import { BlockType } from '@/executor/constants'
 import type { BlockHandler, ExecutionContext } from '@/executor/types'
 import { collectBlockData } from '@/executor/utils/block-data'
@@ -106,6 +107,7 @@ export class FunctionBlockHandler implements BlockHandler {
         userId: ctx.userId,
         isDeployedContext: ctx.isDeployedContext,
         enforceCredentialAccess: ctx.enforceCredentialAccess,
+        blockId: block.id,
       },
     }
 
@@ -117,7 +119,7 @@ export class FunctionBlockHandler implements BlockHandler {
           ? new NonRetryableExecutionError(result.error || 'Function execution is indeterminate')
           : new Error(result.error || 'Function execution failed')
       attachTrustedExecutionCost(error, result.output?.cost)
-      throw error
+      throw adoptToolFailure(error, result)
     }
 
     mergeLargeValueKeys(ctx, result.largeValueKeys ?? [])

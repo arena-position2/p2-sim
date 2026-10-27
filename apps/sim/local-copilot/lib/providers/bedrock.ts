@@ -4,6 +4,7 @@ import {
   type ContentBlock,
   type ConversationRole,
   ConverseCommand,
+  type ConverseCommandInput,
   ConverseStreamCommand,
   type SystemContentBlock,
   type Tool,
@@ -63,7 +64,7 @@ export function resolveBedrockThinkingAdditionalFields(
   const normalized = thinkingLevel.trim().toLowerCase()
   // Adaptive-only Claude generations reject manual budget_tokens on Bedrock.
   if (
-    /claude-(?:opus|sonnet)-5(?:$|[^0-9])/i.test(model) ||
+    /claude-(?:opus|sonnet|fable)-5(?:$|[^0-9])/i.test(model) ||
     /claude-opus-4(?:\.|-)(?:7|8)/i.test(model)
   ) {
     return {
@@ -596,7 +597,13 @@ export function createBedrockProvider(config: LocalCopilotConfig): LocalCopilotP
       system: system.length > 0 ? system : undefined,
       inferenceConfig,
       toolConfig,
-      ...(thinkingFields ? { additionalModelRequestFields: thinkingFields } : {}),
+      ...(thinkingFields
+        ? {
+            additionalModelRequestFields: thinkingFields as unknown as NonNullable<
+              ConverseCommandInput['additionalModelRequestFields']
+            >,
+          }
+        : {}),
     }
 
     const useStream = !(toolConfig && !bedrockSupportsStreamingWithTools(model))

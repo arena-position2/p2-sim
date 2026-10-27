@@ -3,6 +3,8 @@ import { requestRaw } from '@/lib/api/client/request'
 import { downloadWorkspaceFileItemsContract } from '@/lib/api/contracts/workspace-file-folders'
 import { exportWorkspaceFileSnapshotContract } from '@/lib/api/contracts/workspace-files'
 import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
+import { isMarkdownFile } from '@/lib/uploads/utils/file-utils'
+import { normalizeMimeType } from '@/lib/uploads/utils/mime'
 
 /** Action-time content from the mounted viewer, scoped so another file cannot consume it. */
 export interface FileDownloadSource {
@@ -43,13 +45,11 @@ export async function triggerFileDownload(
   record: WorkspaceFileRecord,
   source?: FileDownloadSource | null
 ): Promise<void> {
-  const isMarkdown =
-    record.type === 'text/markdown' ||
-    record.type === 'text/x-markdown' ||
-    /\.(?:md|markdown)$/i.test(record.name)
+  const isMarkdown = isMarkdownFile(record) || normalizeMimeType(record.type) === 'text/x-markdown'
 
   const content =
     isMarkdown &&
+    record.vfsNamespace !== 'uploads' &&
     (record.storageContext ?? 'workspace') === 'workspace' &&
     source?.fileId === record.id &&
     source.workspaceId === record.workspaceId
@@ -76,9 +76,12 @@ export async function triggerFileDownload(
     return
   }
 
-  const url = isMarkdown
-    ? `/api/files/export/${encodeURIComponent(record.id)}`
-    : `/api/files/serve/${encodeURIComponent(record.key)}?context=workspace&t=${Date.now()}`
+  const url =
+    isMarkdown &&
+    record.vfsNamespace !== 'uploads' &&
+    (record.storageContext ?? 'workspace') === 'workspace'
+      ? `/api/files/export/${encodeURIComponent(record.id)}`
+      : `/api/files/serve/${encodeURIComponent(record.key)}?context=${record.storageContext ?? 'workspace'}&t=${Date.now()}`
 
   // boundary-raw-fetch: binary download read as a blob; these paths have no contract
   const response = await fetch(url, { cache: 'no-store' })

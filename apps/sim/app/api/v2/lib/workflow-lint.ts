@@ -12,8 +12,8 @@ function blockRef(ref: WorkflowLintBlockRef) {
 /**
  * Projects a lint report onto the wire.
  *
- * Shared by the two graph writes so the report is byte-identical whichever one
- * produced it. The domain leaves an absent block name `undefined`; the contract
+ * Shared by the two graph writes and deploy so the report is byte-identical
+ * whichever one produced it. The domain leaves an absent block name `undefined`; the contract
  * declares it `nullable`, because `undefined` is not a JSON value and a key that
  * simply vanishes is indistinguishable from one the server forgot to send. The
  * mapping is therefore load-bearing, not ceremony.
@@ -56,6 +56,11 @@ export function presentWorkflowLint(lint: WorkflowLintReport) {
       value: reference.value,
       kind: reference.kind,
       reason: reference.reason,
+    })),
+    tableFieldIssues: lint.tableFieldIssues.map((issue) => ({
+      ...blockRef(issue),
+      field: issue.field,
+      tableName: issue.tableName,
     })),
     notes: lint.notes,
   }

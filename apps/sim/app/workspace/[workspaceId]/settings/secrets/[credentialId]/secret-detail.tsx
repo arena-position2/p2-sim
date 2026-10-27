@@ -15,16 +15,15 @@ import { useQueryState } from 'nuqs'
 import { SaveDiscardChips } from '@/components/settings/save-discard-actions'
 import { SettingsActionChips } from '@/components/settings/settings-header'
 import { isApiClientError } from '@/lib/api/client/errors'
-import { ResourceTile } from '@/app/workspace/[workspaceId]/components'
 import {
   AddPeopleModal,
   CredentialDetailHeading,
   CredentialDetailLayout,
   CredentialMembersSection,
   DetailSection,
-  UnsavedChangesModal,
   useCredentialDetailForm,
 } from '@/app/workspace/[workspaceId]/components/credential-detail'
+import { ResourceTile } from '@/app/workspace/[workspaceId]/components/resource-tile'
 import { SecretValueField } from '@/app/workspace/[workspaceId]/settings/components/secrets/components/secret-value-field'
 import { useSecretValue } from '@/app/workspace/[workspaceId]/settings/components/secrets/hooks/use-secret-value'
 import { SettingsEmptyState } from '@/app/workspace/[workspaceId]/settings/components/settings-empty-state'
@@ -162,7 +161,7 @@ export function SecretDetail({ workspaceId, credentialId }: SecretDetailProps) {
   if (error && !(isApiClientError(error) && error.status === 404)) {
     return (
       <CredentialDetailLayout back={back} actions={actions}>
-        <SettingsEmptyState variant='inline' tone='error'>
+        <SettingsEmptyState variant='inline'>
           {isApiClientError(error) && error.status === 403
             ? 'You do not have access to this secret.'
             : 'Could not load this secret.'}
@@ -302,12 +301,6 @@ export function SecretDetail({ workspaceId, credentialId }: SecretDetailProps) {
           onOpenChange={setIsShareModalOpen}
         />
       )}
-
-      <UnsavedChangesModal
-        open={form.showUnsavedAlert}
-        onOpenChange={form.setShowUnsavedAlert}
-        onDiscard={form.confirmDiscard}
-      />
     </>
   )
 }

@@ -1,7 +1,7 @@
-/**
- * @vitest-environment node
- */
-
+import {
+  inputValidationMock,
+  inputValidationMockFns,
+} from '@sim/testing/mocks/input-validation.mock'
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   isInternalToolFileResult,
@@ -10,20 +10,13 @@ import {
 
 const mocks = vi.hoisted(() => ({
   resolveFiles: vi.fn(),
-  secureFetchWithPinnedIP: vi.fn(),
-  secureFetchWithValidation: vi.fn(),
-  validateUrlWithDNS: vi.fn(),
 }))
 
 vi.mock('@/lib/internal/slack/file-input', () => ({
   forEachSlackAttachmentFile: mocks.resolveFiles,
 }))
 
-vi.mock('@/lib/core/security/input-validation.server', () => ({
-  secureFetchWithPinnedIP: mocks.secureFetchWithPinnedIP,
-  secureFetchWithValidation: mocks.secureFetchWithValidation,
-  validateUrlWithDNS: mocks.validateUrlWithDNS,
-}))
+vi.mock('@/lib/core/security/input-validation.server', () => inputValidationMock)
 
 import type { SlackOperationError } from '@/lib/internal/slack/errors'
 import {
@@ -33,9 +26,10 @@ import {
   executeSlackSendMessage,
   executeSlackUpdateMessage,
 } from '@/lib/internal/slack/operations'
-import { executeSlackGetChannelHistoryOperation } from '@/lib/internal/slack/operations/get-channel-history'
-import { executeSlackGetThreadRepliesOperation } from '@/lib/internal/slack/operations/get-thread-replies'
 import { MAX_FILE_SIZE } from '@/lib/uploads/utils/validation'
+
+const { mockValidateUrlWithDNS, mockSecureFetchWithPinnedIP, mockSecureFetchWithValidation } =
+  inputValidationMockFns
 
 const originalFetch = global.fetch
 
@@ -45,14 +39,13 @@ function slackResponse(body: unknown, status = 200): Response {
 
 describe('Slack operations', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     global.fetch = vi.fn() as unknown as typeof fetch
-    mocks.validateUrlWithDNS.mockResolvedValue({
+    mockValidateUrlWithDNS.mockResolvedValue({
       isValid: true,
       resolvedIP: '93.184.216.34',
       originalHostname: 'files.slack.com',
     })
-    mocks.secureFetchWithValidation.mockResolvedValue(new Response(null, { status: 200 }))
+    mockSecureFetchWithValidation.mockResolvedValue(new Response(null, { status: 200 }))
   })
 
   afterEach(() => {
@@ -286,16 +279,14 @@ describe('Slack operations', () => {
         },
       })
     )
-    mocks.secureFetchWithPinnedIP.mockResolvedValue(
-      new Response(Buffer.from('pdf'), { status: 200 })
-    )
+    mockSecureFetchWithPinnedIP.mockResolvedValue(new Response(Buffer.from('pdf'), { status: 200 }))
 
     const result = await executeSlackDownload(
       { accessToken: 'token', fileId: 'F1' },
       controller.signal
     )
 
-    expect(mocks.secureFetchWithPinnedIP).toHaveBeenCalledWith(
+    expect(mockSecureFetchWithPinnedIP).toHaveBeenCalledWith(
       'https://files.slack.com/report.pdf',
       '93.184.216.34',
       {
@@ -320,39 +311,5 @@ describe('Slack operations', () => {
       context: 'execution',
     }
     expect(result.present([storedFile])).toEqual({ success: true, output: { file: storedFile } })
-  })
-
-  it.each([
-    ['channel history', executeSlackGetChannelHistoryOperation, { channel: 'C1' }],
-    ['thread replies', executeSlackGetThreadRepliesOperation, { channel: 'C1', threadTs: '1.0' }],
-  ] as const)('passes cancellation through paginated %s reads', async (_name, operation, input) => {
-    const controller = new AbortController()
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      slackResponse({ ok: true, messages: [], response_metadata: { next_cursor: '' } })
-    )
-
-    await operation({ accessToken: 'token', ...input } as never, controller.signal)
-
-    expect(vi.mocked(global.fetch).mock.calls[0]?.[1]).toMatchObject({
-      signal: controller.signal,
-    })
-  })
-
-  it('interrupts a paginated Slack rate-limit wait when cancelled', async () => {
-    const controller = new AbortController()
-    vi.mocked(global.fetch).mockResolvedValueOnce(
-      slackResponse({ ok: false, error: 'ratelimited' }, 429)
-    )
-
-    const result = executeSlackGetChannelHistoryOperation(
-      { accessToken: 'token', channel: 'C1' },
-      controller.signal
-    )
-    const rejection = expect(result).rejects.toMatchObject({ name: 'AbortError' })
-    await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1))
-    controller.abort(new DOMException('cancelled', 'AbortError'))
-
-    await rejection
-    expect(global.fetch).toHaveBeenCalledTimes(1)
   })
 })

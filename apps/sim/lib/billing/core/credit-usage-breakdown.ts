@@ -1,5 +1,5 @@
 import { dbReplica } from '@sim/db'
-import { member, usageLog, user, userStats, workspace } from '@sim/db/schema'
+import { member, usageLog, user, workspace } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { isOrgAdminRole } from '@sim/platform-authz/predicates'
 import { and, eq, inArray, type SQL, sql } from 'drizzle-orm'
@@ -337,18 +337,8 @@ async function getPersonalCreditUsageSummary(
       ? { start: usageData.billingPeriodStart, end: usageData.billingPeriodEnd }
       : defaultBillingPeriod()
 
-  const [statsRow] = await executor
-    .select({
-      currentPeriodCost: userStats.currentPeriodCost,
-      currentPeriodCopilotCost: userStats.currentPeriodCopilotCost,
-    })
-    .from(userStats)
-    .where(eq(userStats.userId, userId))
-    .limit(1)
-
-  const totalBaseline = Number(statsRow?.currentPeriodCost ?? 0)
-  const copilotBaseline = Number(statsRow?.currentPeriodCopilotCost ?? 0)
-
+  // Current-period usage lives on the ledger after user_stats dropped
+  // currentPeriodCost / currentPeriodCopilotCost.
   const [totalLedger, mothershipLedger, workflowLedger] = await Promise.all([
     getBillingPeriodUsageCost({ type: 'user', id: userId }, billingPeriod, undefined, executor),
     getBillingPeriodUsageCost(
@@ -361,8 +351,8 @@ async function getPersonalCreditUsageSummary(
   ])
 
   const dollarBreakdown = buildDollarBreakdown({
-    totalBaseline,
-    copilotBaseline,
+    totalBaseline: 0,
+    copilotBaseline: 0,
     totalLedger,
     mothershipLedger,
     workflowLedger,
@@ -410,12 +400,9 @@ async function getOrganizationCreditUsageSummary(
       userId: member.userId,
       userName: user.name,
       userEmail: user.email,
-      currentPeriodCost: userStats.currentPeriodCost,
-      currentPeriodCopilotCost: userStats.currentPeriodCopilotCost,
     })
     .from(member)
     .innerJoin(user, eq(member.userId, user.id))
-    .leftJoin(userStats, eq(member.userId, userStats.userId))
     .where(eq(member.organizationId, organizationId))
 
   const [
@@ -444,21 +431,14 @@ async function getOrganizationCreditUsageSummary(
     sumOrganizationWorkspaceUsageBySource(organizationId, billingPeriod, 'workflow', executor),
   ])
 
-  let totalBaseline = 0
-  let copilotBaseline = 0
   const memberRows: MemberCreditUsageRow[] = membersWithStats.map((memberRecord) => {
-    const memberTotalBaseline = Number(memberRecord.currentPeriodCost ?? 0)
-    const memberCopilotBaseline = Number(memberRecord.currentPeriodCopilotCost ?? 0)
     const memberTotalLedger = usageByUser.get(memberRecord.userId) ?? 0
     const memberMothershipLedger = mothershipByUser.get(memberRecord.userId) ?? 0
     const memberWorkflowLedger = workflowByUser.get(memberRecord.userId) ?? 0
 
-    totalBaseline += memberTotalBaseline
-    copilotBaseline += memberCopilotBaseline
-
     const memberBreakdown = buildDollarBreakdown({
-      totalBaseline: memberTotalBaseline,
-      copilotBaseline: memberCopilotBaseline,
+      totalBaseline: 0,
+      copilotBaseline: 0,
       totalLedger: memberTotalLedger,
       mothershipLedger: memberMothershipLedger,
       workflowLedger: memberWorkflowLedger,
@@ -477,8 +457,8 @@ async function getOrganizationCreditUsageSummary(
   memberRows.sort((a, b) => b.totalCredits - a.totalCredits)
 
   const orgDollarBreakdown = buildDollarBreakdown({
-    totalBaseline,
-    copilotBaseline,
+    totalBaseline: 0,
+    copilotBaseline: 0,
     totalLedger: orgTotalLedger,
     mothershipLedger: orgMothershipLedger,
     workflowLedger: orgWorkflowLedger,

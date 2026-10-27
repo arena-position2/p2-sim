@@ -2,7 +2,6 @@ import { DevelopmentIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
 import { IntegrationType } from '@/blocks/types'
 import { normalizeFileInput } from '@/blocks/utils'
-import type { DevelopmentGenerateAppResponse } from '@/tools/development/types'
 
 let _inflightRepoFetch: Promise<Array<{ label: string; id: string }>> | null = null
 
@@ -34,7 +33,7 @@ async function fetchArenaDevelopmentRepos(): Promise<Array<{ label: string; id: 
   return _inflightRepoFetch
 }
 
-export const ArenaDevelopmentBlock: BlockConfig<DevelopmentGenerateAppResponse> = {
+export const ArenaDevelopmentBlock: BlockConfig = {
   type: 'arena_development',
   name: 'Arena Development',
   description:

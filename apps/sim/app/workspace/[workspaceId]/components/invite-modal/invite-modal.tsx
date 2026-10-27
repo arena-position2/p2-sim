@@ -21,7 +21,7 @@ import { quickValidateEmail } from '@/lib/messaging/email/validation'
 import type { PermissionType } from '@/lib/workspaces/permissions/utils'
 import { useOptionalWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import { useSendWorkspaceInvitations } from '@/hooks/queries/invitations'
-import { useOrganizationBilling } from '@/hooks/queries/organization'
+import { useOrganizationPlanSeats } from '@/hooks/queries/organization-plan-seats'
 import { useAdminWorkspaces } from '@/hooks/queries/workspace'
 
 const logger = createLogger('InviteModal')
@@ -41,7 +41,6 @@ const MEMBERSHIP_OPTIONS = [
 type Membership = (typeof MEMBERSHIP_OPTIONS)[number]['value']
 
 const MEMBERSHIP_HINTS: Partial<Record<Membership, string>> = {
-  admin: 'Joins your organization and can manage it. Adds a seat.',
   external:
     'Access to the selected workspaces only — no seat. Only available for people already on a paid Arena AI plan.',
 }
@@ -194,7 +193,7 @@ export function InviteModal({
   )
   const canViewOrganizationBilling = canGrantOrganizationAdmin
 
-  const { data: organizationBillingData } = useOrganizationBilling(organizationId ?? '', {
+  const { data: organizationBillingData } = useOrganizationPlanSeats(organizationId ?? '', {
     enabled: open && billingEnabled && canViewOrganizationBilling,
   })
 

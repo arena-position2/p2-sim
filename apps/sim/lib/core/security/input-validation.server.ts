@@ -26,11 +26,15 @@ import { describeEgressDenial, type EgressProfile } from '@/lib/core/security/eg
 import {
   checkEgressUrl,
   checkResolvedEgress,
+  type EgressValidationOptions,
   validateEgressUrl,
 } from '@/lib/core/security/egress/validate'
 import type { HttpRedirectPolicy } from '@/lib/core/security/http-redirect-policy'
 import type { ValidationResult } from '@/lib/core/security/input-validation'
-import { nodeReadableToWebStream } from '@/lib/core/utils/node-stream'
+import {
+  createPrematureStreamCloseError,
+  nodeReadableToWebStream,
+} from '@/lib/core/utils/node-stream'
 import { PayloadSizeLimitError } from '@/lib/core/utils/stream-limits'
 
 const logger = createLogger('InputValidation')
@@ -40,7 +44,13 @@ const logger = createLogger('InputValidation')
  */
 export type AsyncValidationResult =
   | { isValid: true; resolvedIP: string; originalHostname: string; error?: undefined }
-  | { isValid: false; error: string; resolvedIP?: undefined; originalHostname?: undefined }
+  | {
+      isValid: false
+      error: string
+      cause?: unknown
+      resolvedIP?: undefined
+      originalHostname?: undefined
+    }
 
 /**
  * Validates a URL, resolves its DNS, and returns the address to pin.
@@ -59,12 +69,12 @@ export async function validateUrlWithDNS(
   url: string | null | undefined,
   paramName: string,
   profile: EgressProfile,
-  options: { logDetails?: boolean } = {}
+  options: EgressValidationOptions = {}
 ): Promise<AsyncValidationResult> {
   const result = await validateEgressUrl(url, paramName, profile, options)
   return result.isValid
     ? { isValid: true, resolvedIP: result.resolvedIP, originalHostname: result.originalHostname }
-    : { isValid: false, error: result.error }
+    : { isValid: false, error: result.error, cause: result.cause }
 }
 
 /**
@@ -330,6 +340,12 @@ export interface SecureFetchOptions {
   method?: string
   headers?: Record<string, string>
   body?: string | Buffer | Uint8Array
+  /**
+   * Raw origin-form path and query for authenticated protocols that sign the request target.
+   * Preserves dot segments, keeps the URL's host, disables redirects, and fails closed when
+   * the selected gateway cannot preserve this target.
+   */
+  requestTarget?: string
   timeout?: number
   maxRedirects?: number
   /**
@@ -356,6 +372,19 @@ export interface SecureFetchOptions {
   proxyUrl?: string
   /** Hide credential-derived URL details from validation logs. */
   logUrlValidationDetails?: boolean
+  /**
+   * Ask for a gzip or brotli body. The body is decoded before it is returned, and
+   * `maxResponseBytes` bounds the decoded bytes, so a compression bomb still stops at the cap.
+   */
+  acceptCompressed?: boolean
+  /**
+   * Reuses keep-alive connections to the same pinned address across requests. A connection is
+   * only ever reused for the IP it was opened to, so every request keeps its DNS pinning. The
+   * owner must call {@link PinnedConnectionPool.destroy} once its requests have finished. Bun
+   * keeps sockets in its own per-address pool, so there reuse spans pools and `destroy` releases
+   * only the agents.
+   */
+  connectionPool?: PinnedConnectionPool
   /**
    * Where this request's URL came from. Carried on the options so the same
    * policy is re-applied to every redirect hop rather than re-derived — a hop
@@ -444,6 +473,43 @@ function resolveRedirectUrl(baseUrl: string, location: string): string {
     return new URL(location, baseUrl).toString()
   } catch {
     throw new Error(`Invalid redirect location: ${location}`)
+  }
+}
+
+/** Keep-alive agents keyed by protocol, host, port, and the pinned address they connect to. */
+export interface PinnedConnectionPool {
+  /** Undefined once destroyed, so a late request falls back to a single-use pinned agent. */
+  agent(isHttps: boolean, host: string, port: number, resolvedIP: string): http.Agent | undefined
+  destroy(): void
+}
+
+/**
+ * Creates a request-scoped pool of pinned keep-alive agents. Reusing a connection skips the TCP
+ * and TLS handshakes that otherwise dominate short provider API calls.
+ */
+export function createPinnedConnectionPool(): PinnedConnectionPool {
+  const agents = new Map<string, http.Agent>()
+  let destroyed = false
+  return {
+    agent(isHttps, host, port, resolvedIP) {
+      if (destroyed) return undefined
+      const key = JSON.stringify([isHttps, host, port, resolvedIP])
+      let agent = agents.get(key)
+      if (!agent) {
+        const options: http.AgentOptions = {
+          keepAlive: true,
+          lookup: createPinnedLookup(resolvedIP),
+        }
+        agent = isHttps ? new https.Agent(options) : new http.Agent(options)
+        agents.set(key, agent)
+      }
+      return agent
+    },
+    destroy() {
+      destroyed = true
+      for (const agent of agents.values()) agent.destroy()
+      agents.clear()
+    },
   }
 }
 
@@ -861,7 +927,7 @@ async function undiciRequestAsResponse(
     signal?.addEventListener('abort', onAbort, { once: true })
     body.once('error', (error) => decoder.destroy(error))
     body.once('close', () => {
-      if (!body.readableEnded) decoder.destroy(new Error('Response body closed before completing'))
+      if (!body.readableEnded) decoder.destroy(createPrematureStreamCloseError())
     })
     decoder.once('close', () => {
       signal?.removeEventListener('abort', onAbort)
@@ -1067,7 +1133,17 @@ export async function secureFetchWithPinnedIP(
   options: SecureFetchOptions,
   redirectCount = 0
 ): Promise<SecureFetchResponse> {
-  const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
+  const requestTarget = options.requestTarget
+  if (
+    requestTarget !== undefined &&
+    (!requestTarget.startsWith('/') ||
+      requestTarget.includes('#') ||
+      /[^\x21-\x7e]/.test(requestTarget))
+  ) {
+    throw new Error('Invalid signed HTTP request target')
+  }
+  const maxRedirects =
+    requestTarget === undefined ? (options.maxRedirects ?? DEFAULT_MAX_REDIRECTS) : 0
   const requestedMaxResponseBytes = options.maxResponseBytes
   const maxResponseBytes =
     typeof requestedMaxResponseBytes === 'number' && requestedMaxResponseBytes > 0
@@ -1083,11 +1159,17 @@ export async function secureFetchWithPinnedIP(
 
   return new Promise((resolve, reject) => {
     const parsed = new URL(url)
+    const hostname = unwrapIpv6Brackets(parsed.hostname)
     const isHttps = parsed.protocol === 'https:'
     const defaultPort = isHttps ? 443 : 80
     const port = parsed.port ? Number.parseInt(parsed.port, 10) : defaultPort
 
     let agent: http.Agent | undefined
+    /**
+     * Bun ignores a `lookup` set on an Agent and honors one on the request, while Node honors
+     * both. A pinned direct connection sets it in both places so pinning holds in either runtime.
+     */
+    let pinnedLookup: LookupFunction | undefined
     if (outboundDispatcher) {
       agent = undefined
     } else if (options.proxyUrl) {
@@ -1096,12 +1178,17 @@ export async function secureFetchWithPinnedIP(
       // targets tunnel via CONNECT, http targets use absolute-URI forwarding.
       agent = isHttps ? new HttpsProxyAgent(options.proxyUrl) : new HttpProxyAgent(options.proxyUrl)
     } else {
-      const lookup = createPinnedLookup(resolvedIP)
-      const agentOptions: http.AgentOptions = { lookup }
-      agent = isHttps ? new https.Agent(agentOptions) : new http.Agent(agentOptions)
+      pinnedLookup = createPinnedLookup(resolvedIP)
+      agent =
+        options.connectionPool?.agent(isHttps, hostname, port, resolvedIP) ??
+        (isHttps
+          ? new https.Agent({ lookup: pinnedLookup })
+          : new http.Agent({ lookup: pinnedLookup }))
     }
 
     const { 'accept-encoding': _, ...sanitizedHeaders } = options.headers ?? {}
+    /** Raw deflate streams are ambiguous to decode, so only gzip and brotli are requested. */
+    if (options.acceptCompressed) sanitizedHeaders['accept-encoding'] = 'gzip, br'
     if (!Object.keys(sanitizedHeaders).some((name) => name.toLowerCase() === 'user-agent')) {
       sanitizedHeaders['user-agent'] = DEFAULT_USER_AGENT
     }
@@ -1117,12 +1204,13 @@ export async function secureFetchWithPinnedIP(
     }
 
     const requestOptions: http.RequestOptions = {
-      hostname: parsed.hostname,
+      hostname,
       port,
-      path: parsed.pathname + parsed.search,
+      path: requestTarget ?? parsed.pathname + parsed.search,
       method: options.method || 'GET',
       headers: sanitizedHeaders,
       agent,
+      ...(pinnedLookup ? { lookup: pinnedLookup } : {}),
       timeout: options.timeout || 300000,
     }
 
@@ -1149,10 +1237,13 @@ export async function secureFetchWithPinnedIP(
         }
         validateUrlWithDNS(redirectUrl, 'redirectUrl', options.profile, {
           logDetails: options.logUrlValidationDetails,
+          signal: options.signal,
         })
           .then((validation) => {
             if (!validation.isValid) {
-              settledReject(new Error(`Redirect blocked: ${validation.error}`))
+              settledReject(
+                new Error(`Redirect blocked: ${validation.error}`, { cause: validation.cause })
+              )
               return
             }
             const redirectPolicy = options.redirectPolicy
@@ -1265,7 +1356,13 @@ export async function secureFetchWithPinnedIP(
         statusCode === 204 ||
         statusCode === 205 ||
         statusCode === 304
-      const contentLength = headersRecord['content-length']
+      /**
+       * An encoded body's Content-Length is its wire size, not the decoded size the cap bounds,
+       * so only an identity body is rejected up front; the decoded stream is capped as it reads.
+       */
+      const contentLength = headersRecord['content-encoding']
+        ? undefined
+        : headersRecord['content-length']
       if (contentLength && !isBodylessResponse) {
         const parsedLength = Number.parseInt(contentLength, 10)
         if (Number.isFinite(parsedLength) && parsedLength > maxResponseBytes) {
@@ -1344,13 +1441,12 @@ export async function secureFetchWithPinnedIP(
           })
           nodeRes.once('error', fail)
           nodeRes.once('close', () => {
-            if (!bodySettled) fail(new Error('Response body closed before completing'))
+            if (!bodySettled) fail(createPrematureStreamCloseError())
           })
           if (decoder) {
             res.once('error', (error) => decoder.destroy(error))
             res.once('close', () => {
-              if (!res.readableEnded)
-                decoder.destroy(new Error('Response body closed before completing'))
+              if (!res.readableEnded) decoder.destroy(createPrematureStreamCloseError())
             })
             res.pipe(decoder)
           }
@@ -1420,6 +1516,7 @@ export async function secureFetchWithPinnedIP(
       send = () => {
         void requestWithOutboundDispatcher(url, {
           dispatcher,
+          requestTarget,
           method: (options.method || 'GET') as Dispatcher.HttpMethod,
           headers: sanitizedHeaders,
           body: options.body,
@@ -1447,7 +1544,11 @@ export async function secureFetchWithPinnedIP(
       req.on('error', settledReject)
       req.on('timeout', () => {
         destroyRequest()
-        settledReject(new Error(`Request timed out after ${requestOptions.timeout}ms`))
+        settledReject(
+          Object.assign(new Error(`Request timed out after ${requestOptions.timeout}ms`), {
+            code: 'ETIMEDOUT',
+          })
+        )
       })
       send = () => {
         req.end(options.body)
@@ -1488,9 +1589,10 @@ export async function secureFetchWithValidation(
 ): Promise<SecureFetchResponse> {
   const validation = await validateUrlWithDNS(url, paramName, options.profile, {
     logDetails: options.logUrlValidationDetails,
+    signal: options.signal,
   })
   if (!validation.isValid) {
-    throw new Error(validation.error)
+    throw new Error(validation.error, { cause: validation.cause })
   }
   return secureFetchWithPinnedIP(url, validation.resolvedIP, options)
 }

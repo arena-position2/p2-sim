@@ -31,7 +31,13 @@ function extractImageUrl(image: unknown): string {
 
 function toImageFile(image: unknown, contentType = 'image/png'): ToolFileData | '' {
   if (isUserFile(image)) {
-    return image
+    return {
+      name: image.name,
+      url: image.url,
+      mimeType: image.type ?? contentType,
+      ...(typeof image.size === 'number' ? { size: image.size } : {}),
+      ...(image.base64 !== undefined ? { data: image.base64 } : {}),
+    }
   }
 
   const imageUrl = extractImageUrl(image)
@@ -74,11 +80,11 @@ function resolvePrimaryImageFile(
   contentType: string
 ): ToolFileData | '' {
   if (isUserFile(data.imageFile)) {
-    return data.imageFile
+    return toImageFile(data.imageFile, contentType)
   }
 
   if (isUserFile(data.image)) {
-    return data.image
+    return toImageFile(data.image, contentType)
   }
 
   if (data.imageUrl) {
@@ -331,7 +337,14 @@ export const imageGenerateTool: ImageGenerationToolConfig = {
           throw new Error('Fal.ai image response missing cost data')
         }
 
-        return calculateHostedImageToolCost(params, output)
+        const priced = calculateHostedImageToolCost(
+          params as unknown as Record<string, unknown>,
+          output
+        )
+        return {
+          cost: priced.cost,
+          metadata: priced.metadata as unknown as Record<string, unknown>,
+        }
       },
     },
     rateLimit: {

@@ -30,11 +30,6 @@ interface AddDocumentsModalProps {
   onOpenChange: (open: boolean) => void
   knowledgeBaseId: string
   knowledgeBaseName?: string
-  chunkingConfig?: {
-    maxSize: number
-    minSize: number
-    overlap: number
-  }
 }
 
 export function AddDocumentsModal({
@@ -42,7 +37,6 @@ export function AddDocumentsModal({
   onOpenChange,
   knowledgeBaseId,
   knowledgeBaseName,
-  chunkingConfig,
 }: AddDocumentsModalProps) {
   const params = useParams()
   const workspaceId = params.workspaceId as string
@@ -222,6 +216,7 @@ export function AddDocumentsModal({
                         <>
                           {isFailed && (
                             <Button
+                              aria-label='Retry upload'
                               type='button'
                               variant='ghost'
                               className='size-4 p-0'
@@ -232,6 +227,7 @@ export function AddDocumentsModal({
                             </Button>
                           )}
                           <Button
+                            aria-label='Remove file'
                             type='button'
                             variant='ghost'
                             className='size-4 p-0'

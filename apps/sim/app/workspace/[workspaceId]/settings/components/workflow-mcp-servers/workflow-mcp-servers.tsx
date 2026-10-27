@@ -387,7 +387,7 @@ function ServerDetailView({
   if (error || !data) {
     return (
       <SettingsPanel back={{ text: 'MCP servers', icon: ArrowLeft, onSelect: onBack }}>
-        <SettingsEmptyState tone='error'>Failed to load server details</SettingsEmptyState>
+        <SettingsEmptyState>Failed to load server details</SettingsEmptyState>
       </SettingsPanel>
     )
   }
@@ -487,7 +487,7 @@ function ServerDetailView({
                   <SettingsField label='Server Name'>{server.name}</SettingsField>
                   <SettingsField label='Transport'>Streamable-HTTP</SettingsField>
                   <SettingsField label='Access'>
-                    {server.isPublic ? 'Public' : 'API Key'}
+                    {server.isPublic ? 'Public' : 'Private'}
                   </SettingsField>
                 </div>
 
@@ -586,7 +586,8 @@ function ServerDetailView({
                         variant='ghost'
                         aria-label={copiedConfig ? 'Configuration copied' : 'Copy configuration'}
                         onClick={() => handleCopyConfig(server.isPublic, server.name)}
-                        className='-my-1.5 p-1.5!'
+                        iconPadding='md'
+                        className='-my-1.5'
                       >
                         {copiedConfig ? (
                           <Check className='size-[14px]' />
@@ -611,7 +612,7 @@ function ServerDetailView({
                       {activeConfigTab === 'cursor' && (
                         <a
                           href={getCursorInstallUrl(server.isPublic, server.name)}
-                          className='absolute top-1.5 right-2 inline-flex rounded-md bg-[var(--surface-5)] ring-[length:var(--border-width)] ring-[var(--border-1)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-2)]'
+                          className='absolute top-1.5 right-2 inline-flex rounded-md bg-[var(--surface-5)] ring-[length:var(--border-width)] ring-[var(--border-1)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--selection)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-2)]'
                         >
                           <img
                             src='https://cursor.com/deeplink/mcp-install-dark.svg'
@@ -854,13 +855,13 @@ function ServerDetailView({
                   value={editServerIsPublic ? 'public' : 'private'}
                   onValueChange={(value) => setEditServerIsPublic(value === 'public')}
                 >
-                  <ChipButtonGroupItem value='private'>API Key</ChipButtonGroupItem>
+                  <ChipButtonGroupItem value='private'>Private</ChipButtonGroupItem>
                   <ChipButtonGroupItem value='public'>Public</ChipButtonGroupItem>
                 </ChipButtonGroup>
                 <p className='text-[var(--text-muted)] text-caption'>
                   {editServerIsPublic
                     ? 'Anyone with the URL can call this server without authentication'
-                    : 'Requests must include your Sim API key in the X-API-Key header'}
+                    : 'Clients sign in with OAuth, or send a Sim API key in the X-API-Key header'}
                 </p>
               </div>
             </ChipModalField>
@@ -1097,7 +1098,7 @@ export function WorkflowMcpServers() {
       >
         <div className='min-h-0 flex-1'>
           {error ? (
-            <SettingsEmptyState tone='error'>
+            <SettingsEmptyState>
               {getErrorMessage(error, 'Failed to load MCP servers')}
             </SettingsEmptyState>
           ) : isLoading ? null : !hasServers ? (

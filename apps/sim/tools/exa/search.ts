@@ -7,7 +7,7 @@ import {
   parseJsonSchema,
   resolveCategory,
 } from '@/tools/exa/utils'
-import type { ToolConfig } from '@/tools/types'
+import type { ToolConfig, ToolHostingConfig } from '@/tools/types'
 
 export const searchTool: ToolConfig<ExaSearchParams, ExaSearchResponse> = {
   id: 'exa_search',
@@ -16,7 +16,7 @@ export const searchTool: ToolConfig<ExaSearchParams, ExaSearchResponse> = {
     'Search the web using Exa AI. Returns relevant search results with titles, URLs, and text snippets.',
   version: '2.0.0',
 
-  hosting: exaHosting,
+  hosting: exaHosting as unknown as ToolHostingConfig<ExaSearchParams>,
 
   params: {
     query: {

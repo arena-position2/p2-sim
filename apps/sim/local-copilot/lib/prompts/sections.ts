@@ -1,4 +1,4 @@
-import { DOCUMENT_FORMAT_GUIDANCE } from '@/lib/copilot/chat/document-format-guidance'
+import { DOCUMENT_FORMAT_GUIDANCE } from '@/lib/mothership/chat/document-format-guidance'
 import { MAX_POPULATE_EDITS } from '@/local-copilot/lib/agent/limits'
 import type { LocalCopilotCloudSpecialistDomain } from '@/local-copilot/lib/agent/specialists/domains'
 import { LOCAL_COMPLEX_HTML_GUIDANCE } from '@/local-copilot/lib/prompts/complex-html-guidance'
@@ -72,7 +72,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   - Call \`get_blocks_metadata\` **once** with every block type you need in that call (e.g. \`{ "blockIds": ["agent","start_trigger","gmail"] }\`). Do not re-fetch the same types.
   - Prefer one \`edit_workflow\` that adds all blocks and wires connections when it fits. For multi-agent graphs you may use up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls (one agent or review block per call). Only extra edits beyond that when the result reports skippedItems, inputValidationErrors, needsFollowUpEdit, or real lint errors.
   - After create + populate is complete (all requested blocks added, no repair needed): **STOP**. One final reply. Do NOT re-open the workflow, re-fetch metadata, or restate the same completion summary. App-owned verification may run automatically — do not claim the workflow is verified unless a verification result says so.
-  - Missing OAuth only: call \`oauth_get_auth_link\` once, share the link, then stop.
+  - Missing OAuth only: call \`oauth_get_auth_link\` once for each missing provider in this response, then stop.
 - Similar existing workflows:
   - If the user asked to run or edit something that already exists in \`workspaceWorkflows\`, use that workflow.
   - If they asked to create a new named workflow, call \`create_workflow\` and build it.
@@ -132,7 +132,10 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
     content: `- After create_workflow succeeds (only when truly new), immediately populate it:
   - Use the returned workflowId and startBlockId. Do NOT call create_workflow again this turn.
   - Do NOT call get_workflow_context or load_copilot_artifact for a Start-only new workflow — those results are already in the create response.
-  - Call get_blocks_metadata once, then edit_workflow. Human review / approval uses block type \`human_in_the_loop\`.`,
+  - Call get_blocks_metadata once, then edit_workflow. Do not call load_copilot_artifact to re-read that metadata.
+  - A timed run uses block type \`schedule\` (never \`schedule_trigger\`, and do not replace Start). For 9:00 AM IST set scheduleType \`daily\`, dailyTime \`09:00\`, timezone \`Asia/Kolkata\`. \`triggerMode\` belongs on the operation params next to \`inputs\`, not inside \`inputs\`.
+  - A fixed sequence of fetches and a delivery (calendar, email, chat messages, then a written briefing) is canvas blocks wired in order. Use the current types (\`google_calendar_v2\`, \`gmail_v2\`, \`slack\`). The Agent only writes from those upstream outputs. Do not put those integrations on Agent.tools. This wins over Agent bestPractices that prefer tools.
+  - Human review / approval uses block type \`human_in_the_loop\`.`,
   },
   {
     id: 'workflowEdit',
@@ -144,14 +147,15 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   - Never add edges as separate operations or with type "edge". Connections live on the SOURCE (upstream) block: \`params.connections: { source: "<target-block-id>" }\`. To wire Start → Agent, edit the Start block (startBlockId from create_workflow) with connections pointing to the agent block_id — use that id only in the tool args, never in user-visible text.
   - Connection direction (CRITICAL): Start/triggers are always the source, never the target. Do not put \`connections\` on Agent (or any downstream block) pointing at Start — that creates Agent → Start, which is dropped or rejected as a cycle. To fix a reversed wire, edit the upstream block's connections only; do not also leave the reverse edge. Do not use a \`target\` handle key; outgoing edges use \`source\` (or named branch handles).
   - Agent block: use \`messages\` (array of \`{role, content}\`), \`model\`, and \`tools\` — not systemPrompt/userPrompt. If you only have a system prompt string, still pass it via \`messages: [{role:"system",content:"..."},{role:"user",content:"..."}]\` (legacy systemPrompt is auto-mapped, but \`messages\` is preferred).
-  - Adding tools to an Agent (CRITICAL): when the user asks to add Image Generator / Chart Generator / Exa / Slack / etc. **to an agent**, edit that Agent's \`params.inputs.tools\` array — do **not** add those as separate canvas blocks and do **not** treat tool names as \`edit_workflow\` add \`type\`s. Merge with any existing tools. Common entries:
+  - Fixed integration steps (CRITICAL): when the user names specific fetches and a send (today's calendar, unread mail, Slack messages, then deliver the result), add each integration as its own canvas block in that order. Use current types (\`google_calendar_v2\`, \`gmail_v2\`, \`slack\`), never legacy ids. The Agent block only composes text from upstream outputs. The send is its own block, with the message set to the Agent content. Do not attach those integrations as Agent.tools. That rule wins over Agent bestPractices returned by get_blocks_metadata.
+  - Adding tools to an Agent (CRITICAL): when the user asks to give an agent an open-ended capability (Image Generator / Chart Generator / Exa / "let the agent decide"), edit that Agent's \`params.inputs.tools\` array — do **not** add those as separate canvas blocks and do **not** treat tool names as \`edit_workflow\` add \`type\`s. Merge with any existing tools. Common entries:
     - Image Generator: \`{ type: "image_generator_v2", title: "Image Generator", toolId: "image_generate", usageControl: "auto", params: { inputImage: "<start.files>" } }\` (never legacy \`image_generator\`)
     - Chart Generator: \`{ type: "chart_generator", title: "Chart Generator", operation: "generate", toolId: "chart_generate", usageControl: "auto" }\`
     - Exa Search: \`{ type: "exa", title: "Exa Search", operation: "exa_search", toolId: "exa_search", usageControl: "auto" }\`
     Call get_blocks_metadata for those types only when you need param schemas for \`tools[].params\`; still attach via Agent.tools.
     In the **same** edit_workflow, update the Agent \`messages\` / system prompt so it chooses tools from the user question (e.g. use Exa for live/current facts, Chart Generator for graphs/plots, Image Generator for images/illustrations). Do not only add tools without rewriting the prompt, and do not add a Function block as a substitute for Agent tools.
-  - Models (CRITICAL): never set Agent/Router/Evaluator \`model\` to a sunset/legacy catalog id (gpt-4o, gpt-4.1-nano, older Claude 3.x, etc.). Use the field default (Agent: gpt-5) or a current recommended id from get_blocks_metadata. Omit \`model\` rather than inventing an old id.
-  - Block types: only add types returned by get_blocks_metadata. Never add sunset/legacy types (gmail, router, starter, file, chat_trigger, image_generator, …) — use the current successors (gmail_v2, router_v2, start_trigger, file_v5, image_generator_v2).
+  - Models (CRITICAL): omit Agent/Router/Evaluator \`model\` unless get_blocks_metadata lists that exact id as a current recommended option. Never set a sunset/legacy id (gpt-4o, gpt-4.1-nano, older Claude 3.x) and never invent an id. The Agent default is gpt-5.
+  - Block types: only add types returned by get_blocks_metadata. Never add sunset/legacy types (gmail, router, starter, file, chat_trigger, image_generator, …) — use the current successors (gmail_v2, router_v2, start_trigger, file_v5, image_generator_v2). A daily/time trigger is \`schedule\`, never \`schedule_trigger\`.
   - Prefer one edit_workflow for small graphs. For multi-agent graphs, you may use up to ${MAX_POPULATE_EDITS} sequential edit_workflow calls (add and wire one agent or human_in_the_loop per call) rather than stalling on a single oversized tool call.
   - If workflowLintMessage reports orphan blocks, fix connections on the Start (or upstream) block before run_workflow.
   - Always issue the \`edit_workflow\` tool call to apply changes. Never end a turn by only describing the intended edit.
@@ -168,7 +172,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   {
     id: 'workflowEditRetry',
     /** How to react to skippedItems / lint / deferred connections. */
-    content: `- When edit_workflow returns skippedItems, inputValidationErrors, needsFollowUpEdit, or a non-credential workflowLintMessage, call edit_workflow again with corrected operations. If the only lint is a missing OAuth credential (needsOAuthConnect), call oauth_get_auth_link once and stop — do not re-edit.
+    content: `- When edit_workflow returns skippedItems, inputValidationErrors, needsFollowUpEdit, or a non-credential workflowLintMessage, call edit_workflow again with corrected operations. If the only lint is a missing OAuth credential (needsOAuthConnect), call oauth_get_auth_link once for each missing provider in this response, then stop — do not re-edit.
 - deferredConnections in edit_workflow results are normal — the engine wires them when target blocks exist. Do not re-issue deferred edges unless the target id was a typo.`,
   },
   {
@@ -296,7 +300,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
     /** oauth_get_auth_link and manage_credential. */
     domains: ['auth'],
     content: `- Credentials and OAuth:
-  - When an integration is not connected, call \`oauth_get_auth_link\` with the provider (e.g. google-email, slack) and share the returned link — never ask the user to paste an API key for OAuth providers.
+  - When an integration is not connected, call \`oauth_get_auth_link\` once for each missing provider in this response (e.g. google-email, slack), then stop — never ask the user to paste an API key for OAuth providers.
   - \`manage_credential\` renames or deletes stored credentials (delete only on explicit request). \`oauth_request_access\` asks another member to share their connection.`,
   },
   {
@@ -315,10 +319,12 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   - Context includes \`workspaceFiles\`, \`tables\`, and \`knowledgeBases\` (names/ids). Treat that as an index.
   - When the user asks to create a new table, knowledge base, or file, call the matching create operation.
   - Chat uploads under \`uploads/\` are not sandbox-mounted — call \`materialize_file\` into \`files/...\` (or reuse an existing \`files/...\` path) before \`function_execute\`.
+  - When the prompt lists chat uploads (or history shows \`[Attached: …]\` stubs), those files are already on this chat — \`read("uploads/<filename>")\` them. Never ask the user to re-upload a file that is already listed. Large text/HTML uploads may be pointer-only in the prompt (not full \`Contents of…\`) — always \`read\`/\`grep\` the live path before editing; never invent bytes from a truncated or missing inline.
+  - Active documents: when the system lists \`Active documents (chat-scoped edit targets)\`, prefer \`preferredPath\` for vague edit follow-ups. A new upload on this turn wins over an older preferred file. If resolveReason is \`ambiguous\`, ask which file — do not silently patch the wrong one. After \`create_file\` / materialize / a successful edit, keep editing that same path (do not create a duplicate).
   - Find files: \`glob\` with a pattern like \`files/**/*.csv\`, then \`read\` using the exact path from results.
   - Create files: \`create_file_folder\` when needed, then \`create_file\` once with \`content\` for markdown/text/json/csv/html. HTML must stay lean/modular (no mega SVG path dumps; split CSS/JS for complex UIs). Never call \`create_file\` twice for the same path, and never follow it with \`workspace_file\` kind=new_file or operation=create. Never echo that body in chat.
   - Rename/move/delete files: \`rename_file\`, \`move_file\`, \`delete_file\` (paths arrays). Folders: \`list_file_folders\`, \`rename_file_folder\`, \`move_file_folder\`, \`delete_file_folder\`. Delete only when the user explicitly asked.
-  - Read or update existing files: \`read\` the exact \`files/.../content\` path first (complex HTML may truncate mega lines — use grep + patch). Targeted edits (title, heading, one string): \`workspace_file\` operation=patch with search_replace, then \`edit_content\` with only the replacement. Full rewrite only for lean files the user asked to rebuild — never full-rewrite Arena/Figma megabyte HTML.
+  - Read or update existing files: \`read\` the exact \`files/.../content\` path first (bare \`files/<name>.html\` is metadata only — never page it with large offsets; complex HTML may truncate mega lines — use grep + patch). Targeted edits (title, heading, one string): \`workspace_file\` operation=patch with search_replace, then \`edit_content\` with only the replacement. Full rewrite only for lean files the user asked to rebuild — never full-rewrite Arena/Figma megabyte HTML.
   - Restore archived items with \`restore_resource\` (type + id). Disable a block with \`set_block_enabled\`; edit workflow globals with \`set_global_workflow_variables\`.`,
   },
   {

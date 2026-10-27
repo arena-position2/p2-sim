@@ -27,10 +27,11 @@ import {
 import { ChevronDown, Paperclip, Plus, Slash } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { useParams } from 'next/navigation'
-import { getMothershipAttachmentPreviewUrl } from '@/lib/copilot/chat/attachment-preview'
-import { SIM_RESOURCE_DRAG_TYPE, SIM_RESOURCES_DRAG_TYPE } from '@/lib/copilot/resource-types'
+import { getMothershipAttachmentPreviewUrl } from '@/lib/mothership/chat/attachment-preview'
 import { MOTHERSHIP_ADD_CONTEXT_EVENT } from '@/lib/mothership/events'
+import { SIM_RESOURCE_DRAG_TYPE, SIM_RESOURCES_DRAG_TYPE } from '@/lib/mothership/resource-types'
 import { MOTHERSHIP_ACCEPT_ATTRIBUTE } from '@/lib/uploads/utils/validation'
+import { inter } from '@/app/_styles/fonts/inter/inter'
 import { useChatSurface } from '@/app/workspace/[workspaceId]/home/components/chat-surface-context'
 import {
   AnimatedPlaceholderEffect,
@@ -42,8 +43,12 @@ import {
   SendButton,
   usePromptEditor,
 } from '@/app/workspace/[workspaceId]/home/components/user-input/components'
+import { ConversationModeSelector } from '@/app/workspace/[workspaceId]/home/components/user-input/components/conversation-mode-selector'
+import { InputToolbar } from '@/app/workspace/[workspaceId]/home/components/user-input/components/input-toolbar'
+import { useConversationModeShortcut } from '@/app/workspace/[workspaceId]/home/components/user-input/hooks/use-conversation-mode-shortcut'
 import { handleMothershipAddContextEvent } from '@/app/workspace/[workspaceId]/home/components/user-input/mothership-context-event'
 import type {
+  ChatRequestMode,
   FileAttachmentForApi,
   MothershipResource,
   QueuedMessage,
@@ -52,6 +57,8 @@ import { useFileAttachments } from '@/app/workspace/[workspaceId]/w/[workflowId]
 import type { AttachedFile } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/copilot/components/user-input/hooks/use-file-attachments'
 import { mentionifyIntegrations } from '@/blocks/integration-matcher'
 import { useChatInputFocus } from '@/hooks/use-chat-input-focus'
+import { useHydrated } from '@/hooks/use-hydrated'
+import { isMobileViewport } from '@/hooks/use-is-mobile'
 import { useSettingsNavigation } from '@/hooks/use-settings-navigation'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { SessionMemoryInspector } from '@/local-copilot/components/session-memory-inspector'
@@ -75,7 +82,7 @@ interface LocalCopilotModelPickerProps {
 }
 
 /**
- * Single Local Copilot model dropdown with Claude / Gemini / Bedrock section headers.
+ * Single Local Copilot model dropdown with Claude / Gemini / Vertex / Bedrock headers.
  */
 function LocalCopilotModelPicker({ catalogId, onCatalogIdChange }: LocalCopilotModelPickerProps) {
   const selectedLabel = getLocalCopilotCatalogEntry(catalogId)?.label ?? 'Claude'
@@ -126,6 +133,8 @@ function LocalCopilotModelPicker({ catalogId, onCatalogIdChange }: LocalCopilotM
 }
 
 interface UserInputProps {
+  requestMode?: 'agent' | 'plan'
+  onModeChange?: (mode: 'agent' | 'plan') => void
   defaultValue?: string
   draftScopeKey?: string
   onSubmit: (
@@ -157,6 +166,8 @@ export interface UserInputHandle {
  */
 const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserInput(
   {
+    requestMode = 'agent',
+    onModeChange,
     defaultValue = '',
     draftScopeKey,
     onSubmit,
@@ -181,19 +192,17 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     localCopilotCatalogId,
     setLocalCopilotCatalogId,
   } = useChatSurface()
-
   const showLocalModelPicker =
     Boolean(canSwitchCopilotBackend) &&
     copilotBackend === 'local' &&
     localCopilotCatalogId !== undefined &&
     setLocalCopilotCatalogId !== undefined
-
   const showSessionMemoryInspector = copilotBackend === 'local' && Boolean(chatId)
-  const [microphonePermissionHelpOpen, setMicrophonePermissionHelpOpen] = useState(false)
-
+  // Server HTML cannot see the stored draft; hydration renders without it and the mount restore applies it.
+  const canReadStoredDraft = useHydrated()
   const [initialValue] = useState(() => {
     if (defaultValue) return defaultValue
-    if (!draftScopeKey) return ''
+    if (!canReadStoredDraft || !draftScopeKey) return ''
     const text = useMothershipDraftsStore.getState().drafts[draftScopeKey]?.text
     return typeof text === 'string' ? text : ''
   })
@@ -203,7 +212,6 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const files = useFileAttachments({
     userId,
     workspaceId,
-    isLoading: isSending,
   })
   const hasFiles = files.attachedFiles.some((f) => !f.uploading && f.key)
   const hasUploadingFiles = files.attachedFiles.some((f) => f.uploading)
@@ -224,6 +232,15 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   const editorRef = useRef(editor)
   editorRef.current = editor
   const textareaRef = editor.textareaRef
+  const handleModeChange = (mode: ChatRequestMode) => {
+    if (mode === 'agent' || mode === 'plan') onModeChange?.(mode)
+  }
+  const handleModeShortcut = useConversationModeShortcut({
+    value: requestMode,
+    onChange: onModeChange ? handleModeChange : undefined,
+    textareaRef,
+    pickerOpen: editor.mentionQuery !== null || editor.slashQuery !== null,
+  })
   useChatInputFocus({ textareaRef })
 
   /**
@@ -279,14 +296,17 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     }
     if (restoredContexts) editor.setContexts(restoredContexts)
     if (restoredFiles) files.restoreAttachedFiles(restoredFiles)
-    if (caretText !== null) {
+    // Text typed before hydration wins over the saved draft, caret included.
+    const typedBeforeHydration = initialValue === '' && editor.getValue() !== ''
+    if (caretText !== null && !typedBeforeHydration) {
+      if (initialValue === '') editor.setValue(caretText, { seed: true })
       const textarea = textareaRef.current
       if (textarea) {
-        textarea.focus()
+        if (!isMobileViewport()) textarea.focus()
         textarea.setSelectionRange(caretText.length, caretText.length)
       }
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- intentional mount-only restore
+  }, []) // intentional mount-only restore
 
   const isFirstSaveRef = useRef(true)
   const draftSaveTimerRef = useRef<number | null>(null)
@@ -349,6 +369,8 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
           return `knowledge:${ctx.knowledgeId ?? ''}`
         case 'table':
           return `table:${ctx.tableId}`
+        case 'dashboard':
+          return `dashboard:${ctx.dashboardId}`
         case 'file':
           return `file:${ctx.fileId}`
         case 'folder':
@@ -402,7 +424,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   }
 
   const {
-    audioLevelsRef,
+    audioLevels,
     isListening,
     isSupported: isSttSupported,
     toggleListening,
@@ -567,6 +589,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     prevSelectedContextsRef.current = []
     resetTranscript()
     filesRef.current.clearAttachedFiles()
+    filesRef.current = { ...filesRef.current, attachedFiles: [] }
   }, [resetTranscript])
 
   const handleSubmit = useCallback(() => {
@@ -639,6 +662,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
   return (
     <div
       onClick={handleContainerClick}
+      onKeyDown={handleModeShortcut}
       onFocusCapture={() => {
         composerOwnsFocusRef.current = true
       }}
@@ -649,6 +673,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
       }}
       className={cn(
         'relative z-10 mx-auto w-full max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
+        inter.className,
         isInitialView && 'shadow-ambient'
       )}
       onDragEnter={handleDragEnter}
@@ -666,91 +691,103 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
 
       <PromptEditor
         editor={editor}
-        placeholder='Ask Areana to '
+        aria-label='Message'
+        placeholder='Ask Arena to '
         onSubmit={handleEnterSubmit}
         onArrowUpOnEmpty={handleArrowUpOnEmpty}
-        className={cn('max-h-[200px]', isInitialView && 'min-h-[56px]')}
+        className={cn(
+          'max-h-[200px] max-md:max-h-[min(200px,calc(var(--mobile-viewport-height,100dvh)*0.25))]',
+          isInitialView && 'min-h-[56px] max-md:min-h-0'
+        )}
       />
 
-      <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-1'>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Chip
-                shape='round'
-                leftIcon={Plus}
-                onClick={handlePlusClick}
-                aria-label='Add resources'
-              />
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Add resources</Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Chip
-                shape='round'
-                leftIcon={Paperclip}
-                onClick={handleFileSelectStable}
-                aria-label='Attach file'
-              />
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Attach file</Tooltip.Content>
-          </Tooltip.Root>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <Chip
-                shape='round'
-                leftIcon={Slash}
-                onClick={handleSlashTriggerClick}
-                aria-label='Skills'
-              />
-            </Tooltip.Trigger>
-            <Tooltip.Content side='top'>Skills</Tooltip.Content>
-          </Tooltip.Root>
-          {canSwitchCopilotBackend && copilotBackend && setCopilotBackend ? (
+      <InputToolbar
+        leadingControls={
+          <>
             <Tooltip.Root>
               <Tooltip.Trigger asChild>
-                <div className='ml-1'>
-                  <ChipSwitch
-                    value={copilotBackend}
-                    onChange={setCopilotBackend}
-                    aria-label='Copilot backend'
-                    options={[
-                      { value: 'local', label: 'Local' },
-                      { value: 'external', label: 'Cloud' },
-                    ]}
-                  />
-                </div>
+                <Chip
+                  shape='round'
+                  leftIcon={Plus}
+                  onClick={handlePlusClick}
+                  aria-label='Add resources'
+                />
               </Tooltip.Trigger>
-              <Tooltip.Content side='top'>
-                Local runs Arena Copilot in your deployment. Cloud uses external Mothership.
-              </Tooltip.Content>
+              <Tooltip.Content side='top'>Add resources</Tooltip.Content>
             </Tooltip.Root>
-          ) : null}
-          {showLocalModelPicker && localCopilotCatalogId && setLocalCopilotCatalogId ? (
-            <LocalCopilotModelPicker
-              catalogId={localCopilotCatalogId}
-              onCatalogIdChange={setLocalCopilotCatalogId}
-            />
-          ) : null}
-          {showSessionMemoryInspector ? <SessionMemoryInspector chatId={chatId} /> : null}
-        </div>
-        <div className='flex items-center gap-1.5'>
-          {isSttSupported && (
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <Chip
+                  shape='round'
+                  leftIcon={Paperclip}
+                  onClick={handleFileSelectStable}
+                  aria-label='Attach file'
+                />
+              </Tooltip.Trigger>
+              <Tooltip.Content side='top'>Attach file</Tooltip.Content>
+            </Tooltip.Root>
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <Chip
+                  shape='round'
+                  leftIcon={Slash}
+                  onClick={handleSlashTriggerClick}
+                  aria-label='Skills'
+                />
+              </Tooltip.Trigger>
+              <Tooltip.Content side='top'>Skills</Tooltip.Content>
+            </Tooltip.Root>
+            {onModeChange && (
+              <ConversationModeSelector value={requestMode} onChange={handleModeChange} />
+            )}
+            {canSwitchCopilotBackend && copilotBackend && setCopilotBackend ? (
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <div className='ml-1'>
+                    <ChipSwitch
+                      value={copilotBackend}
+                      onChange={setCopilotBackend}
+                      aria-label='Copilot backend'
+                      options={[
+                        { value: 'local', label: 'Local' },
+                        { value: 'external', label: 'Cloud' },
+                      ]}
+                    />
+                  </div>
+                </Tooltip.Trigger>
+                <Tooltip.Content side='top'>
+                  Local runs Arena Copilot in your deployment. Cloud uses external Mothership.
+                </Tooltip.Content>
+              </Tooltip.Root>
+            ) : null}
+            {showLocalModelPicker && localCopilotCatalogId && setLocalCopilotCatalogId ? (
+              <LocalCopilotModelPicker
+                catalogId={localCopilotCatalogId}
+                onCatalogIdChange={setLocalCopilotCatalogId}
+              />
+            ) : null}
+            {showSessionMemoryInspector ? <SessionMemoryInspector chatId={chatId} /> : null}
+          </>
+        }
+        showModelSelector={copilotBackend !== 'local'}
+        voiceControl={
+          isSttSupported && (
             <MicButton
-              audioLevelsRef={audioLevelsRef}
+              audioLevels={audioLevels}
               isListening={isListening}
               onToggle={toggleListening}
             />
-          )}
+          )
+        }
+        submitControl={
           <SendButton
             isSending={isSending}
             canSubmit={canSubmit}
             onSubmit={handleSubmit}
             onStopGeneration={onStopGeneration}
           />
-        </div>
-      </div>
+        }
+      />
 
       <input
         ref={files.fileInputRef}

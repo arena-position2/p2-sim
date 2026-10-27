@@ -9,6 +9,7 @@ import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
 import { isBillingEnabled, isHosted } from '@/lib/core/config/env-flags'
 import { hasBrowserAgent, hasDesktopSettings, hasTerminal } from '@/lib/desktop'
+import { isPlatformAdminEmail } from '@/lib/permissions/platform-admin-emails'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import {
@@ -65,10 +66,10 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
   const userId = session?.user?.id
   const isOrgAdminOrOwner = hostContext.viewer.isHostOrganizationAdmin
   const subscriptionAccess = getSubscriptionAccessState(hostContext.ownerBilling)
-  const hasTeamPlan = subscriptionAccess.hasUsableTeamAccess
   const hasEnterprisePlan = subscriptionAccess.hasUsableEnterpriseAccess
   const isEnterprisePlan = subscriptionAccess.isEnterprise
   const isSuperUser = session?.user?.role === 'admin'
+  const isListedPlatformAdminEmail = isPlatformAdminEmail(session?.user?.email)
 
   const isSSOProviderOwner = useMemo(() => {
     if (isHosted) return null
@@ -109,10 +110,7 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
         return false
       }
 
-      if (
-        (item.id === 'billing' || item.id === 'arena-billing') &&
-        !canManageWorkspaceBilling(hostContext, userId)
-      ) {
+      if (item.id === 'arena-billing' && !canManageWorkspaceBilling(hostContext, userId)) {
         return false
       }
 
@@ -158,10 +156,6 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
 
       const orgAdminSatisfied = isOrgAdminOrOwner || item.allowNonOrgAdmin
 
-      if (item.requiresTeam && (!hasTeamPlan || !orgAdminSatisfied)) {
-        return false
-      }
-
       if (
         item.requiresEnterprise &&
         (!hasEnterprisePlan || !orgAdminSatisfied) &&
@@ -188,6 +182,10 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
         return false
       }
 
+      if (item.requiresPlatformAdminEmail && !isListedPlatformAdminEmail) {
+        return false
+      }
+
       if (item.requiresWorkspaceAdmin && !workspacePermissions?.viewer?.isAdmin) {
         return false
       }
@@ -195,7 +193,6 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
       return true
     })
   }, [
-    hasTeamPlan,
     hasEnterprisePlan,
     isEnterprisePlan,
     subscriptionAccess.hasUsableMaxAccess,
@@ -206,6 +203,7 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
     ssoProvidersData?.providers?.length,
     permissionConfig,
     isSuperUser,
+    isListedPlatformAdminEmail,
     generalSettings?.superUserModeEnabled,
     workspacePermissions?.viewer?.isAdmin,
     forkingAvailable,

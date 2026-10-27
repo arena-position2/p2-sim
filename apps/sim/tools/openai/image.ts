@@ -104,7 +104,14 @@ export const imageTool: ToolConfig = {
     byokProviderId: 'openai',
     pricing: {
       type: 'custom',
-      getCost: (params, output) => calculateHostedImageToolCost(params, output),
+      getCost: (params, output) => {
+        const priced = calculateHostedImageToolCost(params, output)
+        const metadata: Record<string, unknown> = {}
+        for (const [key, value] of Object.entries(priced.metadata)) {
+          metadata[key] = value
+        }
+        return { cost: priced.cost, metadata }
+      },
     },
     rateLimit: {
       mode: 'per_request',

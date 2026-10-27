@@ -33,22 +33,7 @@ async function fetchBingAdsAccounts(
   return promise
 }
 
-export interface BingAdsQueryResponse {
-  success: boolean
-  output: {
-    data: Array<Record<string, any>>
-    account_id: string
-    account_name: string
-    query: string
-    date_range?: {
-      start: string
-      end: string
-    }
-  }
-  error?: string
-}
-
-export const BingAdsBlock: BlockConfig<BingAdsQueryResponse> = {
+export const BingAdsBlock: BlockConfig = {
   type: 'bing_ads',
   name: 'Bing Ads',
   description: 'Query Microsoft Advertising (Bing Ads) data with natural language',

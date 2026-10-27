@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { evaluateSandboxBundle } from '@/lib/execution/sandbox/bundles/verify'
@@ -31,6 +28,23 @@ describe('sandbox bundles', () => {
     expect(typeof pdfLib.PDFDocument).toBe('function')
     expect(typeof pdfLib.rgb).toBe('function')
     expect(typeof pdfLib.StandardFonts).toBe('object')
+  })
+
+  it('vitest-expect evaluates in a bare context and fails with uncolored vitest messages', () => {
+    const bundle = loadCheckedInBundle('vitest-expect') as {
+      createExpect: () => (value: unknown) => { toEqual: (expected: unknown) => void }
+      fn: () => unknown
+    }
+    expect(typeof bundle.fn).toBe('function')
+    const sandboxExpect = bundle.createExpect()
+    let message = ''
+    try {
+      sandboxExpect({ channel: '#support' }).toEqual({ channel: '#billing' })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toMatch(/channel: '#support'.*to deeply equal.*channel: '#billing'/)
+    expect(message).not.toContain('\u001b[')
   })
 
   it('pptxgenjs evaluates in a bare context and exposes its constructor', () => {

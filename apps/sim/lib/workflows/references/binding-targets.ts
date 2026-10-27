@@ -1,4 +1,4 @@
-import type { Principal } from '@sim/auth/principal'
+import { type Principal, requirePrincipalSubjectUserId } from '@sim/auth/principal'
 import {
   credential,
   customBlock,
@@ -16,9 +16,10 @@ import {
   workspaceFiles,
   workspaceSandbox,
 } from '@sim/db/schema'
-import { isRecordLike } from '@sim/utils/object'
+import { isRecordLike, toRecord } from '@sim/utils/object'
 import { and, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm'
 import { authorizeCredentialUseForAuth } from '@/lib/auth/credential-access'
+import { isCopilotWorkspaceInvocation } from '@/lib/core/application/copilot-workspace-invocation'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import type { DbOrTx } from '@/lib/db/types'
 import { credentialProviderMatchesService, getServiceConfigByServiceId } from '@/lib/oauth/utils'
@@ -129,7 +130,7 @@ export async function validateWorkflowBindingTargets(
               type: tool.type,
               operation: typeof tool.operation === 'string' ? tool.operation : undefined,
               toolId: typeof tool.toolId === 'string' ? tool.toolId : undefined,
-              params: isRecordLike(tool.params) ? tool.params : {},
+              params: toRecord(tool.params),
             },
             toolIndex: typeof path[0] === 'number' ? path[0] : undefined,
             parentCanonicalModes: block.data?.canonicalModes,
@@ -195,7 +196,7 @@ export async function validateWorkflowBindingTargets(
 export async function authorizeWorkflowBindingCredentials(
   principal: Principal,
   workspaceId: string,
-  plan: WorkflowImportPlan
+  plan: Pick<WorkflowImportPlan, 'bindings'>
 ): Promise<void> {
   const ids = new Set(
     plan.bindings
@@ -206,7 +207,14 @@ export async function authorizeWorkflowBindingCredentials(
   if (
     principal.kind !== 'session' &&
     principal.kind !== 'personal_api_key' &&
-    principal.kind !== 'oauth_access_token'
+    principal.kind !== 'oauth_access_token' &&
+    !(
+      principal.kind === 'delegated' &&
+      principal.serviceId === 'copilot' &&
+      principal.workspaceId === workspaceId &&
+      isCopilotWorkspaceInvocation(principal) &&
+      ['sim:workflows', 'sim:workspaces'].includes(principal.audience)
+    )
   ) {
     throw new OrchestrationError(
       'forbidden',
@@ -215,7 +223,8 @@ export async function authorizeWorkflowBindingCredentials(
   }
   for (const credentialId of ids) {
     const access = await authorizeCredentialUseForAuth(
-      { success: true, userId: principal.userId },
+      // actorless-unsupported: the guard above admits only user credentials or scoped Copilot delegation; executor credential binding is forbidden.
+      { success: true, userId: requirePrincipalSubjectUserId(principal) },
       { workspaceId, credentialId }
     )
     if (!access.ok || access.workspaceId !== workspaceId)

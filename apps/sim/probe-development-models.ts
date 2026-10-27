@@ -8,7 +8,7 @@ import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema
 
 const apiKey = process.env.ANTHROPIC_API_KEY
 if (!apiKey) {
-  console.error('ANTHROPIC_API_KEY missing')
+  process.stderr.write('ANTHROPIC_API_KEY missing\n')
   process.exit(1)
 }
 
@@ -36,19 +36,19 @@ for (const { model, maxTokens } of candidates) {
       model,
       max_tokens: maxTokens,
       messages: [{ role: 'user', content: 'Reply with {"ok": true}' }],
-      // @ts-expect-error output_config is a beta field
       output_config: {
         format: { type: 'json_schema', schema: transformJSONSchema(schema) },
       },
     })
     const message = await stream.finalMessage()
     const text = message.content.find((b) => b.type === 'text')
-    console.log(
-      `[PASS] ${model} (max_tokens=${maxTokens}) ->`,
-      text?.type === 'text' ? text.text : '<no text>'
+    process.stdout.write(
+      `[PASS] ${model} (max_tokens=${maxTokens}) -> ${text?.type === 'text' ? text.text : '<no text>'}\n`
     )
   } catch (error) {
     const err = error as { status?: number; message?: string }
-    console.log(`[FAIL] ${model} (max_tokens=${maxTokens}) -> status=${err.status} ${err.message}`)
+    process.stdout.write(
+      `[FAIL] ${model} (max_tokens=${maxTokens}) -> status=${err.status} ${err.message}\n`
+    )
   }
 }

@@ -1,3 +1,4 @@
+import type { Principal } from '@sim/auth/principal'
 import type { AuthorizedWorkspaceUseCaseContext } from '@/lib/core/application'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
@@ -11,6 +12,8 @@ import { getFileMetadataByKey } from '@/lib/uploads/server/metadata'
 import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { defineAuthorizedWorkspaceFileUseCase } from '@/lib/workspace-files/application/authorized-workspace-file-use-case'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
+import { assertOwnedFileAccess } from '@/lib/workspace-files/application/workspace-file-context'
+import { OWNED_FILE_CONTEXTS, ownedFileKind } from '@/lib/workspace-files/owned-files'
 
 export interface ReadWorkspaceFileByKeyInput {
   key: string
@@ -26,40 +29,16 @@ export interface ReadWorkspaceFileRecordByKeyResult {
   file: WorkspaceFileRecord
 }
 
-const SERVABLE_BY_WORKSPACE_KEY = new Set(['workspace', 'mothership'])
-
-const INCLUDE_MOTHERSHIP = { includeMothership: true } as const
-
 async function loadCurrentWorkspaceFileByKey(
   input: ReadWorkspaceFileByKeyInput,
   context: ActiveWorkspaceFileContext
 ): Promise<WorkspaceFileRecord> {
   const file = await getWorkspaceFile(context.workspaceId, context.fileId, {
     throwOnError: true,
-    ...INCLUDE_MOTHERSHIP,
+    includeOwnedFiles: true,
   })
   if (!file || file.key !== input.key) throw new OrchestrationError('not_found', 'File not found')
   return file
-}
-
-async function resolveWorkspaceFileByKeyContext({
-  input,
-}: {
-  input: ReadWorkspaceFileByKeyInput
-}): Promise<ActiveWorkspaceFileContext> {
-  const metadata = await getFileMetadataByKey(input.key)
-  if (
-    !metadata?.workspaceId ||
-    !SERVABLE_BY_WORKSPACE_KEY.has(metadata.context) ||
-    (input.assertedWorkspaceId !== undefined && input.assertedWorkspaceId !== metadata.workspaceId)
-  ) {
-    throw new OrchestrationError('not_found', 'File not found')
-  }
-  const canonical = await loadActiveWorkspaceFileContext(metadata.id, INCLUDE_MOTHERSHIP)
-  if (!canonical || canonical.workspaceId !== metadata.workspaceId) {
-    throw new OrchestrationError('not_found', 'File not found')
-  }
-  return canonical
 }
 
 async function executeReadWorkspaceFileContentByKey({
@@ -75,6 +54,35 @@ async function executeReadWorkspaceFileContentByKey({
     file,
     content: await fetchWorkspaceFileBuffer(file, { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }),
   }
+}
+
+/** Workspace files and owned files share the `workspace/` key prefix; the row says which. */
+const KEY_READABLE_CONTEXTS = new Set<string>(['workspace', ...OWNED_FILE_CONTEXTS])
+
+async function resolveWorkspaceFileByKeyContext({
+  principal,
+  input,
+}: {
+  principal: Principal
+  input: ReadWorkspaceFileByKeyInput
+}): Promise<ActiveWorkspaceFileContext> {
+  const metadata = await getFileMetadataByKey(input.key)
+  if (
+    !metadata?.workspaceId ||
+    !KEY_READABLE_CONTEXTS.has(metadata.context) ||
+    (input.assertedWorkspaceId !== undefined && input.assertedWorkspaceId !== metadata.workspaceId)
+  ) {
+    throw new OrchestrationError('not_found', 'File not found')
+  }
+  const canonical = await loadActiveWorkspaceFileContext(
+    metadata.id,
+    ownedFileKind(metadata.context) ? { includeOwnedFiles: true } : undefined
+  )
+  if (!canonical || canonical.workspaceId !== metadata.workspaceId) {
+    throw new OrchestrationError('not_found', 'File not found')
+  }
+  await assertOwnedFileAccess(principal, canonical)
+  return canonical
 }
 
 export const readWorkspaceFileRecordByKey = defineAuthorizedWorkspaceFileUseCase({

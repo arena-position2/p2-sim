@@ -68,6 +68,12 @@ export const chartGenerateTool: ToolConfig<ChartGenerateParams, ChartGenerateRes
     },
   },
 
+  request: {
+    url: '/api/tools/chart/generate',
+    method: 'POST',
+    headers: () => ({}),
+  },
+
   outputs: {
     charts: { type: 'json', description: 'ECharts option objects (array)' },
     dashboard: { type: 'json', description: '{ charts, count } payload for chat rendering' },

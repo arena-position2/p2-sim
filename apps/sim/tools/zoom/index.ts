@@ -1,7 +1,7 @@
 // Zoom tools exports
 export { zoomCreateMeetingTool } from './create_meeting'
 export { zoomDeleteMeetingTool } from './delete_meeting'
-export { zoomDeleteRecordingTool } from './delete_recording'
+// zoomDeleteRecordingTool is hidden: Zoom returns "No permission." for this operation.
 export { zoomDownloadTranscriptTool } from './download_transcript'
 export { zoomGetAccountRecordingsWithTranscriptTool } from './get_account_recordings_with_transcript'
 export { zoomGetMeetingTool } from './get_meeting'

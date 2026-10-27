@@ -95,7 +95,22 @@ export async function releaseCheckoutAdmission(claim: CheckoutAdmissionClaim): P
  */
 export function getCheckoutAdmissionClaimFromHookContext(ctx: {
   billingCheckoutAdmissionClaim?: CheckoutAdmissionClaim
-  context?: { billingCheckoutAdmissionClaim?: CheckoutAdmissionClaim }
+  /**
+   * Better Auth's AuthContext is a large intersection that fails the weak-type
+   * check against `{ billingCheckoutAdmissionClaim?: ... }` alone. Accept any
+   * object and read the optional claim field when present.
+   */
+  context?: object
 }): CheckoutAdmissionClaim | undefined {
-  return ctx.billingCheckoutAdmissionClaim ?? ctx.context?.billingCheckoutAdmissionClaim
+  if (ctx.billingCheckoutAdmissionClaim) {
+    return ctx.billingCheckoutAdmissionClaim
+  }
+  if (
+    ctx.context &&
+    'billingCheckoutAdmissionClaim' in ctx.context &&
+    ctx.context.billingCheckoutAdmissionClaim
+  ) {
+    return ctx.context.billingCheckoutAdmissionClaim as CheckoutAdmissionClaim
+  }
+  return undefined
 }

@@ -41,7 +41,10 @@ export interface KnowledgeBaseWithCounts {
   hasPermissionScopedConnector: boolean
 }
 
-// Simplified type for user knowledge base access API
+/** A knowledge base without document totals, for every read that does not display them. */
+export type KnowledgeBaseSummary = Omit<KnowledgeBaseWithCounts, 'tokenCount' | 'docCount'>
+
+/** Knowledge bases returned by the user-access list. */
 export type UserKnowledgeBaseAccess = Pick<
   KnowledgeBaseWithCounts,
   'id' | 'name' | 'workspaceId' | 'docCount'
@@ -126,7 +129,7 @@ export interface KnowledgeBaseData {
   name: string
   isSearchIndex?: boolean
   description: string | null
-  tokenCount: number
+  tokenCount?: number
   embeddingModel: string
   embeddingDimension: number
   chunkingConfig: ExtendedChunkingConfig
@@ -211,24 +214,6 @@ export interface ChunkData {
   updatedAt: string
 }
 
-interface ChunksPagination {
-  total: number
-  limit: number
-  offset: number
-  hasMore: boolean
-}
-
-interface DocumentsPagination {
-  total: number
-  limit: number
-  offset: number
-  hasMore: boolean
-}
-
 /** The member engine's states, as stored on `knowledge_connector.member_sync_status`. */
 export const MEMBER_SYNC_STATUSES = ['idle', 'pending', 'running', 'error', 'disabled'] as const
 export type MemberSyncStatus = (typeof MEMBER_SYNC_STATUSES)[number]
-
-export function isMemberSyncStatus(value: string): value is MemberSyncStatus {
-  return (MEMBER_SYNC_STATUSES as readonly string[]).includes(value)
-}

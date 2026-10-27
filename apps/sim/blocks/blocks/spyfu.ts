@@ -11,9 +11,8 @@ import {
   spyfuQueryOperationIds,
   spyfuTermOperationIds,
 } from '@/tools/spyfu/operations'
-import type { SpyfuResponse } from '@/tools/spyfu/types'
 
-export const SpyfuBlock: BlockConfig<SpyfuResponse> = {
+export const SpyfuBlock: BlockConfig = {
   type: 'spyfu',
   name: 'SpyFu',
   description: 'Query SpyFu for SEO, PPC, competitor, keyword, ranking, and usage data.',

@@ -1,3 +1,4 @@
+import { prepareConversationGeneration } from '@/providers/conversation-generation'
 /**
  * Live Gemini streaming tool loop.
  *
@@ -19,7 +20,6 @@ import {
   type GenerateContentResponse,
   type GoogleGenAI,
   type Part,
-  type Schema,
   type ToolConfig,
 } from '@google/genai'
 import type { Logger } from '@sim/logger'
@@ -28,11 +28,17 @@ import { isRecordLike } from '@sim/utils/object'
 import type { IterationToolCall } from '@/executor/types'
 import { MAX_TOOL_ITERATIONS } from '@/providers'
 import {
+  captureProviderConversationStep,
+  recordProviderConversationToolError,
+} from '@/providers/conversation-history'
+import { applyGeminiResponseFormat } from '@/providers/gemini/config'
+import {
   checkForForcedToolUsage,
-  cleanSchemaForGemini,
   convertUsageMetadata,
   ensureStructResponse,
+  geminiRetryDelayMs,
 } from '@/providers/google/utils'
+import { withProviderRetry } from '@/providers/retry'
 import { executeProviderTool } from '@/providers/runtime-context'
 import type { AgentStreamEvent, ToolCallEndStatus } from '@/providers/stream-events'
 import {
@@ -44,7 +50,7 @@ import {
 import { ensureToolCallId } from '@/providers/tool-call-id'
 import { enrichLastModelSegment } from '@/providers/trace-enrichment'
 import type { ModelPricing, ProviderRequest, TimeSegment } from '@/providers/types'
-import { isGemini3Model, prepareToolExecution, sumToolCosts } from '@/providers/utils'
+import { prepareToolExecution, sumToolCosts } from '@/providers/utils'
 import type { GeminiUsage } from './types'
 import { priceGeminiTokens, splitGeminiUsage } from './usage'
 
@@ -89,19 +95,14 @@ function buildNextConfig(
   if (allForcedToolsUsed && request.responseFormat) {
     nextConfig.tools = undefined
     nextConfig.toolConfig = undefined
-    if (isGemini3Model(model)) {
-      logger.info('Gemini 3: Stripping tools after forced tool execution, schema already set')
-    } else {
-      nextConfig.responseMimeType = 'application/json'
-      nextConfig.responseSchema = cleanSchemaForGemini(request.responseFormat.schema) as Schema
-      logger.info('Using structured output for final response after tool execution')
-    }
+    logger.info('Using structured output for final response after tool execution')
   } else if (currentToolConfig) {
     nextConfig.toolConfig = currentToolConfig
   } else {
     nextConfig.toolConfig = { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } }
   }
 
+  applyGeminiResponseFormat(nextConfig, request.responseFormat, model)
   return nextConfig
 }
 
@@ -119,6 +120,7 @@ async function drainGeminiTurn(
   text: string
   thinking: string
   functionCalls: StreamedFunctionCall[]
+  modelParts: Part[]
   hasFunctionCallPart: boolean
   usage: GeminiUsage
   finishReason?: string
@@ -126,6 +128,7 @@ async function drainGeminiTurn(
   let text = ''
   let thinking = ''
   const functionCalls: StreamedFunctionCall[] = []
+  const modelParts: Part[] = []
   let hasFunctionCallPart = false
   const seenKeys = new Set<string>()
   let usage: GeminiUsage = {
@@ -166,12 +169,14 @@ async function drainGeminiTurn(
         const fallback = chunk.text
         if (fallback) {
           text += fallback
+          modelParts.push({ text: fallback })
           controller.enqueue({ type: 'text_delta', text: fallback, turn: 'pending' })
         }
         continue
       }
 
       for (const part of parts) {
+        modelParts.push(part)
         if (part.functionCall) {
           hasFunctionCallPart = true
           const localId = ensureToolCallId(part.functionCall.id, 'gemini')
@@ -203,7 +208,7 @@ async function drainGeminiTurn(
     onIteratorChange(undefined)
   }
 
-  return { text, thinking, functionCalls, hasFunctionCallPart, usage, finishReason }
+  return { text, thinking, functionCalls, modelParts, hasFunctionCallPart, usage, finishReason }
 }
 
 /**
@@ -299,8 +304,10 @@ export function createGeminiStreamingToolLoopStream(
                   model
                 )
 
+            applyGeminiResponseFormat(turnConfig, request.responseFormat, model)
+
             const modelStart = Date.now()
-            const streamGenerator = await ai.models.generateContentStream({
+            const turnPayload = await prepareConversationGeneration(request, 'gemini', {
               model,
               contents,
               config: {
@@ -308,6 +315,15 @@ export function createGeminiStreamingToolLoopStream(
                 abortSignal: loopAbortController.signal,
               },
             })
+            const streamGenerator = await withProviderRetry(
+              () => ai.models.generateContentStream(turnPayload),
+              {
+                logger,
+                label: 'Gemini',
+                abortSignal: loopAbortController.signal,
+                retryAfterMs: geminiRetryDelayMs,
+              }
+            )
 
             const drained = await drainGeminiTurn(
               streamGenerator,
@@ -362,6 +378,15 @@ export function createGeminiStreamingToolLoopStream(
             }
 
             const turnTag = drained.functionCalls.length > 0 ? 'intermediate' : 'final'
+            await captureProviderConversationStep(
+              request,
+              'gemini',
+              {
+                role: 'model',
+                parts: drained.modelParts,
+              },
+              splitGeminiUsage(drained.usage)
+            )
             controller.enqueue({ type: 'turn_end', turn: turnTag })
             content = drained.text
 
@@ -430,6 +455,12 @@ export function createGeminiStreamingToolLoopStream(
 
                   const tool = request.tools?.find((t) => t.id === toolName)
                   if (!tool) {
+                    await recordProviderConversationToolError(
+                      request,
+                      functionCall.id,
+                      toolName,
+                      `Tool ${toolName} not found`
+                    )
                     const value = {
                       part,
                       toolCallId,
@@ -546,6 +577,12 @@ export function createGeminiStreamingToolLoopStream(
                     throw error
                   }
 
+                  await recordProviderConversationToolError(
+                    request,
+                    functionCall.id,
+                    toolName,
+                    getErrorMessage(error, 'Tool execution failed')
+                  )
                   logger.error('Error processing function call:', {
                     error: toError(error).message,
                     functionName: toolName,
@@ -587,7 +624,6 @@ export function createGeminiStreamingToolLoopStream(
              * model-provided ids must round-trip untouched). A functionResponse
              * id is attached only when the model itself provided one.
              */
-            const modelParts: Part[] = orderedResults.map((r) => r.part)
             const userParts: Part[] = orderedResults.map((r) => ({
               functionResponse: {
                 name: r.toolName,
@@ -598,7 +634,7 @@ export function createGeminiStreamingToolLoopStream(
 
             contents = [
               ...contents,
-              { role: 'model', parts: modelParts },
+              { role: 'model', parts: drained.modelParts },
               { role: 'user', parts: userParts },
             ]
 

@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
-import { env } from '@/lib/core/config/env'
-import { getArenaToken } from '@/app/api/tools/arena/utils/get-token'
+import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
+import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
 const logger = createLogger('ArenaClientUpdatedTasksAPI')
 
@@ -36,30 +36,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid pageSize' }, { status: 400 })
   }
 
-  const tokenObject = await getArenaToken(req, workflowId)
-  if (tokenObject.found === false) {
+  const resolved = await resolveArenaCaller(req, workflowId)
+  if (!resolved.found) {
     return NextResponse.json(
-      { error: 'Failed to get updated tasks', details: tokenObject.reason },
+      { error: 'Failed to get updated tasks', details: resolved.reason },
       { status: 400 }
     )
   }
-  const { arenaToken } = tokenObject
+  const { caller } = resolved
 
   try {
-    const arenaBackendBaseUrl = env.ARENA_BACKEND_BASE_URL
-    const url = new URL(`${arenaBackendBaseUrl}/sol/v1/tasks/client/updated`)
-    url.searchParams.set('cid', cid)
-    url.searchParams.set('period', period)
-    url.searchParams.set('pageNumber', String(resolvedPageNumber))
-    url.searchParams.set('pageSize', String(resolvedPageSize))
-    logger.info(`Arena client updated tasks request URL: ${url.toString()}`)
+    const path = `/sol/v1/tasks/client/updated?cid=${encodeURIComponent(cid)}&period=${encodeURIComponent(period)}&pageNumber=${resolvedPageNumber}&pageSize=${resolvedPageSize}`
+    logger.info('Arena client updated tasks request', { path, mode: caller.mode })
 
-    const res = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        authorisation: arenaToken || '',
-      },
+    const res = await arenaSolFetch({
+      mode: caller.mode,
+      userId: caller.userId,
+      pathOrUrl: path,
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+      init: { method: 'GET', headers: { 'Content-Type': 'application/json' } },
     })
 
     const responseData = await res.json()
@@ -73,6 +69,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(responseData, { status: res.status })
   } catch (error) {
+    if (error instanceof ArenaAuthError) {
+      return NextResponse.json({ error: error.message }, { status: 401 })
+    }
     return NextResponse.json(
       { error: 'Failed to get updated tasks', details: error },
       { status: 500 }

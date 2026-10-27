@@ -2,7 +2,7 @@ import { toast } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
 import { create } from 'zustand'
-import { devtools, type PersistStorage } from 'zustand/middleware'
+import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import {
   type AgentStreamToolTerminalStatus,
@@ -40,67 +40,8 @@ import {
 const logger = createLogger('TerminalConsoleStore')
 
 /**
- * Safe storage adapter that handles QuotaExceededError gracefully
- */
-const safeStorageAdapter: PersistStorage<ConsoleStore> = {
-  getItem: (name: string) => {
-    if (typeof localStorage === 'undefined') return null
-    try {
-      const value = localStorage.getItem(name)
-      if (value === null) return null
-      return JSON.parse(value)
-    } catch (e) {
-      logger.warn('Failed to read from localStorage', e)
-      return null
-    }
-  },
-  setItem: (name: string, value: any) => {
-    if (typeof localStorage === 'undefined') return
-    try {
-      const serialized = JSON.stringify(value)
-      localStorage.setItem(name, serialized)
-    } catch (e) {
-      // Handle QuotaExceededError gracefully
-      if (e instanceof Error && e.name === 'QuotaExceededError') {
-        logger.warn('localStorage quota exceeded, clearing old entries and retrying', e)
-        try {
-          // Try to clear some old entries and retry
-          if (value?.state?.entries && Array.isArray(value.state.entries)) {
-            // Keep only the most recent 20 entries to ensure we don't exceed quota
-            const limitedEntries = value.state.entries.slice(0, 20)
-            const limitedState = {
-              ...value,
-              state: {
-                ...value.state,
-                entries: limitedEntries,
-              },
-            }
-            const serialized = JSON.stringify(limitedState)
-            localStorage.setItem(name, serialized)
-            logger.info('Successfully stored console entries after truncation')
-          }
-        } catch (retryError) {
-          logger.error('Failed to store console entries even after truncation', retryError)
-        }
-      } else {
-        logger.warn('Failed to save to localStorage', e)
-      }
-    }
-  },
-  removeItem: (name: string) => {
-    if (typeof localStorage === 'undefined') return
-    try {
-      localStorage.removeItem(name)
-    } catch (e) {
-      logger.warn('Failed to remove from localStorage', e)
-    }
-  },
-}
-
-/**
  * Updates a NormalizedBlockOutput with new content
  */
-const MAX_ENTRIES_PER_WORKFLOW = 5000
 const EMPTY_CONSOLE_ENTRIES: ConsoleEntry[] = []
 
 const updateBlockOutput = (
@@ -382,7 +323,6 @@ function cloneWorkflowEntries(
 }
 
 function removeWorkflowIndexes(
-  workflowId: string,
   entries: ConsoleEntry[],
   entryIdsByBlockExecution: Record<string, string[]>,
   entryLocationById: Record<string, ConsoleEntryLocation>
@@ -443,7 +383,7 @@ function replaceWorkflowEntries(
   const entryLocationById = { ...state.entryLocationById }
   const previousEntries = workflowEntries[workflowId] ?? EMPTY_CONSOLE_ENTRIES
 
-  removeWorkflowIndexes(workflowId, previousEntries, entryIdsByBlockExecution, entryLocationById)
+  removeWorkflowIndexes(previousEntries, entryIdsByBlockExecution, entryLocationById)
 
   if (nextEntries.length === 0) {
     delete workflowEntries[workflowId]
@@ -471,7 +411,7 @@ function appendWorkflowEntry(
   const survivingIds = new Set(trimmedEntries.map((e) => e.id))
   const droppedEntries = previousEntries.filter((e) => !survivingIds.has(e.id))
   if (droppedEntries.length > 0) {
-    removeWorkflowIndexes(workflowId, droppedEntries, entryIdsByBlockExecution, entryLocationById)
+    removeWorkflowIndexes(droppedEntries, entryIdsByBlockExecution, entryLocationById)
   }
 
   trimmedEntries.forEach((entry, index) => {
@@ -541,7 +481,7 @@ const notifyBlockError = ({
       action: getDeploymentShape().chatEnabled
         ? {
             label: 'Fix in Chat',
-            onClick: () => sendMothershipMessage(copilotMessage),
+            onClick: () => sendMothershipMessage({ content: copilotMessage }),
           }
         : undefined,
     })

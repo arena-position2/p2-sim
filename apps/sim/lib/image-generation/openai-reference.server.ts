@@ -220,7 +220,7 @@ export async function generateOpenAIImageEdit(
   for (const [index, reference] of resolvedReferences.entries()) {
     form.append(
       'image',
-      new Blob([reference.buffer], { type: reference.mimeType }),
+      new Blob([Uint8Array.from(reference.buffer)], { type: reference.mimeType }),
       `reference-${index}.${extensionFromContentType(reference.mimeType)}`
     )
   }

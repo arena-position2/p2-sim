@@ -34,7 +34,7 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { AlertTriangle, Check, Clipboard, Plus, Search, Share2 } from 'lucide-react'
 import Image from 'next/image'
 import { useParams, useSearchParams } from 'next/navigation'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSettingsUnsavedGuard } from '@/components/settings/use-settings-unsaved-guard'
 import { writeOAuthReturnContext } from '@/lib/credentials/client-state'
 import { getCanonicalScopesForProvider, getServiceConfigByProviderId } from '@/lib/oauth'
 import { ATLASSIAN_SERVICE_ACCOUNT_PROVIDER_ID } from '@/lib/oauth/types'
@@ -61,10 +61,9 @@ import {
   useConnectOAuthService,
   useDisconnectOAuthService,
   useOAuthConnections,
-} from '@/hooks/queries/oauth/oauth-connections'
+} from '@/hooks/queries/oauth/connections'
 import { useCanUseZoomAdmin, useWorkspacePermissionsQuery } from '@/hooks/queries/workspace'
 import { useOAuthReturnRouter } from '@/hooks/use-oauth-return'
-import { useSettingsDirtyStore } from '@/stores/settings/dirty/store'
 
 const logger = createLogger('IntegrationsManager')
 
@@ -171,9 +170,6 @@ export function IntegrationsManager() {
     | { type: 'kb-connectors'; knowledgeBaseId: string }
     | undefined
   >(undefined)
-
-  const { data: session } = useSession()
-  const currentUserId = session?.user?.id || ''
 
   const {
     data: credentials = [],
@@ -321,14 +317,10 @@ export function IntegrationsManager() {
 
   const isDetailsDirty = isDescriptionDirty || isDisplayNameDirty
 
-  const setNavGuardDirty = useSettingsDirtyStore((s) => s.setDirty)
-  const resetNavGuard = useSettingsDirtyStore((s) => s.reset)
-
-  useEffect(() => {
-    setNavGuardDirty(isDetailsDirty)
-  }, [isDetailsDirty, setNavGuardDirty])
-
-  useEffect(() => () => resetNavGuard(), [resetNavGuard])
+  useSettingsUnsavedGuard({
+    isDirty: isDetailsDirty,
+    navigationBlocked: updateCredential.isPending,
+  })
 
   const handleSaveDetails = async () => {
     if (!selectedCredential || !isSelectedAdmin || !isDetailsDirty || updateCredential.isPending)

@@ -108,6 +108,21 @@ function parseAIResponse(aiResponse: any): GAQLResponse {
 }
 
 /**
+ * Resources that reject segments.date. Injecting a default segments.date
+ * filter into these queries causes GoogleAdsFailure
+ * PROHIBITED_SEGMENT_IN_SELECT_OR_WHERE_CLAUSE.
+ */
+function shouldSkipSegmentsDateInjection(gaqlQuery: string): boolean {
+  const query = gaqlQuery.toLowerCase()
+  return (
+    /\bfrom\s+change_event\b/.test(query) ||
+    query.includes('change_event.change_date_time') ||
+    /\bfrom\s+campaign_budget\b/.test(query) ||
+    query.includes('url_custom_parameters')
+  )
+}
+
+/**
  * Validates and fixes GAQL query date filtering
  *
  * @param response - Parsed GAQL response
@@ -117,26 +132,34 @@ function validateDateFiltering(response: GAQLResponse): GAQLResponse {
   const hasDateFilter =
     response.gaql_query.includes('segments.date') && response.gaql_query.includes('BETWEEN')
 
-  if (!hasDateFilter) {
-    logger.warn('Query missing BETWEEN date filter, adding default last 30 days ending yesterday', {
-      originalQuery: response.gaql_query,
-    })
-
-    const { query, startDate, endDate } = addDefaultDateFilter(response.gaql_query)
-
-    logger.info('Updated query with default BETWEEN date filter (last 30 days ending yesterday)', {
-      updatedQuery: query,
-      startDate,
-      endDate,
-    })
-
-    return {
-      ...response,
-      gaql_query: query,
-    }
+  if (hasDateFilter) {
+    return response
   }
 
-  return response
+  // change_event / campaign_budget / UTM queries must not get segments.date
+  if (shouldSkipSegmentsDateInjection(response.gaql_query)) {
+    logger.info('Skipping default segments.date injection for non-performance GAQL resource', {
+      originalQuery: response.gaql_query,
+    })
+    return response
+  }
+
+  logger.warn('Query missing BETWEEN date filter, adding default last 30 days ending yesterday', {
+    originalQuery: response.gaql_query,
+  })
+
+  const { query, startDate, endDate } = addDefaultDateFilter(response.gaql_query)
+
+  logger.info('Updated query with default BETWEEN date filter (last 30 days ending yesterday)', {
+    updatedQuery: query,
+    startDate,
+    endDate,
+  })
+
+  return {
+    ...response,
+    gaql_query: query,
+  }
 }
 
 /**

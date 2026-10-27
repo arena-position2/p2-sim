@@ -3,9 +3,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  applyImageGeneratorDefaultPairing,
   assertGeminiImageModel,
   getDefaultImageModelForProvider,
   getMaxReferenceImages,
+  IMAGE_GENERATOR_DEFAULT_MODEL,
+  IMAGE_GENERATOR_DEFAULT_PROVIDER,
   normalizeImageModelId,
   reconcileImageProviderAndModel,
   resolveImageProviderForModel,
@@ -107,5 +110,55 @@ describe('assertGeminiImageModel', () => {
 
   it('rejects unknown models', () => {
     expect(() => assertGeminiImageModel('not-a-model')).toThrow('Invalid Gemini model')
+  })
+})
+
+describe('applyImageGeneratorDefaultPairing', () => {
+  it('keeps the Gemini + Nano Banana 2 default pair intact', () => {
+    const subBlocks = {
+      provider: { value: IMAGE_GENERATOR_DEFAULT_PROVIDER as unknown },
+      model: { value: IMAGE_GENERATOR_DEFAULT_MODEL as unknown },
+    }
+
+    applyImageGeneratorDefaultPairing(subBlocks)
+
+    expect(subBlocks.provider.value).toBe(IMAGE_GENERATOR_DEFAULT_PROVIDER)
+    expect(subBlocks.model.value).toBe(IMAGE_GENERATOR_DEFAULT_MODEL)
+  })
+
+  it('clears orphan default provider when model is empty', () => {
+    const subBlocks = {
+      provider: { value: IMAGE_GENERATOR_DEFAULT_PROVIDER as unknown },
+      model: { value: null as unknown },
+    }
+
+    applyImageGeneratorDefaultPairing(subBlocks)
+
+    expect(subBlocks.provider.value).toBeNull()
+    expect(subBlocks.model.value).toBeNull()
+  })
+
+  it('clears orphan default model when provider is empty', () => {
+    const subBlocks = {
+      provider: { value: null as unknown },
+      model: { value: IMAGE_GENERATOR_DEFAULT_MODEL as unknown },
+    }
+
+    applyImageGeneratorDefaultPairing(subBlocks)
+
+    expect(subBlocks.provider.value).toBeNull()
+    expect(subBlocks.model.value).toBeNull()
+  })
+
+  it('does not clear a non-default provider with an empty model', () => {
+    const subBlocks = {
+      provider: { value: 'openai' as unknown },
+      model: { value: null as unknown },
+    }
+
+    applyImageGeneratorDefaultPairing(subBlocks)
+
+    expect(subBlocks.provider.value).toBe('openai')
+    expect(subBlocks.model.value).toBeNull()
   })
 })

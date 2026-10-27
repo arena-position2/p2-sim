@@ -5,7 +5,6 @@ import { normalizeFileInput } from '@/blocks/utils'
 import { UNIPILE_LINKEDIN_PROFILE_SECTIONS } from '@/tools/unipile/linkedin_profile_query'
 import { buildLinkedinSearchBodyFromForm } from '@/tools/unipile/linkedin_search_form'
 import { getLinkedinSearchParameterTypeDropdownOptions } from '@/tools/unipile/linkedin_search_parameter_types'
-import type { UnipileResponse } from '@/tools/unipile/types'
 
 /** Normalizes attendees to a de-duplicated string array for Unipile `attendees_ids`. */
 const UNIPILE_COMMENT_MENTION_COL_NAME = 'Display name'
@@ -167,7 +166,7 @@ function unipileNormalizeAttendeesIds(raw: unknown): string[] | undefined {
   return undefined
 }
 
-export const UnipileBlock: BlockConfig<UnipileResponse> = {
+export const UnipileBlock: BlockConfig = {
   type: 'unipile',
   name: 'LinkedIn (Unipile)',
   description: 'LinkedIn company data and messaging via Unipile',

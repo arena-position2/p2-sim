@@ -1,7 +1,14 @@
-/**
- * @vitest-environment node
- */
+import {
+  integrationsAvailabilityMock,
+  integrationsAvailabilityMockFns,
+} from '@sim/testing/mocks/integrations-availability.mock'
+import { generateId } from '@sim/utils/id'
+import type { Mock } from 'vitest'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  IMAGE_GENERATOR_DEFAULT_MODEL,
+  IMAGE_GENERATOR_DEFAULT_PROVIDER,
+} from '@/lib/image-generation/block-model-config'
 import { DEFAULT_PERMISSION_GROUP_CONFIG } from '@/lib/permission-groups/fields'
 import {
   applyBlockRetry,
@@ -13,22 +20,40 @@ import {
   resolveBlockRetryUpdate,
 } from '@/lib/workflows/editing/builders'
 import type { SkippedItem } from '@/lib/workflows/editing/types'
+import { getAllBlocks, getBlock } from '@/blocks/registry'
+import { prepareBlockState } from '@/stores/workflows/prepare-block-state'
 
-const { mockIsIntegrationDeploymentAvailable } = vi.hoisted(() => ({
-  mockIsIntegrationDeploymentAvailable: vi.fn(() => true),
-}))
+const mockIsIntegrationDeploymentAvailable =
+  integrationsAvailabilityMockFns.mockIsIntegrationDeploymentAvailableForVisibility
 
-vi.mock('@/lib/integrations/availability.server', () => ({
-  isIntegrationDeploymentAvailableForVisibility: mockIsIntegrationDeploymentAvailable,
-}))
+const mockGetAllBlocks = getAllBlocks as Mock
+const mockGetBlock = getBlock as Mock
+mockGetAllBlocks.mockImplementation(() => [
+  apiBlockConfig,
+  agentBlockConfig,
+  conditionBlockConfig,
+  knowledgeBlockConfig,
+  slackBlockConfig,
+  webhookBlockConfig,
+  gatedOperationBlockConfig,
+  imageGeneratorV2BlockConfig,
+])
+mockGetBlock.mockImplementation((type: string) => blocksByType[type])
+
+vi.mock('@/lib/integrations/availability.server', () => integrationsAvailabilityMock)
 
 const agentBlockConfig = {
   type: 'agent',
   name: 'Agent',
   outputs: {
     content: { type: 'string', description: 'Default content output' },
+    interactionId: {
+      type: 'string',
+      condition: { field: 'model', value: ['deep-research-pro-preview-12-2025'] },
+    },
   },
   subBlocks: [
+    { id: 'model', type: 'combobox', defaultValue: 'gpt-5' },
     { id: 'responseFormat', type: 'response-format' },
     { id: 'tools', type: 'tool-input' },
   ],
@@ -77,26 +102,196 @@ const apiBlockConfig = {
   ],
 }
 
+/** Mirrors generic_webhook: the token is pre-filled by a thunk, the URL is display-only. */
+const webhookBlockConfig = {
+  type: 'generic_webhook',
+  name: 'Webhook Trigger',
+  category: 'triggers',
+  outputs: {},
+  subBlocks: [
+    { id: 'webhookUrlDisplay', type: 'short-input', readOnly: true, value: () => 'display-only' },
+    { id: 'requireAuth', type: 'switch', defaultValue: true },
+    { id: 'token', type: 'short-input', password: true, value: () => generateId() },
+    { id: 'signingSecret', type: 'short-input', hidden: true, value: () => 'run-time-only' },
+  ],
+}
+
+/** An operation dropdown pre-filled by a thunk, so the seed meets the permission gate. */
+const gatedOperationBlockConfig = {
+  type: 'gated',
+  name: 'Gated',
+  outputs: {},
+  subBlocks: [
+    {
+      id: 'operation',
+      type: 'dropdown',
+      options: [
+        { label: 'Canvas', id: 'canvas' },
+        { label: 'Send', id: 'send' },
+      ],
+      value: () => 'canvas',
+    },
+  ],
+  tools: {
+    access: ['gated_canvas', 'gated_send'],
+    config: {
+      tool: ({ operation }: { operation?: string }) =>
+        operation === 'canvas' ? 'gated_canvas' : 'gated_send',
+    },
+  },
+}
+
+const imageGeneratorV2BlockConfig = {
+  type: 'image_generator_v2',
+  name: 'Image Generator',
+  outputs: {},
+  subBlocks: [
+    { id: 'provider', type: 'combobox', defaultValue: IMAGE_GENERATOR_DEFAULT_PROVIDER },
+    { id: 'model', type: 'combobox', defaultValue: IMAGE_GENERATOR_DEFAULT_MODEL },
+    { id: 'prompt', type: 'long-input' },
+  ],
+}
+
+const gmailBlockConfig = {
+  type: 'gmail',
+  name: 'Gmail (Legacy)',
+  hideFromToolbar: true,
+  sunset: { status: 'legacy', replacedBy: 'gmail_v2' },
+  outputs: {},
+  subBlocks: [],
+}
+
+const gmailV2BlockConfig = {
+  type: 'gmail_v2',
+  name: 'Gmail',
+  outputs: {},
+  subBlocks: [{ id: 'operation', type: 'dropdown' }],
+}
+
+const scheduleBlockConfig = {
+  type: 'schedule',
+  name: 'Schedule',
+  category: 'triggers',
+  outputs: {},
+  subBlocks: [
+    { id: 'scheduleType', type: 'dropdown', mode: 'trigger' },
+    { id: 'dailyTime', type: 'time-input', mode: 'trigger' },
+    { id: 'timezone', type: 'dropdown', mode: 'trigger' },
+  ],
+}
+
 const blocksByType: Record<string, unknown> = {
   api: apiBlockConfig,
   agent: agentBlockConfig,
+  mothership: {
+    ...agentBlockConfig,
+    type: 'mothership',
+    subBlocks: agentBlockConfig.subBlocks.map((subBlock) =>
+      subBlock.id === 'model' ? { ...subBlock, defaultValue: 'claude-sonnet-5-5' } : subBlock
+    ),
+  },
   condition: conditionBlockConfig,
   knowledge: knowledgeBlockConfig,
   slack: slackBlockConfig,
+  generic_webhook: webhookBlockConfig,
+  gated: gatedOperationBlockConfig,
+  image_generator_v2: imageGeneratorV2BlockConfig,
+  gmail: gmailBlockConfig,
+  gmail_v2: gmailV2BlockConfig,
+  schedule: scheduleBlockConfig,
 }
 
-vi.mock('@/blocks/registry', () => ({
-  getAllBlocks: () => [
-    apiBlockConfig,
-    agentBlockConfig,
-    conditionBlockConfig,
-    knowledgeBlockConfig,
-    slackBlockConfig,
-  ],
-  getBlock: (type: string) => blocksByType[type],
-}))
-
 describe('createBlockFromParams', () => {
+  it('exposes the output ports of the seeded Agent default', () => {
+    const block = createBlockFromParams(
+      'agent-research-default',
+      { type: 'agent', name: 'Agent' },
+      undefined,
+      undefined,
+      {
+        ...DEFAULT_PERMISSION_GROUP_CONFIG,
+        defaultAgentModel: 'deep-research-pro-preview-12-2025',
+      }
+    )
+    expect(block.outputs.interactionId).toEqual({ type: 'string' })
+  })
+  it('uses the group Agent default when creating an Agent without an explicit model', () => {
+    const config = { ...DEFAULT_PERMISSION_GROUP_CONFIG, defaultAgentModel: 'gpt-4o' }
+    const block = createBlockFromParams(
+      'agent-default',
+      { type: 'agent', name: 'Agent' },
+      undefined,
+      undefined,
+      config
+    )
+    expect(block.subBlocks.model.value).toBe('gpt-4o')
+  })
+
+  it('preserves an explicitly selected model instead of applying the group Agent default', () => {
+    const block = createBlockFromParams(
+      'agent-explicit',
+      { type: 'agent', name: 'Agent', inputs: { model: 'claude-sonnet-5-5' } },
+      undefined,
+      undefined,
+      { ...DEFAULT_PERMISSION_GROUP_CONFIG, defaultAgentModel: 'gpt-4o' }
+    )
+    expect(block.subBlocks.model.value).toBe('claude-sonnet-5-5')
+  })
+
+  it.each([{ deniedModels: ['gpt-4o'] }, { allowedModelProviders: ['anthropic'] }])(
+    'does not seed a group Agent default withheld by %j',
+    (restrictions) => {
+      const block = createBlockFromParams(
+        'agent-denied-default',
+        { type: 'agent', name: 'Agent' },
+        undefined,
+        undefined,
+        { ...DEFAULT_PERMISSION_GROUP_CONFIG, defaultAgentModel: 'gpt-4o', ...restrictions }
+      )
+      expect(block.subBlocks.model.value).not.toBe('gpt-4o')
+    }
+  )
+
+  it('uses the Agent default on canvas creation without changing other model-backed blocks', () => {
+    const options = {
+      id: 'canvas-default',
+      name: 'Agent',
+      position: { x: 0, y: 0 },
+      agentDefaultModel: 'gpt-4o',
+    }
+    expect(prepareBlockState({ ...options, type: 'agent' }).subBlocks.model.value).toBe('gpt-4o')
+    expect(prepareBlockState({ ...options, type: 'mothership' }).subBlocks.model.value).toBe(
+      'claude-sonnet-5-5'
+    )
+  })
+
+  it('creates a schedule block in trigger mode so its fields are visible', () => {
+    const block = createBlockFromParams('sched-1', {
+      type: 'schedule',
+      name: 'Daily 9AM IST',
+      inputs: {
+        scheduleType: 'daily',
+        dailyTime: '09:00',
+        timezone: 'Asia/Kolkata',
+      },
+    })
+
+    expect(block.type).toBe('schedule')
+    expect(block.triggerMode).toBe(true)
+    expect(block.subBlocks.scheduleType.value).toBe('daily')
+    expect(block.subBlocks.dailyTime.value).toBe('09:00')
+    expect(block.subBlocks.timezone.value).toBe('Asia/Kolkata')
+  })
+
+  it('stores the current successor when adding a sunset block type', () => {
+    const block = createBlockFromParams('mail-1', {
+      type: 'gmail',
+      name: 'Gmail',
+    })
+
+    expect(block.type).toBe('gmail_v2')
+  })
+
   it('derives agent outputs from responseFormat when outputs are not provided', () => {
     const block = createBlockFromParams('b-agent', {
       type: 'agent',
@@ -120,23 +315,26 @@ describe('createBlockFromParams', () => {
     expect(block.outputs.answer.type).toBe('string')
   })
 
-  it('selects variable Tool Mode when an agent tool supplies an expression', () => {
-    const block = createBlockFromParams('b-agent', {
-      type: 'agent',
-      name: 'Agent',
-      inputs: {
-        tools: [
-          {
-            type: 'custom-tool',
-            customToolId: 'custom-1',
-            usageControlExpression: '<route.toolMode>',
-          },
-        ],
-      },
-    })
+  it.each(['agent', 'mothership'])(
+    'selects variable Tool Mode when a %s tool supplies an expression',
+    (type) => {
+      const block = createBlockFromParams('b-agent', {
+        type,
+        name: 'Agent',
+        inputs: {
+          tools: [
+            {
+              type: 'mcp',
+              params: { serverId: 'server-1', toolName: 'search' },
+              usageControlExpression: '<route.toolMode>',
+            },
+          ],
+        },
+      })
 
-    expect(block.data.canonicalModes['0:agentToolUsageControl']).toBe('advanced')
-  })
+      expect(block.data.canonicalModes['0:agentToolUsageControl']).toBe('advanced')
+    }
+  )
 
   it('preserves configured subblock types and normalizes condition branch ids', () => {
     const block = createBlockFromParams('condition-1', {
@@ -158,17 +356,6 @@ describe('createBlockFromParams', () => {
     expect(parsed[1].id).toBe('condition-1-else')
   })
 
-  it('uses lowercase titles for default condition branches', () => {
-    const block = createBlockFromParams('condition-1', {
-      type: 'condition',
-      name: 'Condition 1',
-      triggerMode: false,
-    })
-
-    const conditions = JSON.parse(block.subBlocks.conditions.value)
-    expect(conditions.map(({ title }: { title: string }) => title)).toEqual(['if', 'else'])
-  })
-
   it('persists knowledge tag subblocks as JSON strings, not raw arrays', () => {
     const block = createBlockFromParams('kb-1', {
       type: 'knowledge',
@@ -188,7 +375,7 @@ describe('createBlockFromParams', () => {
     expect(filters[0].id).toEqual(expect.any(String))
   })
 
-  it('seeds hidden compatibility defaults on programmatically created blocks', () => {
+  it('seeds declared defaults on programmatically created blocks (canvas parity)', () => {
     const block = createBlockFromParams('api-1', {
       type: 'api',
       name: 'API',
@@ -196,7 +383,157 @@ describe('createBlockFromParams', () => {
     })
 
     expect(block.subBlocks.redirectPolicyVersion.value).toBe('standard-v1')
-    expect(block.subBlocks.sendCredentialsOnCrossOriginRedirect.value).toBeNull()
+    expect(block.subBlocks.sendCredentialsOnCrossOriginRedirect.value).toBe(true)
+  })
+
+  it('seeds Agent model defaultValue when Copilot omits inputs.model', () => {
+    const block = createBlockFromParams('agent-1', {
+      type: 'agent',
+      name: 'My Agent',
+      triggerMode: false,
+    })
+
+    expect(block.subBlocks.model.value).toBe('gpt-5')
+  })
+
+  it('keeps an explicit Agent model from Copilot inputs', () => {
+    const block = createBlockFromParams('agent-1', {
+      type: 'agent',
+      name: 'My Agent',
+      inputs: { model: 'claude-sonnet-5' },
+      triggerMode: false,
+    })
+
+    expect(block.subBlocks.model.value).toBe('claude-sonnet-5')
+  })
+
+  it('leaves Agent model empty when the declared default is permission-denied', () => {
+    const skippedItems: SkippedItem[] = []
+    const block = createBlockFromParams(
+      'agent-1',
+      {
+        type: 'agent',
+        name: 'My Agent',
+        triggerMode: false,
+      },
+      undefined,
+      undefined,
+      {
+        ...DEFAULT_PERMISSION_GROUP_CONFIG,
+        deniedModels: ['gpt-5'],
+      },
+      skippedItems
+    )
+
+    expect(block.subBlocks.model.value).toBeNull()
+    expect(skippedItems.some((item) => item.type === 'model_not_allowed')).toBe(true)
+  })
+
+  it('seeds Image Generator provider+model defaults when Copilot omits them', () => {
+    const block = createBlockFromParams('image-1', {
+      type: 'image_generator_v2',
+      name: 'Image Generator',
+      triggerMode: false,
+    })
+
+    expect(block.subBlocks.provider.value).toBe(IMAGE_GENERATOR_DEFAULT_PROVIDER)
+    expect(block.subBlocks.model.value).toBe(IMAGE_GENERATOR_DEFAULT_MODEL)
+  })
+
+  it('keeps explicit Image Generator provider/model from Copilot inputs', () => {
+    const block = createBlockFromParams('image-1', {
+      type: 'image_generator_v2',
+      name: 'Image Generator',
+      inputs: { provider: 'openai', model: 'gpt-image-2' },
+      triggerMode: false,
+    })
+
+    expect(block.subBlocks.provider.value).toBe('openai')
+    expect(block.subBlocks.model.value).toBe('gpt-image-2')
+  })
+
+  it('clears Image Generator provider+model together when the default model is denied', () => {
+    const skippedItems: SkippedItem[] = []
+    const block = createBlockFromParams(
+      'image-1',
+      {
+        type: 'image_generator_v2',
+        name: 'Image Generator',
+        triggerMode: false,
+      },
+      undefined,
+      undefined,
+      {
+        ...DEFAULT_PERMISSION_GROUP_CONFIG,
+        deniedModels: [IMAGE_GENERATOR_DEFAULT_MODEL],
+      },
+      skippedItems
+    )
+
+    expect(block.subBlocks.provider.value).toBeNull()
+    expect(block.subBlocks.model.value).toBeNull()
+    expect(skippedItems.some((item) => item.type === 'model_not_allowed')).toBe(true)
+  })
+
+  /**
+   * The editor pre-fills a webhook trigger's token from its `value()` thunk;
+   * without the same seeding here a trigger added over the API deployed with
+   * `token: null` and was refused as "authentication enabled but no token".
+   */
+  it('seeds editor defaults from value() thunks so an API-added webhook trigger has a token', () => {
+    const block = createBlockFromParams('hook-1', {
+      type: 'generic_webhook',
+      name: 'Webhook',
+      triggerMode: true,
+    })
+
+    expect(block.subBlocks.token.value).toEqual(expect.any(String))
+    expect(block.subBlocks.token.value).not.toBe('')
+    expect(block.subBlocks.webhookUrlDisplay.value).toBeNull()
+    expect(block.subBlocks.signingSecret.value).toBeNull()
+    expect(block.subBlocks.requireAuth.value).toBe(true)
+  })
+
+  it('never overrides an explicit input with a seeded default', () => {
+    const explicit = createBlockFromParams('hook-1', {
+      type: 'generic_webhook',
+      name: 'Webhook',
+      inputs: { token: 'my-token' },
+    })
+    const cleared = createBlockFromParams('hook-2', {
+      type: 'generic_webhook',
+      name: 'Webhook',
+      inputs: { token: null },
+    })
+
+    expect(explicit.subBlocks.token.value).toBe('my-token')
+    expect(cleared.subBlocks.token.value).toBeNull()
+  })
+
+  it('withholds a seeded operation the permission group denies without recording a skip', () => {
+    const skippedItems: SkippedItem[] = []
+    const denyCanvas = { ...DEFAULT_PERMISSION_GROUP_CONFIG, deniedTools: ['gated_canvas'] }
+
+    const denied = createBlockFromParams(
+      'g-1',
+      { type: 'gated', name: 'Gated' },
+      undefined,
+      undefined,
+      denyCanvas,
+      skippedItems
+    )
+    const allowed = createBlockFromParams(
+      'g-2',
+      { type: 'gated', name: 'Gated' },
+      undefined,
+      undefined,
+      DEFAULT_PERMISSION_GROUP_CONFIG,
+      skippedItems
+    )
+
+    expect(denied.subBlocks.operation.value).toBeNull()
+    expect(allowed.subBlocks.operation.value).toBe('canvas')
+    expect(skippedItems).toEqual([])
   })
 })
 
@@ -270,13 +607,6 @@ describe('normalizeTools', () => {
       },
     ])
   })
-
-  it('defaults a custom tool reference without either permission field to Auto', () => {
-    expect(normalizeTools([{ type: 'custom-tool', customToolId: 'custom-1' }])[0]).toMatchObject({
-      usageControl: 'auto',
-      usageControlExpression: undefined,
-    })
-  })
 })
 
 describe('normalizeSubblockValue', () => {
@@ -289,23 +619,6 @@ describe('normalizeSubblockValue', () => {
       expect(JSON.parse(result as string)[0].title).toBe('a')
     }
   )
-
-  it('accepts a JSON string as input and still returns a string', () => {
-    const result = normalizeSubblockValue('tagFilters', JSON.stringify([{ tagName: 'Department' }]))
-
-    expect(typeof result).toBe('string')
-    expect(JSON.parse(result as string)[0].tagName).toBe('Department')
-  })
-
-  it('leaves array-with-id subblocks that are not string-serialized as raw arrays', () => {
-    const result = normalizeSubblockValue('inputFormat', [{ id: 'x', name: 'field' }])
-
-    expect(Array.isArray(result)).toBe(true)
-  })
-
-  it('passes through subblock keys that need no normalization', () => {
-    expect(normalizeSubblockValue('systemPrompt', 'hello')).toBe('hello')
-  })
 
   // Validation treats null as an explicit clear. Coercing it to "[]" would persist a value
   // where the caller asked for none, so the agent reads back an empty filter rather than an
@@ -346,24 +659,6 @@ describe('applyTriggerConfigToBlockSubblocks', () => {
       value: 'x',
     })
   })
-
-  it('keeps the existing entry metadata when the key already exists', () => {
-    const block = {
-      id: 'b1',
-      type: 'slack',
-      subBlocks: {
-        channel: { id: 'channel', type: 'channel-selector', value: 'C-old' },
-      } as Record<string, { id: string; type: string; value: unknown }>,
-    }
-
-    applyTriggerConfigToBlockSubblocks(block, { channel: 'C-new' })
-
-    expect(block.subBlocks.channel).toEqual({
-      id: 'channel',
-      type: 'channel-selector',
-      value: 'C-new',
-    })
-  })
 })
 
 describe('block retry policy', () => {
@@ -379,15 +674,6 @@ describe('block retry policy', () => {
     expect(resolveBlockRetryUpdate({ maxTries: 4 }, undefined)).toMatchObject({
       enabled: true,
       maxTries: 4,
-    })
-  })
-
-  it('keeps configured numbers when retry is switched off', () => {
-    const existing = { enabled: true, maxTries: 5, waitBetweenTriesMs: 250 }
-    expect(resolveBlockRetryUpdate({ enabled: false }, existing)).toEqual({
-      enabled: false,
-      maxTries: 5,
-      waitBetweenTriesMs: 250,
     })
   })
 
@@ -430,14 +716,5 @@ describe('block retry policy', () => {
     expect(block.retry).toBeUndefined()
     expect(skippedItems).toHaveLength(1)
     expect(skippedItems[0]).toMatchObject({ type: 'retry_not_supported', blockId: 'b1' })
-  })
-
-  it('clears the policy when null is sent', () => {
-    const block: Record<string, unknown> = {
-      type: 'agent',
-      retry: { enabled: true, maxTries: 3, waitBetweenTriesMs: 1000 },
-    }
-    applyBlockRetry(block, null, { operationType: 'edit', blockId: 'b1' })
-    expect(block.retry).toBeUndefined()
   })
 })

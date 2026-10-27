@@ -13,7 +13,8 @@ import { getActiveOrganizationId } from '@/lib/auth/session-response'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { capabilityRefusalResponse } from '@/lib/permission-groups/capability-response'
 import { captureServerEvent } from '@/lib/posthog/server'
-import { createDefaultWorkspace, createWorkspace } from '@/lib/workspaces/create-workspace'
+import { createWorkspace } from '@/lib/workspaces/create'
+import { createDefaultWorkspace } from '@/lib/workspaces/create-workspace'
 import { listWorkspacesForViewer } from '@/lib/workspaces/list'
 import {
   getWorkspaceCreationPolicy,
@@ -161,7 +162,6 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
       organizationId: creationPolicy.organizationId,
       workspaceMode: creationPolicy.workspaceMode,
       billedAccountUserId: creationPolicy.billedAccountUserId,
-      isPersonal: creationPolicy.isPersonal,
       observedOrganizationId: creationPolicy.observedOrganizationId,
       governingPermissionGroupOrganizationId: creationPolicy.governingPermissionGroupOrganizationId,
     })

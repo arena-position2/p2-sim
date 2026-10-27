@@ -9,9 +9,7 @@ export {
   hubspotGetCampaignSpendTool,
   hubspotGetCampaignTool,
   hubspotGetEmailStatisticsHistogramTool,
-  // hubspotGetEmailTool,
   hubspotListCampaignsTool,
-  // hubspotListEmailsTool,
 } from './campaigns'
 export { hubspotCreateAppointmentTool } from './create_appointment'
 export { hubspotCreateAssociationTool } from './create_association'

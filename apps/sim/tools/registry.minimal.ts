@@ -71,7 +71,7 @@ import {
   slackUpdateMessageTool,
   slackUpdateViewTool,
 } from '@/tools/slack'
-import type { ToolConfig } from '@/tools/types'
+import type { ExecutableToolConfig } from '@/tools/types'
 import { customBlockExecutorTool, workflowExecutorTool } from '@/tools/workflow'
 
 /**
@@ -84,7 +84,7 @@ import { customBlockExecutorTool, workflowExecutorTool } from '@/tools/workflow'
  * `gmail_v2` blocks kept in `blocks/registry-maps.minimal.ts`. NEVER aliased in
  * production.
  */
-export const tools: Record<string, ToolConfig> = {
+export const tools: Record<string, ExecutableToolConfig> = {
   http_request: httpRequestTool,
   function_execute: functionExecuteTool,
   guardrails_validate: guardrailsValidateTool,

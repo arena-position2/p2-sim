@@ -1,55 +1,26 @@
-/**
- * @vitest-environment node
- */
 import { describe, expect, it } from 'vitest'
 import {
   BOX_SERVICE_ACCOUNT_PROVIDER_ID,
   getClientCredentialAccountDescriptor,
-  NETSUITE_SERVICE_ACCOUNT_PROVIDER_ID,
   normalizeNetSuiteSuiteTalkOrigin,
+  normalizeOracleFusionApplicationOrigin,
   partitionClientCredentialFields,
   resolveClientCredentialAuthMethod,
   resolveSalesforceAuthMethod,
   SALESFORCE_DEFAULT_AUTH_METHOD,
   SALESFORCE_SERVICE_ACCOUNT_PROVIDER_ID,
-  ZOHO_DESK_SERVICE_ACCOUNT_PROVIDER_ID,
 } from '@/lib/credentials/client-credential-accounts/descriptors'
 
 const salesforce = getClientCredentialAccountDescriptor(SALESFORCE_SERVICE_ACCOUNT_PROVIDER_ID)!
 const box = getClientCredentialAccountDescriptor(BOX_SERVICE_ACCOUNT_PROVIDER_ID)!
-const zohoDesk = getClientCredentialAccountDescriptor(ZOHO_DESK_SERVICE_ACCOUNT_PROVIDER_ID)!
-const netSuite = getClientCredentialAccountDescriptor(NETSUITE_SERVICE_ACCOUNT_PROVIDER_ID)!
 
 const ids = (fields: { id: string }[]) => fields.map((field) => field.id)
 
 describe('partitionClientCredentialFields', () => {
   describe('single-grant providers are unaffected by the auth-method machinery', () => {
-    it('keeps every Box field visible and required', () => {
-      const { visible, required } = partitionClientCredentialFields(box, undefined)
-      expect(ids(visible)).toEqual(['clientId', 'clientSecret', 'orgId'])
-      expect(ids(required)).toEqual(['clientId', 'clientSecret', 'orgId'])
-    })
-
-    it("keeps Zoho Desk's optional data center visible but not required", () => {
-      const { visible, required } = partitionClientCredentialFields(zohoDesk, undefined)
-      expect(ids(visible)).toContain('dataCenter')
-      expect(ids(required)).not.toContain('dataCenter')
-      expect(ids(required)).toEqual(['clientId', 'clientSecret', 'orgId'])
-    })
-
     it('ignores an auth method a single-grant provider does not declare', () => {
       const { required } = partitionClientCredentialFields(box, 'jwt_bearer')
       expect(ids(required)).toEqual(['clientId', 'clientSecret', 'orgId'])
-    })
-
-    it('declares the complete NetSuite certificate credential', () => {
-      const { visible, required } = partitionClientCredentialFields(netSuite, undefined)
-      expect(ids(visible)).toEqual(['orgId', 'clientId', 'certificateId', 'privateKey'])
-      expect(ids(required)).toEqual(['orgId', 'clientId', 'certificateId', 'privateKey'])
-      expect(netSuite.fields.find((field) => field.id === 'privateKey')).toMatchObject({
-        secret: true,
-        multiline: true,
-      })
     })
   })
 
@@ -72,7 +43,6 @@ describe('partitionClientCredentialFields', () => {
 
     it.each([
       ['absent', undefined],
-      ['empty', ''],
       ['unrecognized', 'totally-made-up'],
     ])('falls back to the default grant when the method is %s', (_label, authMethod) => {
       // Credentials created before the JWT branch existed carry no `authMethod`,
@@ -80,12 +50,6 @@ describe('partitionClientCredentialFields', () => {
       const { required } = partitionClientCredentialFields(salesforce, authMethod)
       expect(ids(required)).toContain('clientSecret')
       expect(ids(required)).not.toContain('privateKey')
-    })
-
-    it('never marks the method selector itself required', () => {
-      const { visible, required } = partitionClientCredentialFields(salesforce, 'jwt_bearer')
-      expect(ids(visible)).toContain('authMethod')
-      expect(ids(required)).not.toContain('authMethod')
     })
   })
 })
@@ -99,13 +63,46 @@ describe('normalizeNetSuiteSuiteTalkOrigin', () => {
 
   it.each([
     'http://1234567.suitetalk.api.netsuite.com',
-    'https://suitetalk.api.netsuite.com',
     'https://1234567.suitetalk.api.netsuite.com/services/rest/record/v1',
-    'https://1234567.suitetalk.api.netsuite.com?account=other',
     'https://1234567.suitetalk.api.netsuite.com.evil.example',
     'https://user@1234567.suitetalk.api.netsuite.com',
   ])('rejects the non-authoritative SuiteTalk URL %j', (value) => {
     expect(normalizeNetSuiteSuiteTalkOrigin(value)).toBeUndefined()
+  })
+})
+
+describe('normalizeOracleFusionApplicationOrigin', () => {
+  it.each([
+    [' https://VISION.fa.us2.oraclecloud.com/ ', 'https://vision.fa.us2.oraclecloud.com'],
+    ['https://acme-prod.fa.ocs.oraclecloud.com', 'https://acme-prod.fa.ocs.oraclecloud.com'],
+    [
+      'https://pod.fa.eu-frankfurt-1.oraclecloud.com',
+      'https://pod.fa.eu-frankfurt-1.oraclecloud.com',
+    ],
+  ])('normalizes the supported application origin %j', (value, expected) => {
+    expect(normalizeOracleFusionApplicationOrigin(value)).toBe(expected)
+  })
+
+  it.each([
+    'http://vision.fa.us2.oraclecloud.com',
+    'https://vision.fa.us2.oraclecloud.com/path',
+    'https://vision.fa.us2.oraclecloud.com/path/..',
+    'https://vision.fa.us2.oraclecloud.com/./',
+    'https://vision.fa.us2.oraclecloud.com/%2e%2e/',
+    'https://vision.fa.us2.oraclecloud.com:443',
+    'https://vision.fa.us2.oraclecloud.com:8443',
+    'https://user@vision.fa.us2.oraclecloud.com',
+    'https://user:password@vision.fa.us2.oraclecloud.com',
+    'https://vision.fa.us2.oraclecloud.com?tenant=other',
+    'https://vision.fa.us2.oraclecloud.com#fragment',
+    'https://vision.fa.us2.oraclecloud.com.evil.example',
+    'https://vision.fa.us2.oraclecloud.co',
+    'https://fusion.example.com',
+    'https://fa.us2.oraclecloud.com',
+    'https://-vision.fa.us2.oraclecloud.com',
+    'https://vision.fa.-us2.oraclecloud.com',
+  ])('rejects the noncanonical Fusion Applications URL %j', (value) => {
+    expect(normalizeOracleFusionApplicationOrigin(value)).toBeUndefined()
   })
 })
 

@@ -11,6 +11,7 @@ import {
   user,
 } from '@sim/db/schema'
 import { type SQL, sql } from 'drizzle-orm'
+import { textArrayLiteral } from '@/lib/db/arrays'
 import { EXTERNAL_GROUP_STALE_AFTER_MS } from '@/lib/knowledge/access/external-groups'
 import { SOURCE_ACL_MAX_AGE_MS } from '@/lib/knowledge/access/freshness'
 import { confluenceReaderGroupCondition } from '@/lib/knowledge/access/group-membership'
@@ -176,9 +177,7 @@ function githubInstallationAccessCondition(scope: KnowledgeAccessScope): SQL {
 export function knowledgeAccessCondition(scope: KnowledgeAccessScope | SystemAccessScope): SQL {
   return storedKnowledgeAccessCondition(
     scope,
-    scope.kind === 'system'
-      ? sql`true`
-      : sql`(${githubInstallationAccessCondition(scope)} AND ${confluenceSiteAccessCondition(scope)})`
+    scope.kind === 'system' ? sql`true` : liveSourceAccessCondition(scope)
   )
 }
 
@@ -193,6 +192,54 @@ export function knowledgeMetadataCandidateAccessCondition(
   return storedKnowledgeAccessCondition(scope, sql`true`)
 }
 
+/** Every requirement clause must reach the caller, which preserves source permission intersections. */
+export function aclRequirementsSatisfied(tokens: SQL): SQL {
+  return sql`NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(${document.aclRequirements}) AS required_clause(tokens)
+      WHERE NOT (required_clause.tokens ?| ${tokens})
+    )`
+}
+
+/** The live source proofs this request carries, as the connector-scoped clause both shapes apply. */
+function liveSourceAccessCondition(scope: KnowledgeAccessScope): SQL {
+  return sql`(${githubInstallationAccessCondition(scope)} AND ${confluenceSiteAccessCondition(scope)})`
+}
+
+/**
+ * A members-mode document is readable while one of the caller's active member identities on its
+ * connector still observes it, freshly. Correlated on the document so each check is a lookup on
+ * the observation primary key, which leads with `document_id`: phrased as a row-value `IN`
+ * inside the access predicate's `OR`, PostgreSQL instead hashes every observation in the table
+ * once per statement, a fixed cost paid by every query that carries the predicate.
+ */
+function memberObservationCondition(tokens: SQL, cutoff: SQL): SQL {
+  return sql`EXISTS (
+    SELECT 1 FROM ${knowledgeDocumentObservation}
+    JOIN ${knowledgeConnectorMember}
+      ON ${knowledgeConnectorMember.id} = ${knowledgeDocumentObservation.memberId}
+    WHERE ${knowledgeDocumentObservation.documentId} = ${document.id}
+      AND ${knowledgeConnectorMember.connectorId} = ${document.connectorId}
+      AND ${knowledgeConnectorMember.status} = 'active'
+      AND ${knowledgeConnectorMember.subjectToken} = ANY(${tokens})
+      AND GREATEST(${knowledgeDocumentObservation.lastSeenAt}, ${knowledgeConnectorMember.memberSyncedThrough}) > ${cutoff}
+  )`
+}
+
+/** Source-derived grants count only while their evidence is younger than the freshness window. */
+export function sourceAclFreshnessCutoff(): SQL {
+  return sql`statement_timestamp() - (${SOURCE_ACL_MAX_AGE_MS} * interval '1 millisecond')`
+}
+
+/** A document readable by the whole workspace: the ACL is exactly the workspace token. */
+export function documentHasWorkspaceAcl(): SQL {
+  return sql`${document.acl} = ARRAY['ws']::text[]`
+}
+
+/** A document carrying mirrored source permissions rather than the workspace token. */
+export function documentHasMirroredAcl(): SQL {
+  return sql`${document.acl} <> ARRAY['ws']::text[]`
+}
+
 function storedKnowledgeAccessCondition(
   scope: KnowledgeAccessScope | SystemAccessScope,
   liveSourceAccess: SQL
@@ -200,15 +247,12 @@ function storedKnowledgeAccessCondition(
   if (scope.kind === 'system') return documentConnectorIsActive()
   if (scope.tokens.length === 0) return sql`false`
   const tokens = textArrayLiteral(scope.tokens)
-  const cutoff = sql`statement_timestamp() - (${SOURCE_ACL_MAX_AGE_MS} * interval '1 millisecond')`
+  const cutoff = sourceAclFreshnessCutoff()
   return sql`(
-    ${document.acl} && ${tokens}
-    AND NOT EXISTS (
-      SELECT 1 FROM jsonb_array_elements(${document.aclRequirements}) AS required_clause(tokens)
-      WHERE NOT (required_clause.tokens ?| ${tokens})
-    )
+    ${aclOverlap(tokens)}
+    AND ${aclRequirementsSatisfied(tokens)}
     AND (
-      (${document.connectorId} IS NULL AND ${document.acl} = ARRAY['ws']::text[])
+      (${document.connectorId} IS NULL AND ${documentHasWorkspaceAcl()})
       OR EXISTS (
         SELECT 1 FROM ${knowledgeConnector}
         WHERE ${knowledgeConnector.id} = ${document.connectorId}
@@ -218,17 +262,10 @@ function storedKnowledgeAccessCondition(
           AND ${searchIntegrationAccessCondition()}
           AND ${liveSourceAccess}
           AND (
-            (${knowledgeConnector.accessMode} = 'workspace' AND ${document.acl} = ARRAY['ws']::text[])
-            OR (${document.acl} <> ARRAY['ws']::text[] AND (
+            (${knowledgeConnector.accessMode} = 'workspace' AND ${documentHasWorkspaceAcl()})
+            OR (${documentHasMirroredAcl()} AND (
             (${knowledgeConnector.accessMode} = 'admin' AND ${document.aclVerifiedAt} > ${cutoff})
-            OR (${knowledgeConnector.accessMode} = 'members' AND (${document.id}, ${document.connectorId}) IN (
-              SELECT ${knowledgeDocumentObservation.documentId}, ${knowledgeConnectorMember.connectorId} FROM ${knowledgeDocumentObservation}
-              JOIN ${knowledgeConnectorMember}
-                ON ${knowledgeConnectorMember.id} = ${knowledgeDocumentObservation.memberId}
-              WHERE ${knowledgeConnectorMember.status} = 'active'
-                AND ${knowledgeConnectorMember.subjectToken} = ANY(${tokens})
-                AND GREATEST(${knowledgeDocumentObservation.lastSeenAt}, ${knowledgeConnectorMember.memberSyncedThrough}) > ${cutoff}
-            ))
+            OR (${knowledgeConnector.accessMode} = 'members' AND ${memberObservationCondition(tokens, cutoff)})
             ))
           )
       )
@@ -237,15 +274,9 @@ function storedKnowledgeAccessCondition(
 }
 
 /**
- * The pool uses fetch_types: false, so arrays must be constructed from scalar
- * parameters. A JSON scalar keeps large sets below PostgreSQL's bind limit.
+ * The token half of the stored access predicate: one spelling of the overlap, so the indexed
+ * search probe's reach and the full predicate cannot drift.
  */
-export function textArrayLiteral(values: readonly string[]): SQL {
-  if (values.length > 1000) {
-    return sql`ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(values)}::text::jsonb))`
-  }
-  return sql`ARRAY[${sql.join(
-    values.map((value) => sql`${value}`),
-    sql`, `
-  )}]::text[]`
+export function aclOverlap(tokens: SQL): SQL {
+  return sql`${document.acl} && ${tokens}`
 }

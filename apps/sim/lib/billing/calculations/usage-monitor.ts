@@ -3,10 +3,12 @@ import { userStats, workspace } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { eq } from 'drizzle-orm'
+import { USAGE_UNAVAILABLE_MESSAGE } from '@/lib/billing/constants'
 import { isOrganizationBillingBlocked } from '@/lib/billing/core/access'
 import { defaultBillingPeriod } from '@/lib/billing/core/billing-period'
 import { getHighestPrioritySubscription } from '@/lib/billing/core/plan'
 import { resolveSubscriptionUsagePeriod } from '@/lib/billing/core/reporting-period'
+import { readSoftGateUsageCost } from '@/lib/billing/core/reporting-usage-cache'
 import { getUserUsageLimit, type UsageLimitSubscription } from '@/lib/billing/core/usage'
 import {
   type BillingContext,
@@ -102,8 +104,18 @@ interface UsageData {
   scope: 'user' | 'organization'
   /** Present only when `scope === 'organization'`. */
   organizationId: string | null
+  /**
+   * The ledger could not be read, so `isExceeded` is a fail-closed refusal rather than a
+   * measured one. Admission refuses on it; a run already under way treats it as unknown.
+   */
+  unavailable?: true
 }
 
+/**
+ * The organization's pooled usage for an admission check. An enterprise reporting window is
+ * served through {@link readSoftGateUsageCost}; its weekly refresh is zero, so it always takes
+ * a plain-sum branch below.
+ */
 async function computePooledOrgUsage(
   organizationId: string,
   sub: UsageLimitSubscription,
@@ -118,12 +130,12 @@ async function computePooledOrgUsage(
     }
 
   if (!isPaid(sub.plan) || !sub.periodStart) {
-    return getBillingPeriodUsageCost({ type: 'organization', id: organizationId }, billingPeriod)
+    return readSoftGateUsageCost({ type: 'organization', id: organizationId }, billingPeriod)
   }
 
   const weeklyRefreshDollars = getPlanWeeklyRefreshDollars(sub.plan)
   if (weeklyRefreshDollars <= 0) {
-    return getBillingPeriodUsageCost({ type: 'organization', id: organizationId }, billingPeriod)
+    return readSoftGateUsageCost({ type: 'organization', id: organizationId }, billingPeriod)
   }
 
   const { ledgerUsage, refreshConsumed } = await computeBillingPeriodUsageWithWeeklyRefresh({
@@ -172,7 +184,7 @@ async function checkUsageStatusUncached(
         : await getHighestPrioritySubscription(userId)
 
     const limit = await getUserUsageLimit(userId, sub)
-    logger.info('Using stored usage limit', { userId, limit })
+    logger.debug('Using stored usage limit', { userId, limit })
 
     const subIsOrgScoped = isOrgScopedSubscription(sub, userId)
     const scope: 'user' | 'organization' = subIsOrgScoped ? 'organization' : 'user'
@@ -239,6 +251,7 @@ async function checkUsageStatusUncached(
       limit: 0,
       scope: 'user',
       organizationId: null,
+      unavailable: true,
     }
   }
 }
@@ -276,7 +289,7 @@ function buildUsageData(params: {
   const isExceeded = currentUsage >= limit
   const isWarning = !isExceeded && percentUsed >= WARNING_THRESHOLD
 
-  logger.info('Final usage statistics', {
+  logger.debug('Final usage statistics', {
     currentUsage,
     limit,
     percentUsed,
@@ -372,8 +385,9 @@ export async function checkBillingEntityBlocked(
 
 /**
  * Self-hosted mothership/copilot cap: compares only {@link COPILOT_USAGE_SOURCES}
- * ledger cost (plus the legacy copilot baseline on `user_stats`) against a
- * per-user limit on `user_stats.current_usage_limit`. Workflow and other non-copilot usage is
+ * ledger cost against a per-user limit on `user_stats.current_usage_limit`.
+ * Current-period usage lives on the ledger after `user_stats` dropped
+ * `currentPeriodCopilotCost`. Workflow and other non-copilot usage is
  * excluded so operators can meter hosted Go without capping local execution.
  */
 export async function checkSelfHostedMothershipUsageLimits(userId: string): Promise<{
@@ -394,7 +408,6 @@ export async function checkSelfHostedMothershipUsageLimits(userId: string): Prom
 
     const [stats] = await db
       .select({
-        currentPeriodCopilotCost: userStats.currentPeriodCopilotCost,
         currentUsageLimit: userStats.currentUsageLimit,
       })
       .from(userStats)
@@ -410,13 +423,11 @@ export async function checkSelfHostedMothershipUsageLimits(userId: string): Prom
       }
     }
 
-    const baseline = toNumber(toDecimal(stats.currentPeriodCopilotCost))
-    const ledgerUsage = await getBillingPeriodUsageCost(
+    const currentUsage = await getBillingPeriodUsageCost(
       { type: 'user', id: userId },
       defaultBillingPeriod(),
       COPILOT_USAGE_SOURCES
     )
-    const currentUsage = baseline + ledgerUsage
 
     const limit = stats.currentUsageLimit
       ? toNumber(toDecimal(stats.currentUsageLimit))
@@ -503,7 +514,11 @@ async function checkServerSideUsageLimitsUncached(
       isExceeded: usageData.isExceeded,
       currentUsage: usageData.currentUsage,
       limit: usageData.limit,
-      message: usageData.isExceeded ? exceededMessage : undefined,
+      message: usageData.unavailable
+        ? USAGE_UNAVAILABLE_MESSAGE
+        : usageData.isExceeded
+          ? exceededMessage
+          : undefined,
     }
   } catch (error) {
     logger.error('Error in server-side usage limit check', {

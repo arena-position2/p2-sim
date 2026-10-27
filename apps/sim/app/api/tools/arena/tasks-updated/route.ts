@@ -1,34 +1,35 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
+import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 import { env } from '@/lib/core/config/env'
-import { getArenaToken } from '@/app/api/tools/arena/utils/get-token'
 
 export async function POST(req: NextRequest) {
   const data = await req.json()
   const { workflowId, ...restData } = data
 
-  const tokenObject = await getArenaToken(req, workflowId)
-  if (tokenObject.found === false) {
+  const resolved = await resolveArenaCaller(req, workflowId)
+  if (!resolved.found) {
     return NextResponse.json(
-      { error: 'Failed to create task', details: tokenObject.reason },
+      { error: 'Failed to create task', details: resolved.reason },
       { status: 400 }
     )
   }
-  const { arenaToken, email: createdBy } = tokenObject
-
-  const payload = {
-    ...restData,
-    createdBy,
-  }
+  const { caller } = resolved
+  const payload =
+    caller.mode === 'automation' ? { ...restData } : { ...restData, createdBy: caller.email }
 
   try {
-    const arenaBackendBaseUrl = env.ARENA_BACKEND_BASE_URL
-    const res = await fetch(`${arenaBackendBaseUrl}/sol/v1/tasks/updated`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        authorisation: arenaToken || '',
+    const res = await arenaSolFetch({
+      mode: caller.mode,
+      userId: caller.userId,
+      pathOrUrl: '/sol/v1/tasks/updated',
+      workflowId: caller.workflowId,
+      executionId: caller.executionId,
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
     })
 
     const responseData = await res.json()
@@ -36,6 +37,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(responseData, { status: res.status })
   } catch (error) {
+    if (error instanceof ArenaAuthError) {
+      return NextResponse.json({ error: error.message }, { status: 401 })
+    }
     return NextResponse.json({ error: 'Failed to create task', details: error }, { status: 500 })
   }
 }

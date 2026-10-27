@@ -92,7 +92,9 @@ export const parseTool: InternalToolConfig<ParseParams, ParseResponse> = {
     },
   },
 
-  hosting: firecrawlHosting(),
+  hosting: firecrawlHosting<ParseParams>(),
+
+  timeoutParamIsDeadline: true,
 
   operation: {
     modelInput: {

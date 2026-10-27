@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { truncate } from '@sim/utils/string'
-import { userMemoryServerTool } from '@/lib/copilot/tools/server/other/user-memory'
+import { userMemoryServerTool } from '@/lib/mothership/tools/server/other/user-memory'
 import {
   type PreferenceMemoryCandidate,
   preferenceKeyFromText,

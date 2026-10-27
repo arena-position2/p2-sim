@@ -25,6 +25,7 @@ import {
   HunterIOIcon,
   IcypeasIcon,
   JinaAIIcon,
+  KieIcon,
   KimiIcon,
   LeadMagicIcon,
   LinkupIcon,
@@ -41,11 +42,13 @@ import {
   SerperIcon,
   TinyFishIcon,
   TogetherIcon,
+  TypeSafeIcon,
   WizaIcon,
   xAIIcon,
   ZaiIcon,
   ZeroBounceIcon,
 } from '@/components/icons'
+import { NebiusIcon } from '@/components/icons/nebius'
 import { canMutateWorkspaceSettingsSection } from '@/components/settings/navigation'
 import { type BYOKProviderId, MAX_BYOK_KEYS_PER_PROVIDER } from '@/lib/api/contracts/byok-keys'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
@@ -133,6 +136,13 @@ const PROVIDERS: (BYOKManagerProvider & { id: BYOKProviderId })[] = [
     placeholder: 'sk-...',
   },
   {
+    id: 'typesafe',
+    name: 'TypeSafe',
+    icon: TypeSafeIcon,
+    description: 'Jev evaluation models',
+    placeholder: 'Enter your TypeSafe API key',
+  },
+  {
     id: 'fireworks',
     name: 'Fireworks',
     icon: FireworksIcon,
@@ -154,11 +164,25 @@ const PROVIDERS: (BYOKManagerProvider & { id: BYOKProviderId })[] = [
     placeholder: 'Enter your Baseten API key',
   },
   {
+    id: 'nebius',
+    name: 'Nebius',
+    icon: NebiusIcon,
+    description: 'LLM calls',
+    placeholder: 'Enter your Nebius Token Factory API key',
+  },
+  {
     id: 'ollama-cloud',
     name: 'Ollama Cloud',
     icon: OllamaIcon,
     description: 'LLM calls',
     placeholder: 'Enter your Ollama API key',
+  },
+  {
+    id: 'kie',
+    name: 'Kie',
+    icon: KieIcon,
+    description: 'LLM calls',
+    placeholder: 'Enter your Kie API key',
   },
   {
     id: 'falai',
@@ -368,10 +392,13 @@ const PROVIDER_SECTIONS: BYOKProviderSection[] = [
       'cohere',
       'xai',
       'kimi',
+      'typesafe',
       'fireworks',
       'together',
       'baseten',
+      'nebius',
       'ollama-cloud',
+      'kie',
       'falai',
     ],
   },
@@ -539,7 +566,7 @@ export function BYOK() {
       }
     >
       {keysError && activeQueryData === undefined ? (
-        <SettingsEmptyState tone='error'>
+        <SettingsEmptyState>
           {getErrorMessage(keysError, 'Failed to load provider keys')}
         </SettingsEmptyState>
       ) : (

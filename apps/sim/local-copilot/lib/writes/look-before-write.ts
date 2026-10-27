@@ -1,4 +1,4 @@
-import { isPlainTextWorkspaceFileName } from '@/lib/copilot/chat/document-format-guidance'
+import { isPlainTextWorkspaceFileName } from '@/lib/mothership/chat/document-format-guidance'
 import { hasToolId } from '@/tools/tool-ids'
 
 const BOOTSTRAP_BLOCK_TYPES = new Set(['start_trigger', 'starter', 'start'])

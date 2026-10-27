@@ -57,9 +57,12 @@ export const executeVideoTool: InternalToolOperationHandler = async (request) =>
   const input = parseInput(request.input)
   if (input instanceof Response) return input
 
+  if (!input.apiKey) {
+    return Response.json({ success: false, error: 'API key is required' }, { status: 400 })
+  }
   try {
     const result = await executeVideoOperation(
-      { ...input, provider: input.provider as VideoProvider },
+      { ...input, apiKey: input.apiKey, provider: input.provider as VideoProvider },
       {
         headers: request.headers,
         requestId: request.requestId,

@@ -245,10 +245,7 @@ export default function ArenaCopilotMarkdownRenderer({
           {children}
         </ol>
       ),
-      li: ({
-        children,
-        ordered,
-      }: React.LiHTMLAttributes<HTMLLIElement> & { ordered?: boolean }) => (
+      li: ({ children }: React.LiHTMLAttributes<HTMLLIElement> & { ordered?: boolean }) => (
         <li className={cn(bodyTextClassName, fontClassName)} style={{ display: 'list-item' }}>
           {children}
         </li>
@@ -473,7 +470,7 @@ export default function ArenaCopilotMarkdownRenderer({
 
       // Images
       img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
-        if (src && renderImage) {
+        if (typeof src === 'string' && renderImage) {
           return <>{renderImage({ src, alt })}</>
         }
 

@@ -1,7 +1,7 @@
 import { browserUseHosting } from '@/tools/browser_use/hosting'
 import type { BrowserUseRunTaskParams, BrowserUseRunTaskResponse } from '@/tools/browser_use/types'
 import { createInternalToolOperationInput } from '@/tools/operation-input'
-import type { InternalToolConfig } from '@/tools/types'
+import type { InternalToolConfig, ToolHostingConfig } from '@/tools/types'
 
 export const runTaskTool: InternalToolConfig<BrowserUseRunTaskParams, BrowserUseRunTaskResponse> = {
   id: 'browser_use_run_task',
@@ -9,7 +9,7 @@ export const runTaskTool: InternalToolConfig<BrowserUseRunTaskParams, BrowserUse
   description: 'Runs a browser automation task using BrowserUse',
   version: '1.0.0',
 
-  hosting: browserUseHosting,
+  hosting: browserUseHosting as unknown as ToolHostingConfig<BrowserUseRunTaskParams>,
 
   params: {
     task: {

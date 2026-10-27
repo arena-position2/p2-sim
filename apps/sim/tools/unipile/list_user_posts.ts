@@ -65,7 +65,7 @@ export const unipileListUserPostsTool: ToolConfig<
       if (typeof params.cursor === 'string' && params.cursor.trim() !== '') {
         out.cursor = params.cursor.trim()
       }
-      if (params.limit != null && params.limit !== '') {
+      if (params.limit != null && String(params.limit) !== '') {
         const n =
           typeof params.limit === 'number'
             ? params.limit

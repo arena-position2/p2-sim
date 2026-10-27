@@ -1,6 +1,6 @@
 'use client'
 
-import { Button } from '@sim/emcn'
+import { Button, StatusPageContent } from '@sim/emcn'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
@@ -14,21 +14,18 @@ export function ChatErrorState({ error }: ChatErrorStateProps) {
   const router = useRouter()
 
   return (
-    <div className='flex flex-1 items-center justify-center px-4 py-16 text-center'>
-      <div className='flex w-full max-w-[410px] flex-col items-center gap-3'>
-        <Image src={arenaLogo} alt='Arena Logo' width={48} height={48} className='mb-3' />
-        <h1 className='text-balance text-[40px] text-[var(--text-primary)] leading-[110%] tracking-[-0.02em]'>
-          Chat Unavailable
-        </h1>
-        <p className='text-[var(--text-muted)] text-lg'>{error}</p>
+    <div className='flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center'>
+      <Image src={arenaLogo} alt='Arena' width={48} height={48} />
+      <StatusPageContent title='Chat Unavailable' description={error}>
         <Button
+          type='button'
           variant='primary'
-          onClick={() => router.push(APP_ENTRY_PATH)}
           className='h-[32px] w-full gap-2 px-2.5 text-sm'
+          onClick={() => router.push(APP_ENTRY_PATH)}
         >
-          Open Sim
+          Open Arena AI
         </Button>
-      </div>
+      </StatusPageContent>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { VfsSnapshotV1 } from '@/lib/copilot/generated/vfs-snapshot-v1'
+import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 
 /** Default TTL for treating a stamped snapshot as still fresh. */
 export const SNAPSHOT_FRESHNESS_MAX_AGE_MS = 5 * 60_000
