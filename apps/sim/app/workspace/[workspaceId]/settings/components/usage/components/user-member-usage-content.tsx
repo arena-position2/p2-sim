@@ -108,12 +108,7 @@ export function UserMemberUsageContent({
               key: 'name',
               header: 'By Agent',
               render: (row) => (
-                <div className='flex flex-col'>
-                  <span className='font-medium'>{row.workflowName?.trim() || row.workflowId}</span>
-                  <span className='text-[var(--text-muted)] text-caption'>
-                    {row.organizationName} · {row.workspaceName}
-                  </span>
-                </div>
+                <span className='font-medium'>{row.workflowName?.trim() || row.workflowId}</span>
               ),
             },
             {
