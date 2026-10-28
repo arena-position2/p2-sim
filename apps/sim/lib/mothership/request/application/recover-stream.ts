@@ -191,6 +191,7 @@ export const readChatStream = defineAuthorizedChatUseCase({
           executionId: run.executionId,
           workflowId: run.workflowId ?? undefined,
           goRoute: config.data.goRoute,
+          ...(config.data.copilotBackend ? { copilotBackend: config.data.copilotBackend } : {}),
           billingAttribution,
           userPermission: userPermission ?? undefined,
           interactive: true,

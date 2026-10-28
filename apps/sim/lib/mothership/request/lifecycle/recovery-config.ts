@@ -30,6 +30,11 @@ export const StreamRecoveryConfigSchema = z
     billingAdmission: BillingAdmissionSchema.optional(),
     request: DurableChatRequestSchema,
     goRoute: z.enum(['/api/mothership', '/api/copilot']),
+    /**
+     * Backend chosen for the admitted turn. Recovery must keep it: a Local turn
+     * reattached to the worker has no run there and surfaces "Run not found".
+     */
+    copilotBackend: z.enum(['local', 'external']).optional(),
     clientToolPickupExpected: z.boolean(),
     userTimezone: z.string().optional(),
     requestMode: z.enum(COPILOT_REQUEST_MODES).optional(),
@@ -55,6 +60,7 @@ export function streamRecoveryConfig(
     kind: 'interactive_stream',
     request,
     goRoute: options.goRoute ?? '/api/copilot',
+    ...(options.copilotBackend ? { copilotBackend: options.copilotBackend } : {}),
     clientToolPickupExpected: options.clientToolPickupExpected ?? true,
     userTimezone: options.executionContext?.userTimezone,
     requestMode: options.executionContext?.requestMode,

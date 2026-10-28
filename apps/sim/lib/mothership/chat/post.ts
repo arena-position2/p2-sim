@@ -1613,6 +1613,7 @@ export async function handleUnifiedChatPost(req: NextRequest) {
               kind: 'interactive_stream',
               request: { ...requestPayload, messageId: userMessageId, chatId: actualChatId },
               goRoute: branch.goRoute,
+              copilotBackend,
               clientToolPickupExpected,
               userTimezone: executionContext.userTimezone,
               requestMode: body.mode,

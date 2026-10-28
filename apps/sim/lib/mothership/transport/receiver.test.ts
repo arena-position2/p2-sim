@@ -143,4 +143,50 @@ describe('outbound receiver lifecycle', () => {
       expect.objectContaining({ method: 'POST' })
     )
   })
+
+  it('waits for a new in-flight poll after the previous poll drops', async () => {
+    const baseURL = `https://worker-${generateId()}.test`
+    let releasePoll: (() => void) | undefined
+    let polls = 0
+    const reconnects: Array<() => void> = []
+    mocks.sleep.mockImplementation((ms: number) => {
+      if (ms === 1_000) {
+        return new Promise<void>((resolve) => {
+          reconnects.push(resolve)
+        })
+      }
+      return Promise.resolve()
+    })
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (!url.endsWith('/poll')) return Response.json({ accepted: true })
+      polls += 1
+      if (polls === 1) {
+        await new Promise<void>((resolve) => {
+          releasePoll = resolve
+        })
+        throw new Error('connection lost')
+      }
+      await new Promise<void>(() => {})
+    })
+
+    await ensureSimReceiverForBaseURL(baseURL)
+    expect(polls).toBe(1)
+
+    releasePoll?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(reconnects).toHaveLength(1)
+
+    let settled = false
+    const second = ensureSimReceiverForBaseURL(baseURL).then(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+    expect(polls).toBe(1)
+
+    reconnects[0]?.()
+    await second
+    expect(polls).toBe(2)
+    expect(settled).toBe(true)
+  })
 })

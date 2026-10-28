@@ -54,7 +54,7 @@ The product sync merges `origin/main` into the integration branch. `origin/main`
 | 5. Behavioral conflict | Upstream contradicts a required product behavior | Keep the required behavior. Take unrelated upstream improvements |
 | 6. Obsolete customization | Upstream fully covers the requirement | Remove the custom code after checking that no required behavior is lost |
 
-On files only upstream changed since the merge-base, take upstream. Exclusive Arena trees come back as new files. Registries (`apps/sim/blocks/registry-maps.ts`, `apps/sim/tools/registry.ts`, `integrations.json`) take upstream, then re-register exclusive entries.
+On files only upstream changed since the merge-base, take upstream. Exclusive Arena trees come back as new files. Registries (`apps/sim/blocks/registry-maps.ts`, `apps/sim/tools/registry.ts`, `integrations.json`, and the Mothership server router `apps/sim/lib/mothership/tools/server/router.ts`) take upstream, then re-register exclusive entries. For that router, take upstream's `baseServerToolRegistry` and re-attach `arenaServerToolRegistry` only inside `getServerToolRegistry`. Do not add Arena keys inside the object.
 
 ## Workflow
 

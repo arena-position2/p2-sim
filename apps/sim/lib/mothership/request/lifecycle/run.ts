@@ -594,12 +594,15 @@ export async function runCopilotLifecycle(
           'scope' in admission ? admission.scope : undefined
         )
       } else if (
-        await shouldRouteToLocalCopilot({
+        // An explicit Local turn must not fall through to the worker. A denied
+        // route check used to reattach that turn, and the worker answered "Run not found".
+        lifecycleOptions.copilotBackend === 'local' ||
+        (await shouldRouteToLocalCopilot({
           workflowId: lifecycleOptions.workflowId ?? requestPayload.workflowId,
           workspaceId: lifecycleOptions.workspaceId ?? requestPayload.workspaceId,
           userId: lifecycleOptions.userId,
           copilotBackend: lifecycleOptions.copilotBackend,
-        })
+        }))
       ) {
         logger.info('Delegating copilot turn to Arena Copilot', {
           chatId: context.chatId,
@@ -1001,6 +1004,9 @@ async function runResumeLegWithRetry(
     options.abortSignal?.throwIfAborted()
     const errorsBeforeAttempt = leg.errors.length
     await authorizeLifecycleContinuation(execContext)
+    if (execContext.mothershipBaseURL && getSimConnection().mode === 'checkpoint') {
+      await ensureSimReceiverForBaseURL(execContext.mothershipBaseURL)
+    }
     try {
       await runStreamLoop(
         url,
@@ -1217,12 +1223,6 @@ async function runCheckpointLoop(
     const simConnection = getSimConnection()
     payload = { ...payload, simConnection }
   }
-  // Boot may have no-op'd the poller while transport still defaulted to `direct`.
-  // Await readiness: chat before a registered channel makes Go 500, then a retry
-  // or tool resume surfaces as "Run not found".
-  if (getSimConnection().mode === 'checkpoint') {
-    await ensureSimReceiverForBaseURL(mothershipBaseURL)
-  }
   // Go's ChatRequest rejects keys it does not declare. Drop the deployment flag
   // and Arena's catalog id before the body leaves this process.
   payload = omit(payload, ['isHosted', 'model'])
@@ -1280,6 +1280,12 @@ async function runCheckpointLoop(
     }
     const isResume = route === '/api/tools/resume'
     if (isResume || options.recovery) await authorizeLifecycleContinuation(execContext)
+    // Each attempt, including a retry and a tool resume, waits for a poll that is
+    // actually in flight. A channel that died after the first turn makes Go 500,
+    // the retry reattaches, and the user sees "Run not found".
+    if (getSimConnection().mode === 'checkpoint') {
+      await ensureSimReceiverForBaseURL(mothershipBaseURL)
+    }
 
     // Enterprise BYOK rides EVERY leg, resume included: a resume that lands on a dead
     // run becomes a continuation with no closure holding the key. Re-resolved per leg so
@@ -1687,11 +1693,6 @@ async function runCheckpointLoop(
       streamId: context.messageId,
       results,
     } satisfies ResumeRequest
-    // Keep the outbound channel registered across the tool pause; a dead poller
-    // lets the worker drop the parked run and resume answers "Run not found".
-    if (getSimConnection().mode === 'checkpoint') {
-      await ensureSimReceiverForBaseURL(mothershipBaseURL)
-    }
 
     if (isAborted(options, context)) {
       cancelPendingTools(context)
