@@ -1,9 +1,9 @@
+import { isPlainTextWorkspaceFileName } from '@/lib/mothership/chat/document-format-guidance'
 import {
   extractLiveTokensFromPatchMissExcerpt,
   normalizePatchSearchForRetry,
   patchSearchOverlapsLiveTokens,
-} from '@/lib/copilot/tools/server/files/patch-search-replace'
-import { isPlainTextWorkspaceFileName } from '@/lib/mothership/chat/document-format-guidance'
+} from '@/lib/mothership/tools/server/files/patch-search-replace'
 import { hasToolId } from '@/tools/tool-ids'
 
 const BOOTSTRAP_BLOCK_TYPES = new Set(['start_trigger', 'starter', 'start'])

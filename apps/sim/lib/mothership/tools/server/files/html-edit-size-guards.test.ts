@@ -10,7 +10,7 @@ import {
   rejectHtmlCreateContent,
   rejectHtmlFullUpdate,
   utf8ByteLength,
-} from '@/lib/copilot/tools/server/files/html-edit-size-guards'
+} from '@/lib/mothership/tools/server/files/html-edit-size-guards'
 import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
 
 describe('isHtmlWorkspaceTarget', () => {
