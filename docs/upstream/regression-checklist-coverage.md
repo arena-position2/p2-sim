@@ -1,8 +1,39 @@
 # Manual regression checklist ↔ automated coverage
 
-Manual QA workbook (deduped, with Steps / Expected behaviour): [manual-regression-checklist-qa.xlsx](./manual-regression-checklist-qa.xlsx) (regenerate via [generate-regression-qa-xlsx.py](./generate-regression-qa-xlsx.py)).
+Manual QA workbooks (regenerate both via [generate-regression-qa-xlsx.py](./generate-regression-qa-xlsx.py)):
 
-Snapshot of coverage for [manual-regression-checklist.md](./manual-regression-checklist.md) against `*.test.ts(x)`, `*.integration.ts`, and `apps/sim/scripts/test-*-e2e.ts`.
+- [manual-regression-checklist-qa.xlsx](./manual-regression-checklist-qa.xlsx) — deduped, with Steps / Expected behaviour
+- [manual-regression-checklist-updated.xlsx](./manual-regression-checklist-updated.xlsx) — one row per checkbox in [manual-regression-checklist.md](./manual-regression-checklist.md)
+
+Current workbooks: 146 checkbox rows (P0 88, P1 37, P2 21) and 137 deduped QA rows.
+
+Snapshot below is the 2026-10-14 automated pass (~135 bullets). The 2026-10-28 checklist additions are manual cases for branch fixes; they are not new unit tests.
+
+## Cases added or tightened on 2026-10-28
+
+Fixes on `upstream-sync/2026-10-14` after the first checklist. New rows are manual. Tightened rows keep their old automation status.
+
+| Checklist item | Why it is on the sheet |
+| --- | --- |
+| Default theme light; dark editor popovers | New users load light. Dark-mode env-var, tag, and messages popovers stay readable. |
+| Usage for every member; Insights gated | Subscription → Usage is `/settings/arena-usage` for every member. Billing redirects non-admins there. Organization → Insights stays on `/settings/usage`. |
+| Visitor without a workspace seat still runs | Deployed chat may use workspace secrets without a seat in that workspace. |
+| Base64 / refresh / image edit | Images render as images in deployed chat, the builder chat, and the feedback view, including after refresh. “3 distinct variations” are three images. An edit returns an image preview. |
+| Second turn does not show “Run not found” | A later Cloud turn, and a Local turn that reconnects, complete. Local is not reattached to the Cloud worker. |
+| Finished reply scroll does not invent bold | Scrolling a finished Copilot reply does not turn `*` into bold. |
+| Fetch-and-send sequence is canvas blocks | Calendar, Gmail, and Slack are their own blocks (`google_calendar_v2`, `gmail_v2`, `slack`). A daily trigger is `schedule`. |
+| Copilot HTML file | The saved HTML page opens as a page. |
+| `X-Sim-Email` bills the named org once | Deploy samples include the header. The named user’s org is debited once and shows a By Agent row. Unknown email is `BILLING_EMAIL_NOT_FOUND`. |
+| Slack Arena Bot and one Connect control | Auth method says Arena Bot. Copilot connect is one Continue control, not Submit. |
+| HubSpot Accounts picker | Admin workspaces load portals and a selected account can read. |
+| Google Ads v26 | Search still returns `results` as an array on v26. |
+| Reused chat image file path | A later run copies the image and the file opens. |
+| Arena tasks on a schedule or webhook | Get my tasks and get my overdue tasks succeed from the builder and from a schedule or webhook. A failure is an error, not an empty list. |
+| Agents list allow-list and undeploy | Allowed emails see the agent. Undeploy and inactive chats leave the list. |
+| Video builder `emailId` and Fal usage | Only the video builder opens without `emailId`, and the logged-in email is written onto its URL. Fal calls land on that user’s ledger. |
+| Custom OAuth Apps section and agent access requests | The settings section renders. A platform admin can approve a request. |
+
+## Automated snapshot (2026-10-14)
 
 | Status | Count (≈135 bullets) |
 | --- | ---: |

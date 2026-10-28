@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Generate docs/upstream/manual-regression-checklist-qa.xlsx from the Arena QA plan."""
+"""Generate the Arena QA workbooks from this plan and the markdown checklist.
+
+- manual-regression-checklist-qa.xlsx — deduped rows with steps and expected behaviour
+- manual-regression-checklist-updated.xlsx — one row per markdown checkbox
+"""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -11,6 +16,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 OUT = Path(__file__).with_name("manual-regression-checklist-qa.xlsx")
+UPDATED = Path(__file__).with_name("manual-regression-checklist-updated.xlsx")
+MARKDOWN = Path(__file__).with_name("manual-regression-checklist.md")
 
 SECTION_NAMES = {
     "0": "0. Post-sync gates (P0)",
@@ -87,17 +94,32 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "P0",
         "Arena branding",
         "1. Load workspace home and a workflow.\n"
-        "2. Check logos, favicon, API key labels, and docs title.",
-        "Arena logos/favicon present. Labels say Arena key (not Sim key). Docs title is P2 Agents Docs.",
+        "2. Check logos, favicon, API key labels, and docs title.\n"
+        "3. Open the Slack setup wizard and the Slack block auth method.\n"
+        "4. Open a deploy-modal API sample and find the billing header.",
+        "Arena logos/favicon present. Labels say Arena key (not Sim key). Docs title is P2 Agents Docs. "
+        "Slack says Arena Bot, Arena app, and Arena Workflow Bot. The billing header remains X-Sim-Email.",
     ),
     (
         "1",
         "Identity and shell",
         "P0",
-        "Sidebar Usage; Billing admins only",
-        "1. As org admin: open sidebar / settings and look for Usage and Billing.\n"
-        "2. As non-admin member: repeat.",
-        "Usage is visible. Billing is visible only to org admins; non-admins cannot open billing.",
+        "Usage for every member; Billing admins only; Insights gated",
+        "1. As a member who cannot manage billing, open Subscription → Usage and try Billing.\n"
+        "2. As an org admin, open Billing and Organization → Insights.",
+        "Usage (/settings/arena-usage) opens for every member and shows remaining credits. "
+        "A non-admin who opens Billing lands on Usage. /settings/arena-billing shows the billing panel, not an empty heading. "
+        "Insights (/settings/usage) stays limited to org admins on enterprise, or the self-hosted usage-monitoring flag.",
+    ),
+    (
+        "1",
+        "Identity and shell",
+        "P0",
+        "Default theme is light; dark editor popovers stay readable",
+        "1. Sign in as a user with no saved theme (or clear the saved theme) and reload.\n"
+        "2. Switch to dark mode.\n"
+        "3. In the workflow editor, open the env-var dropdown, tag dropdown, and messages-input popover.",
+        "The first load is light. Dark mode still applies when chosen. Those popovers use dark surfaces and readable text.",
     ),
     (
         "1",
@@ -199,8 +221,19 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "Streamed reply with charts, images, thinking/tool segments",
         "1. Send a message that yields a streamed reply.\n"
         "2. If the workflow enables them, confirm thinking / tool-call segments.\n"
-        "3. Trigger a chart and a generated image; reuse the image if UI allows.",
-        "Reply streams. Thinking/tool-call segments show when enabled. ECharts charts render. Images appear and can be reused.",
+        "3. Trigger a chart and a generated image, including a base64 or data-URL image. Reuse the image.\n"
+        "4. Refresh deployed chat and the workflow builder chat panel.",
+        "Reply streams. Thinking/tool-call segments show when enabled. ECharts charts render. "
+        "Images appear and can be reused. Raw base64 is not shown as message text. The image still renders after refresh.",
+    ),
+    (
+        "1",
+        "Deployed chat",
+        "P0",
+        "Visitor without a workspace seat still runs",
+        "1. Open a deployed chat as a user who is allowed on the agent but has no seat in that workflow’s workspace.\n"
+        "2. Send a message on a workflow that reads workspace secrets.",
+        "The visitor gets a reply. The run does not fail on membership or a stale owner.",
     ),
     (
         "1",
@@ -210,8 +243,11 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1. Open a workflow deployed as chat. Confirm the right panel shows Launch (lightning) beside Run.\n"
         "2. Click Launch. Confirm the deployed chat opens with fromControlBar=true.\n"
         "3. Open a workflow that is not deployed as chat or app.\n"
-        "4. Click Run on the deployed workflow and run the canvas.",
-        "Launch is present only for a chat or app deployment and opens that deployment. It is absent otherwise. Run still executes the workflow in the builder and is not renamed.",
+        "4. Click Run on the deployed workflow and run the canvas.\n"
+        "5. Narrow the panel until Deploy, Launch, and Run share a short row. On home, select a long Local model name.",
+        "Launch is present only for a chat or app deployment and opens that deployment. It is absent otherwise. "
+        "Run still executes the workflow in the builder and is not renamed. Deploy, Launch, and Run stay on one row without overlapping. "
+        "The model name truncates instead of stretching the composer.",
     ),
     (
         "1",
@@ -239,8 +275,8 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "P0",
         "Feedback submit and feedback view",
         "1. Submit prompt/reply feedback from deployed chat.\n"
-        "2. Open the feedback view.",
-        "Feedback submits successfully and is visible in the feedback view.",
+        "2. Open the feedback view for a reply that includes a chart.",
+        "Feedback submits successfully and is visible in the feedback view. The chart renders as a chart, not raw option JSON.",
     ),
     (
         "1",
@@ -303,8 +339,48 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "P0",
         "Local model picker persists; session memory inspector",
         "1. Change the Local model picker; reload.\n"
-        "2. On a longer Local thread, open the session memory inspector if shown.",
-        "Picker selection persists as the user default. Session memory inspector appears on longer Local threads.",
+        "2. On a longer Local thread, open the session memory inspector if shown.\n"
+        "3. Confirm Claude Fable 5.1, GPT-6 Astra, and GPT-5.5 are listed. Send with one of them.",
+        "Picker selection persists as the user default. Session memory inspector appears on longer Local threads. "
+        "Those three models are listed and the chosen one returns a reply.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
+        "Second Cloud turn and Local recovery do not show Run not found",
+        "1. On Cloud, finish one turn, leave the chat idle, then send again.\n"
+        "2. On Local, start a turn that reconnects (refresh mid-thread or send after idle) and confirm the backend stays Local.",
+        "Both turns complete. The user does not see “Run not found”. The Local turn is not reattached to the Cloud worker.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
+        "Finished Copilot reply does not turn asterisks into bold on scroll",
+        "1. Get a Copilot reply that contains ordinary * characters or unfinished markdown.\n"
+        "2. Wait until the reply has finished, then scroll the thread away and back.",
+        "The finished text stays as it streamed. Scrolling does not turn those characters into bold.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P1",
+        "Fetch-and-send sequence is canvas blocks, not Agent tools",
+        "1. Ask Copilot: today’s calendar, unread Gmail, Slack messages, then a written briefing.\n"
+        "2. Also ask for a daily time trigger.\n"
+        "3. Inspect the canvas block types and the Agent tools list.",
+        "The canvas has google_calendar_v2, gmail_v2, and slack as their own blocks in that order. "
+        "Those integrations are not Agent tools. The daily trigger is a schedule block, not schedule_trigger.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P1",
+        "Copilot HTML file opens as a complete page",
+        "1. Ask Copilot to create an HTML page.\n"
+        "2. Open the saved file.",
+        "The file opens as a complete page. The chat does not dump a truncated tag soup in place of the file.",
     ),
     (
         "1",
@@ -391,6 +467,19 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "3. If a test env enables it, confirm it then runs.",
         "Daily refresh stays off by default. It only runs when the environment explicitly enables it.",
     ),
+    (
+        "1",
+        "Billing and workspaces",
+        "P0",
+        "X-Sim-Email bills the named user’s org once",
+        "1. Open the deploy-modal API sample and confirm X-Sim-Email is present.\n"
+        "2. Execute the workflow API with X-Sim-Email set to a Sim user in another organization.\n"
+        "3. Compare Usage for the billed org and the workflow’s owning workspace.\n"
+        "4. Repeat with a missing header, a malformed email, and an email that matches no user.",
+        "The run bills the named user’s org once. The owning workspace does not also debit it. "
+        "The billed org’s Usage shows a By Agent row (workflow, owning org · workspace, Run by) and remaining credits drop by that run. "
+        "A missing header or malformed email is 400. An unknown email is 400 with BILLING_EMAIL_NOT_FOUND.",
+    ),
     # --- Workflow engine ---
     (
         "1",
@@ -443,19 +532,22 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1",
         "Extended integrations",
         "P1",
-        "Slack: search, user-channel lookup, and post",
-        "1. Run Slack search and user-channel lookup (Arena extras).\n"
-        "2. Run a normal Slack post.",
-        "Extra ops and stock post each return data / succeed once.",
+        "Slack: Arena Bot and Custom Bot, search, post, and Copilot Connect",
+        "1. In the Slack block, select Arena Bot (bot token) and Custom Bot (user token).\n"
+        "2. Run Slack search, user-channel lookup, and a normal post.\n"
+        "3. Ask Copilot to connect Slack while it is disconnected.",
+        "Both auth methods are selectable. Search, lookup, and post each succeed once. "
+        "Copilot shows one Connect control (“Connect these, then continue”, button Continue), not a Submit button and not a repeated card.",
     ),
     (
         "1",
         "Extended integrations",
         "P1",
-        "HubSpot: campaign op + list contacts",
-        "1. Run hubspot_get_campaign_metrics (or another campaign op).\n"
-        "2. Run stock hubspot_list_contacts.",
-        "Both operations return data successfully.",
+        "HubSpot: Accounts picker, campaign op, list contacts",
+        "1. On an admin workspace, open the HubSpot block and load the Accounts picker.\n"
+        "2. Select an account and run a read.\n"
+        "3. Run hubspot_get_campaign_metrics (or another campaign op) and stock hubspot_list_contacts.",
+        "The picker loads real portals and the selected account reads successfully. Campaign op and list contacts both return data.",
     ),
     (
         "1",
@@ -507,20 +599,21 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1",
         "Extended integrations",
         "P1",
-        "Google Ads search: results consumed as array",
-        "1. Run Google Ads search (GAQL).\n"
+        "Google Ads v26 search: results consumed as array",
+        "1. Run Google Ads search (GAQL) and confirm the request uses API v26.\n"
         "2. Wire a downstream block to results (e.g. forEach or Function).",
-        "Downstream consumes results as an array (not a bare object / undefined).",
+        "Search succeeds on v26. Downstream consumes results as an array (not a bare object / undefined).",
     ),
     (
         "1",
         "Extended integrations",
         "P1",
-        "Image Generator: variations, refs, pick prior image",
-        "1. Prompt for three variations from one prompt.\n"
-        "2. Use a reference image.\n"
-        "3. Pick a previously generated image from the conversation.",
-        "Multiple variations generate. Reference images work. Prior conversation images can be picked.",
+        "Image Generator: distinct variations, refs, edit",
+        "1. Prompt “Create 3 distinct variations of …” .\n"
+        "2. Use a reference image and pick a previously generated image.\n"
+        "3. Edit that image.",
+        "Three separate images return, not one combined frame. Reference and prior images work. "
+        "The edit returns an image preview, not an empty or octet-stream file.",
     ),
     # --- Files ---
     (
@@ -529,8 +622,9 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "P1",
         "Generated images/docs open from file serve route",
         "1. Generate an image and a compiled document.\n"
-        "2. Open each via the file serve route.",
-        "Both open successfully from the file serve route.",
+        "2. Open each via the file serve route.\n"
+        "3. Reuse a chat image in a later run and open that file.",
+        "Both open from the file serve route. The reused image is copied onto the run and opens. The path is not a broken or context-query URL.",
     ),
     (
         "1",
@@ -615,9 +709,10 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "Arena task block",
         "P0",
         "Get my tasks / get my overdue tasks",
-        "1. Run get my tasks.\n"
-        "2. Run get my overdue tasks.",
-        "Both list operations return the user’s tasks / overdue tasks.",
+        "1. Run get my tasks and get my overdue tasks from the builder.\n"
+        "2. Start the same workflow from a schedule or a webhook and run both operations again.\n"
+        "3. If Arena auth fails, confirm the block returns an error.",
+        "Both operations return the user’s tasks from a manual run and from a schedule or webhook run. A failure is an error, not an empty task list.",
     ),
     (
         "2",
@@ -775,9 +870,43 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "Admin, identity, and ops",
         "P1",
         "Custom OAuth apps at org level",
-        "1. Configure a custom OAuth app at org level with allowed workspaces.\n"
-        "2. Connect from an allowed workspace; deny/block from a disallowed one if applicable.",
-        "Allowed workspaces can use the app. Restrictions respect org configuration.",
+        "1. Open Settings → Custom OAuth Apps.\n"
+        "2. Configure an org-level app with allowed workspaces.\n"
+        "3. Connect from an allowed workspace; try a disallowed one if applicable.",
+        "The section shows the apps form, not a blank page. Allowed workspaces can use the app. Restrictions respect org configuration.",
+    ),
+    (
+        "2",
+        "Admin, identity, and ops",
+        "P1",
+        "Agent access requests",
+        "1. As a platform-admin email, open Settings → Agent access requests.\n"
+        "2. Approve one request.\n"
+        "3. As the requester, open the agents list.",
+        "The settings page opens. After approval the requester sees that agent enabled.",
+    ),
+    (
+        "2",
+        "Agents list and video builder",
+        "P0",
+        "Agents list allow-list and undeploy",
+        "1. With an email on an agent allow-list, open global, shared-with-me, and my-agents.\n"
+        "2. Repeat with an email outside the list.\n"
+        "3. Undeploy the chat agent and reload each list. Also confirm an inactive chat is absent.",
+        "An allowed email sees the agent enabled. An outside email sees it disabled or absent for that tab. "
+        "Undeploy removes it from all three lists. An inactive chat is not listed.",
+    ),
+    (
+        "2",
+        "Agents list and video builder",
+        "P0",
+        "Video builder emailId and Fal usage",
+        "1. From the Arena agents list, open the video builder app while signed in.\n"
+        "2. Open that same agent detail with emailId omitted, and open a different agent with emailId omitted.\n"
+        "3. Make a Fal call from the video app and open the Arena user’s usage ledger.",
+        "The video builder URL has the logged-in email as emailId, replacing any saved email. "
+        "Omitting emailId still returns the video builder app and rejects every other agent. "
+        "The Fal call appears on that user’s usage ledger.",
     ),
     (
         "2",
@@ -973,8 +1102,10 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "P2",
         "Knowledge: create base, upload, retrieve from Agent",
         "1. Create a knowledge base; upload a document.\n"
-        "2. Retrieve it from an Agent block.",
-        "Upload succeeds. Agent retrieval returns the document content/citations.",
+        "2. Retrieve it from an Agent block.\n"
+        "3. Run a search that hits and a search that matches nothing.",
+        "Upload succeeds. Agent retrieval returns the document content/citations. A hit includes rank. "
+        "An empty search returns an empty result the Agent can consume, with no crash on a missing rank.",
     ),
     (
         "3",
@@ -1383,8 +1514,9 @@ def write_run_info(wb: Workbook) -> None:
         "2. P0 identity, SSO, deployed chat, billing package, builder run, agent model.",
         "3. P0 Local / Cloud copilot and Arena task block.",
         "4. P1 exclusive blocks that this environment has credentials for.",
-        "5. P1 customized Slack, HubSpot, Zoom, Slides, Shopify, Gmail, Drive, image variations.",
-        "6. P2 stock surfaces and a short integration sample (skip services already covered in §1).",
+        "5. P1 customized Slack (Arena Bot and Copilot Connect), HubSpot Accounts, Zoom, Slides, Shopify, Gmail, Drive, distinct image variations, and image edit.",
+        "6. P0 video builder emailId, agents-list undeploy, and X-Sim-Email cross-org billing.",
+        "7. P2 stock surfaces and a short integration sample (skip services already covered in §1).",
     ]
     for i, line in enumerate(order, start=16):
         ws.cell(i, 1, line)
@@ -1420,13 +1552,102 @@ def write_dedup_log(wb: Workbook) -> None:
     autosize(ws, {1: 55, 2: 55, 3: 50})
 
 
+def parse_markdown_checklist(path: Path) -> list[tuple[str, str, str, str]]:
+    """Return (section, area, priority, item) for each markdown checkbox."""
+    section = ""
+    area = ""
+    priority = "P2"
+    rows: list[tuple[str, str, str, str]] = []
+    for line in path.read_text().splitlines():
+        if line.startswith("## "):
+            section = line[3:].strip()
+            area = section
+            match = re.search(r"\((P[012])\)", section)
+            if match:
+                priority = match.group(1)
+            continue
+        if line.startswith("### "):
+            area = line[4:].strip()
+            match = re.search(r"\((P[012])\)", area)
+            if match:
+                priority = match.group(1)
+            continue
+        if line.startswith("- [ ] ") and section and not section.startswith("Suggested"):
+            rows.append((section, area, priority, line[6:].strip()))
+    return rows
+
+
+def write_markdown_checklist(rows: list[tuple[str, str, str, str]]) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Checklist"
+    headers = ["#", "Section", "Area", "Priority", "Checklist item", "Result", "Notes"]
+    ws.append(headers)
+    style_header(ws, len(headers))
+    for index, (section, area, priority, item) in enumerate(rows, start=1):
+        ws.append([index, section, area, priority, item, "", ""])
+
+    wrap = Alignment(wrap_text=True, vertical="top")
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=7):
+        for cell in row:
+            cell.alignment = wrap
+        ws.row_dimensions[row[0].row].height = 48
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:G{ws.max_row}"
+    ws.row_dimensions[1].height = 22
+    autosize(ws, {1: 5, 2: 36, 3: 42, 4: 10, 5: 90, 6: 12, 7: 30})
+
+    dv = DataValidation(type="list", formula1='"Pass,Fail,N/A"', allow_blank=True)
+    dv.error = "Choose Pass, Fail, or N/A"
+    dv.errorTitle = "Invalid result"
+    ws.add_data_validation(dv)
+    dv.add(f"F2:F{ws.max_row}")
+
+    summary = wb.create_sheet("Summary")
+    summary.append(["Priority", "Item count"])
+    style_header(summary, 2)
+    for label in ("P0", "P1", "P2"):
+        summary.append([label, sum(1 for row in rows if row[2] == label)])
+    summary.append([])
+    summary.append(["Total", len(rows)])
+    autosize(summary, {1: 14, 2: 14})
+
+    info = wb.create_sheet("Run info")
+    info["A1"] = "Arena vs Sim manual regression checklist"
+    info["A1"].font = Font(bold=True, size=14)
+    info["A2"] = (
+        "One row per checkbox in docs/upstream/manual-regression-checklist.md. "
+        "Steps and expected behaviour are in manual-regression-checklist-qa.xlsx."
+    )
+    info["A2"].alignment = Alignment(wrap_text=True)
+    info["A4"] = "Field"
+    info["B4"] = "Value"
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in (info["A4"], info["B4"]):
+        cell.fill = header_fill
+        cell.font = header_font
+    for index, field in enumerate(
+        ["Date", "Environment URL", "Org", "Plan", "User role", "Tester"], start=5
+    ):
+        info.cell(index, 1, field)
+    autosize(info, {1: 28, 2: 80})
+    info.row_dimensions[2].height = 32
+
+    wb.save(UPDATED)
+
+
 def main() -> None:
     wb = Workbook()
     write_checklist(wb)
     write_run_info(wb)
     write_dedup_log(wb)
     wb.save(OUT)
+    markdown_rows = parse_markdown_checklist(MARKDOWN)
+    write_markdown_checklist(markdown_rows)
     print(f"Wrote {OUT} with {len(ROWS)} checklist rows and {len(DEDUP_LOG)} dedup entries")
+    print(f"Wrote {UPDATED} with {len(markdown_rows)} markdown checkbox rows")
 
 
 if __name__ == "__main__":

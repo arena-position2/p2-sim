@@ -4,6 +4,8 @@ Use this as a backup pass after a deploy or an upstream merge. Mark each item Pa
 
 Sources: [ARENA-NOTES.md](../../.agents/ARENA-NOTES.md), [version-6.1-main-vs-main.md](./version-6.1-main-vs-main.md), [sync-2026-10-07.md](./sync-2026-10-07.md), [sync-2026-10-14.md](./sync-2026-10-14.md), and the live registry in [registry-maps.ts](../../apps/sim/blocks/registry-maps.ts).
 
+Updated 2026-10-28 for fixes on `upstream-sync/2026-10-14` after the 2026-10-14 checklist: copilot “Run not found” and reply formatting, Usage vs Insights and cross-org API billing, image rendering, Slack connect, Google Ads v26, the video builder app, and the agents list.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -37,7 +39,7 @@ From [sync-2026-10-07.md](./sync-2026-10-07.md) and [sync-2026-10-14.md](./sync-
 - [ ] Usage log still carries Arena attribution after the payer-prefix / `createdAt` merge; one chat and one Local Copilot turn both appear on the ledger.
 - [ ] Airweave: block visible and one successful run, or N/A with ticket reference if product does not ship it.
 - [ ] In-process tools after `directExecution` removal: Chart Generator, P2 Docs, Google Slides create-from-template, Google Drive search each run once.
-- [ ] Google Ads search: downstream blocks consume `results` as an array.
+- [ ] Google Ads search on API v26: downstream blocks consume `results` as an array.
 - [ ] Shopify list/get workflows still map outputs, including restored `success` where used.
 - [ ] Integration detail pages for `arena`, `bing_ads`, `figma`, `image_fusion`, `p2_docs`, `spyfu` either show usable meta or an accepted empty state for this release.
 
@@ -49,8 +51,9 @@ These exist upstream. Verify the Arena change still works, and that the original
 
 ### Identity and shell (P0)
 
-- [ ] Product shows Arena branding (logos, favicon, “Arena key” instead of “Sim key”, docs title P2 Agents Docs).
-- [ ] Sidebar shows Usage. Billing is visible only to org admins.
+- [ ] Product shows Arena branding (logos, favicon, “Arena key” instead of “Sim key”, docs title P2 Agents Docs). Slack setup says Arena Bot, Arena app, and Arena Workflow Bot (not Sim Bot, Sim app, or Sim Workflow Bot). The workflow API billing header stays `X-Sim-Email`.
+- [ ] Subscription shows Usage for every member. Billing is visible only to people who can manage billing. A non-admin who opens Billing lands on Usage (`/settings/arena-usage`) and sees remaining credits. `/settings/arena-billing` renders the billing panel, not a heading with an empty body. Organization → Insights (`/settings/usage`) stays limited to org admins on an enterprise plan, or the self-hosted usage-monitoring flag.
+- [ ] A user with no saved theme loads light mode. Dark mode still applies when chosen. In dark mode, the workflow editor env-var dropdown, tag dropdown, and messages-input popover use dark surfaces and readable text.
 - [ ] “Back to Arena agents” returns to the Arena hub.
 - [ ] Help menu stays hidden.
 - [ ] `/workspace/arena-general-settings` opens user preferences without a workspace id. Workspace `/settings/general` is unchanged.
@@ -70,21 +73,26 @@ These exist upstream. Verify the Arena change still works, and that the original
 The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 
 - [ ] Open a deployed agent: landing, welcome CTAs, theme, and department label render.
-- [ ] Send a message and receive a streamed reply. Charts render (ECharts). Generated images appear and can be reused.
+- [ ] Send a message and receive a streamed reply. Charts render (ECharts). Generated images appear, including a base64 or data-URL image, and can be reused. The raw base64 string is not shown as message text. The same image still renders after refresh in deployed chat and in the workflow builder chat panel.
 - [ ] Threads: create, switch, rename, and reload history. History does not require a webhook or schedule.
 - [ ] Golden queries load and can be inserted.
-- [ ] Feedback submit and the feedback view work.
+- [ ] Feedback submit and the feedback view work. A chart in a feedback reply renders as a chart, not raw option JSON.
 - [ ] Knowledge references stay on the reply after refresh.
 - [ ] Inactive or unauthorized chat returns an error and does not write a junk execution log.
 - [ ] Voice controls stay absent.
-- [ ] Workflow builder right panel: a chat or app deployment shows **Launch** (lightning) beside **Run**. Launch opens that deployment (`/chat/{identifier}?fromControlBar=true`, or the app redirect in a new tab). A workflow with no chat deployment does not show Launch. **Run** still executes the workflow in the builder.
+- [ ] Workflow builder right panel: a chat or app deployment shows **Launch** (lightning) beside **Run**. Launch opens that deployment (`/chat/{identifier}?fromControlBar=true`, or the app redirect in a new tab). A workflow with no chat deployment does not show Launch. **Run** still executes the workflow in the builder. On a narrow panel, Deploy, Launch, and Run stay on one row without overlapping. The home composer Local model name truncates instead of stretching the input.
+- [ ] A visitor who can open the deployed chat but has no seat in the workflow’s workspace still gets a reply when the workflow reads workspace secrets. The run does not fail on membership or a stale owner.
 
 ### Workspace chat and Local / Cloud copilot (P0)
 
 - [ ] Workspace home chat streams a reply (theme, charts, and usage attribution still present).
 - [ ] Allowlisted users see the Local / Cloud switch on workspace home and on the workflow Copilot tab.
 - [ ] Local send uses Arena Copilot (local model reply). Cloud send uses Mothership when `COPILOT_API_KEY` is configured.
-- [ ] Local model picker selection persists as the user default; session memory inspector appears on longer Local threads.
+- [ ] Local model picker selection persists as the user default; session memory inspector appears on longer Local threads. The picker includes Claude Fable 5.1, GPT-6 Astra, and GPT-5.5, and one of those models returns a reply.
+- [ ] Cloud: finish one turn, then send another after the chat has been idle. The second turn completes. The user does not see “Run not found”. A Local turn that reconnects stays on Local and also does not show “Run not found”.
+- [ ] After a Copilot reply finishes, scrolling the thread does not turn ordinary `*` characters or unfinished markdown into bold.
+- [ ] Ask Copilot for a fixed sequence: today’s calendar, unread Gmail, Slack messages, then a written briefing. The canvas gets `google_calendar_v2`, `gmail_v2`, and `slack` as their own blocks in that order. Those integrations are not attached as Agent tools. A daily time trigger is a `schedule` block, not `schedule_trigger`.
+- [ ] Ask Copilot to create an HTML page. The saved file opens as a complete page, not a truncated tag dump in the chat.
 - [ ] Local-only users stay on Local without the switch.
 - [ ] Copilot can generate images and create files; Local image/file usage lands on the Arena ledger.
 - [ ] Floating workflow chat streams a run, including chart and image output.
@@ -98,6 +106,7 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 - [ ] Cost block: an explicit Cost block amount shows once on the run’s usage (no double charge vs the Agent model cost).
 - [ ] Usage-log multiplier: a metered tool run writes one scaled ledger row, not a raw plus scaled duplicate.
 - [ ] Org admin can open billing. A non-admin cannot.
+- [ ] Deploy-modal API samples include `X-Sim-Email`. Execute the workflow API with that header set to a Sim user in another organization: the run bills that user’s org, the owning workspace does not also debit it, and Usage for the billed org shows a By Agent row (workflow, owning org · workspace, Run by). A missing header or malformed email is rejected with 400. An email that matches no user is rejected with 400 and `BILLING_EMAIL_NOT_FOUND`. Remaining credits for the billed org drop by that run.
 - [ ] Signup still creates a personal workspace. `/workspace` fallback still lands somewhere valid.
 - [ ] Daily credit refresh stays off unless the environment explicitly enables it.
 
@@ -113,18 +122,18 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 
 Upstream blocks with extra Arena operations. Spot-check one extra op and one stock op on each.
 
-- [ ] Slack: search and user-channel lookup, plus a normal post.
-- [ ] HubSpot: `hubspot_get_campaign_metrics` (or another campaign op), plus stock `hubspot_list_contacts`.
+- [ ] Slack: Arena Bot (bot token) and Custom Bot (user token) are both selectable. Search, user-channel lookup, and a normal post each succeed. Asking Copilot to connect Slack shows one Connect control (“Connect these, then continue”, button Continue), not a Submit button and not a repeated connect card.
+- [ ] HubSpot: on an admin workspace the Accounts picker loads real portals, and a selected account runs a read. `hubspot_get_campaign_metrics` (or another campaign op) plus stock `hubspot_list_contacts` both return data.
 - [ ] Google Slides: template tables, plus a stock slide action.
 - [ ] Zoom: account recordings and transcript download, plus a stock meeting action.
 - [ ] Shopify: `shopify_list_customers` (assert `success` still available downstream), plus stock `shopify_list_products`.
 - [ ] Gmail: advanced search and read thread, plus send or read.
 - [ ] Google Drive: upload and AI query helpers, plus a stock file read.
-- [ ] Image Generator: multiple variations from one prompt (“three variations”), reference images, and picking a previously generated image from the conversation.
+- [ ] Image Generator: “Create 3 distinct variations of …” returns three separate images, not one combined frame. Reference images work, and a previously generated image can be picked. Editing that image returns an image preview, not an empty or octet-stream file.
 
 ### Files (P1)
 
-- [ ] Generated images and compiled documents open from the file serve route.
+- [ ] Generated images and compiled documents open from the file serve route. Reusing a chat image in a later run copies it onto the run and that file opens (the path is not a broken or context-query URL).
 - [ ] Org logo upload and display work.
 - [ ] Editor file upload can pick images already in the chat.
 
@@ -149,7 +158,7 @@ Block name **Arena**. One happy path per operation:
 - [ ] Add comment, add comment by task number.
 - [ ] Fetch searched tasks, search task, simple search.
 - [ ] Save summary, get meetings, get token.
-- [ ] Get my tasks, get my overdue tasks.
+- [ ] Get my tasks and get my overdue tasks, from the builder and from a schedule or webhook run. A failure returns an error, not an empty task list.
 - [ ] Client and project selectors in the block panel load real Arena data.
 
 ### Arena Development and generated apps (P1)
@@ -173,6 +182,11 @@ Confirm each appears in the block menu and one operation returns data.
 - [ ] Skyvern (create or get a run; N/A if this env has no credential).
 - [ ] Airweave: one successful run, or N/A with ticket reference (see Section 0).
 
+### Agents list and video builder (P0)
+
+- [ ] Global, shared-with-me, and my-agents lists follow email and domain allow-lists. An allowed email sees the agent enabled. An email outside the list sees it disabled or absent for that tab. Undeploying a chat agent removes it from all three lists. An inactive chat does not stay listed.
+- [ ] Video builder: opening it from the Arena agents list puts the logged-in email on `emailId` and replaces any saved email. Opening that agent when the Arena page omits `emailId` still returns the deployed video builder app. Any other agent without `emailId` is rejected. A Fal call from the video app appears on that Arena user’s usage ledger.
+
 ### Deployed-chat extras that have no upstream equivalent (P0)
 
 - [ ] Departments, assistant assets, banner messages, prompt feedback, and workflow golden queries.
@@ -181,7 +195,8 @@ Confirm each appears in the block menu and one operation returns data.
 ### Admin, identity, and ops (P1)
 
 - [ ] Arena SSO modules: login, resume, and legacy cookie clear on a user who still has an old session cookie.
-- [ ] Custom OAuth apps at org level (allowed workspaces).
+- [ ] Settings → Custom OAuth Apps opens and shows the apps form, not a blank section. An org-level app limited to allowed workspaces connects from an allowed workspace.
+- [ ] Platform-admin email can open Settings → Agent access requests, approve one request, and the requester then sees that agent enabled on the agents list.
 - [ ] Help and support issue can be filed and is stored.
 - [ ] App banner route and workspace embed page render inside the host frame.
 - [ ] Default workflows import and deploy for a new user.
@@ -218,7 +233,7 @@ Smoke these so an Arena change did not break the base product. One happy path ea
 ### Workspace surfaces (P2)
 
 - [ ] Home, workflow list, and sidebar navigation.
-- [ ] Knowledge: create a base, upload a document, and retrieve it from an Agent block.
+- [ ] Knowledge: create a base, upload a document, and retrieve it from an Agent block. A hit includes rank. An empty search returns an empty result the Agent can consume, with no crash on a missing rank.
 - [ ] Tables: create a table, add a row, filter it.
 - [ ] Files: upload, preview (PDF and image), and delete.
 - [ ] Skills: create and attach one to an agent.
@@ -268,5 +283,6 @@ One read or one write each, using a test account. Skip any integration this envi
 2. P0 identity, SSO, deployed chat, billing, builder run, agent model.
 3. P0 Local / Cloud copilot and Arena task block.
 4. P1 exclusive blocks that this environment has credentials for.
-5. P1 customized Slack, HubSpot, Zoom, Slides, Shopify, Gmail, Drive, image variations.
-6. P2 stock surfaces and a short integration sample.
+5. P1 customized Slack (Arena Bot and Copilot Connect), HubSpot Accounts, Zoom, Slides, Shopify, Gmail, Drive, distinct image variations, and image edit.
+6. P0 video builder `emailId`, agents-list undeploy, and `X-Sim-Email` cross-org billing.
+7. P2 stock surfaces and a short integration sample.
