@@ -2,6 +2,7 @@
 
 import { type ReactNode, useId } from 'react'
 import { ChevronDown, cn, Expandable, ExpandableContent, handleKeyboardActivation } from '@sim/emcn'
+import { ActivityTextColumn } from '@/components/ui/activity-status'
 import { ActivityViewport } from '@/app/workspace/[workspaceId]/home/components/message-content/components/agent-group/activity-viewport'
 
 export interface ActivityDisclosureProps {
@@ -61,7 +62,7 @@ export function ActivityDisclosure({
           <ExpandableContent id={contentId}>
             <div className='pt-2'>
               <ActivityViewport isStreaming={isStreaming} unbounded={unbounded}>
-                {children}
+                <ActivityTextColumn>{children}</ActivityTextColumn>
               </ActivityViewport>
             </div>
           </ExpandableContent>

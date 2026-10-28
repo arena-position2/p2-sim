@@ -10,6 +10,7 @@ const fetchMock = vi.fn(() =>
 vi.stubGlobal('fetch', fetchMock)
 
 import { materializeSelectedGeneratedImage } from '@/lib/chat/generated-image-selection'
+import { validateAttachmentFileType } from '@/lib/uploads/utils/validation'
 
 describe('materializeSelectedGeneratedImage', () => {
   it('uses a positive file size for internal serve URLs without downloading the image', async () => {
@@ -51,6 +52,9 @@ describe('materializeSelectedGeneratedImage', () => {
     })
 
     expect(result.type).toBe('image/jpeg')
+    expect(result.name).toBe('Generated image.jpg')
+    expect(result.file.name).toBe('Generated image.jpg')
+    expect(validateAttachmentFileType(result.file.name)).toBeNull()
   })
 
   it('materializes stored images from storage keys without downloading bytes', async () => {
@@ -65,6 +69,9 @@ describe('materializeSelectedGeneratedImage', () => {
     })
 
     expect(result.size).toBe(8_725_519)
+    expect(result.name).toBe('Generated image.png')
+    expect(result.file.name).toBe('Generated image.png')
+    expect(validateAttachmentFileType(result.file.name)).toBeNull()
     expect(result.url).toContain('/api/files/serve/')
     expect(result.dataUrl).toContain('/api/files/serve/')
     expect(fetchMock).not.toHaveBeenCalled()

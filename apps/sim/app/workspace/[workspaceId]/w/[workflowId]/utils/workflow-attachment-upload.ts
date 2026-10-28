@@ -2,6 +2,7 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
 import { getChatImageFetchUrl } from '@/lib/chat/image-fetch-url'
 import { uploadInternalFileSession } from '@/lib/uploads/client/session-upload'
+import { ensureFileNameExtension } from '@/lib/uploads/utils/file-utils'
 
 export interface WorkflowAttachmentInput {
   name: string
@@ -123,5 +124,5 @@ async function fileFromServeUrl(fileData: WorkflowAttachmentInput, url: string):
     blob.type && blob.type !== 'application/octet-stream'
       ? blob.type
       : fileData.type || 'application/octet-stream'
-  return new File([blob], fileData.name, { type })
+  return new File([blob], ensureFileNameExtension(fileData.name, type), { type })
 }
