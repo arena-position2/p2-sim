@@ -42,6 +42,7 @@ import { storeCompiledDoc } from './doc-compiled-store'
 import { buildEmbeddedImageRefWarning } from './embedded-image-refs'
 import { ensureCopilotFileFolderPath } from './file-folder-application'
 import { storeFileIntent } from './file-intent-store'
+import { rejectHtmlFullUpdate } from './html-edit-size-guards'
 import { validateSearchReplaceForPatch } from './patch-search-replace'
 
 const logger = createLogger('WorkspaceFileServerTool')
@@ -617,6 +618,26 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
             )
           ).content
           const existingContent = currentBuffer.toString('utf-8')
+          const htmlUpdateBlock = rejectHtmlFullUpdate({
+            fileName: fileRecord.name,
+            existingContent,
+            contentType: fileRecord.type,
+          })
+          if (htmlUpdateBlock) {
+            return {
+              success: false,
+              errorType: htmlUpdateBlock.errorType,
+              recoverable: htmlUpdateBlock.recoverable,
+              message: htmlUpdateBlock.message,
+              data: {
+                id: fileRecord.id,
+                name: fileRecord.name,
+                vfsPath,
+                operation: 'update',
+                suggestedNextTools: ['grep', 'read', 'workspace_file'],
+              },
+            }
+          }
           const isPlainTextUpdate = isPlainTextWorkspaceFileName(fileRecord.name)
           const preserveHint =
             isPlainTextUpdate && existingContent.length > 0
@@ -780,6 +801,8 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
             )
           ).content
           const existingContent = currentBuffer.toString('utf-8')
+          let searchForIntent =
+            normalized.edit.strategy === 'search_replace' ? normalized.edit.search : ''
 
           if (normalized.edit.strategy === 'search_replace') {
             const validation = validateSearchReplaceForPatch({
@@ -799,10 +822,12 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
                   name: fileRecord.name,
                   vfsPath,
                   operation: 'patch',
-                  suggestedNextTools: ['read', 'grep', 'workspace_file'],
+                  suggestedNextTools: ['read', 'grep'],
+                  ...(validation.excerpt ? { excerpt: validation.excerpt } : {}),
                 },
               }
             }
+            searchForIntent = validation.search
           } else if (normalized.edit.strategy === 'anchored') {
             if (!normalized.edit.mode) {
               return { success: false, message: 'anchored strategy requires mode' }
@@ -828,7 +853,7 @@ export const workspaceFileServerTool: BaseServerTool<WorkspaceFileArgs, Workspac
               strategy: normalized.edit.strategy,
               ...(normalized.edit.strategy === 'search_replace'
                 ? {
-                    search: normalized.edit.search,
+                    search: searchForIntent,
                     replaceAll: normalized.edit.replaceAll,
                   }
                 : {

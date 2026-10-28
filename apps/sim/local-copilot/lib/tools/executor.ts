@@ -18,6 +18,7 @@ import { reloadLocalCopilotWorkflowContext } from '@/local-copilot/lib/context/r
 import { getLocalCopilotMemorySnapshot } from '@/local-copilot/lib/diagnostics'
 import { generateWorkflowPatchFromRequest } from '@/local-copilot/lib/patches/generate'
 import { validateWorkflowPatch, validateWorkflowState } from '@/local-copilot/lib/patches/validate'
+import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
 import { canonicalCreateFilePath } from '@/local-copilot/lib/tools/enrich-file-tool-args'
@@ -136,6 +137,17 @@ export interface ToolExecutionContext {
    * Full-replace HTML/text updates must follow a read of the same file.
    */
   readVfsPaths?: Set<string>
+  /**
+   * Canonical `files/...` path → normalized patch searches that missed this turn.
+   * Shared across `{ ...toolCtx }` copies. A later patch with the same normalized
+   * search is rejected before the file is opened.
+   */
+  failedPatchSearches?: Map<string, Set<string>>
+  /**
+   * Canonical `files/...` path → live excerpt tokens from the last patch miss.
+   * The next patch search must overlap these tokens (copied from the live file).
+   */
+  livePatchExcerptTokens?: Map<string, Set<string>>
   /** Workflow ids created earlier in this turn (membership bypass until refresh). */
   allowedWorkflowIds?: Set<string>
   /** Active tool_use id for idempotency keying. */
@@ -362,6 +374,8 @@ async function executeLocalCopilotToolInner(
   ctx.mutationIdempotency ??= new Map()
   ctx.listedIntegrationToolIds ??= new Set()
   ctx.readVfsPaths ??= new Set()
+  ctx.failedPatchSearches ??= new Map()
+  ctx.livePatchExcerptTokens ??= new Map()
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
 
@@ -490,11 +504,17 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      enrichedArgs.operations = normalizeLocalEditConnections(operations, {
-        blocks: ctx.structuredContext.workflow?.blocks,
-        edges: ctx.structuredContext.workflow?.edges,
-        availableBlocks: ctx.structuredContext.availableBlocks,
-      })
+      enrichedArgs.operations = coerceLocalEditDropdownInputs(
+        normalizeLocalEditConnections(operations, {
+          blocks: ctx.structuredContext.workflow?.blocks,
+          edges: ctx.structuredContext.workflow?.edges,
+          availableBlocks: ctx.structuredContext.availableBlocks,
+        }),
+        {
+          blocksMetadataByType: ctx.blocksMetadataByType,
+          existingBlocks: ctx.structuredContext.workflow?.blocks,
+        }
+      )
 
       const lookBefore = assertEditWorkflowLookBeforeWrite({
         operations: enrichedArgs.operations,

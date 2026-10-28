@@ -368,19 +368,24 @@ export function buildIncompleteWorkflowPopulateContinuationMessage(): string {
   )
 }
 
-/** Tools that only re-fetch block schemas and must not consume the populate budget. */
-const PRE_POPULATE_DISCOVERY_TOOLS = new Set(['get_blocks_metadata', 'load_copilot_artifact'])
+/**
+ * Tools gated by the pre-populate discovery budget. Only successful
+ * `get_blocks_metadata` increments the counter; `load_copilot_artifact` is
+ * intentionally excluded so truncated catalog reloads cannot starve metadata.
+ */
+const PRE_POPULATE_DISCOVERY_TOOLS = new Set(['get_blocks_metadata'])
 
 /**
- * True for metadata / artifact reloads that run before the first successful populate edit.
+ * True for tools subject to the pre-populate metadata discovery cap.
  */
 export function isPrePopulateDiscoveryTool(toolName: string): boolean {
   return PRE_POPULATE_DISCOVERY_TOOLS.has(toolName)
 }
 
 /**
- * Whether a discovery call may run before the first successful populate edit.
+ * Whether a metadata discovery call may run before the first successful populate edit.
  * `ignore` means the cap does not apply (not a discovery tool, or populate already started).
+ * Admission does not increment the budget — callers count only successful fetches.
  */
 export function admitPrePopulateDiscovery(options: {
   createdWorkflowThisTurn: boolean
@@ -395,7 +400,7 @@ export function admitPrePopulateDiscovery(options: {
 }
 
 /**
- * True when a discovery-only round should not consume a tool-iteration slot.
+ * True when a metadata-only round should not consume a tool-iteration slot.
  * Rejected discovery rounds are not refunded, so a model that ignores the block cannot loop forever.
  */
 export function shouldRefundPrePopulateDiscoveryRound(options: {
@@ -610,9 +615,11 @@ export function shouldEnsureWorkflowBuildClosingMessage(options: {
  * Closing copy when the turn still has unresolved mandatory follow-ups.
  */
 export function buildUnresolvedFollowUpClosingMessage(
-  pending: Array<{ hint: string }>
+  pending: Array<{ hint: string; userHint?: string }>
 ): string | null {
   if (pending.length === 0) return null
+  const userHint = pending[0]?.userHint?.trim()
+  if (userHint) return userHint
   const hint = pending[0]?.hint?.trim()
   if (hint) {
     return `I made partial progress but still need to finish: ${hint}`
