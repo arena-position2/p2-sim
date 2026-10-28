@@ -94,6 +94,7 @@ function enforceLocalCopilotSandboxLanguages(
 let copilotServerToolNames: Set<string> | null = null
 let handlersRegistered = false
 let arenaFileAliasesRegistered = false
+let localUserTableRegistered = false
 
 async function ensureCopilotToolRuntime(): Promise<Set<string>> {
   if (!handlersRegistered) {
@@ -144,6 +145,18 @@ async function ensureCopilotToolRuntime(): Promise<Set<string>> {
     logger.info('Arena Copilot aliased server tools registered', {
       tools: [...ARENA_ALIASED_SERVER_TOOL_NAMES],
     })
+  }
+
+  // Cloud executes user_table on the sim worker. Arena has no worker entry for
+  // it — register a Local handler so create/get/insert/query work in-process.
+  if (!localUserTableRegistered) {
+    const { registerHandler, hasHandler } = await import('@/lib/mothership/tool-executor/executor')
+    if (!hasHandler('user_table')) {
+      const { executeLocalUserTable } = await import('@/local-copilot/lib/tools/user-table')
+      registerHandler('user_table', executeLocalUserTable)
+      logger.info('Arena Copilot user_table handler registered')
+    }
+    localUserTableRegistered = true
   }
 
   return copilotServerToolNames

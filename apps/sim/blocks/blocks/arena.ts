@@ -4,8 +4,27 @@ import type { BlockConfig } from '@/blocks/types'
 export const ArenaBlock: BlockConfig = {
   type: 'arena',
   name: 'Arena',
-  description: 'Arena',
-  longDescription: 'Arena',
+  description:
+    'Arena product tasks and meetings — get my tasks, overdue tasks, search/fetch tasks, create tasks and subtasks, add comments, get meetings, save summaries',
+  longDescription:
+    'Integrate Arena (product work management) into the workflow. Operations: Get My Tasks (arena_get_my_tasks), Get My Overdue Tasks (arena_get_my_overdue_tasks), Get Meetings (arena_get_meetings), Search Task / Search Task name-only (arena_search_task, arena_search_task_simple), Fetch tasks by client/project/assignee/state (arena_fetch_searched_tasks), Create Task and Create Sub Task (selector or names & emails variants), Add Comments (by selectors or task number), Save Summary (arena_save_summary), and Get Token (arena_get_token). Prefer this block over Knowledge when the user asks for Arena tasks, action items, or meetings.',
+  bestPractices: `
+# Arena block
+
+Use this block for Arena product work — tasks, action items, overdue work, meetings, comments, and summaries. Do not use the Knowledge block as a stand-in for Arena tasks or meetings.
+
+## Prefer these operations
+- **Get My Tasks** (\`arena_get_my_tasks\`) — current user's tasks / action items (optional withinMinutes filter).
+- **Get My Overdue Tasks** (\`arena_get_my_overdue_tasks\`) — current user's overdue tasks.
+- **Get Meetings** (\`arena_get_meetings\`) — meetings for a client over a period (7days / today / 14days).
+- **Search Task** (\`arena_search_task\`) — filtered task search (client, project, state, assignee, due date, …).
+- **Search Task (name only)** (\`arena_search_task_simple\`) — search by task name or number only.
+- **Fetch tasks** (\`arena_fetch_searched_tasks\`) — free-text filters by client/project/assignee/state name.
+- **Create Task / Sub Task** — selector variants or names & emails variants.
+- **Add Comments** — by selectors or by task number.
+- **Save Summary** (\`arena_save_summary\`) — persist a client summary.
+- **Get Token** (\`arena_get_token\`) — Arena auth token for advanced flows.
+`,
   docsLink: '',
   category: 'tools',
   bgColor: '#E0E0E0',
@@ -17,58 +36,80 @@ export const ArenaBlock: BlockConfig = {
       type: 'dropdown',
       required: true,
       options: [
-        { label: 'Create Task', id: 'arena_create_task' },
+        {
+          label: 'Create Task',
+          id: 'arena_create_task',
+          description: 'Create a task using Arena client/project/group/assignee selectors.',
+        },
         {
           label: 'Create Task (names & emails)',
           id: 'arena_create_task_fields',
+          description:
+            'Create a task with free-text client/project/group names and assignee email (no selectors).',
         },
         {
           label: 'Create Sub Task',
           id: 'arena_create_sub_task',
+          description: 'Create a subtask under a parent task using Arena selectors.',
         },
         {
           label: 'Create Sub Task (names & emails)',
           id: 'arena_create_sub_task_fields',
+          description:
+            'Create a subtask with free-text names, emails, and parent task number (no selectors).',
         },
         {
           label: 'Add Comments',
           id: 'arena_comments',
+          description: 'Post a comment on a task chosen via client/project/group/task selectors.',
         },
         {
           label: 'Add Comments (Task number)',
           id: 'arena_comments_task_number',
+          description: 'Post a comment on a task identified by its Arena task number.',
         },
         {
           label: 'Fetch tasks (client, project, assignee, state name)',
           id: 'arena_fetch_searched_tasks',
+          description:
+            'Fetch tasks with free-text filters for client, project, assignee, and state name.',
         },
         {
           label: 'Search Task',
           id: 'arena_search_task',
+          description:
+            'Search tasks with structured filters (client, project, state, visibility, due date, assignee, page size).',
         },
         {
           label: 'Search Task (name only)',
           id: 'arena_search_task_simple',
+          description: 'Search tasks by task name or task number only.',
         },
         {
           label: 'Save Summary',
           id: 'arena_save_summary',
+          description: 'Save a text summary for a client in Arena.',
         },
         {
           label: 'Get Meetings',
           id: 'arena_get_meetings',
+          description: 'Fetch meetings for a client for today, last 7 days, or last 14 days.',
         },
         {
           label: 'Get Token',
           id: 'arena_get_token',
+          description: 'Retrieve an Arena auth token for advanced API flows.',
         },
         {
           label: 'Get My Tasks',
           id: 'arena_get_my_tasks',
+          description:
+            'Fetch the current user’s Arena tasks and action items (optional last-N-minutes filter). Prefer this over Knowledge for “my tasks”.',
         },
         {
           label: 'Get My Overdue Tasks',
           id: 'arena_get_my_overdue_tasks',
+          description: 'Fetch the current user’s overdue Arena tasks.',
         },
       ],
       value: () => 'arena_create_task',
