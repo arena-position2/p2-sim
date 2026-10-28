@@ -511,7 +511,7 @@ export const TOOL_ACTIVITIES: Readonly<Record<string, ActivityPhrase | Operation
 const CLI_ACTIVITY_OVERRIDES: Readonly<Record<string, ActivityPhrase>> = {
   cli_credentials_connect: 'created connection links',
   cli_credentials_reconnect: 'created connection links',
-  cli_docs_search: 'searched Sim docs',
+  cli_docs_search: 'searched docs',
   cli_files_mkdir: { verb: 'created', object: 'file folders' },
   cli_knowledge_mkdir: { verb: 'created', object: 'knowledge folders' },
   cli_tables_mkdir: { verb: 'created', object: 'table folders' },

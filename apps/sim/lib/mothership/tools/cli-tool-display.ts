@@ -224,7 +224,7 @@ export const CLI_TOOL_TITLES: Record<string, string> = {
   cli_workspaces_members: 'Listing workspace members',
   /** Agent-only CLI augmentations share the same title and streaming-name resolver. */
   cli_blocks_tips: 'Reading block guidance',
-  cli_docs_search: 'Searching Sim docs',
+  cli_docs_search: 'Searching docs',
   cli_files_grep: 'Searching file contents',
   cli_files_view: 'Viewing file',
   cli_grep: 'Searching the workspace',

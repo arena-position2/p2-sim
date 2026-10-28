@@ -649,7 +649,7 @@ const TOOL_TITLES: Record<string, string> = {
   rename_workflow: 'Renaming workflow',
   restore_resource: 'Restoring resource',
   run_block: 'Running block',
-  search_docs: 'Searching Sim docs',
+  search_docs: 'Searching docs',
   set_block_enabled: 'Toggling block',
   set_environment_variables: 'Setting environment variables',
   set_global_workflow_variables: 'Setting workflow variables',
@@ -805,7 +805,7 @@ const MAX_COMMAND_TITLE_LENGTH = 48
  * Budget for a quoted value embedded in a title.
  *
  * Much shorter than {@link MAX_COMMAND_TITLE_LENGTH}: these rows carry a
- * subagent prefix ("Workflow Agent — ") plus a verb phrase ("Searched Sim docs
+ * subagent prefix ("Workflow Agent — ") plus a verb phrase ("Searched docs
  * for ") ahead of the value, and quotes and an ellipsis cost five more columns —
  * roughly 44 characters of fixed overhead before the value starts. The chat pane
  * also narrows whenever a resource panel is open, so the budget is set to keep
@@ -1162,8 +1162,8 @@ export function getToolDisplayTitle(name: string, args?: Record<string, unknown>
     case 'search_docs': {
       const target = firstStringArg(args, 'toolTitle', 'title', 'query')
       return target
-        ? `Searching Sim docs for "${truncate(target, MAX_QUOTED_TITLE_VALUE_LENGTH)}"`
-        : 'Searching Sim docs'
+        ? `Searching docs for "${truncate(target, MAX_QUOTED_TITLE_VALUE_LENGTH)}"`
+        : 'Searching docs'
     }
     case 'grep': {
       const target = firstStringArg(args, 'toolTitle', 'title')

@@ -766,15 +766,25 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      await ensureHandlersReady()
-      const { createServerToolHandler } = await import(
-        '@/lib/mothership/tools/registry/server-tool-adapter'
+      // The mothership server router no longer registers workflow-authoring tools.
+      const { getBlocksMetadataServerTool } = await import(
+        '@/lib/mothership/tools/server/blocks/get-blocks-metadata-tool'
       )
-      const handler = createServerToolHandler('get_blocks_metadata')
-      const metadataResult = await handler(
-        { blockIds: missingIds },
-        toCopilotServerToolContext(ctx)
-      )
+      let metadataResult: { success: boolean; output?: unknown; error?: string }
+      try {
+        const output = await getBlocksMetadataServerTool.execute(
+          { blockIds: missingIds },
+          { userId: ctx.userId, workspaceId: ctx.workspaceId }
+        )
+        metadataResult = { success: true, output }
+      } catch (error) {
+        const message = getErrorMessage(error, 'get_blocks_metadata failed')
+        metadataResult = {
+          success: false,
+          error: message,
+          output: { error: message },
+        }
+      }
 
       if (
         metadataResult.success &&
