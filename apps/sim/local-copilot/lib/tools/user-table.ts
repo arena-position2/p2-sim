@@ -7,6 +7,7 @@
  * `local-copilot` so upstream Sim syncs do not own the file.
  */
 import { createLogger } from '@sim/logger'
+import { toError } from '@sim/utils/errors'
 import { isRecordLike, toArray, toRecord } from '@sim/utils/object'
 import { executeCopilotTableUseCase } from '@/lib/mothership/application/execute-table-use-case'
 import {
@@ -33,6 +34,7 @@ import {
   updateTableUseCase,
 } from '@/lib/table/application/tables'
 import { COLUMN_TYPES } from '@/lib/table/column-types/types'
+import { TableLockedError } from '@/lib/table/mutation-locks'
 import type {
   ColumnDefinition,
   ColumnType,
@@ -174,6 +176,28 @@ function projectRow(row: Pick<TableRow, 'id' | 'data' | 'createdAt' | 'updatedAt
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+/** Joins `error.cause` so Drizzle "Failed query" wrappers keep the Postgres reason. */
+function describeCaughtError(error: unknown): string {
+  const primary = toError(error)
+  const parts = [primary.message]
+  let cursor: unknown = primary.cause
+  let depth = 0
+  while (cursor && depth < 4) {
+    parts.push(toError(cursor).message)
+    cursor = toError(cursor).cause
+    depth += 1
+  }
+  return parts.join(' ← ')
+}
+
+function messageForUserTableFailure(error: unknown): string {
+  if (error instanceof TableLockedError) return error.message
+  const fallback = 'user_table operation failed'
+  const projected = messageForCopilotTableError(error, fallback)
+  if (projected !== fallback) return projected
+  return `${fallback}: ${describeCaughtError(error)}`
 }
 
 /**
@@ -514,8 +538,15 @@ export const executeLocalUserTable: ToolHandler = async (
         return fail(`Unsupported user_table operation "${operation}"`)
     }
   } catch (error) {
-    const message = messageForCopilotTableError(error, 'user_table operation failed')
-    logger.warn('user_table failed', { operation, workspaceId, error: message })
+    const cause = describeCaughtError(error)
+    const message = messageForUserTableFailure(error)
+    logger.warn('user_table failed', {
+      operation,
+      workspaceId,
+      error: message,
+      cause,
+      stack: toError(error).stack,
+    })
     return fail(message)
   }
 }
