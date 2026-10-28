@@ -1,6 +1,6 @@
 # Upstream synchronization
 
-Standing procedure for bringing Sim upstream into this fork. The current seam inventory for the 6.1 gap is [version-6.1-main-vs-main.md](version-6.1-main-vs-main.md). This document is the procedure. That report is the file-by-file map for the current merge. Do not treat a sync as conflict resolution.
+Standing procedure for bringing Sim upstream into this fork. The seam inventory for the sync merged into `version-6.2-main` is [version-6.1-main-vs-main.md](version-6.1-main-vs-main.md). This document is the procedure. That report is the file-by-file map for that merge. The next sync compares `version-6.2-main` with `origin/main`. Do not treat a sync as conflict resolution.
 
 The objective is to keep as much upstream functionality as practical, preserve required Arena behavior, and make the next sync smaller than this one.
 
@@ -10,10 +10,11 @@ The objective is to keep as much upstream functionality as practical, preserve r
 |---|---|---|
 | `upstream` (`simstudioai/sim`) | `upstream/main` | Read-only Sim. Never commit to it. |
 | `origin` (`arenadeveloper02/p2-sim`) | `origin/main` | Intake. Sim `main` plus branding (logos and the docs title). Not the product. |
-| `origin` | `version-6.1-main` | Current product branch. Arena behavior lives here. |
-| `origin` | `upstream-sync/YYYY-MM-DD` | Integration branch, cut from `version-6.1-main`. |
+| `origin` | `version-6.2-main` | Current product branch. Arena behavior lives here. |
+| `origin` | `version-6.1-main` | Previous product line. Not the sync target. |
+| `origin` | `upstream-sync/YYYY-MM-DD` | Integration branch, cut from `version-6.2-main`. |
 
-There is no `version-6.1-prod`. Older lines (`version-5-prod`, `v2-main-prod`, `release/prod`) are not the sync target. When the product line is renamed, update this file and `.claude/rules/upstream-sync.md`, then run `bun run skills:sync`.
+There is no `version-6.2-prod`. Older lines (`version-6.1-main`, `version-5-prod`, `v2-main-prod`, `release/prod`) are not the sync target. When the product line is renamed, update this file and `.claude/rules/upstream-sync.md`, then run `bun run skills:sync`.
 
 Local `main` is stale. After `git fetch`, use `origin/main`.
 
@@ -21,7 +22,7 @@ Local `main` is stale. After `git fetch`, use `origin/main`.
 flowchart LR
   upstreamMain["upstream/main"]
   forkMain["origin/main"]
-  product["version-6.1-main"]
+  product["version-6.2-main"]
   syncBranch["upstream-sync/YYYY-MM-DD"]
   upstreamMain -->|"branding only"| forkMain
   forkMain --> syncBranch
@@ -29,7 +30,7 @@ flowchart LR
   syncBranch -->|"after validation"| product
 ```
 
-The product sync merges `origin/main` into the integration branch. `origin/main` must already contain the upstream commits you intend to take, with only branding kept on top. Merging `upstream/main` straight into `version-6.1-main` skips that branding. Do not sync on `main` or directly on `version-6.1-main`.
+The product sync merges `origin/main` into the integration branch. `origin/main` must already contain the upstream commits you intend to take, with only branding kept on top. Merging `upstream/main` straight into `version-6.2-main` skips that branding. Do not sync on `main` or directly on `version-6.2-main`.
 
 ## Principles
 
@@ -60,7 +61,7 @@ On files only upstream changed since the merge-base, take upstream. Exclusive Ar
 
 ### 1. Read the repository before editing
 
-Record `git status`, the current branch, both remotes, and how far `version-6.1-main` and `origin/main` have diverged from each other and from `upstream/main`. Find the merge-base. Do not modify the worktree until that picture is written down.
+Record `git status`, the current branch, both remotes, and how far `version-6.2-main` and `origin/main` have diverged from each other and from `upstream/main`. Find the merge-base. Do not modify the worktree until that picture is written down.
 
 If `origin/main` is behind `upstream/main`, stop the product sync and update the intake branch first: take upstream, keep branding only. Then cut the integration branch.
 
@@ -76,7 +77,7 @@ git fetch origin
 ### 3. Integration branch
 
 ```bash
-git switch -c upstream-sync/YYYY-MM-DD origin/version-6.1-main
+git switch -c upstream-sync/YYYY-MM-DD origin/version-6.2-main
 git merge origin/main
 ```
 
@@ -98,7 +99,7 @@ A clean merge does not mean saved workflows still run. Workflows store reference
 
 `getBlockOutputs` is what the editor offers. `tool.outputs` is what a run produces. Trigger outputs are a third contract. A workflow fails when a path it already references is no longer produced.
 
-On `version-6.1-main`, before the merge:
+On `version-6.2-main`, before the merge:
 
 ```bash
 bun run apps/sim/scripts/diff-block-output-contracts.ts dump --out /tmp/output-contracts-before.json
@@ -122,7 +123,7 @@ When a database is available, scan stored workflow state for the breaking paths.
 Input fields are the same class of break, and they already have a check. Subblock id removals must be mapped in `SUBBLOCK_ID_MIGRATIONS` (`apps/sim/lib/workflows/migrations/subblock-migrations.ts`). Run it against the pre-sync product tip:
 
 ```bash
-bun run apps/sim/scripts/check-block-registry.ts version-6.1-main
+bun run apps/sim/scripts/check-block-registry.ts version-6.2-main
 ```
 
 Record subblock id failures in the same report section as output contract changes.
@@ -135,7 +136,7 @@ When a test fails, decide whether the cause is an upstream behavior change, a ba
 
 ### 8. Report
 
-Write the sync report below before calling the sync done. Merge the integration branch into `version-6.1-main` only after that report and the verification above.
+Write the sync report below before calling the sync done. Merge the integration branch into `version-6.2-main` only after that report and the verification above.
 
 ## Fork-specific constraints
 

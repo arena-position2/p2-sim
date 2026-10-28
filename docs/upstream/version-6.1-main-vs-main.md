@@ -1,6 +1,6 @@
 # version-6.1-main vs p2-sim main
 
-Report for the next upstream merge. Fork `main` is `simstudioai/sim` `main` plus branding. Everything below is the gap between that tree and `version-6.1-main`.
+Historical seam inventory for the sync merged into `version-6.2-main` (`upstream-sync/2026-10-14`). Fork `main` is `simstudioai/sim` `main` plus branding. Everything below is the gap between that tree and `version-6.1-main` at the time of the report. The next sync compares `version-6.2-main` with `origin/main`.
 
 This report names behavior and seams. It does not perform the merge, the split, or the wrap.
 
@@ -40,9 +40,9 @@ Since that commit:
 
 A raw diff of the two tips is about 11,000 files because it mixes our features with upstream we have not merged yet. Use the three-dot split above.
 
-## Next merge
+## Merge carried into version-6.2-main
 
-Do this in order:
+This plan was carried out by cutting `version-6.2-main` from `version-6.1-main` and merging `upstream-sync/2026-10-14` into it. The steps below are the record of that plan:
 
 1. Merge fork `main` into `version-6.1-main` and take upstream for the 9,289 files we did not touch.
 2. On the 588 overlapping files, keep upstream’s control flow and re-apply only the seams in this report.

@@ -45,7 +45,7 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "Post-sync gates",
         "P0",
         "Output-contract dump vs pre-sync baseline",
-        "1. On version-6.1-main: bun run apps/sim/scripts/diff-block-output-contracts.ts dump --out /tmp/output-contracts-before.json\n"
+        "1. On version-6.2-main: bun run apps/sim/scripts/diff-block-output-contracts.ts dump --out /tmp/output-contracts-before.json\n"
         "2. On the sync branch: bun run apps/sim/scripts/diff-block-output-contracts.ts diff /tmp/output-contracts-before.json\n"
         "3. Compare removals/type changes to the sync report.",
         "No unexplained removed paths or type changes beyond what the sync report already accepts (aliases or documented N/A).",

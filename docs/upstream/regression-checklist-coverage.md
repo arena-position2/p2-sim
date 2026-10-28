@@ -85,6 +85,6 @@ Fixes on `upstream-sync/2026-10-14` after the first checklist. New rows are manu
 ## Suggested next automations
 
 1. Config route assert for `canSwitchBackend` (full-access vs local-only).
-2. Output-contract dump in CI against `version-6.1-main` baseline.
+2. Output-contract dump in CI against `version-6.2-main` baseline.
 3. Thin Arena task tool `transformResponse` tests with mocked HTTP (one op per group).
 4. Image Fusion / P2 Docs / SpyFu output-contract smoke (no live calls).
