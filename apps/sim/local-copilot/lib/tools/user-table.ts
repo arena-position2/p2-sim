@@ -266,7 +266,8 @@ export const executeLocalUserTable: ToolHandler = async (
           {
             tableId,
             workspaceId,
-          }
+          },
+          { tableId }
         )
         if (operation === 'get_schema') {
           return ok(`Retrieved schema for table "${table.name}"`, {
