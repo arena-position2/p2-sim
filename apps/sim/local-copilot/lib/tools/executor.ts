@@ -18,6 +18,7 @@ import { reloadLocalCopilotWorkflowContext } from '@/local-copilot/lib/context/r
 import { getLocalCopilotMemorySnapshot } from '@/local-copilot/lib/diagnostics'
 import { generateWorkflowPatchFromRequest } from '@/local-copilot/lib/patches/generate'
 import { validateWorkflowPatch, validateWorkflowState } from '@/local-copilot/lib/patches/validate'
+import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
 import { canonicalCreateFilePath } from '@/local-copilot/lib/tools/enrich-file-tool-args'
@@ -501,11 +502,17 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      enrichedArgs.operations = normalizeLocalEditConnections(operations, {
-        blocks: ctx.structuredContext.workflow?.blocks,
-        edges: ctx.structuredContext.workflow?.edges,
-        availableBlocks: ctx.structuredContext.availableBlocks,
-      })
+      enrichedArgs.operations = coerceLocalEditDropdownInputs(
+        normalizeLocalEditConnections(operations, {
+          blocks: ctx.structuredContext.workflow?.blocks,
+          edges: ctx.structuredContext.workflow?.edges,
+          availableBlocks: ctx.structuredContext.availableBlocks,
+        }),
+        {
+          blocksMetadataByType: ctx.blocksMetadataByType,
+          existingBlocks: ctx.structuredContext.workflow?.blocks,
+        }
+      )
 
       const lookBefore = assertEditWorkflowLookBeforeWrite({
         operations: enrichedArgs.operations,

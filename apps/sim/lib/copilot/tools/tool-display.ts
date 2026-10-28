@@ -967,8 +967,8 @@ export function getToolDisplayTitle(name: string, args?: Record<string, unknown>
     case 'search_docs': {
       const target = firstStringArg(args, 'toolTitle', 'title', 'query')
       return target
-        ? `Searching Sim docs for "${truncate(target, MAX_QUOTED_TITLE_VALUE_LENGTH)}"`
-        : 'Searching Sim docs'
+        ? `Searching Arena Copilot docs for "${truncate(target, MAX_QUOTED_TITLE_VALUE_LENGTH)}"`
+        : 'Searching Arena Copilot docs'
     }
     case 'grep': {
       const target = firstStringArg(args, 'toolTitle', 'title')
