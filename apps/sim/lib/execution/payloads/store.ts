@@ -10,6 +10,10 @@ import {
   type LargeValueRef,
 } from '@/lib/execution/payloads/large-value-ref'
 import {
+  MAX_DURABLE_LARGE_VALUE_BYTES,
+  MAX_TRACE_ARCHIVE_BYTES,
+} from '@/lib/execution/payloads/limits'
+import {
   assertDurableLargeValueSize,
   assertInlineMaterializationSize,
   assertLargeValueRefAccess,
@@ -97,7 +101,9 @@ async function persistValue(
     return fileInfo.key
   } catch (error) {
     if (context.requireDurable) {
-      throw new Error(`Failed to persist large execution value: ${toError(error).message}`)
+      throw new Error(`Failed to persist large execution value: ${toError(error).message}`, {
+        cause: error,
+      })
     }
     logger.warn('Failed to persist large execution value, keeping in memory only', {
       id,
@@ -162,7 +168,40 @@ export async function storeLargeValue(
   size: number,
   context: LargeValueStoreContext
 ): Promise<LargeValueRef> {
-  assertDurableLargeValueSize(size)
+  return persistLargeValue(value, json, size, context, MAX_DURABLE_LARGE_VALUE_BYTES)
+}
+
+/**
+ * Stores a completed execution archive with a larger cap than individual
+ * workflow values. Not kept in the in-process cache: the run is over, readers
+ * materialize it asynchronously from storage, and the archive can hold live
+ * run objects rather than their JSON form.
+ */
+export async function storeExecutionTraceArchive(
+  value: Record<string, unknown>,
+  json: string,
+  size: number,
+  context: LargeValueStoreContext
+): Promise<LargeValueRef> {
+  return persistLargeValue(
+    value,
+    json,
+    size,
+    { ...context, requireDurable: true },
+    MAX_TRACE_ARCHIVE_BYTES,
+    false
+  )
+}
+
+async function persistLargeValue(
+  value: unknown,
+  json: string,
+  size: number,
+  context: LargeValueStoreContext,
+  limitBytes: number,
+  cacheInProcess = true
+): Promise<LargeValueRef> {
+  assertDurableLargeValueSize(size, limitBytes)
   const referencedKeys = collectLargeValueKeys(value)
   const id = `lv_${generateShortId(12)}`
   let key = await persistValue(id, json, context)
@@ -181,7 +220,8 @@ export async function storeLargeValue(
       key = undefined
     }
   }
-  const cached = cacheLargeValue(id, value, size, context, { recoverable: Boolean(key) })
+  const cached =
+    cacheInProcess && cacheLargeValue(id, value, size, context, { recoverable: Boolean(key) })
   if (!key && !cached) {
     throw new Error('Cannot retain large execution value without durable storage')
   }

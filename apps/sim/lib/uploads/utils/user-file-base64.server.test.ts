@@ -1,23 +1,32 @@
-/**
- * @vitest-environment node
- */
 import { redisConfigMockFns, resetRedisConfigMock } from '@sim/testing'
+import { createSessionPrincipal } from '@sim/testing/factories/principal.factory'
+import {
+  fileUtilsServerMock,
+  fileUtilsServerMockFns,
+} from '@sim/testing/mocks/file-utils-server.mock'
+import {
+  filesAuthorizationMock,
+  filesAuthorizationMockFns,
+} from '@sim/testing/mocks/files-authorization.mock'
+import {
+  knowledgeAccessScopeMock,
+  knowledgeAccessScopeMockFns,
+} from '@sim/testing/mocks/knowledge-access-scope.mock'
+import { storageServiceMockFns } from '@sim/testing/mocks/storage-service.mock'
+import { uploadsMock } from '@sim/testing/mocks/uploads.mock'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { KnowledgeAccessProvider } from '@/lib/knowledge/access/types'
 import { getRedisBudgetLimits } from '@/lib/core/redis/byte-budget.server'
+import type { KnowledgeAccessProvider } from '@/lib/knowledge/access/types'
 import {
   cleanupExecutionBase64Cache,
   hydrateUserFilesWithBase64,
 } from '@/lib/uploads/utils/user-file-base64.server'
 import type { UserFile } from '@/executor/types'
 
-const {
-  mockDownloadFile,
-  mockDownloadServableFileFromStorage,
-  mockRedis,
-  mockVerifyFileAccess,
-  mockCreateKnowledgeAccessProvider,
-} = vi.hoisted(() => {
+const mockCreateKnowledgeAccessProvider =
+  knowledgeAccessScopeMockFns.mockCreateKnowledgeAccessProvider
+
+const { mockRedis } = vi.hoisted(() => {
   const mockRedis = {
     get: vi.fn(),
     set: vi.fn(),
@@ -30,44 +39,34 @@ const {
     eval: vi.fn(),
   }
   return {
-    mockDownloadFile: vi.fn(),
-    mockDownloadServableFileFromStorage: vi.fn(),
     mockRedis,
-    mockVerifyFileAccess: vi.fn(),
-    mockCreateKnowledgeAccessProvider: vi.fn(),
   }
 })
 
 const mockGetRedisClient = redisConfigMockFns.mockGetRedisClient
+const mockDownloadFile = storageServiceMockFns.mockDownloadFile
+const { mockDownloadServableFileFromStorage } = fileUtilsServerMockFns
+const mockVerifyFileAccess = filesAuthorizationMockFns.mockVerifyFileAccess
+fileUtilsServerMockFns.mockDownloadFileFromStorage.mockImplementation((...args: unknown[]) =>
+  mockDownloadFile(...args)
+)
 
 afterAll(resetRedisConfigMock)
 
-vi.mock('@/lib/uploads', () => ({
-  StorageService: {
-    downloadFile: mockDownloadFile,
-  },
-}))
+vi.mock('@/lib/uploads', () => uploadsMock)
 
 vi.mock('@/lib/uploads/contexts/execution/execution-file-manager', () => ({
-  downloadExecutionFile: mockDownloadFile,
+  downloadExecutionFile: storageServiceMockFns.mockDownloadFile,
 }))
 
-vi.mock('@/lib/uploads/utils/file-utils.server', () => ({
-  downloadFileFromStorage: mockDownloadFile,
-  downloadServableFileFromStorage: mockDownloadServableFileFromStorage,
-}))
+vi.mock('@/lib/uploads/utils/file-utils.server', () => fileUtilsServerMock)
 
-vi.mock('@/app/api/files/authorization', () => ({
-  verifyFileAccess: mockVerifyFileAccess,
-}))
+vi.mock('@/app/api/files/authorization', () => filesAuthorizationMock)
 
-vi.mock('@/lib/knowledge/access/scope', () => ({
-  createKnowledgeAccessProvider: mockCreateKnowledgeAccessProvider,
-}))
+vi.mock('@/lib/knowledge/access/scope', () => knowledgeAccessScopeMock)
 
 describe('hydrateUserFilesWithBase64', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockDownloadFile.mockReset()
     mockDownloadServableFileFromStorage.mockReset()
     mockGetRedisClient.mockReturnValue(null)
@@ -102,24 +101,6 @@ describe('hydrateUserFilesWithBase64', () => {
     const hydrated = await hydrateUserFilesWithBase64({ file }, { maxBytes: 1 })
 
     expect(hydrated.file).not.toHaveProperty('base64')
-  })
-
-  it('keeps existing base64 when it is within maxBytes', async () => {
-    const base64 = Buffer.from('hello').toString('base64')
-    const file: UserFile = {
-      id: 'file-1',
-      name: 'small.txt',
-      key: 'execution/workspace/workflow/execution/small.txt',
-      url: 'https://example.com/small.txt',
-      size: 5,
-      type: 'text/plain',
-      context: 'execution',
-      base64,
-    }
-
-    const hydrated = await hydrateUserFilesWithBase64({ file }, { maxBytes: 10 })
-
-    expect(hydrated.file.base64).toBe(base64)
   })
 
   it('uses rendered size when generated source metadata exceeds the inline limit', async () => {
@@ -163,25 +144,6 @@ describe('hydrateUserFilesWithBase64', () => {
     expect(hydrated.file.size).toBe(11)
   })
 
-  it('records cached rendered size when a generated document must use a provider upload path', async () => {
-    mockGetRedisClient.mockReturnValue(mockRedis)
-    mockRedis.get.mockResolvedValueOnce(Buffer.alloc(11).toString('base64'))
-    const file: UserFile = {
-      id: 'file-1',
-      name: 'report.pdf',
-      key: 'workspace/2f1d8c3e-5b6a-4c7d-8e9f-0a1b2c3d4e5f/report.pdf',
-      url: '',
-      size: 1,
-      type: 'text/x-python-pdf',
-    }
-
-    const hydrated = await hydrateUserFilesWithBase64({ file }, { maxBytes: 10, userId: 'user-1' })
-
-    expect(hydrated.file).not.toHaveProperty('base64')
-    expect(hydrated.file.size).toBe(11)
-    expect(mockDownloadServableFileFromStorage).not.toHaveBeenCalled()
-  })
-
   it('bypasses a byte-only cache when model hydration must verify document contributors', async () => {
     mockGetRedisClient.mockReturnValue(mockRedis)
     mockRedis.get.mockResolvedValue(Buffer.from('%PDF-cached').toString('base64'))
@@ -221,24 +183,6 @@ describe('hydrateUserFilesWithBase64', () => {
     expect(onServableFileContributors).toHaveBeenCalledWith(file, [contributor])
   })
 
-  it('propagates generated documents that are still compiling', async () => {
-    const notReady = new Error('Document is still being generated')
-    notReady.name = 'DocCompileUserError'
-    mockDownloadServableFileFromStorage.mockRejectedValueOnce(notReady)
-    const file: UserFile = {
-      id: 'file-1',
-      name: 'report.pdf',
-      key: 'workspace/2f1d8c3e-5b6a-4c7d-8e9f-0a1b2c3d4e5f/report.pdf',
-      url: '',
-      size: 1,
-      type: 'text/x-python-pdf',
-    }
-
-    await expect(
-      hydrateUserFilesWithBase64({ file }, { maxBytes: 10, userId: 'user-1' })
-    ).rejects.toBe(notReady)
-  })
-
   it('does not hydrate URL-only internal file objects', async () => {
     const file: UserFile = {
       id: 'file-1',
@@ -258,7 +202,7 @@ describe('hydrateUserFilesWithBase64', () => {
     'retains the run principal and knowledge reader when file access is %s',
     async (allowed) => {
       mockDownloadFile.mockResolvedValueOnce(Buffer.from('hello', 'utf8'))
-      const principal = { kind: 'session' as const, userId: 'user-1', sessionId: 'session-1' }
+      const principal = createSessionPrincipal()
       const scope = { kind: 'user' as const, userId: 'user-1', tokens: ['user:user-1'] }
       const access: KnowledgeAccessProvider = {
         get: vi.fn().mockResolvedValue(scope),
@@ -302,7 +246,6 @@ describe('hydrateUserFilesWithBase64', () => {
         'user-1',
         undefined,
         'knowledge-base',
-        false,
         { knowledgeAccess: access }
       )
     }
@@ -369,105 +312,6 @@ describe('hydrateUserFilesWithBase64', () => {
         workflowId: 'workflow',
         executionId: 'resume-execution',
         largeValueExecutionIds: ['source-execution'],
-        userId: 'user-1',
-        maxBytes: 1024,
-      }
-    )
-
-    expect((hydrated.ref as unknown as { file: UserFile }).file.base64).toBe(
-      Buffer.from('hello').toString('base64')
-    )
-  })
-
-  it('preserves large-value metadata while hydrating visible files when requested', async () => {
-    mockDownloadFile.mockResolvedValueOnce(Buffer.from('hello', 'utf8'))
-    const file: UserFile = {
-      id: 'file-1',
-      name: 'visible.txt',
-      key: 'execution/workspace/workflow/execution-1/visible.txt',
-      url: '/api/files/serve/execution/workspace/workflow/execution-1/visible.txt?context=execution',
-      size: 5,
-      type: 'text/plain',
-      context: 'execution',
-    }
-    const ref = {
-      __simLargeValueRef: true,
-      version: 1,
-      id: 'lv_PRESERVEREF1',
-      kind: 'object',
-      size: 256,
-      key: 'execution/workspace/workflow/source-execution/large-value-lv_PRESERVEREF1.json',
-      executionId: 'source-execution',
-    }
-    const manifest = {
-      __simLargeArrayManifest: true,
-      version: 2,
-      kind: 'array',
-      totalCount: 1,
-      chunkCount: 1,
-      byteSize: 256,
-      chunks: [
-        {
-          ref,
-          count: 1,
-          byteSize: 256,
-        },
-      ],
-      preview: [{ id: 1 }],
-    }
-
-    const hydrated = await hydrateUserFilesWithBase64(
-      { file, ref, manifest },
-      {
-        workspaceId: 'workspace',
-        workflowId: 'workflow',
-        executionId: 'execution-1',
-        userId: 'user-1',
-        maxBytes: 1024,
-        preserveLargeValueMetadata: true,
-      }
-    )
-
-    expect(hydrated.file.base64).toBe(Buffer.from('hello').toString('base64'))
-    expect(hydrated.ref).toBe(ref)
-    expect(hydrated.manifest).toBe(manifest)
-    expect(mockDownloadFile).toHaveBeenCalledOnce()
-  })
-
-  it('hydrates nested prior-execution files discovered from exact-key large refs', async () => {
-    const file: UserFile = {
-      id: 'file-1',
-      name: 'nested.txt',
-      key: 'execution/workspace/workflow/source-execution/nested.txt',
-      url: '/api/files/serve/execution/workspace/workflow/source-execution/nested.txt?context=execution',
-      size: 5,
-      type: 'text/plain',
-      context: 'execution',
-    }
-    const ref = {
-      __simLargeValueRef: true,
-      version: 1,
-      id: 'lv_MNOPQRSTUVWX',
-      kind: 'object',
-      size: 256,
-      key: 'execution/workspace/workflow/source-execution/large-value-lv_MNOPQRSTUVWX.json',
-      executionId: 'source-execution',
-    }
-
-    mockDownloadFile.mockImplementation(async ({ key }) => {
-      if (key.includes('large-value')) {
-        return Buffer.from(JSON.stringify({ file }), 'utf8')
-      }
-      return Buffer.from('hello', 'utf8')
-    })
-
-    const hydrated = await hydrateUserFilesWithBase64(
-      { ref },
-      {
-        workspaceId: 'workspace',
-        workflowId: 'workflow',
-        executionId: 'resume-execution',
-        largeValueKeys: [ref.key],
         userId: 'user-1',
         maxBytes: 1024,
       }

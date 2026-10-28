@@ -6,12 +6,15 @@ import {
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
 } from '@/lib/billing/core/billing-attribution'
-import type { VfsSnapshotV1 } from '@/lib/copilot/generated/vfs-snapshot-v1'
+import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
+  HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
   MAX_FORCED_FOLLOW_UP_ROUNDS,
+  MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
+  MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
   MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS,
   MAX_INTENT_CONTINUATION_ROUNDS,
   MAX_POPULATE_EDITS,
@@ -45,8 +48,10 @@ import {
   ThinkingLiveStatusAccumulator,
 } from '@/local-copilot/lib/agent/thinking-live-status'
 import {
-  buildStagnationSystemMessage,
+  buildFileExploreSystemMessage,
+  createFileExploreTracker,
   createToolStagnationTracker,
+  resolveStagnationAction,
 } from '@/local-copilot/lib/agent/tool-stagnation'
 import { formatUxPhaseStatus, type LocalUxPhase } from '@/local-copilot/lib/agent/ux-phase'
 import { logCopilotAction } from '@/local-copilot/lib/audit/logger'
@@ -143,6 +148,7 @@ import { LOCAL_OPS_COUNTERS, recordLocalOpsEvent } from '@/local-copilot/lib/ops
 import {
   appendMessage,
   createConversation,
+  ensureConversationForChat,
   getMessages,
   recordToolCall,
   savePatch,
@@ -173,6 +179,7 @@ import {
   buildToolFailureEvidenceLines,
   buildWorkflowBuildChatAppendix,
   buildWorkflowRunChatAppendix,
+  generatedImageChatMarkdown,
   isWorkflowRunToolName,
   shouldAppendWorkflowRunChatResult,
   stripLeakedToolMarkers,
@@ -249,6 +256,17 @@ import { resolveTurnCompletion } from '@/local-copilot/lib/verification/completi
 import { mutationRequiresVerification } from '@/local-copilot/lib/verification/policy'
 import { runPostMutationVerification } from '@/local-copilot/lib/verification/run-verification'
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
+import {
+  buildHtmlEditGrepNudgeMessage,
+  buildHtmlEditWriteGiveUpMessage,
+  buildHtmlEditWriteNudgeMessage,
+  countSuccessfulFileInspections,
+  extractHtmlEditGrepTokens,
+  hasHtmlEditContext,
+  shouldForceHtmlEditGrepNudge,
+  shouldForceHtmlEditWriteNudge,
+  shouldStopHtmlEditWithoutWrite,
+} from '@/local-copilot/lib/writes/html-edit-intent'
 import { createTurnMutations } from '@/local-copilot/lib/writes/turn-mutations'
 import { MAX_TOOL_ITERATIONS } from '@/providers'
 
@@ -317,9 +335,10 @@ export async function* runLocalCopilotAgent(
     : getLocalCopilotConfig()
   assertLocalCopilotEnabled(config)
   /**
-   * Unique per user turn. Mothership Local has no local conversationId, and
-   * round indexes reset each turn — without this, usage_log eventKeys collide
-   * and later turns are dropped by onConflictDoNothing.
+   * Unique per user turn. Mothership Chat may still lack a local conversation
+   * until ensureConversationForChat runs; round indexes reset each turn —
+   * without this, usage_log eventKeys collide and later turns are dropped by
+   * onConflictDoNothing.
    */
   const usageTurnId = params.messageId?.trim() || generateId()
   logger.info('Arena Copilot agent starting', {
@@ -453,6 +472,24 @@ export async function* runLocalCopilotAgent(
       role: 'user',
       content: { text: params.message },
     })
+  } else if (!conversationId && params.chatId?.trim()) {
+    // Chat/mothership keeps messages on copilot_messages, but audit rows need a
+    // local conversation_id FK — ensure one keyed by chatId without dual-writing history.
+    try {
+      conversationId = await ensureConversationForChat({
+        userId: params.userId,
+        workspaceId: params.workspaceId,
+        chatId: params.chatId,
+        workflowId: params.workflowId,
+        model: config.model,
+        provider: config.provider,
+      })
+    } catch (error) {
+      logger.warn('Arena Copilot failed to ensure chat audit conversation', {
+        chatId: params.chatId,
+        error: getErrorMessage(error),
+      })
+    }
   }
 
   void logCopilotAction({
@@ -781,7 +818,9 @@ export async function* runLocalCopilotAgent(
   }
   let resolvedSecretTraceRegistry: ToolExecutionContext['resolvedSecretTraceRegistry']
   try {
-    const { prepareCopilotEnvironmentContext } = await import('@/lib/copilot/environment-context')
+    const { prepareCopilotEnvironmentContext } = await import(
+      '@/lib/mothership/environment-context'
+    )
     const environmentContext = await prepareCopilotEnvironmentContext(
       params.userId,
       params.workspaceId
@@ -817,6 +856,8 @@ export async function* runLocalCopilotAgent(
     mutationIdempotency: new Map(),
     listedIntegrationToolIds: new Set(),
     readVfsPaths: new Set(),
+    failedPatchSearches: new Map(),
+    livePatchExcerptTokens: new Map(),
     allowedWorkflowIds: new Set(),
     blocksMetadataByType: new Map(),
     artifactStore: createArtifactStore(),
@@ -1004,8 +1045,10 @@ export async function* runLocalCopilotAgent(
   let forcedWorkflowBuildContinuations = 0
   let forcedIncompletePopulateContinuations = 0
   let forcedFileEditContinuations = 0
+  let forcedHtmlEditGrepNudges = 0
+  let forcedHtmlEditWriteNudges = 0
   let forcedResearchSearchContinuations = 0
-  /** Metadata / artifact calls after create and before the first successful edit. */
+  /** Successful get_blocks_metadata calls after create and before the first populate edit. */
   let prePopulateDiscoveryCalls = 0
   let refundedPrePopulateDiscoveryRounds = 0
   let roundToolNames: string[] = []
@@ -1014,7 +1057,50 @@ export async function* runLocalCopilotAgent(
   let turnInputTokens = 0
   let turnOutputTokens = 0
   const stagnationTracker = createToolStagnationTracker()
+  const fileExploreTracker = createFileExploreTracker()
   let stagnationStopMessage: string | null = null
+  /**
+   * Explore hard-stops must not wait on another model round — that await is
+   * what left Chat blank when the provider hung after endless HTML paging.
+   */
+  let stagnationSkipModelRound = false
+
+  const applyToolLoopGuards = (
+    toolName: string,
+    argsJson: string,
+    success: boolean,
+    result: unknown
+  ): {
+    stop: boolean
+    skipModelRound: boolean
+    systemMessage: string | null
+    userMessage: string | null
+  } => {
+    const exploreHit = fileExploreTracker.record(toolName, argsJson, success)
+    if (exploreHit) {
+      return {
+        stop: true,
+        skipModelRound: true,
+        systemMessage: buildFileExploreSystemMessage(exploreHit),
+        userMessage: exploreHit.message,
+      }
+    }
+
+    const stagnationHit = stagnationTracker.record(toolName, argsJson, success, result)
+    if (!stagnationHit) {
+      return { stop: false, skipModelRound: false, systemMessage: null, userMessage: null }
+    }
+    const action = resolveStagnationAction(
+      stagnationHit,
+      pendingFollowUps.map((item) => item.id)
+    )
+    return {
+      stop: action.stop,
+      skipModelRound: false,
+      systemMessage: action.systemMessage,
+      userMessage: action.stop ? stagnationHit.message : null,
+    }
+  }
 
   const needsLiveSearch = intent.primary === 'research' || intent.secondary.includes('research')
 
@@ -1025,11 +1111,7 @@ export async function* runLocalCopilotAgent(
       discoveryCallsSoFar: prePopulateDiscoveryCalls,
       toolName,
     })
-    if (decision === 'allow') {
-      prePopulateDiscoveryCalls += 1
-      return null
-    }
-    if (decision !== 'reject') return null
+    if (decision === 'allow' || decision === 'ignore') return null
     roundHadRejectedDiscovery = true
     const message = buildPrePopulateDiscoveryBlockedMessage()
     return {
@@ -1038,6 +1120,12 @@ export async function* runLocalCopilotAgent(
       error: message,
       result: { success: false, error: message, message },
     }
+  }
+
+  /** Counts only successful get_blocks_metadata toward the pre-populate budget. */
+  const recordSuccessfulBlocksMetadataFetch = () => {
+    if (!createdWorkflowThisTurn || successfulPopulateEdits > 0) return
+    prePopulateDiscoveryCalls += 1
   }
 
   // Overflow past maxToolRounds is reserved for write-critical follow-ups
@@ -1558,6 +1646,120 @@ export async function* runLocalCopilotAgent(
         continue
       }
 
+      const hasSuccessfulRead = turnToolRecords.some(
+        (record) => record.name === 'read' && record.success
+      )
+      const hasSuccessfulGrep = turnToolRecords.some(
+        (record) => record.name === 'grep' && record.success
+      )
+      const htmlEditContext = hasHtmlEditContext({
+        userMessage: userTurnText,
+        preferredPath: activeEditTarget.preferredPath,
+        candidatePaths: activeEditTarget.candidates,
+      })
+      const fileInspectionCount = countSuccessfulFileInspections(turnToolRecords)
+      const hasFileMutations = turnHasFileMutationTools(turnToolRecords)
+      const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+
+      const canForceHtmlEditGrep = shouldForceHtmlEditGrepNudge({
+        postBuildToolMode,
+        forcedHtmlEditGrepNudges,
+        maxForcedHtmlEditGrepNudges: MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasSuccessfulRead,
+        hasSuccessfulGrep,
+        hasFileMutationTools: hasFileMutations,
+        streamedUserFacingText,
+        roundDisplayText: intentDisplay,
+      })
+
+      if (canForceHtmlEditGrep) {
+        forcedHtmlEditGrepNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'system',
+          content: buildHtmlEditGrepNudgeMessage(htmlEditGrepTokens),
+        })
+        logger.info('Arena Copilot forcing HTML edit grep nudge', {
+          round,
+          forcedHtmlEditGrepNudges,
+          grepTokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
+      const canForceHtmlEditWrite = shouldForceHtmlEditWriteNudge({
+        postBuildToolMode,
+        forcedHtmlEditWriteNudges,
+        maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        inspectionCount: fileInspectionCount,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasFileMutationTools: hasFileMutations,
+        streamedUserFacingText,
+        roundDisplayText: intentDisplay,
+      })
+
+      if (canForceHtmlEditWrite) {
+        forcedHtmlEditWriteNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'system',
+          content: buildHtmlEditWriteNudgeMessage({
+            tokens: htmlEditGrepTokens,
+            preferredPath: activeEditTarget.preferredPath,
+            attempt: forcedHtmlEditWriteNudges,
+            maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML edit write nudge', {
+          round,
+          forcedHtmlEditWriteNudges,
+          fileInspectionCount,
+          grepTokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
+      if (
+        shouldStopHtmlEditWithoutWrite({
+          forcedHtmlEditWriteNudges,
+          maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+          inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+          inspectionCount: fileInspectionCount,
+          userMessage: userTurnText,
+          hasHtmlContext: htmlEditContext,
+          hasFileMutationTools: hasFileMutations,
+        })
+      ) {
+        stagnationStopMessage = buildHtmlEditWriteGiveUpMessage({
+          tokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+          userMessage: userTurnText,
+        })
+        logger.info('Arena Copilot stopping HTML edit without write after write nudges', {
+          round,
+          forcedHtmlEditWriteNudges,
+          fileInspectionCount,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        break
+      }
+
       const canForceFileEdit = shouldForceFileEditContinuation({
         postBuildToolMode,
         forcedFileEditContinuations,
@@ -1565,7 +1767,7 @@ export async function* runLocalCopilotAgent(
         round,
         maxToolRounds,
         hasFileInspectionTools: turnHasFileInspectionTools(turnToolRecords),
-        hasFileMutationTools: turnHasFileMutationTools(turnToolRecords),
+        hasFileMutationTools: hasFileMutations,
         streamedUserFacingText,
         roundDisplayText: intentDisplay,
       })
@@ -1767,7 +1969,15 @@ export async function* runLocalCopilotAgent(
         const formattedToolResult = formatToolResultForLlm(call.name, outcome.output, {
           artifactStore: toolCtx.artifactStore,
         })
-        for (const followUp of outcome.result?.pendingFollowUps ?? []) {
+        const outcomeFollowUps =
+          'result' in outcome &&
+          outcome.result &&
+          typeof outcome.result === 'object' &&
+          'pendingFollowUps' in outcome.result &&
+          Array.isArray(outcome.result.pendingFollowUps)
+            ? outcome.result.pendingFollowUps
+            : []
+        for (const followUp of outcomeFollowUps) {
           pendingFollowUps = [
             ...pendingFollowUps.filter((item) => item.id !== followUp.id),
             followUp,
@@ -1801,33 +2011,32 @@ export async function* runLocalCopilotAgent(
           }
         }
 
-        const stagnationHit = stagnationTracker.record(
+        const loopGuard = applyToolLoopGuards(
           call.name,
           call.arguments || '{}',
           outcome.success,
           outcome.output
         )
-        if (stagnationHit) {
-          if (pendingFollowUps.length > 0) {
-            deferredSystemMessages.push({
-              role: 'system',
-              content:
-                buildStagnationSystemMessage(stagnationHit) +
-                ' Required follow-up tools are still pending — call them now instead of retrying the stalled tool.',
-            })
-          } else {
-            stagnationStopMessage = stagnationHit.message
-            deferredSystemMessages.push({
-              role: 'system',
-              content: buildStagnationSystemMessage(stagnationHit),
-            })
-            logger.warn('Arena Copilot tool stagnation detected', {
-              toolName: stagnationHit.toolName,
-              count: stagnationHit.count,
-              fingerprint: stagnationHit.fingerprint,
-            })
-            break
-          }
+        if (loopGuard.systemMessage) {
+          deferredSystemMessages.push({
+            role: 'system',
+            content: loopGuard.systemMessage,
+          })
+        }
+        if (loopGuard.stop && loopGuard.userMessage) {
+          stagnationStopMessage = loopGuard.userMessage
+          stagnationSkipModelRound = loopGuard.skipModelRound
+          logger.warn('Arena Copilot tool loop hard-stop', {
+            toolName: call.name,
+            skipModelRound: loopGuard.skipModelRound,
+          })
+          break
+        }
+        if (loopGuard.systemMessage && !loopGuard.stop) {
+          logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
+            toolName: call.name,
+            pendingFollowUpIds: pendingFollowUps.map((item) => item.id),
+          })
         }
         continue
       }
@@ -2047,6 +2256,7 @@ export async function* runLocalCopilotAgent(
             completedToolCallIds.add(parallelCall.id)
 
             if (parallelCall.name === 'get_blocks_metadata' && toolResult.success) {
+              recordSuccessfulBlocksMetadataFetch()
               if (blocksMetadataFetchedThisTurn) {
                 deferredSystemMessages.push({
                   role: 'system',
@@ -2056,39 +2266,34 @@ export async function* runLocalCopilotAgent(
               blocksMetadataFetchedThisTurn = true
             }
 
-            const stagnationHit = stagnationTracker.record(
+            const loopGuard = applyToolLoopGuards(
               parallelCall.name,
               parallelCall.arguments || '{}',
               toolResult.success,
               toolResult.result
             )
-            if (stagnationHit) {
-              if (pendingFollowUps.length > 0) {
-                deferredSystemMessages.push({
-                  role: 'system',
-                  content:
-                    buildStagnationSystemMessage(stagnationHit) +
-                    ' Required follow-up tools are still pending — call them now instead of retrying the stalled tool.',
-                })
-                logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
-                  toolName: stagnationHit.toolName,
-                  count: stagnationHit.count,
-                  pendingFollowUpIds: pendingFollowUps.map((followUp) => followUp.id),
-                })
-              } else {
-                stagnationStopMessage = stagnationHit.message
-                deferredSystemMessages.push({
-                  role: 'system',
-                  content: buildStagnationSystemMessage(stagnationHit),
-                })
-                logger.warn('Arena Copilot tool stagnation detected', {
-                  toolName: stagnationHit.toolName,
-                  count: stagnationHit.count,
-                  fingerprint: stagnationHit.fingerprint,
-                })
-                stopAfterParallel = true
-                break
-              }
+            if (loopGuard.systemMessage) {
+              deferredSystemMessages.push({
+                role: 'system',
+                content: loopGuard.systemMessage,
+              })
+            }
+            if (loopGuard.stop && loopGuard.userMessage) {
+              stagnationStopMessage = loopGuard.userMessage
+              stagnationSkipModelRound = loopGuard.skipModelRound
+              logger.warn('Arena Copilot tool loop hard-stop', {
+                toolName: parallelCall.name,
+                skipModelRound: loopGuard.skipModelRound,
+                parallel: true,
+              })
+              stopAfterParallel = true
+              break
+            }
+            if (loopGuard.systemMessage && !loopGuard.stop) {
+              logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
+                toolName: parallelCall.name,
+                pendingFollowUpIds: pendingFollowUps.map((followUp) => followUp.id),
+              })
             }
           }
 
@@ -2452,6 +2657,7 @@ export async function* runLocalCopilotAgent(
       completedToolCallIds.add(call.id)
 
       if (call.name === 'get_blocks_metadata' && toolResult.success) {
+        recordSuccessfulBlocksMetadataFetch()
         if (blocksMetadataFetchedThisTurn) {
           deferredSystemMessages.push({
             role: 'system',
@@ -2560,39 +2766,32 @@ export async function* runLocalCopilotAgent(
         }
       }
 
-      const stagnationHit = stagnationTracker.record(
+      const loopGuard = applyToolLoopGuards(
         call.name,
         call.arguments || '{}',
         toolResult.success,
         toolResult.result
       )
-      if (stagnationHit) {
-        // Never abort while mandatory follow-ups (e.g. populate after create) remain.
-        if (pendingFollowUps.length > 0) {
-          deferredSystemMessages.push({
-            role: 'system',
-            content:
-              buildStagnationSystemMessage(stagnationHit) +
-              ' Required follow-up tools are still pending — call them now instead of retrying the stalled tool.',
-          })
-          logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
-            toolName: stagnationHit.toolName,
-            count: stagnationHit.count,
-            pendingFollowUpIds: pendingFollowUps.map((item) => item.id),
-          })
-        } else {
-          stagnationStopMessage = stagnationHit.message
-          deferredSystemMessages.push({
-            role: 'system',
-            content: buildStagnationSystemMessage(stagnationHit),
-          })
-          logger.warn('Arena Copilot tool stagnation detected', {
-            toolName: stagnationHit.toolName,
-            count: stagnationHit.count,
-            fingerprint: stagnationHit.fingerprint,
-          })
-          break
-        }
+      if (loopGuard.systemMessage) {
+        deferredSystemMessages.push({
+          role: 'system',
+          content: loopGuard.systemMessage,
+        })
+      }
+      if (loopGuard.stop && loopGuard.userMessage) {
+        stagnationStopMessage = loopGuard.userMessage
+        stagnationSkipModelRound = loopGuard.skipModelRound
+        logger.warn('Arena Copilot tool loop hard-stop', {
+          toolName: call.name,
+          skipModelRound: loopGuard.skipModelRound,
+        })
+        break
+      }
+      if (loopGuard.systemMessage && !loopGuard.stop) {
+        logger.warn('Arena Copilot tool stagnation soft-nudge (pending follow-ups)', {
+          toolName: call.name,
+          pendingFollowUpIds: pendingFollowUps.map((item) => item.id),
+        })
       }
     }
 
@@ -2667,71 +2866,98 @@ export async function* runLocalCopilotAgent(
   }
 
   if (stagnationStopMessage) {
-    // One more model round with the stagnation system nudge. Keep tools attached
-    // — Bedrock requires toolConfig when history already has tool content.
-    // If the model stays silent, surface the stop message directly.
-    const priorAssistantChars = assistantText.length
-    const stagnationThinkingStatus = new ThinkingLiveStatusAccumulator()
-    for await (const event of iterateWithIdleStatus({
-      source: provider.chatCompletionStream({
-        model: config.model,
-        messages,
-        tools,
-        maxTokens: maxOutputTokens,
-        signal: params.signal,
-        ...(turnThinkingLevel ? { thinkingLevel: turnThinkingLevel } : {}),
-      }),
-      abortSignal: params.signal,
-      messages: MODEL_WAIT_STATUS_FALLBACK,
-      idleMs: 2500,
-      intervalMs: 2500,
-    })) {
-      if (event.type === 'status') {
-        if (!stagnationThinkingStatus.isPublishing) yield event
-        continue
-      }
-      const chunk = event.item
-      if (chunk.type === 'thinking_block') continue
-      if (chunk.type === 'gemini_model_parts') continue
-      if (chunk.type === 'thinking' && chunk.content) {
-        const announceThinking = !stagnationThinkingStatus.isPublishing
-        applyModelChunkToThinkingStatus(stagnationThinkingStatus, chunk)
-        yield { type: 'thinking_delta', content: chunk.content }
-        if (announceThinking) {
-          yield { type: 'status', message: 'Thinking…' }
-        }
-        continue
-      }
-      applyModelChunkToThinkingStatus(stagnationThinkingStatus, chunk)
-      if (chunk.type === 'text' && chunk.content) {
-        const cleaned = stripIdsFromUserFacingText(
-          stripLeakedToolMarkers(chunk.content, { trim: false })
-        )
-        if (!cleaned) continue
-        assistantText += cleaned
-        streamedUserFacingText += cleaned
-        yield { type: 'text_delta', content: cleaned }
-      }
-      if (chunk.type === 'done') {
-        if (chunk.finishReason) lastFinishReason = chunk.finishReason
-        if (chunk.usage) {
-          turnCost.addModelUsage({
-            model: config.model,
-            inputTokens: chunk.usage.inputTokens,
-            outputTokens: chunk.usage.outputTokens,
-            cacheReadTokens: chunk.usage.cacheReadTokens,
-            provider: config.provider,
-          })
-          turnInputTokens += chunk.usage.inputTokens
-          turnOutputTokens += chunk.usage.outputTokens
-        }
-      }
-    }
-    if (assistantText.length === priorAssistantChars) {
+    if (stagnationSkipModelRound) {
+      // Explore hard-stop: emit the closer immediately so finalize always has
+      // assistant content even if the next provider round would hang.
       const safe = stripIdsFromUserFacingText(stagnationStopMessage)
-      assistantText += safe
-      streamedUserFacingText += safe
-      yield { type: 'text_delta', content: safe }
+      const chunk = streamedUserFacingText.trim() ? `\n\n${safe}` : safe
+      assistantText = streamedUserFacingText.trim() ? `${streamedUserFacingText}${chunk}` : safe
+      streamedUserFacingText = assistantText
+      yield { type: 'text_delta', content: chunk }
+      void logCopilotAction({
+        userId: params.userId,
+        workspaceId: params.workspaceId,
+        workflowId: params.workflowId,
+        conversationId,
+        action: 'file_explore_hard_stop',
+        summary: safe.slice(0, 200),
+        status: 'failure',
+        metadata: {
+          chatId: params.chatId,
+          runId: params.runId,
+          backend: 'local',
+          inspectionToolCount: turnToolRecords.filter((record) =>
+            ['read', 'grep', 'glob', 'load_copilot_artifact'].includes(record.name)
+          ).length,
+        },
+      }).catch(() => undefined)
+    } else {
+      // One more model round with the stagnation system nudge. Keep tools attached
+      // — Bedrock requires toolConfig when history already has tool content.
+      // If the model stays silent, surface the stop message directly.
+      const priorAssistantChars = assistantText.length
+      const stagnationThinkingStatus = new ThinkingLiveStatusAccumulator()
+      for await (const event of iterateWithIdleStatus({
+        source: provider.chatCompletionStream({
+          model: config.model,
+          messages,
+          tools,
+          maxTokens: maxOutputTokens,
+          signal: params.signal,
+          ...(turnThinkingLevel ? { thinkingLevel: turnThinkingLevel } : {}),
+        }),
+        abortSignal: params.signal,
+        messages: MODEL_WAIT_STATUS_FALLBACK,
+        idleMs: 2500,
+        intervalMs: 2500,
+      })) {
+        if (event.type === 'status') {
+          if (!stagnationThinkingStatus.isPublishing) yield event
+          continue
+        }
+        const chunk = event.item
+        if (chunk.type === 'thinking_block') continue
+        if (chunk.type === 'gemini_model_parts') continue
+        if (chunk.type === 'thinking' && chunk.content) {
+          const announceThinking = !stagnationThinkingStatus.isPublishing
+          applyModelChunkToThinkingStatus(stagnationThinkingStatus, chunk)
+          yield { type: 'thinking_delta', content: chunk.content }
+          if (announceThinking) {
+            yield { type: 'status', message: 'Thinking…' }
+          }
+          continue
+        }
+        applyModelChunkToThinkingStatus(stagnationThinkingStatus, chunk)
+        if (chunk.type === 'text' && chunk.content) {
+          const cleaned = stripIdsFromUserFacingText(
+            stripLeakedToolMarkers(chunk.content, { trim: false })
+          )
+          if (!cleaned) continue
+          assistantText += cleaned
+          streamedUserFacingText += cleaned
+          yield { type: 'text_delta', content: cleaned }
+        }
+        if (chunk.type === 'done') {
+          if (chunk.finishReason) lastFinishReason = chunk.finishReason
+          if (chunk.usage) {
+            turnCost.addModelUsage({
+              model: config.model,
+              inputTokens: chunk.usage.inputTokens,
+              outputTokens: chunk.usage.outputTokens,
+              cacheReadTokens: chunk.usage.cacheReadTokens,
+              provider: config.provider,
+            })
+            turnInputTokens += chunk.usage.inputTokens
+            turnOutputTokens += chunk.usage.outputTokens
+          }
+        }
+      }
+      if (assistantText.length === priorAssistantChars) {
+        const safe = stripIdsFromUserFacingText(stagnationStopMessage)
+        assistantText += safe
+        streamedUserFacingText += safe
+        yield { type: 'text_delta', content: safe }
+      }
     }
   }
 
@@ -2767,6 +2993,7 @@ export async function* runLocalCopilotAgent(
               createdWorkflowThisTurn,
               successfulPopulateEdits,
               unresolvedFollowUpHint: followUpClosing ? (pendingFollowUps[0]?.hint ?? null) : null,
+              unresolvedFollowUpUserHint: pendingFollowUps[0]?.userHint ?? null,
             })
           : null) ??
         synthesizeAssistantSummaryFromTools(turnToolRecords) ??
@@ -2863,12 +3090,13 @@ export async function* runLocalCopilotAgent(
     const visible = stripIdsFromUserFacingText(
       stripOptionsTagsForDisplay(streamedUserFacingText, false)
     ).trim()
-    const followUpHint = pendingFollowUps[0]?.hint ?? null
+    const followUp = pendingFollowUps[0]
     const guaranteed =
       buildWorkflowBuildChatAppendix(turnToolRecords, {
         createdWorkflowThisTurn,
         successfulPopulateEdits,
-        unresolvedFollowUpHint: followUpHint,
+        unresolvedFollowUpHint: followUp?.hint ?? null,
+        unresolvedFollowUpUserHint: followUp?.userHint ?? null,
       }) ??
       buildUnresolvedFollowUpClosingMessage(pendingFollowUps) ??
       synthesizeAssistantSummaryFromTools(turnToolRecords)
@@ -2890,6 +3118,20 @@ export async function* runLocalCopilotAgent(
         streamedUserFacingText += chunk
         yield { type: 'text_delta', content: chunk }
       }
+    }
+  }
+
+  const imageMarkdown = generatedImageChatMarkdown(turnToolRecords)
+  if (imageMarkdown) {
+    const missing = imageMarkdown
+      .split('\n\n')
+      .filter((line) => line.length > 0 && !streamedUserFacingText.includes(line))
+    if (missing.length > 0) {
+      const body = missing.join('\n\n')
+      const chunk = streamedUserFacingText.trim() ? `\n\n${body}` : body
+      assistantText += chunk
+      streamedUserFacingText += chunk
+      yield { type: 'text_delta', content: chunk }
     }
   }
 

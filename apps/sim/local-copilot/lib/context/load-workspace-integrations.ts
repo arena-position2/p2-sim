@@ -1,14 +1,14 @@
-import {
-  getHubSpotSharedAccountOptionIds,
-  mergeOAuthIntegrationPresence,
-} from '@/lib/copilot/chat/env-integration-presence'
-import type { VfsSnapshotV1 } from '@/lib/copilot/generated/vfs-snapshot-v1'
 import { isHosted } from '@/lib/core/config/env-flags'
 import {
   getAccessibleEnvCredentials,
   getAccessibleOAuthCredentials,
 } from '@/lib/credentials/environment'
 import { getEffectiveDecryptedEnv } from '@/lib/environment/utils'
+import {
+  getHubSpotSharedAccountOptionIds,
+  mergeOAuthIntegrationPresence,
+} from '@/lib/mothership/chat/env-integration-presence'
+import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import type { LocalCopilotConnectedIntegration } from '@/local-copilot/lib/types'
 
 export interface WorkspaceIntegrationsContext {

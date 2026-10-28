@@ -10,7 +10,7 @@ import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { getBaseUrl } from '@/lib/core/utils/urls'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { uploadWorkspaceFile } from '@/lib/uploads/contexts/workspace'
-import { getMaxOutputTokensForModel } from '@/providers/utils'
+import { getMaxOutputTokensForModel } from '@/providers/models'
 
 const logger = createLogger('FigmaToHTMLAPI')
 

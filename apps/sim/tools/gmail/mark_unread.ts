@@ -100,9 +100,9 @@ export const gmailMarkUnreadV2Tool: InternalToolConfig<GmailMarkReadParams, Gmai
       return {
         success: true,
         output: {
-          id: metadata?.id ?? null,
-          threadId: metadata?.threadId ?? null,
-          labelIds: metadata?.labelIds ?? null,
+          id: metadata?.id,
+          threadId: metadata?.threadId,
+          labelIds: metadata?.labelIds,
         },
       }
     },

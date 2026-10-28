@@ -1,10 +1,13 @@
 import { createLogger } from '@sim/logger'
 import { AuthType } from '@/lib/auth/hybrid'
-import { executeCopilotCredentialUseCase } from '@/lib/copilot/application/execute-credential-use-case'
-import type { CopilotExecutionContext } from '@/lib/copilot/auth/application-delegation'
 import { createCopilotManagedOAuthPrincipal } from '@/lib/credentials/application/copilot-managed-oauth-delegation'
 import { bindExecutorManagedOAuthDelegation } from '@/lib/credentials/application/managed-oauth-delegation'
 import { authorizePersonalCredential } from '@/lib/credentials/application/personal-credentials'
+import { executeCopilotCredentialUseCase } from '@/lib/mothership/application/execute-credential-use-case'
+import { resolveCopilotOrganizationPersonalToken } from '@/lib/mothership/application/resolve-organization-personal-token'
+import { projectAssistantConnectedAccountTool } from '@/lib/mothership/assistant/connected-account-tool'
+import type { CopilotExecutionContext } from '@/lib/mothership/auth/application-delegation'
+import { CredentialRevokedError, OAUTH_CREDENTIAL_REVOKED } from '@/lib/oauth/credential-revoked'
 import {
   type CredentialTokenPayload,
   resolveCredentialAccessToken,
@@ -60,12 +63,27 @@ export async function resolveExecutorCredentialToken(
     if (!userId || userId !== copilotExecutionContext.userId || executorDelegationOrigin) {
       throw new Error('Assistant credential use requires the authenticated person for this turn.')
     }
-    const tool = toolId ? getToolMetadata(toolId) : undefined
-    if (!tool?.oauth?.required || !copilotExecutionContext.workspaceId || params.impersonateEmail) {
+    const original = toolId ? getToolMetadata(toolId) : undefined
+    const tool = original ? projectAssistantConnectedAccountTool(original) : undefined
+    if (
+      !tool?.oauth?.required ||
+      (!copilotExecutionContext.workspaceId && !copilotExecutionContext.organizationId) ||
+      params.impersonateEmail
+    ) {
       throw new Error(
         'Assistant requires your own connected account and cannot impersonate another user.'
       )
     }
+    if (copilotExecutionContext.organizationId) {
+      return resolveCopilotOrganizationPersonalToken(copilotExecutionContext, {
+        credentialId,
+        expectedProviderId: tool.oauth.provider,
+        requiredScopes: params.scopes ?? [],
+        toolId: tool.id,
+      })
+    }
+    if (!copilotExecutionContext.workspaceId)
+      throw new Error('Workspace credential scope is required')
     await executeCopilotCredentialUseCase(copilotExecutionContext, authorizePersonalCredential, {
       workspaceId: copilotExecutionContext.workspaceId,
       credentialId,
@@ -107,14 +125,17 @@ export async function resolveExecutorCredentialToken(
   })
 
   if (!result.ok) {
+    const message = `Failed to obtain credential for ${params.toolLabel ?? credentialId}: ${result.error}`
+    // The resolver already logged the revocation once, at WARN, where it was classified.
+    if (result.code === OAUTH_CREDENTIAL_REVOKED) {
+      throw new CredentialRevokedError(message)
+    }
     logger.error(`[${requestId}] Credential token resolution failed`, {
       status: result.status,
       credentialId,
       code: result.code,
     })
-    throw new Error(
-      `Failed to obtain credential for ${params.toolLabel ?? credentialId}: ${result.error}`
-    )
+    throw new Error(message)
   }
 
   return result.token

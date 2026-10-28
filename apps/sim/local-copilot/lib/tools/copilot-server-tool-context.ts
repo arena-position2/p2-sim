@@ -1,4 +1,4 @@
-import type { ToolExecutionContext as CopilotToolExecutionContext } from '@/lib/copilot/tool-executor/types'
+import type { ToolExecutionContext as CopilotToolExecutionContext } from '@/lib/mothership/tool-executor/types'
 import { getLocalCopilotSandboxProfile } from '@/local-copilot/lib/context/e2b-capabilities'
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'
 

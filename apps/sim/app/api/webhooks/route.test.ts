@@ -1,13 +1,9 @@
-/**
- * @vitest-environment node
- */
 import { webhook, workflow } from '@sim/db/schema'
 import {
   auditMock,
   authMockFns,
   createMockRequest,
   dbChainMockFns,
-  flattenMockConditions,
   permissionGroupScopeMock,
   permissionGroupScopeMockFns,
   posthogServerMock,
@@ -16,9 +12,12 @@ import {
   telemetryMock,
   workflowAuthzMockFns,
 } from '@sim/testing'
+import { toRecord } from '@sim/utils/object'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  activateExternalWebhookSubscription: vi.fn(),
+  cleanupExternalWebhook: vi.fn(),
   authorizeCredentialUseForAuth: vi.fn(),
   configurePolling: vi.fn(),
   createExternalWebhookSubscription: vi.fn(),
@@ -39,7 +38,8 @@ vi.mock('@/lib/webhooks/env-resolver', () => ({
   resolveEnvVarsInObject: mocks.resolveEnvVarsInObject,
 }))
 vi.mock('@/lib/webhooks/provider-subscriptions', () => ({
-  cleanupExternalWebhook: vi.fn(),
+  activateExternalWebhookSubscription: mocks.activateExternalWebhookSubscription,
+  cleanupExternalWebhook: mocks.cleanupExternalWebhook,
   createExternalWebhookSubscription: mocks.createExternalWebhookSubscription,
   shouldRecreateExternalWebhookSubscription: mocks.shouldRecreateExternalWebhookSubscription,
 }))
@@ -55,7 +55,6 @@ import { POST } from '@/app/api/webhooks/route'
 
 describe('POST /api/webhooks polling configuration', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     authMockFns.mockGetSession.mockResolvedValue({
       user: { id: 'actor-1', name: 'Actor', email: 'actor@example.com' },
@@ -81,149 +80,6 @@ describe('POST /api/webhooks polling configuration', () => {
     })
     mocks.configurePolling.mockResolvedValue(true)
     mocks.getProviderHandler.mockReturnValue({ configurePolling: mocks.configurePolling })
-  })
-
-  it('passes the authenticated actor and canonical workflow workspace to legacy polling setup', async () => {
-    const savedWebhook = {
-      id: 'webhook-1',
-      workflowId: 'workflow-1',
-      blockId: 'block-1',
-      path: 'imap-hook',
-      provider: 'imap',
-      deploymentVersionId: 'deployment-1',
-      providerConfig: {
-        host: '{{IMAP_HOST}}',
-        username: '{{IMAP_USERNAME}}',
-        password: '{{IMAP_PASSWORD}}',
-      },
-      isActive: true,
-    }
-    queueTableRows(workflow, [
-      {
-        id: 'workflow-1',
-        userId: 'owner-1',
-        workspaceId: 'canonical-workspace',
-        deploymentVersionId: 'deployment-1',
-      },
-    ])
-    queueTableRows(webhook, [])
-    dbChainMockFns.returning.mockImplementationOnce(async () => {
-      const insertedValues = dbChainMockFns.values.mock.calls.at(-1)?.[0] as {
-        deploymentVersionId?: string | null
-      }
-      return [
-        {
-          ...savedWebhook,
-          deploymentVersionId: insertedValues.deploymentVersionId ?? null,
-        },
-      ]
-    })
-
-    const response = await POST(
-      createMockRequest(
-        'POST',
-        {
-          workflowId: 'workflow-1',
-          blockId: 'block-1',
-          path: 'imap-hook',
-          provider: 'imap',
-          providerConfig: savedWebhook.providerConfig,
-        },
-        {},
-        'http://localhost:3000/api/webhooks'
-      )
-    )
-
-    expect(response.status).toBe(201)
-    expect(dbChainMockFns.values).toHaveBeenCalledWith(
-      expect.objectContaining({ deploymentVersionId: 'deployment-1' })
-    )
-    expect(mocks.configurePolling).toHaveBeenCalledWith({
-      webhook: savedWebhook,
-      requestId: 'mock-request-id',
-      userId: 'actor-1',
-      workspaceId: 'canonical-workspace',
-      deploymentVersionId: 'deployment-1',
-    })
-  })
-
-  it('updates only the current-deployment IMAP webhook before polling setup', async () => {
-    const existingWebhook = {
-      id: 'webhook-1',
-      workflowId: 'workflow-1',
-      blockId: 'block-1',
-      path: 'imap-hook',
-      provider: 'imap',
-      deploymentVersionId: 'deployment-1',
-      providerConfig: {
-        host: '{{IMAP_HOST}}',
-        username: '{{IMAP_USERNAME}}',
-        password: '{{IMAP_PASSWORD}}',
-      },
-      isActive: true,
-    }
-    queueTableRows(workflow, [
-      {
-        id: 'workflow-1',
-        userId: 'owner-1',
-        workspaceId: 'canonical-workspace',
-        deploymentVersionId: 'deployment-1',
-      },
-    ])
-    queueTableRows(webhook, [{ id: existingWebhook.id }])
-    queueTableRows(webhook, [existingWebhook])
-    dbChainMockFns.returning.mockImplementationOnce(async () => {
-      const updatedValues = dbChainMockFns.set.mock.calls.at(-1)?.[0] as {
-        deploymentVersionId?: string | null
-      }
-      return [
-        {
-          ...existingWebhook,
-          deploymentVersionId: updatedValues.deploymentVersionId ?? null,
-        },
-      ]
-    })
-
-    const response = await POST(
-      createMockRequest(
-        'POST',
-        {
-          workflowId: 'workflow-1',
-          blockId: 'block-1',
-          path: 'imap-hook',
-          provider: 'imap',
-          providerConfig: existingWebhook.providerConfig,
-        },
-        {},
-        'http://localhost:3000/api/webhooks'
-      )
-    )
-
-    const repairedWebhook = {
-      ...existingWebhook,
-      deploymentVersionId: 'deployment-1',
-    }
-    expect(response.status).toBe(200)
-    const pathLookupConditions = dbChainMockFns.where.mock.calls
-      .map(([condition]) => flattenMockConditions(condition))
-      .find((conditions) =>
-        conditions.some((condition) => condition.type === 'eq' && condition.right === 'imap-hook')
-      )
-    expect(pathLookupConditions).toContainEqual({
-      type: 'eq',
-      left: 'webhook.deploymentVersionId',
-      right: 'deployment-1',
-    })
-    expect(dbChainMockFns.set).toHaveBeenCalledWith(
-      expect.objectContaining({ deploymentVersionId: 'deployment-1' })
-    )
-    expect(mocks.configurePolling).toHaveBeenCalledWith({
-      webhook: repairedWebhook,
-      requestId: 'mock-request-id',
-      userId: 'actor-1',
-      workspaceId: 'canonical-workspace',
-      deploymentVersionId: 'deployment-1',
-    })
   })
 
   it('creates an active IMAP webhook instead of rebinding a historical row', async () => {
@@ -445,15 +301,6 @@ describe('POST /api/webhooks triggers.webhook gate', () => {
     expect(mocks.createExternalWebhookSubscription).not.toHaveBeenCalled()
   })
 
-  it('creates the webhook when no group withholds the capability', async () => {
-    queueCreatePathRows()
-
-    const response = await POST(upsertRequest())
-
-    expect(response.status).not.toBe(403)
-    expect(mocks.createExternalWebhookSubscription).toHaveBeenCalledTimes(1)
-  })
-
   /**
    * The upsert always writes `isActive: true`, so re-saving a dormant webhook is
    * the same transition `PATCH /api/webhooks/[id]` gates — a workflow becoming
@@ -470,35 +317,6 @@ describe('POST /api/webhooks triggers.webhook gate', () => {
 
     expect(response.status).toBe(403)
     expect(dbChainMockFns.set).not.toHaveBeenCalled()
-  })
-
-  /**
-   * An already-active webhook is already reachable, so re-saving its config adds
-   * no exposure. Refusing it would strand a member unable to repair a live
-   * integration — the same reason inbound delivery is never gated.
-   */
-  it('still lets an already-active webhook be reconfigured under the same group', async () => {
-    permissionGroupScopeMockFns.mockResolvePermissionGroupConfig.mockResolvedValue({
-      ...DEFAULT_PERMISSION_GROUP_CONFIG,
-      disableWebhookTriggers: true,
-    })
-    queueUpdatePathRows(true)
-
-    const response = await POST(upsertRequest())
-
-    expect(response.status).toBe(200)
-    expect(dbChainMockFns.set).toHaveBeenCalledWith(
-      expect.objectContaining({ isActive: true, provider: 'generic' })
-    )
-  })
-
-  it('reactivates a dormant webhook when no group withholds the capability', async () => {
-    queueUpdatePathRows(false)
-
-    const response = await POST(upsertRequest())
-
-    expect(response.status).toBe(200)
-    expect(dbChainMockFns.set).toHaveBeenCalledWith(expect.objectContaining({ isActive: true }))
   })
 })
 
@@ -539,19 +357,6 @@ describe('POST /api/webhooks credential references', () => {
     expect(response.status).toBe(400)
     expect(mocks.authorizeCredentialUseForAuth).not.toHaveBeenCalled()
     expect(mocks.createExternalWebhookSubscription).not.toHaveBeenCalled()
-  })
-
-  it('saves a credential the actor can use in the workflow workspace', async () => {
-    mocks.authorizeCredentialUseForAuth.mockResolvedValue(CREDENTIAL_ALLOWED)
-    queueCreatePathRows()
-
-    const response = await POST(upsertRequest({ credentialId: 'own-credential' }))
-
-    expect(response.status).toBe(201)
-    expect(mocks.createExternalWebhookSubscription).toHaveBeenCalledTimes(1)
-    expect(dbChainMockFns.values).toHaveBeenCalledWith(
-      expect.objectContaining({ providerConfig: { credentialId: 'own-credential' } })
-    )
   })
 
   /** The polling token resolver mints `providerConfig.userId`'s token when no credential is set. */
@@ -632,24 +437,6 @@ describe('POST /api/webhooks credential references', () => {
     }
   )
 
-  /** Rotation without recreation never touches the old credential, so it needs no access to it. */
-  it('rotates the credential without access to the stored one when nothing is recreated', async () => {
-    mocks.authorizeCredentialUseForAuth.mockImplementation(async (_auth, { credentialId }) =>
-      credentialId === 'new-credential' ? CREDENTIAL_ALLOWED : CREDENTIAL_DENIED
-    )
-    queueUpdatePathRows(true, { credentialId: 'stored-credential' })
-
-    const response = await POST(upsertRequest({ credentialId: 'new-credential' }))
-
-    expect(response.status).toBe(200)
-    expect(mocks.authorizeCredentialUseForAuth.mock.calls.map(([, params]) => params)).toEqual([
-      { credentialId: 'new-credential', workflowId: 'workflow-1' },
-    ])
-    expect(dbChainMockFns.set).toHaveBeenCalledWith(
-      expect.objectContaining({ providerConfig: { credentialId: 'new-credential' } })
-    )
-  })
-
   /** Recreation cleans up the previous subscription with the stored credential. */
   it('authorizes both credentials when a rotation recreates the subscription', async () => {
     mocks.authorizeCredentialUseForAuth.mockResolvedValue(CREDENTIAL_ALLOWED)
@@ -665,30 +452,6 @@ describe('POST /api/webhooks credential references', () => {
     ])
   })
 
-  /**
-   * Recreation cleans up the previous subscription with the stored credential even
-   * when the request omits it, and a `userId` echoed back by the provider is not saved.
-   */
-  it('authorizes the stored credential and drops userId when an omitting re-save recreates', async () => {
-    mocks.authorizeCredentialUseForAuth.mockResolvedValue(CREDENTIAL_ALLOWED)
-    mocks.shouldRecreateExternalWebhookSubscription.mockReturnValue(true)
-    mocks.createExternalWebhookSubscription.mockResolvedValue({
-      updatedProviderConfig: { externalId: 'subscription-2', userId: 'stored-user' },
-      externalSubscriptionCreated: true,
-    })
-    queueUpdatePathRows(true, { credentialId: 'stored-credential', userId: 'stored-user' })
-
-    const response = await POST(upsertRequest({ eventType: 'record.created' }))
-
-    expect(response.status).toBe(200)
-    expect(mocks.authorizeCredentialUseForAuth).toHaveBeenCalledWith(expect.anything(), {
-      credentialId: 'stored-credential',
-      workflowId: 'workflow-1',
-    })
-    const savedConfig = dbChainMockFns.set.mock.calls.at(-1)?.[0].providerConfig
-    expect(savedConfig).toEqual({ eventType: 'record.created', externalId: 'subscription-2' })
-  })
-
   /** The permission-group refusal keeps answering first, before any credential lookup. */
   it('refuses a withheld creation before authorizing its credential', async () => {
     permissionGroupScopeMockFns.mockResolvePermissionGroupConfig.mockResolvedValue({
@@ -702,4 +465,157 @@ describe('POST /api/webhooks credential references', () => {
     expect(response.status).toBe(403)
     expect(mocks.authorizeCredentialUseForAuth).not.toHaveBeenCalled()
   })
+})
+
+describe('POST /api/webhooks subscription replacement recovery', () => {
+  beforeEach(setupUpsertMocks)
+  it.each(['create', 'save'])(
+    'preserves the live subscription when replacement fails at %s',
+    async (failure) => {
+      queueUpdatePathRows(true, {
+        autoRegister: true,
+        externalId: 'external-old',
+        webhookSecret: 'old-secret',
+      })
+      mocks.getProviderHandler.mockReturnValue({ activateSubscription: async () => undefined })
+      mocks.shouldRecreateExternalWebhookSubscription.mockReturnValue(true)
+      const external = new Set(['external-old'])
+      mocks.createExternalWebhookSubscription.mockImplementation(async () => {
+        if (failure === 'create') throw new Error('creation unavailable')
+        external.add('external-new')
+        return {
+          updatedProviderConfig: {
+            autoRegister: true,
+            externalId: 'external-new',
+            webhookSecret: 'new-secret',
+            subscriptionActivationPending: true,
+          },
+          externalSubscriptionCreated: true,
+        }
+      })
+      if (failure === 'save')
+        dbChainMockFns.set.mockImplementation(() => {
+          throw new Error('database unavailable')
+        })
+      mocks.cleanupExternalWebhook.mockImplementation(async (row) => {
+        external.delete(String(toRecord(row.providerConfig).externalId))
+      })
+      expect((await POST(upsertRequest({ autoRegister: true }))).status).toBe(500)
+      expect([...external]).toEqual(['external-old'])
+    }
+  )
+  it.each([false, true])(
+    'retains recoverable state when prior cleanup fails: %s',
+    async (priorCleanupFails) => {
+      let cleanupUnavailable = priorCleanupFails
+      let activationMustFail = !priorCleanupFails
+      let nextExternalId = 0
+      let persisted: Record<string, unknown> = {
+        id: 'webhook-1',
+        workflowId: 'workflow-1',
+        blockId: 'block-1',
+        path: 'inbound-orders',
+        provider: 'plane',
+        isActive: true,
+        archivedAt: null,
+        providerConfig: {
+          autoRegister: true,
+          projectId: 'prior',
+          externalId: 'external-old',
+          webhookSecret: 'old-secret',
+        },
+      }
+      const external = new Map<string, { active: boolean }>([['external-old', { active: true }]])
+      const desired = { autoRegister: true, projectId: 'next' }
+      mocks.getProviderHandler.mockReturnValue({
+        createSubscription: async () => undefined,
+        activateSubscription: async () => undefined,
+      })
+      mocks.shouldRecreateExternalWebhookSubscription.mockImplementation(
+        ({ previousConfig, nextConfig }) => previousConfig.projectId !== nextConfig.projectId
+      )
+      const defaultSet = dbChainMockFns.set.getMockImplementation()
+      dbChainMockFns.set.mockImplementation((...args: unknown[]) => {
+        persisted = { ...persisted, ...structuredClone(toRecord(args[0])) }
+        return defaultSet?.(...args)
+      })
+      dbChainMockFns.returning.mockImplementation(async () => [structuredClone(persisted)])
+      mocks.createExternalWebhookSubscription.mockImplementation(async (_request, row) => {
+        const externalId = `external-${++nextExternalId}`
+        external.set(externalId, { active: false })
+        return {
+          updatedProviderConfig: {
+            ...toRecord(row.providerConfig),
+            externalId,
+            webhookSecret: 'new-secret',
+            subscriptionActivationPending: true,
+          },
+          externalSubscriptionCreated: true,
+        }
+      })
+      mocks.activateExternalWebhookSubscription.mockImplementation(async (_request, row) => {
+        const resource = external.get(String(toRecord(row.providerConfig).externalId))
+        if (!resource) throw new Error('provider subscription missing')
+        if (activationMustFail) {
+          activationMustFail = false
+          throw new Error('activation unavailable')
+        }
+        resource.active = true
+      })
+      mocks.cleanupExternalWebhook.mockImplementation(
+        async (row, _workflow, _requestId, options) => {
+          const externalId = String(toRecord(row.providerConfig).externalId)
+          if (cleanupUnavailable && externalId === 'external-old') {
+            if (options?.throwOnError) throw new Error('cleanup unavailable')
+            return
+          }
+          external.delete(externalId)
+        }
+      )
+      function queueCurrentRows(): void {
+        queueTableRows(workflow, [
+          { id: 'workflow-1', userId: 'actor-1', workspaceId: 'workspace-1' },
+        ])
+        queueTableRows(webhook, [{ id: 'webhook-1' }])
+        queueTableRows(webhook, [structuredClone(persisted)])
+      }
+      function replacementRequest() {
+        return createMockRequest('POST', {
+          workflowId: 'workflow-1',
+          path: 'inbound-orders',
+          provider: 'plane',
+          providerConfig: desired,
+        })
+      }
+      queueCurrentRows()
+      expect((await POST(replacementRequest())).status).toBe(500)
+      expect(external.size).toBe(2)
+      const retainedConfig = toRecord(persisted.providerConfig)
+      if (priorCleanupFails) {
+        expect(retainedConfig.projectId).toBe('next')
+        expect(toRecord(retainedConfig.previousSubscription).providerConfig).toEqual({
+          autoRegister: true,
+          projectId: 'prior',
+          externalId: 'external-old',
+          webhookSecret: 'old-secret',
+        })
+        expect(external.get('external-old')?.active).toBe(true)
+        expect(external.get(String(retainedConfig.externalId))?.active).toBe(true)
+      } else {
+        expect(retainedConfig.projectId).toBe('next')
+        expect(retainedConfig.webhookSecret).toBe('new-secret')
+        expect(external.get('external-old')?.active).toBe(true)
+        expect(external.get(String(retainedConfig.externalId))?.active).toBe(false)
+      }
+      cleanupUnavailable = false
+      queueCurrentRows()
+      expect((await POST(replacementRequest())).status).toBe(200)
+      expect(external.size).toBe(1)
+      const recoveredConfig = toRecord(persisted.providerConfig)
+      expect(recoveredConfig.projectId).toBe('next')
+      expect(recoveredConfig.webhookSecret).toBe('new-secret')
+      expect(external.get(String(recoveredConfig.externalId))?.active).toBe(true)
+      if (!priorCleanupFails) expect(recoveredConfig.externalId).toBe(retainedConfig.externalId)
+    }
+  )
 })

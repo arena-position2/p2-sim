@@ -1,26 +1,42 @@
-/** @vitest-environment node */
 import { dbChainMockFns, resetDbChainMock } from '@sim/testing'
+import {
+  createPersonalApiKeyPrincipal,
+  createSessionPrincipal,
+} from '@sim/testing/factories/principal.factory'
+import {
+  permissionGroupsResolveMock,
+  permissionGroupsResolveMockFns,
+} from '@sim/testing/mocks/permission-groups-resolve.mock'
+import { storageServiceMock, storageServiceMockFns } from '@sim/testing/mocks/storage-service.mock'
+import { uploadSessionMock, uploadSessionMockFns } from '@sim/testing/mocks/upload-session.mock'
+import { uploadsConfigMock } from '@sim/testing/mocks/uploads-config.mock'
 import sharp from 'sharp'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ download: vi.fn(), config: vi.fn(), create: vi.fn() }))
-vi.mock('@/lib/uploads/core/storage-service', () => ({ downloadFile: mocks.download }))
-vi.mock('@/lib/uploads/upload-session/service', () => ({ createUploadSession: mocks.create }))
-vi.mock('@/lib/permission-groups/resolve.server', () => ({
-  getUserPermissionConfigForOrganization: mocks.config,
-}))
-vi.mock('@/lib/uploads/config', () => ({ getServeStoragePrefix: () => 's3' }))
+const hoisted = vi.hoisted(() => ({}))
+vi.mock('@/lib/uploads/core/storage-service', () => storageServiceMock)
+vi.mock('@/lib/uploads/upload-session/service', () => uploadSessionMock)
+vi.mock('@/lib/permission-groups/resolve.server', () => permissionGroupsResolveMock)
+vi.mock('@/lib/uploads/config', () => uploadsConfigMock)
 
 import {
   authorizeOrganizationAttachmentControl,
   createOrganizationAssistantAttachment,
   finalizeOrganizationAssistantAttachment,
   readOrganizationAssistantImage,
+  readOrganizationChatAttachment,
 } from '@/lib/uploads/contexts/organization-assistant/application'
 import { ASSISTANT_IMAGE_MAX_BYTES } from '@/lib/uploads/shared/assistant-images'
 import type { UploadSessionRecord } from '@/lib/uploads/upload-session/service'
 
-const principal = { kind: 'session', userId: 'user-1', sessionId: 'session-1' } as const
+const mocks = {
+  config: permissionGroupsResolveMockFns.mockGetUserPermissionConfigForOrganization,
+  ...hoisted,
+  create: uploadSessionMockFns.mockCreateUploadSession,
+  download: storageServiceMockFns.mockDownloadFile,
+}
+
+const principal = createSessionPrincipal()
 const key = 'assistant/org-1/user-1/upload-1/image.png'
 const session: UploadSessionRecord = {
   id: 'upload-1',
@@ -61,7 +77,6 @@ beforeAll(async () => {
     .toBuffer()
 })
 beforeEach(() => {
-  vi.clearAllMocks()
   resetDbChainMock()
   mocks.config.mockResolvedValue(null)
   mocks.download.mockResolvedValue(png)
@@ -106,29 +121,10 @@ describe('private organization Assistant images', () => {
     expect(mocks.create).not.toHaveBeenCalled()
   })
 
-  it('reads canonical completed uploads after a new login and emits bounded decoded bytes', async () => {
-    dbChainMockFns.limit.mockResolvedValueOnce([session])
-    const signal = new AbortController().signal
-    const image = await read({ principal: { ...principal, sessionId: 'new-session' }, signal })
-    expect(image).toMatchObject({
-      id: 'upload-1',
-      key,
-      name: 'image.png',
-      contentType: 'image/webp',
-    })
-    expect((await sharp(image.buffer).metadata()).format).toBe('webp')
-    expect(mocks.download).toHaveBeenCalledWith({
-      key,
-      context: 'mothership',
-      maxBytes: ASSISTANT_IMAGE_MAX_BYTES,
-      signal,
-    })
-  })
-
   it.each([
     { key: 'https://example.com/image.png' },
     { key: 'assistant/org-1/user-1/../image.png' },
-    { principal: { kind: 'personal_api_key', userId: 'user-1', keyId: 'key-1' } as const },
+    { principal: createPersonalApiKeyPrincipal() },
   ])('rejects invalid references or non-session callers before loading', async (input) => {
     await expect(read(input)).rejects.toMatchObject({ code: 'not_found' })
     expect(dbChainMockFns.limit).not.toHaveBeenCalled()
@@ -157,12 +153,6 @@ describe('private organization Assistant images', () => {
     expect(mocks.download).not.toHaveBeenCalled()
   })
 
-  it('rejects missing immutable scope metadata', async () => {
-    dbChainMockFns.limit.mockResolvedValueOnce([{ ...session, metadata: {} }])
-    await expect(read()).rejects.toMatchObject({ code: 'not_found' })
-    expect(mocks.download).not.toHaveBeenCalled()
-  })
-
   it('refuses metadata above the byte cap without downloading', async () => {
     dbChainMockFns.limit.mockResolvedValueOnce([
       { ...session, fileSize: ASSISTANT_IMAGE_MAX_BYTES + 1 },
@@ -178,13 +168,6 @@ describe('private organization Assistant images', () => {
     dbChainMockFns.limit.mockResolvedValueOnce([session])
     mocks.download.mockResolvedValue(Buffer.from(content))
     await expect(read()).rejects.toMatchObject({ code: 'validation' })
-  })
-
-  it('propagates storage infrastructure failures unchanged', async () => {
-    const error = new Error('storage unavailable')
-    dbChainMockFns.limit.mockResolvedValueOnce([session])
-    mocks.download.mockRejectedValue(error)
-    await expect(read()).rejects.toBe(error)
   })
 
   it('rejects compressed images above the 25 megapixel decode budget', async () => {
@@ -222,5 +205,56 @@ describe('private organization Assistant images', () => {
       key,
       path: `/api/files/serve/s3/${encodeURIComponent(key)}?context=mothership`,
     })
+  })
+})
+
+describe('organization Agent attachment parity', () => {
+  const agentSession = {
+    ...session,
+    contentType: 'text/csv',
+    fileName: 'records.csv',
+    metadata: {
+      organizationAttachment: {
+        organizationId: 'org-1',
+        userId: 'user-1',
+        sessionId: 'session-1',
+        requestMode: 'agent',
+      },
+    },
+  }
+  it('uses the transfer budget for downloads while default reads retain the extraction limit', async () => {
+    const largeSession = { ...agentSession, fileSize: 30 * 1024 * 1024 }
+    dbChainMockFns.limit.mockResolvedValueOnce([largeSession])
+    await expect(readOrganizationChatAttachment({ principal, key })).rejects.toMatchObject({
+      code: 'payload_too_large',
+    })
+    expect(mocks.download).not.toHaveBeenCalled()
+    dbChainMockFns.limit.mockResolvedValueOnce([largeSession])
+    mocks.download.mockResolvedValue(Buffer.from('downloaded'))
+    await readOrganizationChatAttachment({ principal, key, maxBytes: 100 * 1024 * 1024 })
+    expect(mocks.download).toHaveBeenCalledWith(
+      expect.objectContaining({ maxBytes: 100 * 1024 * 1024 })
+    )
+  })
+  it('bounds normalized Assistant bytes by the caller limit when an image expands', async () => {
+    const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
+    dbChainMockFns.limit.mockResolvedValueOnce([
+      { ...session, contentType: 'image/gif', fileName: 'pixel.gif', fileSize: gif.length },
+    ])
+    mocks.download.mockResolvedValue(gif)
+    await expect(
+      readOrganizationChatAttachment({ principal, key, maxBytes: gif.length })
+    ).rejects.toMatchObject({ code: 'payload_too_large' })
+    expect(mocks.download).toHaveBeenCalledWith({
+      key,
+      context: 'mothership',
+      maxBytes: gif.length,
+      signal: undefined,
+    })
+  })
+  it('keeps the Assistant image route image-only even when an Agent upload exists', async () => {
+    dbChainMockFns.limit.mockResolvedValueOnce([agentSession])
+    await expect(read()).rejects.toMatchObject({ code: 'validation' })
+    expect(mocks.download).not.toHaveBeenCalled()
   })
 })

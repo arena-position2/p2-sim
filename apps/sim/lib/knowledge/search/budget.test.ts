@@ -1,9 +1,6 @@
-/** @vitest-environment node */
 import { db } from '@sim/db'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SearchBudget, SearchDeadlineError } from '@/lib/knowledge/search/budget'
-
-afterEach(() => vi.restoreAllMocks())
 
 describe('search SQL deadline', () => {
   it('does not start a fallback with a fresh budget', async () => {
@@ -42,6 +39,23 @@ describe('search SQL deadline', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('caps a step without letting it shorten or outlive the leg it came from', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(0)
+    const controller = new AbortController()
+    const leg = new SearchBudget('vector', 1000, controller.signal)
+    const step = leg.capped(600)
+    expect(step.deadline).toBe(600)
+    expect(step.leg).toBe('vector')
+    expect(step.signal).toBe(controller.signal)
+    /** Spending the step is the step's own business; the leg keeps its deadline and its verdict. */
+    step.isTimeout(new SearchDeadlineError())
+    expect(step.timedOut).toBe(true)
+    expect(leg.timedOut).toBe(false)
+    expect(leg.remaining()).toBe(1000)
+    /** A step longer than what the leg has left cannot extend it. */
+    expect(new SearchBudget('vector', 200).capped(600).deadline).toBe(200)
   })
 
   it('preserves cancellation and unexpected errors instead of labeling them incomplete evidence', async () => {

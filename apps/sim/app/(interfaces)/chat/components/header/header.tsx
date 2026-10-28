@@ -1,8 +1,10 @@
 'use client'
 
+import { OverflowText } from '@sim/emcn'
 import Image from 'next/image'
 import Link from 'next/link'
 import { GithubIcon } from '@/components/icons'
+import { SITE_URL } from '@/lib/core/utils/urls'
 import arenaLogo from '@/app/(interfaces)/chat/components/message/components/ArenaLogo.svg'
 import { useBrandConfig } from '@/ee/whitelabeling'
 
@@ -20,53 +22,17 @@ interface ChatHeaderProps {
   workflowId?: string
 }
 
-export function ChatHeader({ chatConfig, starCount, workflowId }: ChatHeaderProps) {
+export function ChatHeader({ chatConfig, starCount }: ChatHeaderProps) {
   const brand = useBrandConfig()
   const customImage = chatConfig?.customizations?.imageUrl || chatConfig?.customizations?.logoUrl
-
-  const params = new URLSearchParams(window.location.search)
-  const workspaceId = params.get('workspaceId')
-  const isFromControlBar = params.get('fromControlBar') === 'true'
-
-  // Determine environment and construct exit URL
-  const getExitUrl = () => {
-    // If opened from control bar, redirect to workspace
-    if (isFromControlBar && workspaceId && workflowId) {
-      return `/workspace/${workspaceId}/w/${workflowId}`
-    }
-
-    // Otherwise redirect based on environment
-    if (typeof window !== 'undefined') {
-      const hostname = window.location.hostname
-
-      if (hostname.includes('localhost')) {
-        return 'http://localhost:3001/agents'
-      }
-      if (hostname.includes('dev-agent')) {
-        return 'https://dev.thearena.ai/agents'
-      }
-      if (hostname.includes('test-agent')) {
-        return 'https://test.thearena.ai/agents'
-      }
-      if (hostname.includes('sandbox-agent')) {
-        return 'https://sandbox.thearena.ai/agents'
-      }
-      // prod - agent.thearena.ai
-      return 'https://app.thearena.ai/agents'
-    }
-
-    return '/'
-  }
-
-  const exitUrl = getExitUrl()
 
   return (
     <nav
       aria-label='Chat navigation'
-      className='flex w-full items-center justify-between px-4 pt-3 pb-[21px] sm:px-8 sm:pt-[8.5px] md:px-[44px] md:pt-4'
+      className='flex w-full shrink-0 items-center justify-between gap-3 px-4 pt-3 pb-[21px] sm:px-8 sm:pt-[8.5px] md:px-[44px] md:pt-4'
     >
-      <div className='flex items-center gap-[34px]'>
-        <div className='flex items-center gap-3'>
+      <div className='min-w-0 flex-1'>
+        <div className='flex min-w-0 items-center gap-3'>
           {customImage && (
             <Image
               src={customImage}
@@ -74,22 +40,24 @@ export function ChatHeader({ chatConfig, starCount, workflowId }: ChatHeaderProp
               width={24}
               height={24}
               unoptimized
-              className='size-6 rounded-md object-cover'
+              className='size-6 shrink-0 rounded-md object-cover'
             />
           )}
-          <h2 className='text-[var(--text-primary)] text-lg'>
-            {chatConfig?.customizations?.headerText || chatConfig?.title || 'Chat'}
+          <h2 className='min-w-0 text-[var(--text-primary)] text-lg'>
+            <OverflowText
+              label={chatConfig?.customizations?.headerText || chatConfig?.title || 'Chat'}
+            />
           </h2>
         </div>
       </div>
 
       {!brand.logoUrl && (
-        <div className='flex items-center gap-4'>
+        <div className='flex shrink-0 items-center gap-4'>
           <a
             href='https://github.com/simstudioai/sim'
             target='_blank'
             rel='noopener noreferrer'
-            className='flex items-center gap-2 text-[var(--text-muted)] transition-colors hover-hover:text-[var(--text-primary)]'
+            className='hidden items-center gap-2 text-[var(--text-muted)] transition-colors hover-hover:text-[var(--text-primary)] md:flex'
             aria-label={`GitHub repository - ${starCount} stars`}
           >
             <GithubIcon className='size-[16px]' aria-hidden='true' />
@@ -97,7 +65,13 @@ export function ChatHeader({ chatConfig, starCount, workflowId }: ChatHeaderProp
           </a>
           {/* Only show Arena logo if no custom branding is set */}
 
-          <Link href='/' aria-label='Arena home' className='flex items-center'>
+          <Link
+            href={SITE_URL}
+            target='_blank'
+            rel='noopener noreferrer'
+            aria-label='Arena home'
+            className='flex items-center'
+          >
             <Image src={arenaLogo} alt='Arena' width={30} height={30} />
           </Link>
         </div>

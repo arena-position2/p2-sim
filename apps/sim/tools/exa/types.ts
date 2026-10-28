@@ -4,11 +4,6 @@ interface ExaBaseParams {
   apiKey: string
 }
 
-/** Cost breakdown returned by Exa API responses. */
-interface ExaCostDollars {
-  total: number
-}
-
 /**
  * Exa's content-freshness controls. `maxAgeHours` (-1 cache-only, 0 always live
  * crawl, 1-720 cache-if-younger-than) replaced `livecrawl`, which is deprecated
@@ -26,7 +21,7 @@ export interface ExaFreshnessParams {
  * documented set; `neural`, `keyword`, and `hybrid` are legacy values the API
  * still honors, kept so workflows saved against the old dropdown keep running.
  */
-export type ExaSearchType =
+type ExaSearchType =
   | 'instant'
   | 'fast'
   | 'auto'
@@ -217,7 +212,7 @@ export interface ExaAnswerResponse extends ToolResponse {
 }
 
 /** Effort levels the Agent API accepts, trading cost against depth. */
-export type ExaAgentEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'auto'
+type ExaAgentEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'auto'
 
 export interface ExaAgentParams extends ExaBaseParams {
   query: string
@@ -247,10 +242,3 @@ export interface ExaAgentResponse extends ToolResponse {
     __costDollars?: number | { total?: number }
   }
 }
-
-export type ExaResponse =
-  | ExaSearchResponse
-  | ExaGetContentsResponse
-  | ExaFindSimilarLinksResponse
-  | ExaAnswerResponse
-  | ExaAgentResponse

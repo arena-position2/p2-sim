@@ -8,7 +8,7 @@
  * `create_file` (the failure mode that produced "Tool not found" loops).
  */
 import { describe, expect, it } from 'vitest'
-import { TOOL_RUNTIME_SCHEMAS } from '@/lib/copilot/generated/tool-schemas-v1'
+import { TOOL_RUNTIME_SCHEMAS } from '@/lib/mothership/generated/tool-schemas-v1'
 import {
   ARENA_ALIASED_SERVER_TOOL_NAMES,
   ARENA_DUAL_REGISTERED_SERVER_TOOL_NAMES,
@@ -16,8 +16,8 @@ import {
   ARENA_SERVER_TOOL_SCHEMA_ALIASES,
   ARENA_TO_SERVER_REGISTRY_TOOL_NAME,
   toServerRegistryToolName,
-} from '@/lib/copilot/tools/arena-server-tool-aliases'
-import { getRegisteredServerToolNames } from '@/lib/copilot/tools/server/router'
+} from '@/lib/mothership/tools/arena-server-tool-aliases'
+import { getRegisteredServerToolNames } from '@/lib/mothership/tools/server/router'
 import { buildMothershipDelegatedToolDefinitions } from '@/local-copilot/lib/tools/mothership-delegated-tool-defs'
 
 function schemaPropertyCount(schemaId: string): number {

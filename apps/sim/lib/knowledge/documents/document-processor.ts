@@ -1,3 +1,4 @@
+import { OCR_CAPABILITY, requireCapability } from '@sim/deployment-config/env-capabilities'
 import { createLogger } from '@sim/logger'
 import { sha256Hex } from '@sim/security/hash'
 import { toError } from '@sim/utils/errors'
@@ -17,7 +18,6 @@ import {
 } from '@/lib/chunkers'
 import type { ChunkingStrategy, StrategyOptions } from '@/lib/chunkers/types'
 import { env } from '@/lib/core/config/env'
-import { OCR_CAPABILITY, requireCapability } from '@/lib/core/config/env-capabilities'
 import {
   recordProviderCooldown,
   waitForProviderAdmission,
@@ -38,6 +38,7 @@ import { FileParserError, isFileParserError } from '@/lib/file-parsers/errors'
 import { openPdfDocument } from '@/lib/file-parsers/pdfjs-server'
 import type { FileParseMetadata, FileParseResult } from '@/lib/file-parsers/types'
 import { getMistralOcrPagesPerRequest } from '@/lib/internal/mistral/capacity'
+import { getOcrResponseDiagnostic } from '@/lib/internal/mistral/error-diagnostics'
 import { MistralOperationError } from '@/lib/internal/mistral/errors'
 import { mistralParseInputSchema } from '@/lib/internal/mistral/input'
 import { executeMistralParse } from '@/lib/internal/mistral/operations'
@@ -47,6 +48,11 @@ import {
   OcrRequestRejectedError,
   PermanentDocumentProcessingError,
 } from '@/lib/knowledge/documents/document-processing-error'
+import { extractImageText } from '@/lib/knowledge/documents/image-extraction'
+import {
+  type ImageExtractionPolicy,
+  isSemanticImage,
+} from '@/lib/knowledge/documents/image-extraction-policy'
 import {
   createOcrCheckpoints,
   type OcrCheckpointContext,
@@ -69,6 +75,7 @@ import {
 import { assessPdfTextLayer } from '@/lib/knowledge/documents/pdf-text-layer'
 import { getProviderCapacityDeferral } from '@/lib/knowledge/documents/processing-provider-deferral'
 import { resolveRetryDelayMs, retryWithExponentialBackoff } from '@/lib/knowledge/documents/utils'
+import type { VisionExtractionUsage } from '@/lib/knowledge/documents/vision-checkpoints'
 import {
   assertKnowledgeOpaqueModelInputSafe,
   getKnowledgeOpaqueModelInputRegistry,
@@ -227,7 +234,13 @@ export type SourceFileAccess = Pick<
   ocrCheckpoint?: OcrCheckpointContext
   /** Canonical worker deadline; OCR yields before another request can overrun this pass. */
   processingDeadlineAt?: number
+  /** The document's source policy for images; absent keeps the OCR path. */
+  imageExtraction?: ImageExtractionPolicy
+  /** Receives what the vision model billed, even when processing then fails. */
+  onVisionUsage?: (usage: VisionExtractionUsage) => void
 }
+
+type ProcessingMethod = 'file-parser' | 'mistral-ocr' | 'vision-extract'
 
 export async function processDocument(
   fileUrl: string,
@@ -249,7 +262,7 @@ export async function processDocument(
     chunkCount: number
     tokenCount: number
     characterCount: number
-    processingMethod: 'file-parser' | 'mistral-ocr'
+    processingMethod: ProcessingMethod
     cloudUrl?: string
   }
 }> {
@@ -257,10 +270,42 @@ export async function processDocument(
 
   try {
     access.signal?.throwIfAborted()
-    const parseResult = await parseDocument(fileUrl, filename, mimeType, access, workspaceId)
+    const image = isSemanticImage(access.imageExtraction, mimeType)
+      ? await extractImageText({
+          source: await downloadFileForBase64(fileUrl, access),
+          filename,
+          workspaceId,
+          checkpoint: access.ocrCheckpoint,
+          deadlineAt: access.processingDeadlineAt,
+          signal: access.signal,
+          onUsage: access.onVisionUsage,
+        })
+      : undefined
+    if (image?.decorative) {
+      /** Nothing to index, which is the expected outcome for an icon or logo, not a failure. */
+      return {
+        chunks: [],
+        metadata: {
+          filename,
+          fileSize: 0,
+          mimeType,
+          chunkCount: 0,
+          tokenCount: 0,
+          characterCount: 0,
+          processingMethod: 'vision-extract',
+        },
+      }
+    }
+    const parseResult: {
+      content: string
+      processingMethod: ProcessingMethod
+      cloudUrl?: string
+      metadata?: FileParseMetadata
+    } = image
+      ? { content: image.renderedText, processingMethod: 'vision-extract' }
+      : await parseDocument(fileUrl, filename, mimeType, access, workspaceId)
     access.signal?.throwIfAborted()
-    const { content, processingMethod } = parseResult
-    const cloudUrl = 'cloudUrl' in parseResult ? parseResult.cloudUrl : undefined
+    const { content, processingMethod, cloudUrl } = parseResult
     if (parseResult.metadata?.detectedType || parseResult.metadata?.warning) {
       logger.info('Parser reported a warning for the document', {
         filename,
@@ -651,6 +696,12 @@ async function makeOCRRequest(
     }
 
     if (!response.ok) {
+      logger.warn('OCR provider request failed', {
+        provider: 'azure-mistral',
+        operation: 'ocr',
+        status: response.status,
+        ...getOcrResponseDiagnostic(response.headers, responseText),
+      })
       if ([400, 415, 422].includes(response.status)) {
         throw new OcrRequestRejectedError(response.status)
       }

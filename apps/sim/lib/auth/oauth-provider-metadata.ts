@@ -17,7 +17,17 @@ const DISCOVERY_HEADERS = {
  * and revocation. Introspection is not exposed by Sim's protocol routes.
  */
 export async function getOAuthProviderMetadata() {
-  const metadata = await auth.api.getOAuthServerConfig()
+  const metadata = await (
+    auth.api as unknown as {
+      getOAuthServerConfig: () => Promise<{
+        introspection_endpoint?: string
+        introspection_endpoint_auth_methods_supported?: string[]
+        token_endpoint_auth_methods_supported?: string[]
+        revocation_endpoint_auth_methods_supported?: string[]
+        [key: string]: unknown
+      }>
+    }
+  ).getOAuthServerConfig()
   const {
     introspection_endpoint: _introspectionEndpoint,
     introspection_endpoint_auth_methods_supported: _introspectionAuthMethods,

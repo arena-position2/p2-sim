@@ -30,10 +30,8 @@ import {
   sql,
 } from 'drizzle-orm'
 import type Stripe from 'stripe'
-import {
-  ADMIN_INVITATION_OPERATION_EVENT_TYPE,
-  parseAdminInvitationOperationPayload,
-} from '@/lib/admin/invitation-operation'
+import { parseAdminInvitationOperationPayload } from '@/lib/admin/invitation-operation'
+import { ADMIN_INVITATION_OPERATION_EVENT_TYPE } from '@/lib/admin/invitation-operation-event'
 import { parseBillingConcurrencyLimit } from '@/lib/billing/concurrency-defaults'
 import { getBillingConcurrencyLimit } from '@/lib/billing/concurrency-limits'
 import { resolveEnterpriseReportingPeriod } from '@/lib/billing/core/reporting-period'
@@ -44,11 +42,6 @@ import {
 import { creditsToDollars, dollarsToCredits } from '@/lib/billing/credits/conversion'
 import {
   deriveEnterpriseOperationStatus,
-  ENTERPRISE_INVITE_PEOPLE_EVENT_TYPE,
-  ENTERPRISE_MEMBER_RECONCILIATION_EVENT_TYPE,
-  ENTERPRISE_METADATA_SYNC_EVENT_TYPE,
-  ENTERPRISE_PROVISION_EVENT_TYPE,
-  ENTERPRISE_WORKSPACE_MOVE_EVENT_TYPE,
   type EnterpriseInvitePeoplePayload,
   type EnterpriseMetadataSyncPayload,
   type EnterpriseOperationStatus,
@@ -64,6 +57,13 @@ import {
   parseEnterpriseProvisionPayload,
 } from '@/lib/billing/enterprise-outbox'
 import {
+  ENTERPRISE_INVITE_PEOPLE_EVENT_TYPE,
+  ENTERPRISE_MEMBER_RECONCILIATION_EVENT_TYPE,
+  ENTERPRISE_METADATA_SYNC_EVENT_TYPE,
+  ENTERPRISE_PROVISION_EVENT_TYPE,
+  ENTERPRISE_WORKSPACE_MOVE_EVENT_TYPE,
+} from '@/lib/billing/enterprise-outbox-events'
+import {
   parseWorkflowExecutionTimeoutSeconds,
   resolveEnterpriseWorkflowExecutionTimeoutFallbackSeconds,
 } from '@/lib/billing/execution-timeout-defaults'
@@ -76,7 +76,11 @@ import { requireStripeClient } from '@/lib/billing/stripe-client'
 import { TERMINAL_SUBSCRIPTION_STATUSES } from '@/lib/billing/subscriptions/utils'
 import { countPendingSeatInvitations } from '@/lib/billing/validation/seat-management'
 import { withEnterpriseReconciliationLease } from '@/lib/billing/webhooks/enterprise-reconciliation-lease'
-import { OUTBOX_EVENT_TYPES } from '@/lib/billing/webhooks/outbox-handlers'
+import { OUTBOX_EVENT_TYPES } from '@/lib/billing/webhooks/outbox-events'
+import {
+  lockSubscriptionForSyncRetry,
+  recommitSubscriptionSync,
+} from '@/lib/billing/webhooks/subscription-sync'
 import { env } from '@/lib/core/config/env'
 import {
   continueOutboxHandler,
@@ -94,10 +98,8 @@ import {
   createWorkspaceInvitation,
   prepareWorkspaceInvitationContext,
 } from '@/lib/invitations/workspace-invitations'
-import {
-  MIGRATED_INVITATION_EMAIL_EVENT_TYPE,
-  moveWorkspaceToOrganization,
-} from '@/lib/workspaces/admin-move'
+import { moveWorkspaceToOrganization } from '@/lib/workspaces/admin-move'
+import { MIGRATED_INVITATION_EMAIL_EVENT_TYPE } from '@/lib/workspaces/admin-move-event'
 import { ownedAttachableWorkspacesWhere } from '@/lib/workspaces/organization-workspaces'
 
 const TERMINAL_STATUSES = new Set<string>(TERMINAL_SUBSCRIPTION_STATUSES)
@@ -2105,6 +2107,9 @@ export async function retryEnterpriseFollowUpJob(
 
   const retried = await db.transaction(async (tx) => {
     await acquireOrganizationMutationLock(tx, operationPayload.request.organizationId)
+    if (snapshotDetail.kind === 'personal_subscription_cancellation') {
+      await lockSubscriptionForSyncRetry(tx, snapshotDetail.subjectId)
+    }
     const [row] = await tx
       .select({
         status: outboxEvent.status,
@@ -2121,7 +2126,9 @@ export async function retryEnterpriseFollowUpJob(
       !detail ||
       !getEnterpriseFollowUpOperationIds(row.eventType, row.payload).includes(operationId) ||
       (detail.kind === 'member_reconciliation' &&
-        detail.subjectId !== operationPayload.request.organizationId)
+        detail.subjectId !== operationPayload.request.organizationId) ||
+      detail.kind !== snapshotDetail.kind ||
+      detail.subjectId !== snapshotDetail.subjectId
     ) {
       throw new EnterpriseProvisioningError('Enterprise follow-up job not found')
     }
@@ -2137,6 +2144,13 @@ export async function retryEnterpriseFollowUpJob(
         processedAt: null,
       })
       .where(eq(outboxEvent.id, jobEventId))
+    if (detail.kind === 'personal_subscription_cancellation') {
+      await recommitSubscriptionSync(
+        tx,
+        OUTBOX_EVENT_TYPES.STRIPE_SYNC_CANCEL_AT_PERIOD_END,
+        detail.subjectId
+      )
+    }
     return true
   })
 
@@ -2746,36 +2760,52 @@ async function resolveEnterpriseInvitationApplicationState(
   workspaceIds: string[]
 ): Promise<EnterpriseInvitationApplicationState> {
   const normalizedEmail = normalizeEmail(payload.email)
-  const [existingUser] = await db
-    .select({ id: user.id, organizationId: member.organizationId, role: member.role })
+  const accessRows = await db
+    .select({
+      userId: user.id,
+      workspaceId: workspace.id,
+      role: member.role,
+      permission: permissions.permissionType,
+    })
     .from(user)
-    .leftJoin(member, eq(member.userId, user.id))
-    .where(eq(user.normalizedEmail, normalizedEmail))
-    .limit(1)
-  const roleSatisfied =
-    existingUser?.organizationId === payload.organizationId &&
-    (payload.role === 'member' || isOrgAdminRole(existingUser.role))
-  if (existingUser && roleSatisfied) {
-    const accessRows = await db
-      .select({ workspaceId: permissions.entityId, permission: permissions.permissionType })
-      .from(permissions)
-      .where(
-        and(
-          eq(permissions.entityType, 'workspace'),
-          eq(permissions.userId, existingUser.id),
-          inArray(permissions.entityId, workspaceIds)
-        )
-      )
-    const accessByWorkspace = new Map(
-      accessRows.map((row) => [row.workspaceId, row.permission] as const)
+    .innerJoin(
+      member,
+      and(eq(member.userId, user.id), eq(member.organizationId, payload.organizationId))
     )
-    if (
-      workspaceIds.every((workspaceId) =>
-        permissionSatisfies(accessByWorkspace.get(workspaceId), payload.permission)
+    /**
+     * Archived workspaces stay in the join: the selection keeps them on purpose (the move
+     * carries them into the organization so they can be unarchived later), so a recipient
+     * whose access on one is already in place must read as applied, or the sweep would
+     * schedule an invitation the archived workspace cannot accept and never converge.
+     */
+    .innerJoin(
+      workspace,
+      and(eq(workspace.organizationId, member.organizationId), inArray(workspace.id, workspaceIds))
+    )
+    .leftJoin(
+      permissions,
+      and(
+        eq(permissions.entityType, 'workspace'),
+        eq(permissions.userId, user.id),
+        eq(permissions.entityId, workspace.id)
       )
-    ) {
-      return { kind: 'applied', resultId: existingUser.id }
-    }
+    )
+    .where(eq(user.normalizedEmail, normalizedEmail))
+  const accessByWorkspace = new Map(accessRows.map((row) => [row.workspaceId, row] as const))
+  const existingUserId = accessRows[0]?.userId
+  if (
+    existingUserId &&
+    workspaceIds.every((workspaceId) => {
+      const access = accessByWorkspace.get(workspaceId)
+      if (!access) return false
+      const inheritsAdmin = isOrgAdminRole(access.role)
+      return (
+        (payload.role === 'member' || inheritsAdmin) &&
+        (inheritsAdmin || permissionSatisfies(access.permission, payload.permission))
+      )
+    })
+  ) {
+    return { kind: 'applied', resultId: existingUserId }
   }
 
   const pendingRows = await db
@@ -3199,5 +3229,3 @@ export async function getLatestEnterpriseProvisionings(
   }
   return result
 }
-
-export { ENTERPRISE_METADATA_SYNC_EVENT_TYPE, ENTERPRISE_PROVISION_EVENT_TYPE }

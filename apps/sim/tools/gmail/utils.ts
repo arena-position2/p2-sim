@@ -48,7 +48,7 @@ export async function fetchThreadingHeaders(
         subject: headers.find((h: any) => h.name.toLowerCase() === 'subject')?.value,
       }
     }
-  } catch (error) {
+  } catch {
     // Continue without threading headers rather than failing
   }
 
@@ -325,34 +325,6 @@ function wrapBase64Lines(base64: string): string {
   return base64.match(/.{1,76}/g)?.join(MIME_CRLF) ?? base64
 }
 
-function encodeMimeTextBody(body: string): { transferEncoding: string; content: string } {
-  const isSevenBitSafe = (value: string): boolean => {
-    for (let i = 0; i < value.length; i++) {
-      const code = value.charCodeAt(i)
-      if (code === 13 || code === 10) {
-        if (value[i] === '\r' && value[i + 1] === '\n') {
-          i++
-          continue
-        }
-        return false
-      }
-      if (code > 127 || code === 0) {
-        return false
-      }
-    }
-    return true
-  }
-
-  if (isSevenBitSafe(body)) {
-    return { transferEncoding: '7bit', content: body }
-  }
-
-  return {
-    transferEncoding: 'base64',
-    content: wrapBase64Lines(Buffer.from(body, 'utf-8').toString('base64')),
-  }
-}
-
 function formatAttachmentContentType(mimeType: string): string {
   if (
     mimeType.startsWith('text/') ||
@@ -380,7 +352,6 @@ function encodeAttachmentFilename(filename: string): string {
  * @see https://github.com/googleapis/google-api-nodejs-client/blob/main/samples/gmail/send.js
  */
 export function encodeRfc2047(value: string): string {
-  // eslint-disable-next-line no-control-regex
   if (/^[\x00-\x7F]*$/.test(value)) {
     return value
   }
@@ -605,7 +576,6 @@ export function buildMimeMessage(params: BuildMimeMessageParams): string {
 
     messageParts.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`)
     messageParts.push('')
-    const encodedBody = encodeMimeTextBody(body)
     messageParts.push(`--${mixedBoundary}`)
     messageParts.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`)
     messageParts.push('')
@@ -635,4 +605,13 @@ export function buildMimeMessage(params: BuildMimeMessageParams): string {
   }
 
   return joinMimeParts(messageParts)
+}
+
+/**
+ * Adapts a legacy Gmail payload to an upstream v2 response generic.
+ * The runtime shape stays the legacy content and metadata payload.
+ */
+export function castGmailResponse<R>(response: unknown): R {
+  // double-cast-allowed: v2 wrappers still return the legacy content and metadata payload
+  return response as unknown as R
 }

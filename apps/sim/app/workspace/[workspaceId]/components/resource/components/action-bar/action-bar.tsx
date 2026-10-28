@@ -2,8 +2,7 @@
 
 import type { ComponentType } from 'react'
 import {
-  Button,
-  chipFilledFillTokens,
+  BulkActionButton,
   cn,
   DropdownMenu,
   DropdownMenuContent,
@@ -16,12 +15,6 @@ import { Download } from '@sim/emcn/icons'
 import type { MoveOptionNode } from '@/app/workspace/[workspaceId]/components/folders'
 import { renderMoveOptions } from '@/app/workspace/[workspaceId]/components/folders'
 
-/** Shared chrome for every action button, so the bar reads as one control strip. */
-const ACTION_BUTTON_CLASS = cn(
-  chipFilledFillTokens,
-  'hover-hover:text-[var(--text-inverse)]! size-[28px] rounded-lg p-0 text-[var(--text-secondary)] hover-hover:bg-[var(--brand-secondary)]'
-)
-
 interface ActionButtonProps {
   icon: ComponentType<{ className?: string }>
   label: string
@@ -33,14 +26,9 @@ function ActionButton({ icon: Icon, label, onClick, disabled }: ActionButtonProp
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <Button
-          variant='ghost'
-          onClick={onClick}
-          disabled={disabled}
-          className={ACTION_BUTTON_CLASS}
-        >
+        <BulkActionButton aria-label={label} onClick={onClick} disabled={disabled}>
           <Icon className='size-[12px]' />
-        </Button>
+        </BulkActionButton>
       </Tooltip.Trigger>
       <Tooltip.Content side='top'>{label}</Tooltip.Content>
     </Tooltip.Root>
@@ -98,15 +86,15 @@ export function ResourceActionBar({
   return (
     <div
       className={cn(
-        '-translate-x-1/2 fixed bottom-6 left-1/2 z-[var(--z-dropdown)]',
+        '-translate-x-1/2 fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 z-[var(--z-dropdown)] max-w-[calc(100%_-_2rem)] md:max-w-none',
         'fade-in-0 slide-in-from-bottom-2 animate-in duration-200 ease-out motion-reduce:animate-none',
         className
       )}
     >
-      <div className='flex items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1.5'>
+      <div className='flex items-center justify-between gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1.5'>
         <span
           className={cn(
-            'px-1 text-small',
+            'min-w-0 px-1 text-small',
             exceedsLimit ? 'text-[var(--text-error)]' : 'text-[var(--text-secondary)]'
           )}
         >
@@ -128,13 +116,9 @@ export function ResourceActionBar({
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant='ghost'
-                      disabled={actionsDisabled}
-                      className={ACTION_BUTTON_CLASS}
-                    >
+                    <BulkActionButton aria-label='Move' disabled={actionsDisabled}>
                       <Folder className='size-[12px]' />
-                    </Button>
+                    </BulkActionButton>
                   </DropdownMenuTrigger>
                 </Tooltip.Trigger>
                 <Tooltip.Content side='top'>Move</Tooltip.Content>

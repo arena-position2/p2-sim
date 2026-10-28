@@ -8,13 +8,12 @@ import {
   normalizeStringRecord,
   normalizeWorkflowVariables,
 } from '@/lib/core/utils/records'
-import { getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import type { EnvironmentVariable } from '@/lib/environment/api'
 import { getQueryClient } from '@/app/_shell/providers/get-query-client'
 import type { CustomToolDefinition } from '@/hooks/queries/custom-tools'
 import { environmentKeys } from '@/hooks/queries/environment'
 import { tools } from '@/tools/registry'
-import type { ExecutableToolConfig, InternalToolConfig } from '@/tools/types'
+import type { ExecutableToolConfig, InternalToolConfig, ToolConfig } from '@/tools/types'
 
 const logger = createLogger('ToolUtils')
 
@@ -70,42 +69,33 @@ export function getLatestVersionTools(
 }
 
 /**
- * Resolves an agent integration tool name (Copilot, mothership chat, subagents) to the **canonical
- * latest** registry id for its version family (same base after {@link stripVersionSuffix}). Agent
- * integration schemas omit `_vN`; when legacy unversioned and `_vN` keys both exist
- * (`google_sheets_write` vs `google_sheets_write_v2`), stripped names bind the latest toolkit.
+ * Resolves a tool name to its actual tool ID in the registry.
+ * Handles both stripped names (e.g., 'notion_search') and versioned names (e.g., 'notion_search_v2').
  *
  * Workflow block execution must not call this — serialized block tool ids are already exact keys.
  *
- * @param toolName Stripped agent integration name or `_vN` suffix
- * @returns Latest registry id when the base exists in versioning; unknown ids unchanged
+ * Server-side counterpart to `resolveToolId` in `@/tools/tool-ids`. Both exist
+ * deliberately: this one reads the live registry, so a tool added but not yet
+ * regenerated stays resolvable; that one resolves against the generated id list
+ * without pulling 4,300 tools into a client graph. Client code wants that one.
+ * `check:tool-metadata` asserts the two never diverge.
+ *
+ * @param toolName The tool name to resolve (may or may not have version suffix)
+ * @returns The actual tool ID in the registry, or the original name if not found
  */
 export function resolveToolId(toolName: string): string {
-  const baseId = stripVersionSuffix(toolName)
-  const latestTools = getLatestVersionTools(tools)
-
-  const latestMatch = Object.keys(latestTools).find(
-    (toolId) => stripVersionSuffix(toolId) === baseId
-  )
-  if (latestMatch) {
-    return latestMatch
-  }
-
   if (tools[toolName]) {
     return toolName
   }
 
-  return toolName
-}
+  const latestTools = getLatestVersionTools(tools)
+  for (const toolId of Object.keys(latestTools)) {
+    if (stripVersionSuffix(toolId) === toolName) {
+      return toolId
+    }
+  }
 
-export interface RequestParams {
-  url: string
-  method: string
-  headers: Record<string, string>
-  body?: string
-  timeout?: number
-  proxyUrl?: string
-  stripAuthOnRedirect?: boolean
+  return toolName
 }
 
 /**
@@ -365,6 +355,11 @@ export async function formatRequestParams(
  * Formats a parameter name for user-friendly error messages
  * Converts parameter names and descriptions to more readable format
  */
+
+/**
+ * Formats a parameter name for user-friendly error messages
+ * Converts parameter names and descriptions to more readable format
+ */
 function formatParameterNameForError(paramName: string): string {
   // Split camelCase and snake_case/kebab-case into words, then capitalize first letter of each word
   return paramName
@@ -510,10 +505,10 @@ export function getTool(toolId: string, _workspaceId?: string): ExecutableToolCo
   const builtInTool = tools[resolveToolId(toolId)]
   if (builtInTool) return builtInTool
 
+  // If not found or running on the server, return undefined
   return undefined
 }
 
-// Helper function to create a tool config from a custom tool
 export function createToolConfig(
   customTool: CustomToolDefinition,
   customToolId: string
@@ -547,105 +542,6 @@ export function createToolConfig(
         error: undefined,
       }
     },
-  }
-}
-
-// Create a tool config from a custom tool definition by fetching from API
-async function fetchCustomToolFromAPI(
-  customToolId: string,
-  workflowId?: string,
-  userId?: string
-): Promise<ToolConfig | undefined> {
-  const identifier = customToolId.replace('custom_', '')
-
-  try {
-    const baseUrl = getInternalApiBaseUrl()
-    const url = new URL('/api/tools/custom', baseUrl)
-
-    if (workflowId) {
-      url.searchParams.append('workflowId', workflowId)
-    }
-    if (userId) {
-      url.searchParams.append('userId', userId)
-    }
-
-    // For server-side calls (during workflow execution), use internal JWT token
-    const headers: Record<string, string> = {}
-    if (typeof window === 'undefined') {
-      try {
-        const { generateInternalToken } = await import('@/lib/auth/internal')
-        const internalToken = await generateInternalToken(userId)
-        headers.Authorization = `Bearer ${internalToken}`
-      } catch (error) {
-        logger.warn('Failed to generate internal token for custom tools fetch', { error })
-        // Continue without token - will fail auth and be reported upstream
-      }
-    }
-
-    const response = await fetch(url.toString(), {
-      headers,
-    })
-
-    if (!response.ok) {
-      await response.text().catch(() => {})
-      logger.error(`Failed to fetch custom tools: ${response.statusText}`)
-      return undefined
-    }
-
-    const result = await response.json()
-
-    if (!result.data || !Array.isArray(result.data)) {
-      logger.error(`Invalid response when fetching custom tools: ${JSON.stringify(result)}`)
-      return undefined
-    }
-
-    // Try to find the tool by ID or title
-    const customTool = result.data.find(
-      (tool: any) => tool.id === identifier || tool.title === identifier
-    )
-
-    if (!customTool) {
-      logger.error(`Custom tool not found: ${identifier}`)
-      return undefined
-    }
-
-    // Create a parameter schema
-    const params = createParamSchema(customTool)
-
-    // Create a tool config for the custom tool
-    return {
-      id: customToolId,
-      name: customTool.title,
-      description: customTool.schema.function?.description || '',
-      version: '1.0.0',
-      params,
-
-      // Request configuration - for custom tools we'll use the execute endpoint
-      request: {
-        url: '/api/function/execute',
-        method: 'POST',
-        headers: () => ({ 'Content-Type': 'application/json' }),
-        body: createCustomToolRequestBody(customTool, false, workflowId),
-      },
-
-      // Same response handling as client-side
-      transformResponse: async (response: Response) => {
-        const data = await response.json()
-
-        if (!data.success) {
-          throw new Error(data.error || 'Custom tool execution failed')
-        }
-
-        return {
-          success: true,
-          output: data.output.result || data.output,
-          error: undefined,
-        }
-      },
-    }
-  } catch (error) {
-    logger.error(`Error fetching custom tool ${identifier} from API:`, error)
-    return undefined
   }
 }
 

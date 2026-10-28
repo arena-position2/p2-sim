@@ -1,6 +1,6 @@
 import { db } from '@sim/db'
 import { getPostgresErrorCode } from '@sim/utils/errors'
-import { sql } from 'drizzle-orm'
+import { type SQL, sql } from 'drizzle-orm'
 import type { DbTransaction } from '@/lib/db/types'
 import {
   measureSearchStage,
@@ -39,6 +39,18 @@ export class SearchBudget {
     return remaining
   }
 
+  /**
+   * A shorter deadline for one step of the leg, carrying the same leg and cancellation signal.
+   * Spending it is the step's own business: the leg's deadline is untouched and still governs.
+   */
+  capped(milliseconds: number): SearchBudget {
+    return new SearchBudget(
+      this.leg,
+      Math.min(this.deadline, performance.now() + milliseconds),
+      this.signal
+    )
+  }
+
   isTimeout(error: unknown): boolean {
     this.signal?.throwIfAborted()
     if (error instanceof SearchDeadlineError || getPostgresErrorCode(error) === '57014') {
@@ -55,7 +67,8 @@ export class SearchBudget {
    */
   async query<T>(
     stage: SearchStage,
-    run: (executor: SearchExecutor) => PromiseLike<T>
+    run: (executor: SearchExecutor) => PromiseLike<T>,
+    settings: readonly SQL[] = []
   ): Promise<T> {
     const started = performance.now()
     const remaining = this.remaining()
@@ -85,9 +98,16 @@ export class SearchBudget {
       if (expired) throw new SearchDeadlineError()
       recordSearchStageDuration(`${this.leg}.connection_acquire`, performance.now() - started)
       const timeout = String(this.remaining())
-      /** Interactive retrieval cannot amortize compilation of the access predicates. */
+      /**
+       * Interactive retrieval cannot amortize compilation of the access predicates. A stage's
+       * own session settings ride in the same statement: each is a round trip otherwise.
+       */
       await tx.execute(
-        sql`SELECT set_config('statement_timeout', ${timeout}, true), set_config('jit', 'off', true)`
+        sessionSettingsStatement([
+          sql`set_config('statement_timeout', ${timeout}, true)`,
+          sql`set_config('jit', 'off', true)`,
+          ...settings,
+        ])
       )
       this.remaining()
       return measureSearchStage(stage, () => run(tx))
@@ -106,6 +126,11 @@ export class SearchBudget {
         recordSearchStageDuration(`${this.leg}.connection_acquire`, performance.now() - started)
     }
   }
+}
+
+/** One statement applying `set_config` fragments to the transaction they run in. */
+export function sessionSettingsStatement(settings: readonly SQL[]): SQL {
+  return sql.join([sql`SELECT`, sql.join([...settings], sql`, `)], sql` `)
 }
 
 /** Execute SQL with stage diagnostics and, for live search, the shared retrieval deadline. */

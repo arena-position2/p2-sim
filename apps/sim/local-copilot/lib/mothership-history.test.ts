@@ -2,12 +2,12 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import type { PersistedMessage } from '@/lib/copilot/chat/persisted-message'
+import type { PersistedMessage } from '@/lib/mothership/chat/persisted-message'
 import {
   MothershipStreamV1EventType,
   MothershipStreamV1TextChannel,
   MothershipStreamV1ToolOutcome,
-} from '@/lib/copilot/generated/mothership-stream-v1'
+} from '@/lib/mothership/generated/mothership-stream-v1'
 import {
   assistantMessageToChatHistory,
   formatPersistedUserMessageForLocalHistory,

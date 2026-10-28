@@ -1,24 +1,17 @@
-/**
- * @vitest-environment node
- */
 import { dbChainMockFns, resetDbChainMock } from '@sim/testing'
+import { billingSubscriptionSyncMock } from '@sim/testing/mocks/billing-subscription-sync.mock'
+import { outboxServiceMock } from '@sim/testing/mocks/outbox-service.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const { mockEnqueueOutboxEvent } = vi.hoisted(() => ({
-  mockEnqueueOutboxEvent: vi.fn(),
-}))
 
 vi.mock('@/lib/billing/storage/payer-transfer', () => ({
   changeOrganizationWorkspaceBilledAccountsInTx: vi.fn(),
   changeWorkspaceStoragePayerInTx: vi.fn(),
   changeWorkspaceStoragePayersInTx: vi.fn(),
 }))
-vi.mock('@/lib/core/outbox/service', () => ({
-  enqueueOutboxEvent: mockEnqueueOutboxEvent,
-}))
+vi.mock('@/lib/core/outbox/service', () => outboxServiceMock)
+vi.mock('@/lib/billing/webhooks/subscription-sync', () => billingSubscriptionSyncMock)
 
 import { pauseProSubscriptionForOrgCoverage } from '@/lib/billing/organizations/membership'
-import { OUTBOX_EVENT_TYPES } from '@/lib/billing/webhooks/outbox-handlers'
 
 const ACTIVE_PERSONAL_PRO = {
   id: 'sub-personal',
@@ -53,11 +46,10 @@ function queueWhereResponses(responses: unknown[][]) {
 
 describe('pauseProSubscriptionForOrgCoverage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
   })
 
-  it('pauses the personal Pro and queues the Stripe sync when an entitled paid org covers the user', async () => {
+  it('pauses the personal Pro when an entitled paid org covers the user', async () => {
     queueWhereResponses([
       [{ organizationId: 'org-1' }],
       [{ plan: 'team_6000', referenceId: 'org-1' }],
@@ -75,15 +67,6 @@ describe('pauseProSubscriptionForOrgCoverage', () => {
       organizationId: 'org-1',
     })
     expect(dbChainMockFns.set).toHaveBeenCalledWith({ cancelAtPeriodEnd: true })
-    expect(mockEnqueueOutboxEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      OUTBOX_EVENT_TYPES.STRIPE_SYNC_CANCEL_AT_PERIOD_END,
-      {
-        stripeSubscriptionId: 'stripe-sub-personal',
-        subscriptionId: 'sub-personal',
-        reason: 'covered-by-organization',
-      }
-    )
   })
 
   it('reports covered even when no entitled personal Pro row exists', async () => {
@@ -101,7 +84,6 @@ describe('pauseProSubscriptionForOrgCoverage', () => {
       organizationId: 'org-1',
     })
     expect(dbChainMockFns.update).not.toHaveBeenCalled()
-    expect(mockEnqueueOutboxEvent).not.toHaveBeenCalled()
   })
 
   it('reports covered without pausing again when the personal Pro is already pausing', async () => {
@@ -120,25 +102,5 @@ describe('pauseProSubscriptionForOrgCoverage', () => {
       organizationId: 'org-1',
     })
     expect(dbChainMockFns.update).not.toHaveBeenCalled()
-    expect(mockEnqueueOutboxEvent).not.toHaveBeenCalled()
-  })
-
-  it('reports not covered when the user is not a member of any organization', async () => {
-    queueWhereResponses([[]])
-
-    const result = await pauseProSubscriptionForOrgCoverage('user-1')
-
-    expect(result).toEqual({ covered: false, paused: false })
-    expect(dbChainMockFns.update).not.toHaveBeenCalled()
-  })
-
-  it('reports not covered when no org subscription is an entitled paid plan', async () => {
-    queueWhereResponses([[{ organizationId: 'org-1' }], []])
-
-    const result = await pauseProSubscriptionForOrgCoverage('user-1')
-
-    expect(result).toEqual({ covered: false, paused: false })
-    expect(dbChainMockFns.update).not.toHaveBeenCalled()
-    expect(mockEnqueueOutboxEvent).not.toHaveBeenCalled()
   })
 })

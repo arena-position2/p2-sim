@@ -12,6 +12,7 @@ import type {
 } from '@/providers/types'
 import {
   calculateCost,
+  isFunctionToolCall,
   prepareToolExecution,
   prepareToolsWithUsageControl,
   trackForcedToolUsage,
@@ -274,57 +275,64 @@ export async function executeChatCompletionsProviderRequest(
 
       const toolsStartTime = Date.now()
 
-      const toolExecutionPromises = toolCallsInResponse.map(async (toolCall) => {
-        const toolCallStartTime = Date.now()
-        const toolName = toolCall.function.name
+      const toolExecutionPromises = toolCallsInResponse
+        .filter(isFunctionToolCall)
+        .map(async (toolCall) => {
+          const toolCallStartTime = Date.now()
+          const toolName = toolCall.function.name
 
-        try {
-          const toolArgs = JSON.parse(toolCall.function.arguments)
-          const tool = request.tools?.find((t) => t.id === toolName)
-          if (!tool) {
-            return null
-          }
+          try {
+            const toolArgs = JSON.parse(toolCall.function.arguments)
+            const tool = request.tools?.find((t) => t.id === toolName)
+            if (!tool) {
+              return null
+            }
 
-          const { toolParams, executionParams } = prepareToolExecution(tool, toolArgs, request)
-          const result = await executeTool(toolName, executionParams)
-          const toolCallEndTime = Date.now()
+            const { toolParams, executionParams } = prepareToolExecution(
+              tool,
+              toolArgs,
+              request,
+              toolCall.id
+            )
+            const result = await executeTool(toolName, executionParams)
+            const toolCallEndTime = Date.now()
 
-          return {
-            toolCall,
-            toolName,
-            toolParams,
-            result,
-            startTime: toolCallStartTime,
-            endTime: toolCallEndTime,
-            duration: toolCallEndTime - toolCallStartTime,
+            return {
+              toolCall,
+              toolName,
+              toolParams,
+              result,
+              startTime: toolCallStartTime,
+              endTime: toolCallEndTime,
+              duration: toolCallEndTime - toolCallStartTime,
+            }
+          } catch (error) {
+            const toolCallEndTime = Date.now()
+            logger.error('Error processing tool call:', { error, toolName })
+            return {
+              toolCall,
+              toolName,
+              toolParams: {},
+              result: {
+                success: false,
+                output: undefined,
+                error: error instanceof Error ? error.message : 'Tool execution failed',
+              },
+              startTime: toolCallStartTime,
+              endTime: toolCallEndTime,
+              duration: toolCallEndTime - toolCallStartTime,
+            }
           }
-        } catch (error) {
-          const toolCallEndTime = Date.now()
-          logger.error('Error processing tool call:', { error, toolName })
-          return {
-            toolCall,
-            toolName,
-            toolParams: {},
-            result: {
-              success: false,
-              output: undefined,
-              error: error instanceof Error ? error.message : 'Tool execution failed',
-            },
-            startTime: toolCallStartTime,
-            endTime: toolCallEndTime,
-            duration: toolCallEndTime - toolCallStartTime,
-          }
-        }
-      })
+        })
 
       const executionResults = await Promise.allSettled(toolExecutionPromises)
 
       currentMessages.push({
         role: 'assistant',
         content: null,
-        tool_calls: toolCallsInResponse.map((tc) => ({
+        tool_calls: toolCallsInResponse.filter(isFunctionToolCall).map((tc) => ({
           id: tc.id,
-          type: 'function',
+          type: 'function' as const,
           function: {
             name: tc.function.name,
             arguments: tc.function.arguments,

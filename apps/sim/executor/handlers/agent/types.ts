@@ -1,6 +1,7 @@
 import type { McpOperationPolicy } from '@/lib/mcp/operation-policy'
-import type { UserFile } from '@/executor/types'
+import type { FallbackModelEntry } from '@/lib/workflows/blocks/fallback-models'
 import type { ResolvedSecretInputPath } from '@/executor/utils/resolved-secret-trace-registry'
+import type { Message as ProviderMessage } from '@/providers/types'
 
 export interface FileNameProjection {
   name: string
@@ -14,6 +15,8 @@ export interface SkillInput {
 }
 
 export interface AgentInputs {
+  evaluationState?: unknown
+  evaluationQuestions?: unknown
   model?: string
   responseFormat?: string | object
   tools?: ToolInput[]
@@ -32,8 +35,8 @@ export interface AgentInputs {
   // Deep research multi-turn
   previousInteractionId?: string // Interactions API previous interaction reference
   // LLM parameters
-  temperature?: string
-  maxTokens?: string
+  temperature?: string | number
+  maxTokens?: string | number
   apiKey?: string
   azureEndpoint?: string
   azureApiVersion?: string
@@ -48,6 +51,8 @@ export interface AgentInputs {
   thinkingLevel?: string
   promptCaching?: boolean
   files?: unknown
+  /** Ordered models tried when the request to `model` fails; see `normalizeFallbackModels`. */
+  fallbackModels?: Array<Partial<FallbackModelEntry> & { model: string }>
 }
 
 /**
@@ -78,13 +83,8 @@ export interface ToolInput {
   customToolId?: string
 }
 
-export interface Message {
-  role: 'system' | 'user' | 'assistant'
-  content: string
-  files?: UserFile[]
+export interface Message extends ProviderMessage {
   executionId?: string
-  function_call?: any
-  tool_calls?: any[]
 }
 
 export interface StreamingConfig {

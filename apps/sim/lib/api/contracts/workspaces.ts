@@ -1,10 +1,8 @@
 import { z } from 'zod'
-import {
-  nonEmptyIdSchema,
-  organizationRoleSchema,
-  requiredFieldSchema,
-} from '@/lib/api/contracts/primitives'
+import { nonEmptyIdSchema, organizationRoleSchema } from '@/lib/api/contracts/primitives'
 import { type ContractJsonResponse, defineRouteContract } from '@/lib/api/contracts/types'
+import { createWorkspaceInputSchema } from '@/lib/workspaces/create-input'
+import { workspacePermissionUpdatesSchema } from '@/lib/workspaces/permissions/input'
 
 export const workspaceScopeSchema = z.enum(['active', 'archived', 'all'])
 export const workspaceModeSchema = z.enum(['personal', 'organization', 'grandfathered_shared'])
@@ -15,6 +13,7 @@ export type WorkspacePermission = z.output<typeof workspacePermissionSchema>
 export const workspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
+  color: z.string().optional(),
   logoUrl: z.string().nullable().optional(),
   ownerId: z.string(),
   organizationId: z.string().nullable(),
@@ -31,6 +30,17 @@ export const workspaceSchema = z.object({
   isOrgAdmin: z.boolean().optional(),
   billedAccountUserId: z.string().nullable().optional(),
   allowPersonalApiKeys: z.boolean().optional(),
+  storageUsedBytes: z.number().nonnegative().optional(),
+  inboxEnabled: z.boolean().optional(),
+  inboxAddress: z.string().nullable().optional(),
+  inboxProviderId: z.string().nullable().optional(),
+  inboxSecretScope: z.string().optional(),
+  inboxMountedSecrets: z.array(z.string()).optional(),
+  archivedAt: z.string().datetime().nullable().optional(),
+  organizationAssignedAt: z.string().datetime().nullable().optional(),
+  forkSyncNewWorkflowsExcluded: z.boolean().optional(),
+  createdAt: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().optional(),
   inviteMembersEnabled: z.boolean().optional(),
   inviteDisabledReason: z.string().nullable().optional(),
   inviteUpgradeRequired: z.boolean().optional(),
@@ -66,10 +76,7 @@ export const listWorkspacesQuerySchema = z.object({
 
 export type WorkspaceQueryScope = NonNullable<z.input<typeof listWorkspacesQuerySchema>['scope']>
 
-export const createWorkspaceBodySchema = z.object({
-  name: z.string().trim().min(1, 'Name is required'),
-  skipDefaultWorkflow: z.boolean().optional().default(false),
-})
+export const createWorkspaceBodySchema = createWorkspaceInputSchema
 
 export const workspaceParamsSchema = z.object({
   id: z.string().min(1),
@@ -127,37 +134,7 @@ export type WorkspacePermissions = z.output<typeof workspacePermissionsResponseS
  * collaborator goes through the invitation flow, which owns the plan, seat, and
  * consent gates this endpoint has no way to apply.
  */
-export const updateWorkspacePermissionsBodySchema = z.object({
-  updates: z
-    .array(
-      z.object({
-        userId: requiredFieldSchema('User ID is required').max(128, 'User ID is too long'),
-        permissions: workspacePermissionSchema,
-      })
-    )
-    .min(1, 'updates must contain at least one permission change')
-    .max(100, 'Cannot update more than 100 permissions at once')
-    /**
-     * One entry per user. Repeating a userId made the batch self-contradictory:
-     * the route's guards inspect the first matching entry while the write loop
-     * applied every entry in order, so a second entry could carry a role the
-     * guards had already vetted the first one against.
-     */
-    .superRefine((updates, ctx) => {
-      const seen = new Set<string>()
-      for (const [index, update] of updates.entries()) {
-        if (seen.has(update.userId)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: [index, 'userId'],
-            message: 'Each user may appear only once in updates',
-          })
-          return
-        }
-        seen.add(update.userId)
-      }
-    }),
-})
+export const updateWorkspacePermissionsBodySchema = workspacePermissionUpdatesSchema
 
 export const workspaceMemberSchema = z.object({
   userId: z.string(),
@@ -174,6 +151,7 @@ export const listWorkspacesContract = defineRouteContract({
   response: {
     mode: 'json',
     schema: z.object({
+      /** Most recently visited first, then newest first. */
       workspaces: z.array(workspaceSchema),
       lastActiveWorkspaceId: z.string().nullable(),
       /**
@@ -185,6 +163,16 @@ export const listWorkspacesContract = defineRouteContract({
       pinnedWorkspaceIds: z.array(z.string()).default([]),
       creationPolicy: workspaceCreationPolicySchema.nullable(),
     }),
+  },
+})
+
+export const recordWorkspaceVisitContract = defineRouteContract({
+  method: 'POST',
+  path: '/api/workspaces/[id]/visit',
+  params: workspaceParamsSchema,
+  response: {
+    mode: 'json',
+    schema: z.object({ success: z.literal(true) }),
   },
 })
 

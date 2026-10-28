@@ -1,3 +1,4 @@
+import type { Principal } from '@sim/auth/principal'
 import type { AuthorizedWorkspaceUseCaseContext, WorkspaceOperation } from '@/lib/core/application'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
@@ -18,11 +19,26 @@ export interface ReadWorkspaceFileRecordResult {
   file: WorkspaceFileRecord
 }
 
+/**
+ * Record reads by id admit chat uploads: the sandbox mount reloads an `uploads/<name>`
+ * upload through here before presigning it. Listings never surface chat uploads and
+ * writes never resolve them.
+ */
 function createReadWorkspaceFileRecord<const O extends WorkspaceOperation>(operation: O) {
   return defineAuthorizedWorkspaceFileUseCase({
     operation,
-    resolveContext: ({ input }: { input: ReadWorkspaceFileRecordInput }) =>
-      resolveActiveWorkspaceFileContext(input),
+    resolveContext: ({
+      principal,
+      input,
+    }: {
+      principal: Principal
+      input: ReadWorkspaceFileRecordInput
+    }) =>
+      resolveActiveWorkspaceFileContext({
+        ...input,
+        includeChatUploads: true,
+        ownedFilePrincipal: principal,
+      }),
     async execute({
       context,
     }: AuthorizedWorkspaceUseCaseContext<
@@ -32,6 +48,8 @@ function createReadWorkspaceFileRecord<const O extends WorkspaceOperation>(opera
     >): Promise<ReadWorkspaceFileRecordResult> {
       const file = await getWorkspaceFile(context.workspaceId, context.fileId, {
         throwOnError: true,
+        includeChatUploads: true,
+        includeOwnedFiles: true,
       })
       if (!file) throw new OrchestrationError('not_found', 'File not found')
       return { file }

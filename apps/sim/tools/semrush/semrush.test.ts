@@ -1,6 +1,4 @@
 /**
- * @vitest-environment node
- *
  * Response fixtures are copied verbatim from the Semrush API reference examples
  * at https://developer.semrush.com/api/v3/analytics/.
  */
@@ -419,7 +417,7 @@ describe('semrush registry surface', () => {
   const registered = Object.entries(semrushTools)
 
   it('registers every tool under its own id', () => {
-    expect(semrushTools).toHaveLength(44)
+    expect(registered).toHaveLength(44)
     for (const [id, tool] of semrushTools) {
       expect((tool as ToolConfig).id).toBe(id)
       expect(hasToolId(id), `${id} registry`).toBe(true)

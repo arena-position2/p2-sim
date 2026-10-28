@@ -7,11 +7,10 @@ import {
   s3UriToPathObject,
 } from '@/lib/utils/parse-image-urls'
 import { AuthMode, type BlockConfig } from '@/blocks/types'
-import type { DalleResponse } from '@/tools/openai/types'
 
 const NANO_BANANA_PRO_MODEL = 'gemini-3-pro-image-preview'
 
-export const ImageFusionBlock: BlockConfig<DalleResponse> = {
+export const ImageFusionBlock: BlockConfig = {
   type: 'image_fusion',
   name: 'Image Fusion',
   description: 'Fuse multiple images with Nano Banana Pro',

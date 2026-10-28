@@ -1,6 +1,7 @@
 import { AuditAction, AuditResourceType } from '@sim/audit'
 import { type Principal, requirePrincipalSubjectUserId } from '@sim/auth/principal'
 import { createLogger } from '@sim/logger'
+import { chatDeploymentDelegationPolicy } from '@/lib/chat-deployments/application/authorization'
 import {
   assertedChatDeploymentWorkspaceId,
   resolveActiveChatDeploymentApplicationContext,
@@ -175,7 +176,7 @@ export const updateChatDeployment = defineAuthorizedWorkspaceUseCase({
       chatDeploymentId: input.chatDeploymentId,
       assertedWorkspaceId: assertedChatDeploymentWorkspaceId(principal, input.assertedWorkspaceId),
     }),
-  authorizationOptions: {},
+  authorizationOptions: { delegation: chatDeploymentDelegationPolicy },
   async execute({ principal, input, context }): Promise<UpdateChatDeploymentResult> {
     const existing = context.chatDeployment
 
@@ -245,8 +246,7 @@ export const updateChatDeployment = defineAuthorizedWorkspaceUseCase({
         input.deploymentType === 'app' ? (input.redirectUrl?.trim() ?? null) : null
     }
     if (input.includeThinking !== undefined) values.includeThinking = input.includeThinking
-    /** Partial updates keep the stored value; a row predating the column reads false. */
-    values.includeToolCalls = input.includeToolCalls ?? existing.includeToolCalls ?? false
+    if (input.includeToolCalls !== undefined) values.includeToolCalls = input.includeToolCalls
 
     const updated = await updateChatDeploymentRow(existing.id, values).catch(
       chatIdentifierUniquenessConflict(values.identifier ?? existing.identifier)

@@ -49,32 +49,6 @@ export const getPresentationIconsTool: ToolConfig<
     headers: () => ({}),
   },
 
-  directExecution: async (
-    params: GetPresentationIconsParams
-  ): Promise<GetPresentationIconsResponse> => {
-    const library = getPresentationIconLibrary()
-    const categoryFilter = params.category?.trim().toLowerCase()
-    const colorFilter = params.color?.trim().toLowerCase() as 'black' | 'white' | undefined
-
-    let icons = library.icons
-    if (categoryFilter) {
-      icons = icons.filter((icon) => icon.category.toLowerCase() === categoryFilter)
-    }
-    if (colorFilter) {
-      icons = icons.filter((icon) => icon.color === colorFilter)
-    }
-
-    return {
-      success: true,
-      output: {
-        version: library.version,
-        baseUrl: library.baseUrl,
-        icons,
-        count: icons.length,
-      },
-    }
-  },
-
   outputs: {
     version: { type: 'string', description: 'Icon library version' },
     baseUrl: { type: 'string', description: 'Base URL for icon assets' },
@@ -84,4 +58,30 @@ export const getPresentationIconsTool: ToolConfig<
     },
     count: { type: 'number', description: 'Number of icons returned' },
   },
+}
+
+export async function executeGetPresentationIconsDirect(
+  params: GetPresentationIconsParams
+): Promise<GetPresentationIconsResponse> {
+  const library = getPresentationIconLibrary()
+  const categoryFilter = params.category?.trim().toLowerCase()
+  const colorFilter = params.color?.trim().toLowerCase() as 'black' | 'white' | undefined
+
+  let icons = library.icons
+  if (categoryFilter) {
+    icons = icons.filter((icon) => icon.category.toLowerCase() === categoryFilter)
+  }
+  if (colorFilter) {
+    icons = icons.filter((icon) => icon.color === colorFilter)
+  }
+
+  return {
+    success: true,
+    output: {
+      version: library.version,
+      baseUrl: library.baseUrl,
+      icons,
+      count: icons.length,
+    },
+  }
 }

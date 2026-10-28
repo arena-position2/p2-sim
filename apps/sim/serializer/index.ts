@@ -1,6 +1,10 @@
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
+import {
+  generateLoopBlocks,
+  generateParallelBlocks,
+} from '@sim/workflow-persistence/subflow-helpers'
 import { resolveBlockRetryConfig } from '@sim/workflow-types/workflow'
 import type { Edge } from '@xyflow/react'
 import { migrateMcpOperationControls } from '@/lib/workflows/migrations/mcp-operation-controls'
@@ -19,9 +23,9 @@ import {
 import { getBlock } from '@/blocks'
 import { isCustomBlockType, RESERVED_PARAMS } from '@/blocks/custom/build-config'
 import type { SubBlockConfig } from '@/blocks/types'
+import { MissingRequiredFieldsError } from '@/serializer/errors'
 import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
 import type { BlockState, Loop, Parallel } from '@/stores/workflows/workflow/types'
-import { generateLoopBlocks, generateParallelBlocks } from '@/stores/workflows/workflow/utils'
 import { getToolParams } from '@/tools/metadata'
 import { expandSubBlockValueToParams } from '@/tools/param-shape'
 
@@ -179,10 +183,6 @@ export class Serializer {
     const safeLoops = Object.keys(canonicalLoops).length > 0 ? canonicalLoops : loops || {}
     const safeParallels =
       Object.keys(canonicalParallels).length > 0 ? canonicalParallels : parallels || {}
-    if (validateRequired) {
-      this.validateSubflowsBeforeExecution(blocks, safeLoops, safeParallels)
-    }
-
     // A custom block whose definition was deleted (or is out of scope) no longer
     // resolves via `getBlock`. Treat it as a removed block — drop it and any edges
     // touching it — so the rest of the workflow still serializes and runs, instead
@@ -218,18 +218,6 @@ export class Serializer {
       loops: safeLoops,
       parallels: safeParallels,
     }
-  }
-
-  /**
-   * Validate loop and parallel subflows for required inputs when running in "each/collection" modes
-   */
-  private validateSubflowsBeforeExecution(
-    blocks: Record<string, BlockState>,
-    loops: Record<string, Loop>,
-    parallels: Record<string, Parallel>
-  ): void {
-    // Note: Empty collections in forEach loops and parallel collection mode are handled gracefully
-    // at runtime - the loop/parallel will simply be skipped. No build-time validation needed.
   }
 
   private serializeBlock(
@@ -281,17 +269,12 @@ export class Serializer {
 
     // Validate required fields that only users can provide (before execution starts)
     if (options.validateRequired) {
-      const { missingRequiredFields } = collectBlockFieldIssues(
-        block,
-        blockConfig,
-        params,
-        options.workspaceId
-      )
+      const { missingRequiredFields } = collectBlockFieldIssues(block, blockConfig, params, {
+        workspaceId: options.workspaceId,
+      })
       if (missingRequiredFields.length > 0) {
         const blockName = block.name || blockConfig.name || 'Block'
-        throw new Error(
-          `${blockName} is missing required fields: ${missingRequiredFields.join(', ')}`
-        )
+        throw new MissingRequiredFieldsError(blockName, missingRequiredFields)
       }
     }
 
@@ -315,8 +298,10 @@ export class Serializer {
         // Default to the first tool if we can't process tools
         toolId = blockConfig.tools.access[0]
       }
-    } else {
-      // For non-agent blocks, get tool ID from block config as usual
+    } else if (params.triggerMode !== true) {
+      // A trigger-mode block runs through TriggerBlockHandler, which never reads a tool id,
+      // and its tool-mode sub-blocks (e.g. `operation`) are not serialized, so selecting
+      // one would throw and fall back to an arbitrary tool.
       toolId = selectToolId(blockConfig, params)
     }
 
@@ -508,6 +493,22 @@ export interface InactiveModeValue {
 export interface BlockFieldIssues {
   missingRequiredFields: string[]
   inactiveModeValues: InactiveModeValue[]
+}
+
+/**
+ * Which required-field policy {@link collectBlockFieldIssues} applies.
+ *
+ * `execution` mirrors `serializeBlock`: a required sub-block whose tool parameter
+ * the tool itself does not mark `required` + `user-only` is deferred to the tool's
+ * own late validation, because an agent invoking that tool may supply the value
+ * at call time. `lint` reports every required, visible sub-block the tool pass
+ * did not already check — a canvas block has no LLM to fill the field, so a
+ * missing knowledge base id is as fatal there as a missing table id, and the
+ * tool-level visibility of the parameter must not decide whether lint says so.
+ */
+export interface BlockFieldIssueOptions {
+  mode?: 'execution' | 'lint'
+  workspaceId?: string
 }
 
 /**
@@ -711,8 +712,9 @@ export function collectBlockFieldIssues(
   block: BlockState,
   blockConfig: any,
   params: Record<string, any>,
-  workspaceId?: string
+  options: BlockFieldIssueOptions = {}
 ): BlockFieldIssues {
+  const workspaceId = options.workspaceId
   // Disabled blocks and trigger-mode blocks are not validated (mirrors runtime).
   if (block.enabled === false) {
     return { missingRequiredFields: [], inactiveModeValues: [] }
@@ -743,9 +745,11 @@ export function collectBlockFieldIssues(
   // Validate tool parameters (for blocks with tools).
   // Lookup contract: a tool param's value lives under its own paramId in `params`.
   // Block subBlocks align via either `id === paramId` or `canonicalParamId === paramId`.
+  const checkedByToolPass = new Set<string>()
   if (currentToolParams) {
     Object.entries(currentToolParams).forEach(([paramId, paramConfig]: [string, any]) => {
       if (paramConfig.required && paramConfig.visibility === 'user-only') {
+        checkedByToolPass.add(paramId)
         const matchingConfigs =
           blockConfig.subBlocks?.filter(
             (sb: any) => sb.id === paramId || sb.canonicalParamId === paramId
@@ -801,8 +805,13 @@ export function collectBlockFieldIssues(
     })
   }
 
-  // Validate required subBlocks not covered by tool params (e.g., blocks with empty tools.access)
-  const validatedByTool = new Set(currentToolParams ? Object.keys(currentToolParams) : [])
+  // Validate required subBlocks not covered by the tool pass. Execution treats every
+  // tool-declared param as the tool's to validate (see `BlockFieldIssueOptions`);
+  // lint only skips the ones the pass above actually checked.
+  const validatedByTool =
+    options.mode === 'lint'
+      ? checkedByToolPass
+      : new Set(currentToolParams ? Object.keys(currentToolParams) : [])
 
   blockConfig.subBlocks?.forEach((subBlockConfig: SubBlockConfig) => {
     if (validatedByTool.has(subBlockConfig.id)) {

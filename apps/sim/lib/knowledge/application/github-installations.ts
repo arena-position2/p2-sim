@@ -17,6 +17,7 @@ import {
   ManagedOAuthCredentialError,
   resolveManagedOAuthToken,
 } from '@/lib/credentials/managed-oauth'
+import { acquireAdvisoryXactLock } from '@/lib/db/advisory-locks'
 import type { DbOrTx } from '@/lib/db/types'
 import { requireOrganizationSearchAvailable } from '@/lib/knowledge/access/availability'
 import { defineAuthorizedKnowledgeUseCase } from '@/lib/knowledge/application/authorized-knowledge-use-case'
@@ -121,6 +122,11 @@ export const listGitHubSearchInstallations = defineAuthorizedKnowledgeUseCase({
           { signal: input.signal }
         )
       } catch (error) {
+        if (
+          error instanceof GitHubInstallationError &&
+          error.operation === 'membership-permissions'
+        )
+          throw new OrchestrationError('validation', error.message)
         /** Only reader-token discovery can request reauthorization; App JWT failures stay errors. */
         if (
           (error instanceof GitHubInstallationError && error.status === 401) ||
@@ -167,8 +173,10 @@ export const connectGitHubSearchInstallation = defineAuthorizedKnowledgeUseCase(
     })
     const { encrypted } = await encryptSecret(JSON.stringify(binding))
     return db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`github-search:${context.organizationId}:${binding.installationId}`}, 0))`
+      await acquireAdvisoryXactLock(
+        tx,
+        'github_search',
+        `github-search:${context.organizationId}:${binding.installationId}`
       )
       const [admin] = await tx
         .select({ id: member.id })

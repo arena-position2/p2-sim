@@ -1,11 +1,11 @@
 import { truncate } from '@sim/utils/string'
 import type { WorkflowState } from '@sim/workflow-types/workflow'
-import { documentLayoutFollowUpHint } from '@/lib/copilot/chat/document-format-guidance'
 import { REDACTED_MARKER } from '@/lib/core/security/redaction'
+import { documentLayoutFollowUpHint } from '@/lib/mothership/chat/document-format-guidance'
 import { sanitizeForCopilot } from '@/lib/workflows/sanitization/json-sanitizer'
 import { getBlock } from '@/blocks/registry'
 import { MAX_POPULATE_EDITS } from '@/local-copilot/lib/agent/limits'
-import type { ArtifactStore } from '@/local-copilot/lib/context/artifacts'
+import type { ArtifactStore, ArtifactStub } from '@/local-copilot/lib/context/artifacts'
 import {
   LOAD_COPILOT_ARTIFACT_TOOL_NAME,
   maybeOffloadToolResult,
@@ -315,10 +315,21 @@ const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
   'search_looks_truncated',
+  'search_too_long',
+  'search_repeated',
+  'search_ignores_live_excerpt',
+  'html_full_update_too_large',
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_HINT =
-  'Patch search did not match the live file (stale/truncated/ambiguous search — file is still there). Call read or grep on the file path NOW, take a short unique live substring for search, then workspace_file operation=patch once. Do not reuse the previous search. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+  'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated/invented search — file is still there). Call read or grep on the file path NOW, copy a short unique substring from the live excerpt into search (well under 600 chars; must reuse a live token), then workspace_file operation=patch once. Do not reuse the previous search and do not invent new markup. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+
+const HTML_FULL_UPDATE_FOLLOW_UP_HINT =
+  'Full HTML update was blocked because the file is too large. Call grep (or a tight read) for the region to change, then workspace_file operation=patch with search_replace and a short unique live substring, then edit_content with only the replacement. Do not retry operation=update and do not create_file a full rewrite of this page.'
+
+/** User-facing closer. The model hint stays on {@link PATCH_REPAIR_FOLLOW_UP_HINT}. */
+export const PATCH_REPAIR_USER_HINT =
+  'I could not find that exact text in the file, so nothing was changed. Tell me the button label, heading, or section to update and I will try again.'
 
 /**
  * Copies mandatory-follow-up flags onto an artifact stub so offload cannot
@@ -326,10 +337,10 @@ const PATCH_REPAIR_FOLLOW_UP_HINT =
  */
 function copyFollowUpFields(
   source: unknown,
-  stub: Record<string, unknown>
+  stub: Record<string, unknown> | ArtifactStub
 ): Record<string, unknown> {
   const record = asRecord(source)
-  const next = { ...stub }
+  const next: Record<string, unknown> = { ...stub }
   for (const key of FOLLOW_UP_FIELD_KEYS) {
     if (record[key] !== undefined) next[key] = record[key]
   }
@@ -338,7 +349,10 @@ function copyFollowUpFields(
 
 export interface MandatoryFollowUp {
   id: string
+  /** Instruction injected into the model continuation. */
   hint: string
+  /** Sentence shown in chat when the follow-up is still open at the end of the turn. */
+  userHint?: string
   resolveWith: string[]
 }
 
@@ -625,10 +639,13 @@ export function formatToolResultForLlm(
     const data = asRecord(record.data)
     const size = typeof data.size === 'number' ? data.size : 0
     if (record.success === false) {
+      const createErrorType = typeof record.errorType === 'string' ? record.errorType : ''
       formatted = {
         ...record,
         followUpHint:
-          'create_file failed — fix the args and call create_file again (fileName for office shells; fileName + content for html/md/txt/json/csv). Do NOT switch to manage_sandbox, function_execute, or python-pptx, and do not tell the user office tools are unavailable.',
+          createErrorType === 'html_create_too_large'
+            ? 'HTML create_file body was too large. create_file a lean shell under 100KB (semantic HTML + small CSS, CDN icons) or patch the existing large file with workspace_file operation=patch. Do NOT retry the same megabyte dump, and do not switch to manage_sandbox or python-pptx.'
+            : 'create_file failed — fix the args and call create_file again (fileName for office shells; fileName + content for html/md/txt/json/csv). Do NOT switch to manage_sandbox, function_execute, or python-pptx, and do not tell the user office tools are unavailable.',
       }
     } else if (size === 0) {
       const filePath =
@@ -686,11 +703,15 @@ export function formatToolResultForLlm(
       record.success === false &&
       (record.recoverable === true || RECOVERABLE_PATCH_ERROR_TYPES.has(errorType))
     ) {
+      const followUpHint =
+        errorType === 'html_full_update_too_large'
+          ? HTML_FULL_UPDATE_FOLLOW_UP_HINT
+          : PATCH_REPAIR_FOLLOW_UP_HINT
       formatted = {
         ...record,
         recoverable: true,
         needsFollowUpPatchRepair: true,
-        followUpHint: PATCH_REPAIR_FOLLOW_UP_HINT,
+        followUpHint,
       }
     } else if (
       record.success !== false &&
@@ -895,7 +916,8 @@ function detectMandatoryFollowUpFromRecord(
     return {
       id: 'workspace_file:patch-repair',
       hint: hint ?? PATCH_REPAIR_FOLLOW_UP_HINT,
-      resolveWith: ['read', 'grep', 'workspace_file'],
+      userHint: PATCH_REPAIR_USER_HINT,
+      resolveWith: ['read', 'grep'],
     }
   }
 
@@ -1066,6 +1088,10 @@ export function resolveMandatoryFollowUps(
       (item) =>
         item.id !== 'create_file:workspace-file' && item.id !== 'workspace_file:patch-repair'
     )
+  }
+
+  if (toolName === 'read' || toolName === 'grep') {
+    next = next.filter((item) => item.id !== 'workspace_file:patch-repair')
   }
 
   if (toolName === 'create_file') {

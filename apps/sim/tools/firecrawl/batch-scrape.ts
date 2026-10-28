@@ -108,7 +108,7 @@ export const batchScrapeTool: ToolConfig<FirecrawlBatchScrapeParams, FirecrawlBa
       },
     },
 
-    hosting: firecrawlHosting(),
+    hosting: firecrawlHosting<FirecrawlBatchScrapeParams>(),
 
     request: {
       modelInput: {

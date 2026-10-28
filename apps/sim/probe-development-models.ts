@@ -3,6 +3,7 @@
  * (model id + structured outputs beta + max_tokens) with a tiny prompt.
  * Delete after verification.
  */
+// biome-ignore-all lint/suspicious/noConsole: one-off CLI probe prints pass/fail to the terminal
 import Anthropic from '@anthropic-ai/sdk'
 import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema'
 
@@ -36,7 +37,6 @@ for (const { model, maxTokens } of candidates) {
       model,
       max_tokens: maxTokens,
       messages: [{ role: 'user', content: 'Reply with {"ok": true}' }],
-      // @ts-expect-error output_config is a beta field
       output_config: {
         format: { type: 'json_schema', schema: transformJSONSchema(schema) },
       },

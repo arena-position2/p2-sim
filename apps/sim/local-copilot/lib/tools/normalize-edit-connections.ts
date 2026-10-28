@@ -1,5 +1,5 @@
 import { createLogger } from '@sim/logger'
-import { TRIGGER_TYPES } from '@/lib/workflows/triggers/triggers'
+import { TRIGGER_TYPES } from '@/lib/workflows/triggers/types'
 
 const logger = createLogger('LocalCopilotEditConnections')
 

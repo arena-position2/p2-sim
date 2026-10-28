@@ -45,7 +45,7 @@ export const searchTool: ToolConfig<TinyFishSearchParams, TinyFishSearchResponse
     },
   },
 
-  hosting: tinyfishSearchHosting(),
+  hosting: tinyfishSearchHosting<TinyFishSearchParams>(),
 
   request: {
     url: (params) => {

@@ -2,7 +2,7 @@ import { db } from '@sim/db'
 import { workflow } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { and, desc, eq, isNull } from 'drizzle-orm'
-import { extractResourcesFromToolResult } from '@/lib/copilot/resources/extraction'
+import { extractResourcesFromToolResult } from '@/lib/mothership/resources/extraction'
 import { extractLocalToolBillingMetadata } from '@/local-copilot/lib/billing/turn-cost-accumulator'
 import { getLocalCopilotMemorySnapshot } from '@/local-copilot/lib/diagnostics'
 import {
@@ -30,12 +30,18 @@ import { rejectOfficeFileViaSandbox } from '@/local-copilot/lib/tools/reject-off
 import {
   ARENA_ALIASED_SERVER_TOOL_NAMES,
   ARENA_DUAL_REGISTERED_SERVER_TOOL_NAMES,
-  ARENA_FILE_PIPELINE_TOOL_NAMES,
   isArenaFilePipelineTool,
   toServerRegistryToolName,
 } from '@/local-copilot/lib/tools/resolve-tool-name-alias'
 import type { LocalCopilotStructuredContext } from '@/local-copilot/lib/types'
-import { assertWorkspaceFileLookBeforeWrite } from '@/local-copilot/lib/writes/look-before-write'
+import {
+  assertWorkspaceFileLookBeforeWrite,
+  clearLivePatchExcerptTokens,
+  rejectPatchSearchIgnoringLiveExcerpt,
+  rejectRepeatedPatchSearch,
+  rememberFailedPatchSearch,
+  rememberLivePatchExcerptTokens,
+} from '@/local-copilot/lib/writes/look-before-write'
 
 export {
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
@@ -96,7 +102,7 @@ async function ensureCopilotToolRuntime(): Promise<Set<string>> {
       memory: getLocalCopilotMemorySnapshot(),
     })
     const { ensureHandlersRegistered } = await import(
-      '@/lib/copilot/tool-executor/register-handlers'
+      '@/lib/mothership/tool-executor/register-handlers'
     )
     ensureHandlersRegistered()
     handlersRegistered = true
@@ -108,15 +114,15 @@ async function ensureCopilotToolRuntime(): Promise<Set<string>> {
 
   // Rebuild from the live registry so Arena aliases (create_file) appear after
   // hot reload without requiring a full process restart.
-  const { getRegisteredServerToolNames } = await import('@/lib/copilot/tools/server/router')
+  const { getRegisteredServerToolNames } = await import('@/lib/mothership/tools/server/router')
   copilotServerToolNames = new Set(getRegisteredServerToolNames())
 
   // Hot-reload safety: older handler snapshots may lack Arena leaf names even
   // when create_empty_file / manage_knowledge_base / web_search are present.
   if (!arenaFileAliasesRegistered) {
-    const { registerHandler, hasHandler } = await import('@/lib/copilot/tool-executor/executor')
+    const { registerHandler, hasHandler } = await import('@/lib/mothership/tool-executor/executor')
     const { createServerToolHandler } = await import(
-      '@/lib/copilot/tools/registry/server-tool-adapter'
+      '@/lib/mothership/tools/registry/server-tool-adapter'
     )
     for (const arenaName of ARENA_ALIASED_SERVER_TOOL_NAMES) {
       // Schema-only aliases (function_execute → run_function, materialize_file →
@@ -278,7 +284,7 @@ async function executeCopilotServerTool(
   workflowId?: string
 ): Promise<ToolExecutionResult> {
   const { createServerToolHandler } = await import(
-    '@/lib/copilot/tools/registry/server-tool-adapter'
+    '@/lib/mothership/tools/registry/server-tool-adapter'
   )
   const serverToolName = toServerRegistryToolName(arenaToolName)
   const handler = createServerToolHandler(serverToolName)
@@ -427,6 +433,32 @@ export async function executeMothershipDelegatedTool(
 
   if (toolName === 'workspace_file') {
     enrichWorkspaceFileArgs(enrichedArgs)
+    ctx.failedPatchSearches ??= new Map()
+    ctx.livePatchExcerptTokens ??= new Map()
+    const repeated = rejectRepeatedPatchSearch({
+      args: enrichedArgs,
+      failedPatchSearches: ctx.failedPatchSearches,
+    })
+    if (repeated) {
+      return {
+        toolName,
+        success: false,
+        error: repeated.message,
+        result: repeated.result,
+      }
+    }
+    const ignoresLive = rejectPatchSearchIgnoringLiveExcerpt({
+      args: enrichedArgs,
+      livePatchExcerptTokens: ctx.livePatchExcerptTokens,
+    })
+    if (ignoresLive) {
+      return {
+        toolName,
+        success: false,
+        error: ignoresLive.message,
+        result: ignoresLive.result,
+      }
+    }
     const lookBefore = assertWorkspaceFileLookBeforeWrite({
       args: enrichedArgs,
       readVfsPaths: ctx.readVfsPaths,
@@ -469,6 +501,16 @@ export async function executeMothershipDelegatedTool(
     if (!result.success) {
       logger.warn('Copilot server tool failed', { toolName, serverToolName, error: result.error })
     }
+    if (toolName === 'workspace_file') {
+      ctx.failedPatchSearches ??= new Map()
+      ctx.livePatchExcerptTokens ??= new Map()
+      if (!result.success) {
+        rememberFailedPatchSearch(ctx.failedPatchSearches, enrichedArgs, result.result)
+        rememberLivePatchExcerptTokens(ctx.livePatchExcerptTokens, enrichedArgs, result.result)
+      } else {
+        clearLivePatchExcerptTokens(ctx.livePatchExcerptTokens, enrichedArgs)
+      }
+    }
     if (toolName === 'list_integration_tools' && result.success) {
       const { adaptListIntegrationToolsForLocal } = await import(
         '@/local-copilot/lib/tools/adapt-list-integration-tools'
@@ -495,7 +537,7 @@ export async function executeMothershipDelegatedTool(
     billingEntityType: ctx.billingAttribution?.billingEntity.type ?? null,
     workspaceId: ctx.workspaceId,
   })
-  const { executeTool } = await import('@/lib/copilot/tool-executor/executor')
+  const { executeTool } = await import('@/lib/mothership/tool-executor/executor')
   // Always execute under the Cloud/handler id (run_function, save_upload, …)
   // while keeping the Arena leaf name on the tool result for the model.
   let result = await executeTool(
@@ -508,7 +550,7 @@ export async function executeMothershipDelegatedTool(
   // so path-only `outputs.files` land in the workspace VFS. Arena must do the
   // same — otherwise Claude sees a sandbox "success" while files/ never updates.
   if (toolName === 'function_execute' && result.success) {
-    const { maybeWriteOutputToFile } = await import('@/lib/copilot/request/tools/files')
+    const { maybeWriteOutputToFile } = await import('@/lib/mothership/request/tools/files')
     const written = await maybeWriteOutputToFile(
       toolName,
       enrichedArgs,

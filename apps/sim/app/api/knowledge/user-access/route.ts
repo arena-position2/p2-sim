@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const workspaceId = searchParams.get('workspaceId')
 
-    const knowledgeBases = await getUserKnowledgeBaseAccess(session.user.id, workspaceId, requestId)
+    const knowledgeBases = await getUserKnowledgeBaseAccess(session.user.id, workspaceId)
 
     return NextResponse.json({
       success: true,

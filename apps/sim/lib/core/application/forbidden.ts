@@ -37,10 +37,20 @@ export const FORBIDDEN_DETAIL_CODES = [
   'ORGANIZATION_ADMIN_REQUIRED',
   /** The organization has no usable enterprise subscription. */
   'ENTERPRISE_PLAN_REQUIRED',
+  /** Single sign-on is switched off for this deployment. */
+  'SSO_DISABLED',
+  /** Verify DNS ownership before configuring a provider for this domain. */
+  'SSO_DOMAIN_NOT_VERIFIED',
+  /** The acting user has reached the configured identity-provider ceiling. */
+  'SSO_PROVIDER_LIMIT_REACHED',
   /** The organization has no usable organization plan of any tier. */
   'ORGANIZATION_PLAN_REQUIRED',
   /** Audit logging is switched off for this deployment. */
   'AUDIT_LOGS_DISABLED',
+  /** The organization or deployment has paused access requests. */
+  'ACCESS_REQUESTS_DISABLED',
+  /** Access requests need an organization-owned workspace. */
+  'ACCESS_REQUEST_ORGANIZATION_REQUIRED',
   /** The caller holds workspace write but is not an editor of this skill. */
   'SKILL_EDITOR_ACCESS_REQUIRED',
   /** The caller holds workspace write but is not an admin of this secret. */

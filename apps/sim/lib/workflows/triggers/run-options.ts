@@ -2,7 +2,11 @@ import { isRecordLike } from '@sim/utils/object'
 import { z } from 'zod'
 import { generateToolInputSchema } from '@/lib/mcp/workflow-tool-schema'
 import { parseInternalFileUrl } from '@/lib/uploads/utils/file-utils'
-import { normalizeInputFormatValue, parseInputFormatFiles } from '@/lib/workflows/input-format'
+import {
+  isFileFieldType,
+  normalizeInputFormatValue,
+  parseInputFormatFiles,
+} from '@/lib/workflows/input-format'
 import { generateWorkflowInputShape } from '@/lib/workflows/input-schema'
 import {
   extractTriggerMockPayload,
@@ -146,7 +150,7 @@ function buildFieldsSample(inputFormat: InputFormatField[]): Record<string, unkn
   for (const field of inputFormat) {
     const name = field.name?.trim()
     if (!name) continue
-    if (field.type === 'file[]') {
+    if (isFileFieldType(field.type)) {
       sample[name] = parseInputFormatFiles(field.value).map((file) => ({
         ...file,
         key: file.key || parseInternalFileUrl(file.url).key,
@@ -247,6 +251,7 @@ function buildTriggerRunOption(
         properties: {
           input: { type: 'string', description: 'User message' },
           conversationId: { type: 'string', description: 'Optional conversation ID' },
+          files: generateToolInputSchema([{ name: 'files', type: 'file[]' }]).properties.files,
         },
       }
       mockPayload = { input: 'mock_message' }
@@ -279,8 +284,7 @@ function buildTriggerRunOption(
  * guaranteeing describe == enforce.
  */
 export function resolveTriggerRunOptions(
-  blocks: Record<string, TriggerBlockLike>,
-  edges?: Array<{ source: string; target: string }>
+  blocks: Record<string, TriggerBlockLike>
 ): TriggerRunOption[] {
   const manual = resolveStartCandidates(blocks, { execution: 'manual' })
   const chat = resolveStartCandidates(blocks, { execution: 'chat' })
@@ -297,7 +301,7 @@ export function resolveTriggerRunOptions(
     return []
   }
 
-  // Single overall default (no edges => one best); ties broken by trigger priority.
+  // Single overall default; ties broken by trigger priority.
   const defaultBlockId = selectBestTrigger(candidates)[0]?.blockId
 
   return candidates.map((candidate) =>

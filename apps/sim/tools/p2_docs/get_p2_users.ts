@@ -36,25 +36,6 @@ export const getP2UsersTool: ToolConfig<GetP2UsersParams, GetP2UsersResponse> = 
     headers: () => ({}),
   },
 
-  directExecution: async (params: GetP2UsersParams): Promise<GetP2UsersResponse> => {
-    const keyword = params.filter?.trim().toLowerCase()
-
-    const users = keyword
-      ? P2_TEAM_MEMBERS.filter(
-          (m) =>
-            m.name.toLowerCase().includes(keyword) || m.designation.toLowerCase().includes(keyword)
-        )
-      : P2_TEAM_MEMBERS
-
-    return {
-      success: true,
-      output: {
-        users,
-        total: users.length,
-      },
-    }
-  },
-
   outputs: {
     users: {
       type: 'array',
@@ -68,4 +49,25 @@ export const getP2UsersTool: ToolConfig<GetP2UsersParams, GetP2UsersResponse> = 
       description: 'Total number of users returned.',
     },
   },
+}
+
+export async function executeGetP2UsersDirect(
+  params: GetP2UsersParams
+): Promise<GetP2UsersResponse> {
+  const keyword = params.filter?.trim().toLowerCase()
+
+  const users = keyword
+    ? P2_TEAM_MEMBERS.filter(
+        (m) =>
+          m.name.toLowerCase().includes(keyword) || m.designation.toLowerCase().includes(keyword)
+      )
+    : P2_TEAM_MEMBERS
+
+  return {
+    success: true,
+    output: {
+      users,
+      total: users.length,
+    },
+  }
 }

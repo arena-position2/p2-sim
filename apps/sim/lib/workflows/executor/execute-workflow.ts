@@ -8,15 +8,18 @@ import {
   resolveBillingAttribution,
 } from '@/lib/billing/core/billing-attribution'
 import type { AsyncExecutionCorrelation } from '@/lib/core/async-jobs/types'
+import type { ExecutionActor } from '@/lib/execution/actor-resolution'
 import { resolveChildExecutionLineage } from '@/lib/execution/lineage'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { captureServerEvent } from '@/lib/posthog/server'
 import { executeWorkflowCore } from '@/lib/workflows/executor/execution-core'
 import { handlePostExecutionPauseState } from '@/lib/workflows/executor/pause-persistence'
+import type { NormalizedWorkflowData } from '@/lib/workflows/persistence/utils'
 import { ExecutionSnapshot } from '@/executor/execution/snapshot'
 import type {
   BlockCompletionCallbackData,
   ExecutionMetadata,
+  ExecutionTestHooks,
   SerializableExecutionState,
 } from '@/executor/execution/types'
 import type { ExecutionResult, StreamingExecution } from '@/executor/types'
@@ -111,15 +114,21 @@ export interface ExecuteWorkflowOptions {
   abortSignal?: AbortSignal
   /** Use the live/draft workflow state instead of the deployed state. Used by copilot. */
   useDraftState?: boolean
+  /** Draft state the caller already loaded, reused instead of reading the draft tables again. */
+  draftState?: NormalizedWorkflowData
   /** Immutable workflow state selected by a trusted server-side trigger boundary. */
   workflowStateOverride?: NonNullable<ExecutionMetadata['workflowStateOverride']>
   /** Stop execution after this block completes. Used for "run until block" feature. */
   stopAfterBlockId?: string
+  /** Workflow test run: mocked blocks await these hooks instead of running. */
+  testHooks?: ExecutionTestHooks
   /** Run-from-block configuration using a prior execution snapshot. */
   runFromBlock?: {
     startBlockId: string
     sourceSnapshot: SerializableExecutionState
     sourceExecutionId?: string
+    /** Mocked upstream outputs (block name/id → output object) overlaid on the snapshot. */
+    variableInputs?: Record<string, unknown>
   }
   /** Trusted encrypted provenance supplied by a server-only caller before execution starts. */
   trustedInitialResolvedSecretTraceProvenance?: ResolvedSecretTraceProvenanceV1
@@ -144,6 +153,8 @@ export interface ExecuteWorkflowOptions {
   isPublicApiAccess?: boolean
   /** Immutable actor/payer decision captured by preprocessing. */
   billingAttribution?: BillingAttributionSnapshot
+  /** Resolved actor identity for `actor_user_id`/`actor_type` on usage and execution logs. */
+  executionActor?: ExecutionActor
   /** Server-issued run identity persisted with the execution log and snapshot. */
   trustedExecutionCorrelation?: AsyncExecutionCorrelation
   /** Deployed-chat thinking policy; persisted on the snapshot for resume. */
@@ -256,6 +267,7 @@ export async function executeWorkflow(
       isClientSession: Boolean(sessionUserId),
       enforceCredentialAccess: streamConfig?.enforceCredentialAccess ?? false,
       isPublicApiAccess: streamConfig?.isPublicApiAccess ?? false,
+      executionActor: streamConfig?.executionActor,
       largeValueExecutionIds: Array.from(new Set([executionId])),
       largeValueKeys: streamConfig?.largeValueKeys,
       fileKeys: streamConfig?.fileKeys,
@@ -313,9 +325,11 @@ export async function executeWorkflow(
       base64MaxBytes: streamConfig?.base64MaxBytes,
       abortSignal: streamConfig?.abortSignal,
       stopAfterBlockId: streamConfig?.stopAfterBlockId,
+      testHooks: streamConfig?.testHooks,
       trustedInitialResolvedSecretTraceProvenance:
         streamConfig?.trustedInitialResolvedSecretTraceProvenance,
       runFromBlock: streamConfig?.runFromBlock,
+      draftState: streamConfig?.draftState,
     }))
 
     const blockTypes = [

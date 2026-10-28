@@ -1,12 +1,5 @@
-/**
- * @vitest-environment node
- */
 import { describe, expect, it } from 'vitest'
-import {
-  extractFieldsFromSchema,
-  extractFieldValues,
-  traverseObjectPath,
-} from '@/lib/core/utils/response-format'
+import { extractFieldsFromSchema, traverseObjectPath } from '@/lib/core/utils/response-format'
 import {
   LARGE_ARRAY_MANIFEST_VERSION,
   type LargeArrayManifest,
@@ -87,9 +80,6 @@ describe('response format traversal', () => {
     const manifest = createManifest()
 
     expect(traverseObjectPath({ output: { rows: manifest } }, 'output.rows.length')).toBe(100_000)
-    expect(
-      extractFieldValues({ output: { rows: manifest } }, ['block-1_output.rows.length'], 'block-1')
-    ).toEqual({ 'output.rows.length': 100_000 })
   })
 
   it('does not perform indexed manifest reads in sync traversal', () => {

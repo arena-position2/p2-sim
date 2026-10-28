@@ -3,6 +3,7 @@ import { localCopilotPatches } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import type { WorkflowState } from '@sim/workflow-types/workflow'
 import { eq } from 'drizzle-orm'
+import type { WorkflowPersistGovernance } from '@/lib/workflows/persistence/block-access-guard'
 import { saveWorkflowToNormalizedTables } from '@/lib/workflows/persistence/utils'
 import { validateWorkflowPatch } from '@/local-copilot/lib/patches/validate'
 import type { WorkflowPatch } from '@/local-copilot/lib/types'
@@ -75,7 +76,11 @@ export async function applyWorkflowPatch(params: ApplyPatchParams): Promise<Appl
   }
 
   const nextState = applyPatchOperations(currentState, patch)
-  await saveWorkflowToNormalizedTables(workflowId, nextState)
+  const governance: WorkflowPersistGovernance = {
+    workspaceId: workspaceId ?? null,
+    subjectUserId: userId,
+  }
+  await saveWorkflowToNormalizedTables(workflowId, nextState, governance)
 
   await db
     .update(localCopilotPatches)

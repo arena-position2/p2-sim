@@ -1,7 +1,4 @@
-/**
- * @vitest-environment node
- */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getDesktopChatCapabilities,
   hasBrowserAgent,
@@ -30,28 +27,6 @@ describe('desktop surface availability', () => {
     setDesktopPreferencesSnapshot(ENABLED_PREFERENCES)
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('ships every surface with the desktop bridge', () => {
-    installBridge({ browserAgent: {}, terminal: {} })
-
-    expect(hasBrowserAgent()).toBe(true)
-    expect(hasTerminal()).toBe(true)
-    expect(isBrowserAgentEnabled()).toBe(true)
-    expect(isTerminalEnabled()).toBe(true)
-  })
-
-  it('reports no surfaces outside the desktop app', () => {
-    vi.stubGlobal('window', {})
-
-    expect(hasBrowserAgent()).toBe(false)
-    expect(hasTerminal()).toBe(false)
-    expect(isBrowserAgentEnabled()).toBe(false)
-    expect(isTerminalEnabled()).toBe(false)
-  })
-
   it('honors the per-device browser and terminal switches', () => {
     installBridge({ browserAgent: {}, terminal: {} })
     setDesktopPreferencesSnapshot({
@@ -64,6 +39,53 @@ describe('desktop surface availability', () => {
     expect(hasTerminal()).toBe(true)
     expect(isBrowserAgentEnabled()).toBe(false)
     expect(isTerminalEnabled()).toBe(false)
+  })
+
+  it('exposes native file tools without browser, terminal, or folder permissions', async () => {
+    installBridge({ localFiles: vi.fn() })
+    setDesktopPreferencesSnapshot({
+      ...ENABLED_PREFERENCES,
+      browserEnabled: false,
+      terminalEnabled: false,
+    })
+    expect(await getDesktopChatCapabilities('org-chat')).toMatchObject({
+      desktopCapabilities: { localFiles: true },
+    })
+    installBridge({})
+    expect(
+      (await getDesktopChatCapabilities('org-chat')).desktopCapabilities?.localFiles
+    ).toBeUndefined()
+  })
+
+  it('offers a turn to the background executor only when the shell has a registered one', async () => {
+    setDesktopPreferencesSnapshot({
+      ...ENABLED_PREFERENCES,
+      browserEnabled: false,
+      terminalEnabled: false,
+    })
+    const offerFrom = async (bridge: Record<string, unknown>) => {
+      installBridge({ localFiles: vi.fn(), ...bridge })
+      const { desktopCapabilities } = await getDesktopChatCapabilities('chat-1')
+      return { deviceId: desktopCapabilities?.deviceId, executor: desktopCapabilities?.executor }
+    }
+    const unset = { deviceId: undefined, executor: undefined }
+
+    expect(await offerFrom({})).toEqual(unset)
+    expect(await offerFrom({ desktopExecutor: { getDevice: vi.fn(async () => null) } })).toEqual(
+      unset
+    )
+    expect(
+      await offerFrom({
+        desktopExecutor: { getDevice: vi.fn(async () => Promise.reject(new Error('IPC closed'))) },
+      })
+    ).toEqual(unset)
+    expect(
+      await offerFrom({
+        desktopExecutor: {
+          getDevice: vi.fn(async () => ({ deviceId: 'device-1', protocolVersion: 1 })),
+        },
+      })
+    ).toEqual({ deviceId: 'device-1', executor: 1 })
   })
 
   it('bounds terminal hints before adding them to a chat request', async () => {

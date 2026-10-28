@@ -1,3 +1,5 @@
+import { escapeRegExp } from '@sim/utils/string'
+
 /** Characters of a document shown under a search result. */
 export const SNIPPET_LENGTH = 280
 /** Characters kept before the selected match, so the hit sits in context rather than at the edge. */
@@ -14,9 +16,11 @@ const HEADER_LINE = /^[A-Z][A-Za-z-]{1,15}: .*$/
  */
 const WORD_CHARACTER =
   /(?![\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\p{sc=Thai}])[\p{L}\p{N}_]/u
+const WORD_RUN = new RegExp(`(?:${WORD_CHARACTER.source})+`, 'gu')
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** The words of a text, split where a run of `WORD_CHARACTER`s ends. */
+export function textWords(text: string): string[] {
+  return text.match(WORD_RUN) ?? []
 }
 
 /**

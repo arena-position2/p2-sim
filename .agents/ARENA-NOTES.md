@@ -106,6 +106,7 @@ Add rows here as more custom work lands.
 | Checkout ignores Starter Stripe ID | `arena/checkout-policy.ts` → `lib/billing/client/upgrade.ts` |
 | Supersede Starter on paid checkout | `arena/supersede-starter.ts` → `onSubscriptionComplete` + org ensure |
 | Personal / signup workspace creation | `apps/sim/lib/workspaces/README.md` |
+| Workflow panel Launch (deployed chat) | `apps/sim/app/workspace/.../panel/components/launch-deployed-chat.tsx`, rendered beside Run in `panel.tsx`. Shows only when the workflow has a chat or app deployment. Upstream's Run button stays the in-builder execution. |
 
 ---
 
@@ -120,7 +121,8 @@ When pulling upstream Sim into an Arena branch:
 5. **Settings Enterprise nav** — Keep `forks` and `custom-blocks` commented out in `settings/navigation.ts`.
 6. **Stripe / plans** — Follow `apps/sim/lib/billing/README.md` (runtime `getCreditsPerDollar()`, Checkout URL + non-blocking transfer, Starter has no Stripe ID, EE entitlement includes Starter/Max).
 7. **Workspaces** — Follow `apps/sim/lib/workspaces/README.md` (signup `ensurePersonalWorkspaceOnEmailSignup`, keep `/workspace` fallbacks, keep `isPersonal` + first-personal on free/lapsed orgs).
-8. **This file** — Update the tables above if anything was added, removed, or renamed during the merge.
+8. **Workflow panel Launch** — `launch-deployed-chat.tsx` must still render beside upstream's Run chip in `panel.tsx`. Do not rename Run back to Test. Launch stays hidden unless chat status reports a deployment.
+9. **This file** — Update the tables above if anything was added, removed, or renamed during the merge.
 
 ---
 
@@ -128,6 +130,7 @@ When pulling upstream Sim into an Arena branch:
 
 | Date | Change |
 |------|--------|
+| 2026-10-16 | Workflow panel Launch button restored (`launch-deployed-chat.tsx`). Re-apply beside Run on upstream panel merges. |
 | 2026-09-07 | Workspace creation and personal-workspace README at `apps/sim/lib/workspaces/README.md` |
 | 2026-09-07 | Stripe payments and plans README at `apps/sim/lib/billing/README.md` |
 | 2026-09-01 | Arena upgrade overlay (Starter/Pro/Max) + checkout ignores Starter Stripe ID and supersedes Starter on payment |

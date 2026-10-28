@@ -1,7 +1,7 @@
 import { exaHosting } from '@/tools/exa/hosting'
 import type { ExaAnswerParams, ExaAnswerResponse } from '@/tools/exa/types'
 import { parseJsonSchema } from '@/tools/exa/utils'
-import type { ToolConfig } from '@/tools/types'
+import type { ToolConfig, ToolHostingConfig } from '@/tools/types'
 
 export const answerTool: ToolConfig<ExaAnswerParams, ExaAnswerResponse> = {
   id: 'exa_answer',
@@ -9,7 +9,7 @@ export const answerTool: ToolConfig<ExaAnswerParams, ExaAnswerResponse> = {
   description: 'Get an AI-generated answer to a question with citations from the web using Exa AI.',
   version: '2.0.0',
 
-  hosting: exaHosting,
+  hosting: exaHosting as unknown as ToolHostingConfig<ExaAnswerParams>,
 
   params: {
     query: {

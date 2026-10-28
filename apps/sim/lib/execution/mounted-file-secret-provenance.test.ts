@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import { encryptionMock, encryptionMockFns } from '@sim/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMountedFileSecretProvenanceScanner } from '@/lib/execution/mounted-file-secret-provenance'
@@ -9,14 +6,13 @@ vi.mock('@/lib/core/security/encryption', () => encryptionMock)
 
 describe('mounted file output provenance scanner', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     encryptionMockFns.mockDecryptSecret.mockImplementation(async (value: string) => ({
       decrypted:
         value === 'encrypted-a' ? 'first secret' : value === 'encrypted-b' ? 'line\n"quoted"' : '',
     }))
   })
 
-  it('classifies only mounted secrets present in the exact exported bytes', async () => {
+  it('retains full mounted lineage while narrowing text exports to matching literals', async () => {
     const scanner = await createMountedFileSecretProvenanceScanner({
       version: 1,
       complete: true,
@@ -27,6 +23,23 @@ describe('mounted file output provenance scanner', () => {
       scope: { userId: 'user-1', workspaceId: 'workspace-1' },
     })
 
+    expect(scanner?.provenance).toEqual({
+      status: 'exact',
+      entries: [
+        {
+          name: 'MOUNTED_FILE_SECRET',
+          encryptedValue: 'encrypted-a',
+          sourceUserId: 'user-1',
+          sourceWorkspaceId: 'workspace-1',
+        },
+        {
+          name: 'ORIGINAL_NAME',
+          encryptedValue: 'encrypted-b',
+          sourceUserId: 'user-1',
+          sourceWorkspaceId: 'workspace-1',
+        },
+      ],
+    })
     expect(scanner?.scan(Buffer.from('ordinary output'))).toEqual({ status: 'exact', entries: [] })
     expect(scanner?.scan(Buffer.from('prefix first secret suffix'))).toEqual({
       status: 'exact',
@@ -52,26 +65,18 @@ describe('mounted file output provenance scanner', () => {
     })
   })
 
-  it('reports whether the mount carried any secret material', async () => {
-    const withSecrets = await createMountedFileSecretProvenanceScanner({
-      version: 1,
-      complete: true,
-      entries: [{ encryptedValue: 'encrypted-a' }],
-      scope: { userId: 'user-1', workspaceId: 'workspace-1' },
-    })
-    expect(withSecrets?.hasSecrets).toBe(true)
-
+  it('keeps a mount without secret material exact-empty', async () => {
     const withoutSecrets = await createMountedFileSecretProvenanceScanner({
       version: 1,
       complete: true,
       entries: [],
       scope: { userId: 'user-1', workspaceId: 'workspace-1' },
     })
-    expect(withoutSecrets?.hasSecrets).toBe(false)
+    expect(withoutSecrets?.provenance).toEqual({ status: 'exact', entries: [] })
     expect(withoutSecrets?.scan(Buffer.from('anything'))).toEqual({ status: 'exact', entries: [] })
   })
 
-  it('keeps hasSecrets true when attested entries yield no scannable plaintext', async () => {
+  it('keeps attested entries unknown when they yield no plaintext', async () => {
     encryptionMockFns.mockDecryptSecret.mockImplementation(async () => ({ decrypted: '' }))
 
     const scanner = await createMountedFileSecretProvenanceScanner({
@@ -81,7 +86,8 @@ describe('mounted file output provenance scanner', () => {
       scope: { userId: 'user-1', workspaceId: 'workspace-1' },
     })
 
-    expect(scanner?.hasSecrets).toBe(true)
+    expect(scanner?.provenance).toEqual({ status: 'unknown' })
+    expect(scanner?.scan(Buffer.from('ordinary output'))).toEqual({ status: 'unknown' })
   })
 
   it.each(['false', 'hunter2', '""""'])(
@@ -100,7 +106,7 @@ describe('mounted file output provenance scanner', () => {
         status: 'exact',
         entries: [],
       })
-      expect(scanner?.hasSecrets).toBe(false)
+      expect(scanner?.provenance).toEqual({ status: 'exact', entries: [] })
     }
   )
 
@@ -116,7 +122,17 @@ describe('mounted file output provenance scanner', () => {
       scope: { userId: 'user-1', workspaceId: 'workspace-1' },
     })
 
-    expect(scanner?.hasSecrets).toBe(true)
+    expect(scanner?.provenance).toEqual({
+      status: 'exact',
+      entries: [
+        {
+          name: 'MOUNTED_FILE_SECRET',
+          encryptedValue: 'encrypted-boundary',
+          sourceUserId: 'user-1',
+          sourceWorkspaceId: 'workspace-1',
+        },
+      ],
+    })
     expect(scanner?.scan(Buffer.from('false hunter22'))).toEqual({
       status: 'exact',
       entries: [
@@ -136,7 +152,7 @@ describe('mounted file output provenance scanner', () => {
       complete: false,
       entries: [],
     })
-    expect(incomplete?.hasSecrets).toBe(true)
+    expect(incomplete?.provenance).toEqual({ status: 'unknown' })
     expect(incomplete?.scan(Buffer.from('raw output'))).toEqual({ status: 'unknown' })
 
     encryptionMockFns.mockDecryptSecret.mockRejectedValueOnce(new Error('decrypt failed'))
@@ -146,7 +162,7 @@ describe('mounted file output provenance scanner', () => {
       entries: [{ encryptedValue: 'encrypted-a' }],
       scope: { userId: 'user-1', workspaceId: 'workspace-1' },
     })
-    expect(unavailable?.hasSecrets).toBe(true)
+    expect(unavailable?.provenance).toEqual({ status: 'unknown' })
     expect(unavailable?.scan(Buffer.from('raw output'))).toEqual({ status: 'unknown' })
   })
 })

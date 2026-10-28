@@ -1,4 +1,4 @@
-import { DOCUMENT_FORMAT_GUIDANCE } from '@/lib/copilot/chat/document-format-guidance'
+import { DOCUMENT_FORMAT_GUIDANCE } from '@/lib/mothership/chat/document-format-guidance'
 import { LOCAL_COMPLEX_HTML_GUIDANCE } from '@/local-copilot/lib/prompts/complex-html-guidance'
 import type { LocalCopilotToolDefinition } from '@/local-copilot/lib/types'
 

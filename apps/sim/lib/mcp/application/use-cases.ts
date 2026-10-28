@@ -2,7 +2,11 @@ import { AuditAction, AuditResourceType } from '@sim/audit'
 import { resolvePrincipalAttribution } from '@sim/auth/principal'
 import { getPostgresErrorCode } from '@sim/utils/errors'
 import type { CursorKey, ListSortOrder } from '@/lib/api/list-query'
-import { defineAuthorizedWorkspaceUseCase, ForbiddenOperationError } from '@/lib/core/application'
+import {
+  authorizeWorkspaceOperation,
+  defineAuthorizedWorkspaceUseCase,
+  ForbiddenOperationError,
+} from '@/lib/core/application'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import { sanitizeUrlForLog } from '@/lib/core/utils/logging'
 import {
@@ -14,6 +18,7 @@ import {
   type McpWorkspaceContext,
   resolveMcpServerContext,
   resolveMcpWorkspaceContext,
+  resolveOrganizationMcpServerContext,
 } from '@/lib/mcp/application/context'
 import {
   loadMcpOperationAccess,
@@ -36,7 +41,7 @@ import {
 import { mcpService } from '@/lib/mcp/service'
 import { compileMcpToolSchema } from '@/lib/mcp/tool-schema'
 import type { McpAuthType } from '@/lib/mcp/types'
-import { generateMcpServerId } from '@/lib/mcp/utils'
+import { generateMcpServerId, isSameMcpServerDestination } from '@/lib/mcp/utils'
 
 type McpServerTransport = McpServerRow['transport']
 type McpWriteSource = 'api' | 'settings' | 'tool_input'
@@ -208,15 +213,17 @@ export const discoverMcpServerToolsUseCase = defineAuthorizedWorkspaceUseCase({
   },
 })
 
-export interface GetMcpServerInput {
-  workspaceId: string
-  serverId: string
-}
+export type GetMcpServerInput = { serverId: string } & (
+  | { workspaceId: string; organizationId?: never }
+  | { workspaceId?: never; organizationId: string }
+)
 
 export const getMcpServerUseCase = defineAuthorizedWorkspaceUseCase({
   operation: mcpServerOperations.read,
   resolveContext: ({ input }: { input: GetMcpServerInput }) =>
-    resolveMcpServerContext(input.workspaceId, input.serverId),
+    input.organizationId
+      ? resolveOrganizationMcpServerContext(input.organizationId, input.serverId)
+      : resolveMcpServerContext(input.workspaceId!, input.serverId),
   authorizationOptions,
   async execute({ context }) {
     return { server: context.server }
@@ -383,6 +390,18 @@ async function updateMcpServer(args: {
       'This MCP server is managed from its Credential Group settings'
     )
   }
+  const changesDestination =
+    args.input.url !== undefined &&
+    (!args.context.server.url ||
+      !isSameMcpServerDestination(args.context.server.url, args.input.url))
+  if (changesDestination) {
+    await authorizeWorkspaceOperation(
+      args.principal,
+      mcpServerOperations.changeDestination,
+      args.context,
+      authorizationOptions
+    )
+  }
   const attribution = resolvePrincipalAttribution(args.principal, {
     workspaceBillingOwnerUserId: args.context.billedAccountUserId,
   })
@@ -390,6 +409,7 @@ async function updateMcpServer(args: {
     workspaceId: args.context.workspaceId,
     userId: attribution.attributedUserId,
     serverId: args.context.server.id,
+    allowDestinationChange: changesDestination,
     name: args.input.name,
     description: args.input.description,
     transport: args.input.transport,
@@ -468,7 +488,7 @@ export const deleteMcpServerUseCase = defineAuthorizedWorkspaceUseCase({
   resolveContext: ({ input }: { input: DeleteMcpServerInput }) =>
     resolveMcpServerContext(input.workspaceId, input.serverId),
   authorizationOptions,
-  async execute({ principal, input, context }) {
+  async execute({ principal, context }) {
     if (context.server.managedConnectorId) {
       throw new OrchestrationError(
         'conflict',

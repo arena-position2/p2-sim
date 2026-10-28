@@ -105,7 +105,7 @@ export function populatePostgresBlocks(
       block.subBlocks = {}
     }
 
-    const subBlocks = block.subBlocks
+    const subBlocks = block.subBlocks as Record<string, unknown>
     setSubBlockValue(subBlocks, 'host', connection.host)
     setSubBlockValue(subBlocks, 'port', connection.port)
     setSubBlockValue(subBlocks, 'database', connection.database)

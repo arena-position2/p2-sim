@@ -2,6 +2,7 @@
 import type { Principal } from '@sim/auth/principal'
 import { db } from '@sim/db'
 import { document, embedding, knowledgeBase, organization, user, workspace } from '@sim/db/schema'
+import { deleteWorkspaceFixture } from '@sim/db/testing/workspace-fixtures'
 import { generateId } from '@sim/utils/id'
 import { eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -79,7 +80,7 @@ describe('API-key KB block fan-out', () => {
   })
 
   afterAll(async () => {
-    await db.delete(workspace).where(eq(workspace.id, ids.workspaceId))
+    await deleteWorkspaceFixture(db, eq(workspace.id, ids.workspaceId))
     await db.delete(organization).where(eq(organization.id, ids.organizationId))
     await db.delete(user).where(inArray(user.id, [ids.aliceId, ids.bobId]))
     await db.$client.end()
@@ -91,7 +92,7 @@ describe('API-key KB block fan-out', () => {
       const previousDebug = db.$client.options.debug
       const statements: string[] = []
       db.$client.options.debug = (_connection, query) => {
-        if (statements.length < 250) statements.push(query)
+        if (statements.length < 1000) statements.push(query)
       }
       try {
         const results = await Promise.all(
@@ -124,9 +125,30 @@ describe('API-key KB block fan-out', () => {
           expect(result.rows[0].knowledgeBaseId).toBe(bases[index].id)
           expect(result.rows[0].distance).toBeCloseTo(0)
         }
-        expect(statements.filter((query) => query.includes('statement_timeout'))).toHaveLength(54)
-        expect(statements.filter((query) => query.includes('+ 0'))).toHaveLength(18)
-        expect(statements.some((query) => query.includes('hnsw.iterative_scan'))).toBe(false)
+        const matching = (fragment: string) =>
+          statements.filter((query) => query.includes(fragment))
+        /**
+         * Every statement runs under the leg's deadline: the candidate search applies it with the
+         * scan settings in one statement, and the probe, exact ranking and hydration each open
+         * with one of their own.
+         */
+        expect(matching('statement_timeout')).toHaveLength(bases.length * 4)
+        expect(matching('IS NOT NULL AS unfilled')).toHaveLength(0)
+        /**
+         * A scope this small leaves the bounded traversal short of its candidate limit, so every
+         * search probes once and rescues once — never a widening retry loop.
+         */
+        expect(matching('hnsw.iterative_scan')).toHaveLength(bases.length)
+        expect(matching('AS visible')).toHaveLength(bases.length)
+        expect(matching(') + 0 LIMIT')).toHaveLength(bases.length)
+        /** The walk and the rescue carry each candidate's document, so no page read follows them. */
+        expect(matching('"embedding_search"."id" = ANY(')).toHaveLength(0)
+        /** The probe enumerates visible documents and reports saturation; it never ranks them. */
+        expect(
+          statements.filter(
+            (query) => query.includes('AS saturated') && !query.includes('ORDER BY')
+          )
+        ).toHaveLength(bases.length)
       } finally {
         db.$client.options.debug = previousDebug
       }

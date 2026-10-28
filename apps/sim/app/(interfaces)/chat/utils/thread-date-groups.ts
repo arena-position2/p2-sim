@@ -7,7 +7,7 @@ const GROUP_ORDER: Exclude<ThreadDateGroup, 'Pinned'>[] = [
   'Older',
 ]
 
-export function getThreadDateGroup(updatedAt: string | Date): ThreadDateGroup {
+export function getThreadDateGroup(updatedAt: string | Date): Exclude<ThreadDateGroup, 'Pinned'> {
   const date = typeof updatedAt === 'string' ? new Date(updatedAt) : updatedAt
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())

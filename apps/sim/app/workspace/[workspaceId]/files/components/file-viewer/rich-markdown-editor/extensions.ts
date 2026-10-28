@@ -298,5 +298,6 @@ export function createMarkdownContentExtensions(
     RawInlineHtml,
     MarkdownLinkInputRule,
     Markdown,
-  ]
+    // Dual @tiptap/core package copies disagree on Extendable.parent; the runtime set is fine.
+  ] as Extensions
 }

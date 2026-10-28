@@ -13,7 +13,6 @@ import { getBlock } from '@/blocks'
 import type { BlockState } from '@/stores/workflows/workflow/types'
 
 const logger = createLogger('SubblockMigrations')
-const ZOOM_OAUTH_CANONICAL_IDS = new Set(['oauthCredential', 'oauthCredentialAdmin'])
 
 /**
  * Marks a migration target as "this field is gone", rather than a rename. The
@@ -113,8 +112,6 @@ function isFieldProjection(value: unknown): boolean {
  * secret onto a live subblock.
  */
 export const SUBBLOCK_ID_MIGRATIONS: Record<string, readonly SubblockIdMigration[]> = {
-  facebook_ads: [{ from: 'account', to: 'accountSelector' }],
-  google_ads_v1: [{ from: 'accounts', to: 'accountsSelector' }],
   /** MCP normalization selects the active replacement before this rename pass. */
   mcp: [
     { from: 'server', to: 'serverSelector' },
@@ -124,7 +121,11 @@ export const SUBBLOCK_ID_MIGRATIONS: Record<string, readonly SubblockIdMigration
   ],
   /** List Channels now returns one page and a cursor; automatic page limits are retired. */
   slack: [{ from: 'channelMaxPages', to: '_removed_channelMaxPages' }],
+  facebook_ads: [{ from: 'account', to: 'accountSelector' }],
   slack_v2: [{ from: 'channelMaxPages', to: '_removed_channelMaxPages' }],
+  /** Google Ads moved API access to the OAuth client's Cloud project and retired developer tokens. */
+  google_ads: [{ from: 'developerToken', to: '_removed_developerToken' }],
+  google_ads_v1: [{ from: 'accounts', to: 'accountsSelector' }],
   instagram: [{ from: 'metrics', to: 'insightMetrics' }],
   knowledge: [{ from: 'knowledgeBaseId', to: 'knowledgeBaseSelector' }],
   zoom: [
@@ -330,28 +331,13 @@ export const SUBBLOCK_ID_MIGRATIONS: Record<string, readonly SubblockIdMigration
       whenOperation: ['semrush_organic_positions'],
     },
   ],
-}
-
-/**
- * Rewrites a stored `operation` dropdown value onto the current option id.
- * Used when a block's operation ids were renamed (Semrush split a generic
- * query into dedicated tools) so the card still selects a live option.
- */
-export const SUBBLOCK_OPERATION_VALUE_MIGRATIONS: Record<string, Record<string, string>> = {
-  semrush: {
-    url_organic: 'semrush_url_organic_keywords',
-    domain_organic: 'semrush_domain_organic_keywords',
-    domain_organic_organic: 'semrush_domain_organic_competitors',
-    domain_rank: 'semrush_domain_overview',
-    tracking_position_organic: 'semrush_organic_positions',
-  },
-  /**
-   * `uploadMimeType` was an advanced MIME Type input on Upload Document File whose
-   * value the upload path never read: the content type is resolved from storage and
-   * that resolution is never empty, so the field's value lost the `||` chain every
-   * time. Dropped rather than renamed — there is no field for the value to move to.
-   */
-  vanta: [{ from: 'uploadMimeType', to: '_removed_uploadMimeType' }],
+  /** Saved credentials replace inline auth; upload content type is resolved from storage. */
+  vanta: [
+    { from: 'uploadMimeType', to: '_removed_uploadMimeType' },
+    { from: 'clientId', to: '_removed_clientId' },
+    { from: 'clientSecret', to: '_removed_clientSecret' },
+    { from: 'region', to: '_removed_region' },
+  ],
   /** Parallel's V1 Extract always returns excerpts; the opt-out toggle has no replacement. */
   parallel_ai: [{ from: 'excerpts', to: '_removed_excerpts' }],
   /**
@@ -408,12 +394,60 @@ export const SUBBLOCK_OPERATION_VALUE_MIGRATIONS: Record<string, Record<string, 
   ],
 }
 
+/**
+ * Rewrites a stored `operation` dropdown value onto the current option id.
+ * Used when a block's operation ids were renamed (Semrush split a generic
+ * query into dedicated tools) so the card still selects a live option.
+ */
+export const SUBBLOCK_OPERATION_VALUE_MIGRATIONS: Record<string, Record<string, string>> = {
+  semrush: {
+    url_organic: 'semrush_url_organic_keywords',
+    domain_organic: 'semrush_domain_organic_keywords',
+    domain_organic_organic: 'semrush_domain_organic_competitors',
+    domain_rank: 'semrush_domain_overview',
+    tracking_position_organic: 'semrush_organic_positions',
+  },
+}
+
+/** Identifies retired fields without applying renames or altering archived workflow structure. */
+export function isRemovedSubblockId(blockType: string, id: string): boolean {
+  return (
+    id.startsWith(REMOVED_SUBBLOCK_ID_PREFIX) ||
+    (SUBBLOCK_ID_MIGRATIONS[blockType]?.some(
+      ({ from, to }) => from === id && to.startsWith(REMOVED_SUBBLOCK_ID_PREFIX)
+    ) ??
+      false)
+  )
+}
+
 /** Reads the value out of a stored subblock entry, tolerating a bare value. */
 function storedSubblockValue(entry: unknown): unknown {
   if (isPlainRecord(entry)) return Object.hasOwn(entry, 'value') ? entry.value : null
   return entry
 }
 
+/** A stored value carries nothing worth migrating when it is absent or blank. */
+function isBlankValue(value: unknown): boolean {
+  return value === undefined || value === null || value === ''
+}
+
+/**
+ * The operation a block is currently configured for, or `null` when it has
+ * none. An operation-scoped migration cannot fire without it: the whole point
+ * of the scope is that the same stored ID means different things per operation,
+ * so an unknown operation must leave the value alone.
+ */
+function selectedOperation(
+  subBlocks: Record<string, BlockState['subBlocks'][string]>
+): string | null {
+  const value = storedSubblockValue(subBlocks.operation)
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+/**
+ * Migrates legacy subblock IDs inside a single block's subBlocks map.
+ * Returns a new subBlocks record if anything changed, or the original if not.
+ */
 /**
  * Rewrites a stored operation dropdown onto the current option id when the
  * block's operation ids were renamed. Must run before ID migrations so
@@ -452,28 +486,6 @@ function migrateBlockOperationValue(
   }
 }
 
-/** A stored value carries nothing worth migrating when it is absent or blank. */
-function isBlankValue(value: unknown): boolean {
-  return value === undefined || value === null || value === ''
-}
-
-/**
- * The operation a block is currently configured for, or `null` when it has
- * none. An operation-scoped migration cannot fire without it: the whole point
- * of the scope is that the same stored ID means different things per operation,
- * so an unknown operation must leave the value alone.
- */
-function selectedOperation(
-  subBlocks: Record<string, BlockState['subBlocks'][string]>
-): string | null {
-  const value = storedSubblockValue(subBlocks.operation)
-  return typeof value === 'string' && value !== '' ? value : null
-}
-
-/**
- * Migrates legacy subblock IDs inside a single block's subBlocks map.
- * Returns a new subBlocks record if anything changed, or the original if not.
- */
 function migrateBlockSubblockIds(
   blockType: string,
   subBlocks: Record<string, BlockState['subBlocks'][string]>,
@@ -790,29 +802,7 @@ export function backfillCanonicalModes(blocks: Record<string, BlockState>): {
     const values = buildSubBlockValues(block.subBlocks)
 
     for (const group of pairs) {
-      const currentMode = existing[group.canonicalId]
-
-      if (
-        block.type === 'zoom' &&
-        currentMode === 'advanced' &&
-        ZOOM_OAUTH_CANONICAL_IDS.has(group.canonicalId)
-      ) {
-        const basicValue = group.basicId ? values[group.basicId] : undefined
-        const hasBasicValue =
-          basicValue !== null && basicValue !== undefined && String(basicValue).trim().length > 0
-        const hasAdvancedValue = group.advancedIds.some((advancedId) => {
-          const value = values[advancedId]
-          return value !== null && value !== undefined && String(value).trim().length > 0
-        })
-
-        if (!hasBasicValue && !hasAdvancedValue) {
-          if (!patched) patched = { ...existing }
-          patched[group.canonicalId] = 'basic'
-        }
-        continue
-      }
-
-      if (currentMode != null) continue
+      if (existing[group.canonicalId] != null) continue
 
       const resolved = resolveCanonicalMode(group, values)
       if (!patched) patched = { ...existing }

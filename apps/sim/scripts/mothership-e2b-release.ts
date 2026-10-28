@@ -1,9 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import {
-  isImmutableE2BTemplateRef,
-  isValidE2BTemplateReferenceName,
-} from '@sim/utils/sandbox-references'
+import { isImmutableE2BTemplateRef, isValidE2BTemplateName } from '@sim/utils/sandbox-references'
 import {
   MOTHERSHIP_E2B_DEFAULT_BASE_TEMPLATE,
   MOTHERSHIP_E2B_DEFAULT_TEMPLATE_NAME,
@@ -31,7 +28,7 @@ export function resolveDefaultMothershipTemplateName(
   configured: string | null | undefined = process.env.MOTHERSHIP_E2B_TEMPLATE_ID
 ): string {
   const trimmed = configured?.trim()
-  if (trimmed && isValidE2BTemplateReferenceName(trimmed)) return trimmed
+  if (trimmed && isValidE2BTemplateName(trimmed)) return trimmed
   return MOTHERSHIP_E2B_DEFAULT_TEMPLATE_NAME
 }
 
@@ -44,7 +41,7 @@ function assertMothershipTemplateName(
       `${flag} must be a mutable template alias, not an immutable <template>:<build-id>. Rebuilding updates the alias in place.`
     )
   }
-  if (!isValidE2BTemplateReferenceName(value)) {
+  if (!isValidE2BTemplateName(value)) {
     throw new Error(
       `${flag} must be an E2B template name or team/name reference (no :build-id). Rebuilding keeps this same id.`
     )
@@ -84,7 +81,7 @@ export function parseMothershipBuildArgs(
       if (!value || value.startsWith('--')) {
         throw new Error('--base-template requires a template name or immutable name:build-id')
       }
-      if (!isValidE2BTemplateReferenceName(value) && !isImmutableE2BTemplateRef(value)) {
+      if (!isValidE2BTemplateName(value) && !isImmutableE2BTemplateRef(value)) {
         throw new Error(
           '--base-template must be an E2B template name or immutable <template>:<build-id>'
         )
@@ -107,7 +104,7 @@ export function parseMothershipBuildArgs(
   // existing image. Fall back to code-interpreter only when no mothership id exists.
   const resolvedBase =
     baseTemplate ??
-    (configuredTemplateId?.trim() && isValidE2BTemplateReferenceName(configuredTemplateId.trim())
+    (configuredTemplateId?.trim() && isValidE2BTemplateName(configuredTemplateId.trim())
       ? configuredTemplateId.trim()
       : MOTHERSHIP_E2B_DEFAULT_BASE_TEMPLATE)
 

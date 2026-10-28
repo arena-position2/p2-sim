@@ -4,7 +4,7 @@ import { createLogger } from '@sim/logger'
 import { eq, isNull, ne, or } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { createErrorResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('RateLimitAPI')
 
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!authenticatedUserId) {
-      return createErrorResponse('Authentication required', 401)
+      return createCodedErrorResponse('Authentication required', 401)
     }
 
     // Get users joined with user_arena_details and filter out client_stakeholder
@@ -52,6 +52,6 @@ export async function GET(request: NextRequest) {
     })
   } catch (error: any) {
     logger.error('Error checking rate limit:', error)
-    return createErrorResponse(error.message || 'Failed to check rate limit', 500)
+    return createCodedErrorResponse(error.message || 'Failed to check rate limit', 500)
   }
 }

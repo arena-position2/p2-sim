@@ -1,21 +1,22 @@
 import { isRecordLike } from '@sim/utils/object'
-import { MothershipStreamV1EventType } from '@/lib/copilot/generated/mothership-stream-v1'
+import { MothershipStreamV1EventType } from '@/lib/mothership/generated/mothership-stream-v1'
 import {
   isToolCallStreamEvent,
   isToolResultStreamEvent,
   type SyntheticFilePreviewPayload,
-} from '@/lib/copilot/request/session'
-import type { OrchestratorOptions, StreamEvent } from '@/lib/copilot/request/types'
+} from '@/lib/mothership/request/session'
+import type { OrchestratorOptions, StreamEvent } from '@/lib/mothership/request/types'
 import {
   extractLocalFileChatResources,
   localFileBodyContent,
 } from '@/local-copilot/integration/file-turn-persist'
 
 const OFFICE_FILE_EXTENSION = /\.(pptx|docx|pdf)$/i
-const WORKSPACE_FILE_PREVIEW_NAME = 'workspace_file' as const
+/** Wire preview payloads must use upstream's prepare_file_edit tool name. */
+const FILE_PREVIEW_TOOL_NAME = 'prepare_file_edit' as const
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return isRecordLike(value) ? (value as Record<string, unknown>) : undefined
+  return isRecordLike(value) ? value : undefined
 }
 
 function previewSessionToolCallId(event: StreamEvent, fallback: string): string {
@@ -44,27 +45,34 @@ export function adaptLocalFilePreviewStreamEvent(event: StreamEvent): StreamEven
   }
 
   const toolName = event.payload.toolName
-  let payload = event.payload
 
   if (isToolCallStreamEvent(event) && (toolName === 'edit_content' || toolName === 'create_file')) {
-    const nextArguments = withFileBodyOnContent(payload.arguments)
-    if (nextArguments !== payload.arguments) {
-      payload = { ...payload, arguments: nextArguments }
-    }
-  }
-
-  if (toolName === 'workspace_file') {
-    const frameId = payload.toolCallId
-    if (frameId) {
-      const sessionId = previewSessionToolCallId(event, frameId)
-      if (sessionId !== frameId) {
-        payload = { ...payload, toolCallId: sessionId }
+    const nextArguments = withFileBodyOnContent(event.payload.arguments)
+    if (nextArguments !== event.payload.arguments) {
+      return {
+        ...event,
+        payload: {
+          ...event.payload,
+          arguments: nextArguments as typeof event.payload.arguments,
+        },
       }
     }
   }
 
-  if (payload === event.payload) return event
-  return { ...event, payload }
+  if (toolName === 'workspace_file') {
+    const frameId = event.payload.toolCallId
+    if (frameId) {
+      const sessionId = previewSessionToolCallId(event, frameId)
+      if (sessionId !== frameId) {
+        return {
+          ...event,
+          payload: { ...event.payload, toolCallId: sessionId },
+        } as StreamEvent
+      }
+    }
+  }
+
+  return event
 }
 
 function createFilePreviewMeta(argumentsValue: unknown):
@@ -126,19 +134,19 @@ export async function emitLocalCreateFilePreview(input: {
     sessions.add(toolCallId)
     await emitPreview(streamEvent, options, {
       toolCallId,
-      toolName: WORKSPACE_FILE_PREVIEW_NAME,
+      toolName: FILE_PREVIEW_TOOL_NAME,
       previewPhase: 'file_preview_start',
     })
     await emitPreview(streamEvent, options, {
       toolCallId,
-      toolName: WORKSPACE_FILE_PREVIEW_NAME,
+      toolName: FILE_PREVIEW_TOOL_NAME,
       previewPhase: 'file_preview_target',
       operation: 'update',
       target: { kind: 'new_file', fileName: meta.fileName },
     })
     await emitPreview(streamEvent, options, {
       toolCallId,
-      toolName: WORKSPACE_FILE_PREVIEW_NAME,
+      toolName: FILE_PREVIEW_TOOL_NAME,
       previewPhase: 'file_preview_content',
       content: meta.content,
       contentMode: 'snapshot',
@@ -164,7 +172,7 @@ export async function emitLocalCreateFilePreview(input: {
     const fileId = resources[0]?.id
     await emitPreview(streamEvent, options, {
       toolCallId,
-      toolName: WORKSPACE_FILE_PREVIEW_NAME,
+      toolName: FILE_PREVIEW_TOOL_NAME,
       previewPhase: 'file_preview_complete',
       ...(fileId ? { fileId } : {}),
       output: streamEvent.payload.output,

@@ -6,6 +6,7 @@ import { ArrowLeft, PanelLeft } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { usePostHog } from 'posthog-js/react'
+import type { WorkspaceSearchFilters } from '@/lib/api/contracts/knowledge'
 import { useSession } from '@/lib/auth/auth-client'
 import {
   LandingPromptStorage,
@@ -14,10 +15,7 @@ import {
 } from '@/lib/core/utils/browser-storage'
 import { captureEvent } from '@/lib/posthog/client'
 import { persistImportedWorkflow } from '@/lib/workflows/operations/import-export'
-import {
-  useMarkMothershipChatRead,
-  useMothershipChatHistory,
-} from '@/hooks/queries/mothership-chats'
+import { useMarkMothershipChatRead } from '@/hooks/queries/mothership-chats'
 import { useLocalCopilotCatalogSelection } from '@/local-copilot/hooks/use-copilot-backend-preference'
 import type { ChatContext } from '@/stores/panel'
 import {
@@ -51,8 +49,8 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
   const initialResourceId = searchParams.get('resource')
   const roleParam = searchParams.get('role')
   const embedPersona = roleParam ? decodeURIComponent(roleParam) : undefined
-  const resolveWorkspaceBeforeSend = true
   const { data: session } = useSession()
+  const userId = session?.user?.id
   const posthog = usePostHog()
   const posthogRef = useRef(posthog)
   posthogRef.current = posthog
@@ -127,10 +125,7 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
 
   const wasSendingRef = useRef(false)
 
-  const { data: chatHistory, isPending: isChatHistoryPending } = useMothershipChatHistory(chatId)
   const { mutate: markRead } = useMarkMothershipChatRead(workspaceId)
-
-  const { mothershipRef, handleResizePointerDown, clearWidth } = useMothershipResize()
 
   const [isResourceCollapsed, setIsResourceCollapsed] = useState(true)
   const [skipResourceTransition, setSkipResourceTransition] = useState(false)
@@ -138,11 +133,10 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
   isResourceCollapsedRef.current = isResourceCollapsed
 
   const collapseResource = useCallback(() => {
-    clearWidth()
     setIsResourceCollapsed(true)
-  }, [clearWidth])
+  }, [])
 
-  const setActiveResourceIdRef = useRef<(resourceId: string) => void>(() => {})
+  const setActiveResourceIdRef = useRef<(resourceId: string | null) => void>(() => {})
   const handleResourceEvent = useCallback((resourceId: string) => {
     if (isResourceCollapsedRef.current) {
       setIsResourceCollapsed(false)
@@ -160,12 +154,13 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
 
   const {
     messages,
+    isChatHistoryPending,
     isSending,
     isReconnecting,
     sendMessage,
     stopGeneration,
     resolvedChatId,
-    activeStreamId,
+    desktopScopeId,
     resources,
     activeResourceId,
     setActiveResourceId,
@@ -180,21 +175,22 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
     editingQueuedId,
     dispatchingHeadId,
     previewSession,
-    genericResourceData,
   } = useChat(
     workspaceId,
     chatId,
     getMothershipUseChatOptions({
       onResourceEvent: handleResourceEvent,
       initialActiveResourceId: initialResourceId,
-      resolveWorkspaceBeforeSend,
-      isEmbedPage: true,
       getCopilotBackend: () => copilotBackend,
       getLocalCopilotCatalogId: () => localCopilotCatalogId,
-    }),
-    true
+    })
   )
   setActiveResourceIdRef.current = setActiveResourceId
+
+  const { mothershipRef, handleResizePointerDown } = useMothershipResize(desktopScopeId, {
+    userId,
+    collapsed: isResourceCollapsed,
+  })
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -212,10 +208,9 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
     if (resolvedChatId) {
       markRead(resolvedChatId)
     } else {
-      clearWidth()
       setIsResourceCollapsed(true)
     }
-  }, [resolvedChatId, markRead, clearWidth])
+  }, [resolvedChatId, markRead])
 
   useEffect(() => {
     if (wasSendingRef.current && !isSending && resolvedChatId) {
@@ -300,7 +295,7 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
       const resolved = resolveResourceFromContext(context)
       if (resolved) {
         addResource({ ...resolved, title: context.label })
-        handleResourceEvent()
+        handleResourceEvent(resolved.id)
       }
     },
     [resolveResourceFromContext, addResource, handleResourceEvent]
@@ -328,9 +323,16 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
       if (!wasAdded) {
         setActiveResourceId(resource.id)
       }
-      handleResourceEvent()
+      handleResourceEvent(resource.id)
     },
     [addResource, handleResourceEvent, setActiveResourceId]
+  )
+
+  const handleSummarize = useCallback(
+    (message: string, filters: WorkspaceSearchFilters) => {
+      void sendMessage(message, undefined, undefined, { assistantSearch: filters })
+    },
+    [sendMessage]
   )
 
   const hasMessages = messages.length > 0
@@ -345,12 +347,7 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
   // both predicates were `false` and the dashboard re-mounted (which also
   // restarted the rotating placeholder via `<UserInput isInitialView>`).
   const shouldShowDashboard =
-    !hasMessages &&
-    !isSending &&
-    !isReconnecting &&
-    !activeStreamId &&
-    !conversationId &&
-    !showChatSkeleton
+    !hasMessages && !isSending && !isReconnecting && !conversationId && !showChatSkeleton
 
   const isHighlightsPageShown = shouldShowDashboard
 
@@ -477,12 +474,13 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
           ref={mothershipRef}
           workspaceId={workspaceId}
           chatId={resolvedChatId}
+          desktopScopeId={desktopScopeId}
           resources={resources}
           activeResourceId={activeResourceId}
           isCollapsed={isResourceCollapsed}
           previewSession={previewSession}
           isAgentResponding={isSending}
-          genericResourceData={genericResourceData ?? undefined}
+          onSummarize={handleSummarize}
           className={skipResourceTransition ? '!transition-none' : undefined}
         />
       </MothershipResourcesProvider>

@@ -2,8 +2,8 @@ import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import type { WorkflowState } from '@sim/workflow-types/workflow'
 import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
-import type { MothershipResource } from '@/lib/copilot/resources/types'
-import { normalizeEditWorkflowArgs } from '@/lib/copilot/tools/server/workflow/edit-workflow/normalize-args'
+import type { MothershipResource } from '@/lib/mothership/resources/types'
+import { normalizeEditWorkflowArgs } from '@/lib/mothership/tools/server/workflow/edit-workflow/normalize-args'
 import type { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
 import type { LocalToolBillingMetadata } from '@/local-copilot/lib/billing/turn-cost-accumulator'
 import { extractLocalToolBillingMetadata } from '@/local-copilot/lib/billing/turn-cost-accumulator'
@@ -18,6 +18,7 @@ import { reloadLocalCopilotWorkflowContext } from '@/local-copilot/lib/context/r
 import { getLocalCopilotMemorySnapshot } from '@/local-copilot/lib/diagnostics'
 import { generateWorkflowPatchFromRequest } from '@/local-copilot/lib/patches/generate'
 import { validateWorkflowPatch, validateWorkflowState } from '@/local-copilot/lib/patches/validate'
+import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
 import { canonicalCreateFilePath } from '@/local-copilot/lib/tools/enrich-file-tool-args'
@@ -89,7 +90,9 @@ async function ensureHandlersReady() {
   logger.info('Arena Copilot ensuring handlers registered', {
     memory: getLocalCopilotMemorySnapshot(),
   })
-  const { ensureHandlersRegistered } = await import('@/lib/copilot/tool-executor/register-handlers')
+  const { ensureHandlersRegistered } = await import(
+    '@/lib/mothership/tool-executor/register-handlers'
+  )
   ensureHandlersRegistered()
   handlersRegistered = true
   logger.info('Arena Copilot handlers ready', {
@@ -134,6 +137,17 @@ export interface ToolExecutionContext {
    * Full-replace HTML/text updates must follow a read of the same file.
    */
   readVfsPaths?: Set<string>
+  /**
+   * Canonical `files/...` path → normalized patch searches that missed this turn.
+   * Shared across `{ ...toolCtx }` copies. A later patch with the same normalized
+   * search is rejected before the file is opened.
+   */
+  failedPatchSearches?: Map<string, Set<string>>
+  /**
+   * Canonical `files/...` path → live excerpt tokens from the last patch miss.
+   * The next patch search must overlap these tokens (copied from the live file).
+   */
+  livePatchExcerptTokens?: Map<string, Set<string>>
   /** Workflow ids created earlier in this turn (membership bypass until refresh). */
   allowedWorkflowIds?: Set<string>
   /** Active tool_use id for idempotency keying. */
@@ -360,6 +374,8 @@ async function executeLocalCopilotToolInner(
   ctx.mutationIdempotency ??= new Map()
   ctx.listedIntegrationToolIds ??= new Set()
   ctx.readVfsPaths ??= new Set()
+  ctx.failedPatchSearches ??= new Map()
+  ctx.livePatchExcerptTokens ??= new Map()
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
 
@@ -488,11 +504,17 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      enrichedArgs.operations = normalizeLocalEditConnections(operations, {
-        blocks: ctx.structuredContext.workflow?.blocks,
-        edges: ctx.structuredContext.workflow?.edges,
-        availableBlocks: ctx.structuredContext.availableBlocks,
-      })
+      enrichedArgs.operations = coerceLocalEditDropdownInputs(
+        normalizeLocalEditConnections(operations, {
+          blocks: ctx.structuredContext.workflow?.blocks,
+          edges: ctx.structuredContext.workflow?.edges,
+          availableBlocks: ctx.structuredContext.availableBlocks,
+        }),
+        {
+          blocksMetadataByType: ctx.blocksMetadataByType,
+          existingBlocks: ctx.structuredContext.workflow?.blocks,
+        }
+      )
 
       const lookBefore = assertEditWorkflowLookBeforeWrite({
         operations: enrichedArgs.operations,
@@ -764,15 +786,25 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      await ensureHandlersReady()
-      const { createServerToolHandler } = await import(
-        '@/lib/copilot/tools/registry/server-tool-adapter'
+      // The mothership server router no longer registers workflow-authoring tools.
+      const { getBlocksMetadataServerTool } = await import(
+        '@/lib/mothership/tools/server/blocks/get-blocks-metadata-tool'
       )
-      const handler = createServerToolHandler('get_blocks_metadata')
-      const metadataResult = await handler(
-        { blockIds: missingIds },
-        toCopilotServerToolContext(ctx)
-      )
+      let metadataResult: { success: boolean; output?: unknown; error?: string }
+      try {
+        const output = await getBlocksMetadataServerTool.execute(
+          { blockIds: missingIds },
+          { userId: ctx.userId, workspaceId: ctx.workspaceId }
+        )
+        metadataResult = { success: true, output }
+      } catch (error) {
+        const message = getErrorMessage(error, 'get_blocks_metadata failed')
+        metadataResult = {
+          success: false,
+          error: message,
+          output: { error: message },
+        }
+      }
 
       if (
         metadataResult.success &&
@@ -921,10 +953,10 @@ async function executeLocalCopilotToolInner(
       }
 
       await ensureHandlersReady()
-      const { hasHandler } = await import('@/lib/copilot/tool-executor/executor')
+      const { hasHandler } = await import('@/lib/mothership/tool-executor/executor')
       if (hasHandler(toolId)) {
         const { createServerToolHandler } = await import(
-          '@/lib/copilot/tools/registry/server-tool-adapter'
+          '@/lib/mothership/tools/registry/server-tool-adapter'
         )
         const handler = createServerToolHandler(toolId)
         const normalizedParams =
@@ -968,7 +1000,7 @@ async function executeLocalCopilotToolInner(
 
       await ensureHandlersReady()
       const { executeTool: executeCopilotRegistryTool } = await import(
-        '@/lib/copilot/tool-executor/executor'
+        '@/lib/mothership/tool-executor/executor'
       )
 
       const executionContext = {
@@ -1125,18 +1157,16 @@ async function executeLocalCopilotToolInner(
     case 'get_execution_logs': {
       const limit = typeof args.limit === 'number' ? args.limit : 10
       const executionId = typeof args.executionId === 'string' ? args.executionId : undefined
-      const { listLogs } = await import('@/lib/logs/list-logs')
-      const logs = await listLogs(
-        {
-          workspaceId: ctx.workspaceId,
-          ...(ctx.workflowId ? { workflowIds: ctx.workflowId } : {}),
-          limit,
-          executionId,
-          sortBy: 'date',
-          sortOrder: 'desc',
-        },
-        ctx.userId
-      )
+      const { readLogs } = await import('@/lib/logs/list-logs')
+      const logs = await readLogs({
+        workspaceId: ctx.workspaceId,
+        ...(ctx.workflowId ? { workflowIds: ctx.workflowId } : {}),
+        limit,
+        executionId,
+        sortBy: 'date',
+        sortOrder: 'desc',
+        hideCostInfo: false,
+      })
       return { toolName, success: true, result: logs }
     }
 
@@ -1153,12 +1183,13 @@ async function executeLocalCopilotToolInner(
 
       let logDetail = null
       if (executionId) {
-        const { fetchLogDetail } = await import('@/lib/logs/fetch-log-detail')
-        logDetail = await fetchLogDetail({
-          userId: ctx.userId,
+        const { readLogDetail } = await import('@/lib/logs/fetch-log-detail')
+        logDetail = await readLogDetail({
+          viewerUserId: ctx.userId,
           workspaceId: ctx.workspaceId,
           lookupColumn: 'executionId',
           lookupValue: executionId,
+          hideCostInfo: false,
         })
       }
 

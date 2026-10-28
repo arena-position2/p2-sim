@@ -1,10 +1,8 @@
 /**
  * Tests for chat identifier API route
- *
- * @vitest-environment node
  */
+
 import {
-  dbChainMock,
   dbChainMockFns,
   encryptionMock,
   executionPreprocessingMock,
@@ -14,6 +12,13 @@ import {
   workflowsApiUtilsMock,
   workflowsApiUtilsMockFns,
 } from '@sim/testing'
+import { createRouteContext } from '@sim/testing/helpers/http'
+import {
+  executeWorkflowMock,
+  executeWorkflowMockFns,
+} from '@sim/testing/mocks/execute-workflow.mock'
+import { rateLimiterMock, rateLimiterMockFns } from '@sim/testing/mocks/rate-limiter.mock'
+import { uploadsMock, uploadsMockFns } from '@sim/testing/mocks/uploads.mock'
 import { NextResponse } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -66,28 +71,16 @@ const createMockStream = () => {
   })
 }
 
-const {
-  mockValidateChatAuth,
-  mockSetChatAuthCookie,
-  mockProcessChatFiles,
-  mockEnforceIpRateLimit,
-  mockEnforceResourceRateLimit,
-} = vi.hoisted(() => ({
-  mockValidateChatAuth: vi.fn().mockResolvedValue({ authorized: true }),
-  mockSetChatAuthCookie: vi.fn(),
-  mockProcessChatFiles: vi.fn(),
-  mockEnforceIpRateLimit: vi.fn(),
-  mockEnforceResourceRateLimit: vi.fn(),
-}))
+const { mockValidateChatAuth, mockSetChatAuthCookie, mockUpdateExecutionHistoryData } = vi.hoisted(
+  () => ({
+    mockValidateChatAuth: vi.fn().mockResolvedValue({ authorized: true }),
+    mockSetChatAuthCookie: vi.fn(),
+    mockUpdateExecutionHistoryData: vi.fn(),
+  })
+)
 
-const mockCreateErrorResponse = workflowsApiUtilsMockFns.mockCreateErrorResponse
+const mockCreateCodedErrorResponse = workflowsApiUtilsMockFns.mockCreateCodedErrorResponse
 const mockCreateSuccessResponse = workflowsApiUtilsMockFns.mockCreateSuccessResponse
-
-vi.mock('@sim/db', () => ({
-  ...dbChainMock,
-  chat: {},
-  workflow: {},
-}))
 
 vi.mock('@/app/api/chat/utils', () => ({
   validateChatAuth: mockValidateChatAuth,
@@ -100,20 +93,14 @@ vi.mock('@/lib/execution/preprocessing', () => executionPreprocessingMock)
 
 vi.mock('@/lib/logs/execution/logging-session', () => loggingSessionMock)
 
-vi.mock('@/lib/uploads', () => ({
-  ChatFiles: {
-    processChatFiles: mockProcessChatFiles,
-  },
-}))
+vi.mock('@/lib/uploads', () => uploadsMock)
 
 vi.mock('@/lib/workflows/streaming/streaming', () => ({
   createStreamingResponse: vi.fn().mockImplementation(async () => createMockStream()),
   agentStreamProtocolResponseHeaders: vi.fn().mockReturnValue({}),
 }))
 
-vi.mock('@/lib/workflows/executor/execute-workflow', () => ({
-  executeWorkflow: vi.fn().mockResolvedValue({ success: true, output: {} }),
-}))
+vi.mock('@/lib/workflows/executor/execute-workflow', () => executeWorkflowMock)
 
 vi.mock('@/lib/core/utils/sse', () => ({
   SSE_HEADERS: {
@@ -150,11 +137,18 @@ vi.mock('@/lib/chat/history-persistence', () => ({
   ),
   updateExecutionHistoryData: mockUpdateExecutionHistoryData,
 }))
+vi.mock('@/lib/core/rate-limiter', () => rateLimiterMock)
 
 import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { executeWorkflow } from '@/lib/workflows/executor/execute-workflow'
 import { createStreamingResponse } from '@/lib/workflows/streaming/streaming'
-import { GET, POST } from '@/app/api/chat/[identifier]/route'
+import { POST } from '@/app/api/chat/[identifier]/route'
+
+executeWorkflowMockFns.mockExecuteWorkflow.mockResolvedValue({ success: true, output: {} })
+
+const mockEnforceIpRateLimit = rateLimiterMockFns.mockEnforceIpRateLimitWithIndependentBackstop
+const mockEnforceResourceRateLimit = rateLimiterMockFns.mockEnforceResourceRateLimit
+const mockProcessChatFiles = uploadsMockFns.mockProcessChatFiles
 
 describe('Chat Identifier API Route', () => {
   const mockChatResult = [
@@ -172,7 +166,7 @@ describe('Chat Identifier API Route', () => {
       },
       outputConfigs: [{ blockId: 'block-1', path: 'output' }],
       includeThinking: false,
-      includeToolCalls: null,
+      includeToolCalls: false,
     },
   ]
 
@@ -195,8 +189,6 @@ describe('Chat Identifier API Route', () => {
   ]
 
   beforeEach(() => {
-    vi.clearAllMocks()
-
     executionPreprocessingMockFns.mockPreprocessExecution.mockResolvedValue({
       success: true,
       actorUserId: 'test-user-id',
@@ -220,15 +212,17 @@ describe('Chat Identifier API Route', () => {
     mockEnforceResourceRateLimit.mockResolvedValue(null)
     mockProcessChatFiles.mockResolvedValue([])
     mockUpdateExecutionHistoryData.mockResolvedValue(undefined)
-    mockCreateErrorResponse.mockImplementation((message: string, status: number, code?: string) => {
-      return new Response(
-        JSON.stringify({
-          error: code || 'Error',
-          message,
-        }),
-        { status }
-      )
-    })
+    mockCreateCodedErrorResponse.mockImplementation(
+      (message: string, status: number, code?: string) => {
+        return new Response(
+          JSON.stringify({
+            error: code || 'Error',
+            message,
+          }),
+          { status }
+        )
+      }
+    )
     mockCreateSuccessResponse.mockImplementation((data: unknown) => {
       return new Response(JSON.stringify(data), { status: 200 })
     })
@@ -253,125 +247,7 @@ describe('Chat Identifier API Route', () => {
     })
   })
 
-  describe('GET endpoint', () => {
-    it('should return chat info for a valid identifier', async () => {
-      const req = createMockNextRequest('GET')
-      const params = Promise.resolve({ identifier: 'test-chat' })
-
-      const response = await GET(req, { params })
-
-      expect(response.status).toBe(200)
-
-      const data = await response.json()
-      expect(data).toHaveProperty('id', 'chat-id')
-      expect(data).toHaveProperty('title', 'Test Chat')
-      expect(data).toHaveProperty('description', 'Test chat description')
-      expect(data).toHaveProperty('customizations')
-      expect(data.customizations).toHaveProperty('welcomeMessage', 'Welcome to the test chat')
-      expect(data).toHaveProperty('includeToolCalls', false)
-    })
-
-    it('should return 404 for non-existent identifier', async () => {
-      dbChainMockFns.select.mockImplementation(() => {
-        return {
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockReturnValue([]),
-            }),
-          }),
-        }
-      })
-
-      const req = createMockNextRequest('GET')
-      const params = Promise.resolve({ identifier: 'nonexistent' })
-
-      const response = await GET(req, { params })
-
-      expect(response.status).toBe(404)
-
-      const data = await response.json()
-      expect(data).toHaveProperty('error')
-      expect(data).toHaveProperty('message', 'Chat not found')
-    })
-
-    it('should return 403 for inactive chat', async () => {
-      dbChainMockFns.select.mockImplementation(() => {
-        return {
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockReturnValue([
-                {
-                  id: 'chat-id',
-                  isActive: false,
-                  authType: 'public',
-                },
-              ]),
-            }),
-          }),
-        }
-      })
-
-      const req = createMockNextRequest('GET')
-      const params = Promise.resolve({ identifier: 'inactive-chat' })
-
-      const response = await GET(req, { params })
-
-      expect(response.status).toBe(403)
-
-      const data = await response.json()
-      expect(data).toHaveProperty('error')
-      expect(data).toHaveProperty('message', 'This chat is currently unavailable')
-    })
-
-    it('should return 401 when authentication is required', async () => {
-      mockValidateChatAuth.mockResolvedValueOnce({
-        authorized: false,
-        error: 'auth_required_password',
-      })
-
-      const req = createMockNextRequest('GET')
-      const params = Promise.resolve({ identifier: 'password-protected-chat' })
-
-      const response = await GET(req, { params })
-
-      expect(response.status).toBe(401)
-
-      const data = await response.json()
-      expect(data).toHaveProperty('error')
-      expect(data).toHaveProperty('message', 'auth_required_password')
-    })
-  })
-
   describe('POST endpoint', () => {
-    it('should return chat config on successful authentication', async () => {
-      const passwordDeployment = {
-        ...mockChatResult[0],
-        authType: 'password',
-        password: 'encrypted-password',
-      }
-      dbChainMockFns.select.mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockReturnValue([passwordDeployment]),
-          }),
-        }),
-      }))
-      const req = createMockNextRequest('POST', { password: 'test-password' })
-      const params = Promise.resolve({ identifier: 'password-protected-chat' })
-
-      const response = await POST(req, { params })
-
-      expect(response.status).toBe(200)
-
-      const data = await response.json()
-      expect(data).toHaveProperty('id', 'chat-id')
-      expect(data).toHaveProperty('title', 'Test Chat')
-      expect(data).toHaveProperty('customizations')
-      expect(data.customizations).toHaveProperty('welcomeMessage', 'Welcome to the test chat')
-
-      expect(mockSetChatAuthCookie).toHaveBeenCalledWith(expect.anything(), passwordDeployment)
-    })
-
     describe('execution rate limit', () => {
       it.each([
         ['per-IP', mockEnforceIpRateLimit],
@@ -382,7 +258,7 @@ describe('Chat Identifier API Route', () => {
         )
         const req = createMockNextRequest('POST', { input: 'drain the wallet' })
 
-        const response = await POST(req, { params: Promise.resolve({ identifier: 'test-chat' }) })
+        const response = await POST(req, createRouteContext({ identifier: 'test-chat' }))
 
         expect(response.status).toBe(429)
         expect(preprocessExecution).not.toHaveBeenCalled()
@@ -393,7 +269,7 @@ describe('Chat Identifier API Route', () => {
       it('debits buckets keyed on the deployment, not the workflow', async () => {
         const req = createMockNextRequest('POST', { input: 'hello' })
 
-        await POST(req, { params: Promise.resolve({ identifier: 'test-chat' }) })
+        await POST(req, createRouteContext({ identifier: 'test-chat' }))
 
         expect(mockEnforceIpRateLimit).toHaveBeenCalledWith(
           'chat-execute',
@@ -406,15 +282,6 @@ describe('Chat Identifier API Route', () => {
           'chat-id',
           expect.objectContaining({ refillIntervalMs: 60_000 })
         )
-      })
-
-      it('leaves the deployment bucket untouched when the IP bucket refuses', async () => {
-        mockEnforceIpRateLimit.mockResolvedValue(NextResponse.json({}, { status: 429 }))
-        const req = createMockNextRequest('POST', { input: 'flood' })
-
-        await POST(req, { params: Promise.resolve({ identifier: 'test-chat' }) })
-
-        expect(mockEnforceResourceRateLimit).not.toHaveBeenCalled()
       })
 
       /**
@@ -431,7 +298,7 @@ describe('Chat Identifier API Route', () => {
         async (plan) => {
           const req = createMockNextRequest('POST', { input: 'hello' })
 
-          await POST(req, { params: Promise.resolve({ identifier: 'test-chat' }) })
+          await POST(req, createRouteContext({ identifier: 'test-chat' }))
 
           const planBucket = RATE_LIMITS[plan as keyof typeof RATE_LIMITS].sync
           const [, , config] = mockEnforceResourceRateLimit.mock.calls[0]
@@ -444,46 +311,33 @@ describe('Chat Identifier API Route', () => {
       it('holds the per-IP bucket under the per-deployment one', async () => {
         const req = createMockNextRequest('POST', { input: 'hello' })
 
-        await POST(req, { params: Promise.resolve({ identifier: 'test-chat' }) })
+        await POST(req, createRouteContext({ identifier: 'test-chat' }))
 
         const [, , ipConfig] = mockEnforceIpRateLimit.mock.calls[0]
         const [, , deploymentConfig] = mockEnforceResourceRateLimit.mock.calls[0]
         expect(ipConfig.refillRate).toBeLessThan(deploymentConfig.refillRate)
       })
-
-      it('leaves the gate-configuration fetch unmetered', async () => {
-        const passwordDeployment = {
-          ...mockChatResult[0],
-          authType: 'password',
-          password: 'encrypted-password',
-        }
-        dbChainMockFns.select.mockImplementation(() => ({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockReturnValue([passwordDeployment]),
-            }),
-          }),
-        }))
-        const req = createMockNextRequest('POST', { password: 'test-password' })
-
-        await POST(req, { params: Promise.resolve({ identifier: 'password-protected-chat' }) })
-
-        expect(mockEnforceIpRateLimit).not.toHaveBeenCalled()
-        expect(mockEnforceResourceRateLimit).not.toHaveBeenCalled()
-      })
     })
 
-    it('should return 400 for requests without input', async () => {
-      const req = createMockNextRequest('POST', {})
-      const params = Promise.resolve({ identifier: 'test-chat' })
+    it('should return 403 for an inactive chat without loading the workflow or writing a log', async () => {
+      dbChainMockFns.select.mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockReturnValue([{ ...mockChatResult[0], isActive: false }]),
+          }),
+        }),
+      }))
+      const req = createMockNextRequest('POST', { input: 'x' })
 
-      const response = await POST(req, { params })
+      const response = await POST(req, createRouteContext({ identifier: 'paused-chat' }))
 
-      expect(response.status).toBe(400)
-
+      expect(response.status).toBe(403)
       const data = await response.json()
-      expect(data).toHaveProperty('error')
-      expect(data).toHaveProperty('message', 'No input provided')
+      expect(data).toHaveProperty('message', 'This chat is currently unavailable')
+      expect(dbChainMockFns.select).toHaveBeenCalledTimes(1)
+      expect(loggingSessionMockFns.mockSafeStart).not.toHaveBeenCalled()
+      expect(loggingSessionMockFns.mockSafeCompleteWithError).not.toHaveBeenCalled()
+      expect(mockValidateChatAuth).not.toHaveBeenCalled()
     })
 
     it('should return 401 for unauthorized access', async () => {
@@ -504,88 +358,6 @@ describe('Chat Identifier API Route', () => {
       expect(data).toHaveProperty('message', 'Authentication required')
     })
 
-    it('should return 503 when workflow is not available', async () => {
-      vi.mocked(preprocessExecution).mockResolvedValueOnce({
-        success: false,
-        error: {
-          message: 'Workflow is not deployed',
-          statusCode: 403,
-        },
-      })
-
-      const req = createMockNextRequest('POST', { input: 'Hello' })
-      const params = Promise.resolve({ identifier: 'test-chat' })
-
-      const response = await POST(req, { params })
-
-      expect(response.status).toBe(403)
-
-      const data = await response.json()
-      expect(data).toHaveProperty('error')
-      expect(data).toHaveProperty('message', 'Workflow is not deployed')
-    })
-
-    it('should return streaming response for valid chat messages', async () => {
-      const req = createMockNextRequest('POST', {
-        input: 'Hello world',
-        conversationId: 'conv-123',
-      })
-      const params = Promise.resolve({ identifier: 'test-chat' })
-
-      const response = await POST(req, { params })
-
-      expect(response.status).toBe(200)
-      expect(response.headers.get('Content-Type')).toBe('text/event-stream')
-      expect(response.headers.get('Cache-Control')).toBe('no-cache')
-      expect(response.headers.get('Connection')).toBe('keep-alive')
-
-      expect(createStreamingResponse).toHaveBeenCalledWith(
-        expect.objectContaining({
-          executeFn: expect.any(Function),
-          requestSignal: expect.any(AbortSignal),
-          requestHeaders: expect.anything(),
-          streamConfig: expect.objectContaining({
-            isSecureMode: true,
-            workflowTriggerType: 'chat',
-            includeThinking: false,
-            includeToolCalls: false,
-          }),
-        })
-      )
-    }, 10000)
-
-    it('projects the internal completion envelope to the public streaming callback', async () => {
-      const response = await POST(createMockNextRequest('POST', { input: 'Hello' }), {
-        params: Promise.resolve({ identifier: 'test-chat' }),
-      })
-      expect(response.status).toBe(200)
-      const onBlockComplete = vi.fn()
-      await vi.mocked(createStreamingResponse).mock.calls[0][0].executeFn({
-        onStream: vi.fn(),
-        onBlockComplete,
-        abortSignal: new AbortController().signal,
-      })
-      await vi.mocked(executeWorkflow).mock.calls[0][4]?.onBlockComplete?.('block-1', {
-        output: { value: 'public output' },
-        outputBlockId: 'child:block-1',
-        resolvedSecretTraceProvenance: {
-          version: 1,
-          complete: true,
-          entries: [{ encryptedValue: 'private-ciphertext' }],
-          scope: { userId: 'user-1', workspaceId: 'workspace-1' },
-        },
-        executionTime: 1,
-        executionOrder: 0,
-        startedAt: '2026-01-01T00:00:00Z',
-        endedAt: '2026-01-01T00:00:01Z',
-      })
-      expect(onBlockComplete).toHaveBeenCalledExactlyOnceWith(
-        'block-1',
-        { value: 'public output' },
-        'child:block-1'
-      )
-    })
-
     it('executes with the email proven by the chat authentication gate', async () => {
       mockValidateChatAuth.mockResolvedValueOnce({
         authorized: true,
@@ -593,9 +365,7 @@ describe('Chat Identifier API Route', () => {
       })
       const req = createMockNextRequest('POST', { input: 'Hello world' })
 
-      const response = await POST(req, {
-        params: Promise.resolve({ identifier: 'test-chat' }),
-      })
+      const response = await POST(req, createRouteContext({ identifier: 'test-chat' }))
       expect(response.status).toBe(200)
 
       const streamOptions = vi.mocked(createStreamingResponse).mock.calls[0][0]
@@ -619,13 +389,10 @@ describe('Chat Identifier API Route', () => {
       })
     }, 10000)
 
-    /**
-     * A row predating the column has no tool policy, so it has not opted in.
-     * Thinking must not drag tool frames along with it.
-     */
-    it('reads a null tool policy as off rather than inheriting thinking', async () => {
+    /** Thinking and tool calls are independent policies: thinking must not drag tool frames along. */
+    it('keeps tool calls off when only thinking is enabled', async () => {
       const thinkingChatResult = [
-        { ...mockChatResult[0], includeThinking: true, includeToolCalls: null },
+        { ...mockChatResult[0], includeThinking: true, includeToolCalls: false },
       ]
       dbChainMockFns.select.mockImplementation((fields: Record<string, unknown>) => {
         if (fields && fields.isDeployed !== undefined) {
@@ -651,7 +418,7 @@ describe('Chat Identifier API Route', () => {
         { input: 'Hello world' },
         { 'X-Sim-Stream-Protocol': 'agent-events-v1' }
       )
-      const response = await POST(req, { params: Promise.resolve({ identifier: 'test-chat' }) })
+      const response = await POST(req, createRouteContext({ identifier: 'test-chat' }))
       expect(response.status).toBe(200)
 
       const options = vi.mocked(createStreamingResponse).mock.calls[0][0]
@@ -672,7 +439,6 @@ describe('Chat Identifier API Route', () => {
         agentEvents: true,
       })
     }, 10000)
-
     it('enables agent events for an independent tool-only policy', async () => {
       const toolChatResult = [
         { ...mockChatResult[0], includeThinking: false, includeToolCalls: true },

@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { semrushHosting } from '@/tools/semrush/hosting'
 import type { SemrushParams, SemrushQueryResponse } from '@/tools/semrush/types'
-import type { ToolConfig } from '@/tools/types'
+import type { ToolConfig, ToolHostingConfig } from '@/tools/types'
 import { parseCsvResponse } from '../utils'
 
 const logger = createLogger('SemrushTool')
@@ -131,7 +131,7 @@ export const semrushQueryTool: ToolConfig<SemrushParams, SemrushQueryResponse> =
     'Query Semrush SEO data API for keywords, backlinks, domain rank, and more. Requires a Semrush API key configured on the block.',
   version: '1.0.0',
 
-  hosting: semrushHosting,
+  hosting: semrushHosting as unknown as ToolHostingConfig<SemrushParams>,
 
   params: {
     apiKey: {

@@ -69,7 +69,7 @@ import {
   formatStructureValidationIssues,
   validateGeneratedAppStructure,
 } from '@/lib/development/validate-generated-app-structure'
-import { supportsTemperature } from '@/providers/utils'
+import { supportsTemperature } from '@/providers/models'
 
 const logger = createLogger('NextjsAppGenerator')
 
@@ -174,8 +174,6 @@ const REQUIRED_APP_FILE_PATHS = [
 ] as const
 /** Max LLM repair rounds after a failed pre-deploy build/typecheck before deploy. */
 const MAX_BUILD_REPAIR_ROUNDS = 3
-/** Max redeploy cycles when Vercel build fails after local build passed. */
-const MAX_VERCEL_REPAIR_ROUNDS = 4
 const MAX_BUILD_LOG_CHARS = 12_000
 
 const APP_SPEC_JSON_SCHEMA: Record<string, unknown> = {

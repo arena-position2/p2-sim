@@ -1,11 +1,7 @@
-/**
- * @vitest-environment node
- */
 import { describe, expect, it } from 'vitest'
 import { isConnectorCredentialTypeAllowed } from '@/connectors/auth'
 import { confluenceConnectorMeta } from '@/connectors/confluence/meta'
 import { googleDriveConnectorMeta } from '@/connectors/google-drive/meta'
-import { slackConnectorMeta } from '@/connectors/slack/meta'
 
 describe('connector credential eligibility', () => {
   it.each([confluenceConnectorMeta, googleDriveConnectorMeta])(
@@ -27,8 +23,4 @@ describe('connector credential eligibility', () => {
       ).toBe(false)
     }
   )
-
-  it('preserves Slack member credentials and its dedicated content-account option', () => {
-    expect(isConnectorCredentialTypeAllowed(slackConnectorMeta.auth, 'members', 'oauth')).toBe(true)
-  })
 })

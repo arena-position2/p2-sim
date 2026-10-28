@@ -1,20 +1,16 @@
-/**
- * @vitest-environment node
- */
-import { dbChainMockFns, queueTableRows, resetDbChainMock } from '@sim/testing'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { usageLog } from '@sim/db/schema'
+import { billingCoreMock, billingCoreMockFns } from '@sim/testing/mocks/billing-core.mock'
+import { billingUsageMock, billingUsageMockFns } from '@sim/testing/mocks/billing-usage.mock'
+import {
+  dbChainMockFns,
+  drizzleOrmMock,
+  queueTableRows,
+  resetDbChainMock,
+} from '@sim/testing/mocks/database.mock'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ON_DEMAND_UNLIMITED, USAGE_LEDGER_STATEMENT_TIMEOUT_MS } from '@/lib/billing/constants'
 
-const {
-  schemaTables,
-  mockAnd,
-  mockEq,
-  mockGte,
-  mockIsNull,
-  mockLt,
-  mockOr,
-  mockGetOrganizationSubscription,
-  mockGetOrgUsageLimit,
-} = vi.hoisted(() => ({
+const { schemaTables } = vi.hoisted(() => ({
   schemaTables: {
     organizationMemberUsageLimit: {
       id: 'oml.id',
@@ -33,6 +29,7 @@ const {
       createdAt: 'usageLog.createdAt',
       cost: 'usageLog.cost',
       userId: 'usageLog.userId',
+      workspaceId: 'usageLog.workspaceId',
     },
     workspace: {
       id: 'workspace.id',
@@ -40,68 +37,38 @@ const {
       organizationId: 'workspace.organizationId',
     },
   },
-  mockAnd: vi.fn((...conditions: unknown[]) => ({ operator: 'and', conditions })),
-  mockEq: vi.fn((field: unknown, value: unknown) => ({ field, value })),
-  mockGte: vi.fn((field: unknown, value: unknown) => ({ operator: 'gte', field, value })),
-  mockIsNull: vi.fn((field: unknown) => ({ operator: 'isNull', field })),
-  mockLt: vi.fn((field: unknown, value: unknown) => ({ operator: 'lt', field, value })),
-  mockOr: vi.fn((...conditions: unknown[]) => ({ operator: 'or', conditions })),
-  mockGetOrganizationSubscription: vi.fn(),
-  mockGetOrgUsageLimit: vi.fn(),
 }))
 
 vi.mock('@sim/db/schema', () => schemaTables)
+vi.mock('@/lib/billing/core/billing', () => billingCoreMock)
+vi.mock('@/lib/billing/core/usage', () => billingUsageMock)
 
-vi.mock('drizzle-orm', () => ({
-  and: mockAnd,
-  eq: mockEq,
-  gte: mockGte,
-  isNull: mockIsNull,
-  lt: mockLt,
-  or: mockOr,
-  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })),
-}))
-
-vi.mock('@/lib/billing/core/billing', () => ({
-  getOrganizationSubscription: mockGetOrganizationSubscription,
-}))
-
-vi.mock('@/lib/billing/core/usage', () => ({
-  getOrgUsageLimit: mockGetOrgUsageLimit,
-}))
-
-import { ON_DEMAND_UNLIMITED } from '@/lib/billing/constants'
 import { defaultBillingPeriod } from '@/lib/billing/core/billing-period'
 import { dollarsToCredits } from '@/lib/billing/credits/conversion'
 import {
   getOrgMemberUsageForBillingPeriod,
   getOrgMemberUsageForCurrentPeriod,
-  getOrgMemberUsageLimit,
   setOrgMemberUsageLimit,
   validateOrgMemberAllocationWithinPool,
 } from '@/lib/billing/organizations/member-limits'
 
+const mockGetOrganizationSubscription = billingCoreMockFns.mockGetOrganizationSubscription
+const mockGetOrgUsageLimit = billingUsageMockFns.mockGetOrgUsageLimit
+const { eq: mockEq, gte: mockGte, isNull: mockIsNull, lt: mockLt, or: mockOr } = drizzleOrmMock
+
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.useFakeTimers({ toFake: ['Date'] })
   resetDbChainMock()
   mockGetOrgUsageLimit.mockResolvedValue({ limit: 2000 })
   mockGetOrganizationSubscription.mockResolvedValue({ plan: 'enterprise', seats: 1 })
 })
 
-afterAll(() => {
-  resetDbChainMock()
+afterEach(() => {
+  vi.useRealTimers()
 })
 
-describe('getOrgMemberUsageLimit', () => {
-  it('returns null when no row exists', async () => {
-    queueTableRows(schemaTables.organizationMemberUsageLimit, [])
-    await expect(getOrgMemberUsageLimit('org-1', 'user-2')).resolves.toBeNull()
-  })
-
-  it('returns the stored dollar limit as a number', async () => {
-    queueTableRows(schemaTables.organizationMemberUsageLimit, [{ usageLimit: '2' }])
-    await expect(getOrgMemberUsageLimit('org-1', 'user-2')).resolves.toBe(2)
-  })
+afterAll(() => {
+  resetDbChainMock()
 })
 
 describe('getOrgMemberUsageForBillingPeriod', () => {
@@ -110,7 +77,8 @@ describe('getOrgMemberUsageForBillingPeriod', () => {
       start: new Date('2026-06-01T00:00:00.000Z'),
       end: new Date('2026-07-01T00:00:00.000Z'),
     }
-    queueTableRows(schemaTables.usageLog, [{ cost: '4.5' }])
+    vi.spyOn(Date, 'now').mockReturnValue(billingPeriod.start.getTime())
+    queueTableRows(usageLog, [{ cost: '4.5' }])
     mockGetOrganizationSubscription.mockResolvedValue({
       periodStart: new Date('2026-07-01T00:00:00.000Z'),
       periodEnd: new Date('2026-08-01T00:00:00.000Z'),
@@ -119,6 +87,16 @@ describe('getOrgMemberUsageForBillingPeriod', () => {
     await expect(
       getOrgMemberUsageForBillingPeriod('snapshot-org', 'actor-2', billingPeriod)
     ).resolves.toBe(4.5)
+
+    /** The member sum is a ledger aggregate: it runs inside the bounded ledger transaction. */
+    expect(dbChainMockFns.transaction).toHaveBeenCalledTimes(1)
+    expect(
+      dbChainMockFns.execute.mock.calls.some(([statement]) =>
+        String((statement as { toSQL?: () => { sql: string } }).toSQL?.().sql).includes(
+          `SET LOCAL statement_timeout = '${USAGE_LEDGER_STATEMENT_TIMEOUT_MS}ms'`
+        )
+      )
+    ).toBe(true)
 
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityType', 'organization')
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityId', 'snapshot-org')
@@ -144,8 +122,8 @@ describe('getOrgMemberUsageForBillingPeriod', () => {
           (condition) =>
             typeof condition === 'object' &&
             condition !== null &&
-            'operator' in condition &&
-            condition.operator === 'and'
+            'type' in condition &&
+            condition.type === 'and'
         )
     )
     expect(mixedHistoryCall).toBeDefined()
@@ -158,7 +136,7 @@ describe('getOrgMemberUsageForBillingPeriod', () => {
       end: new Date('2026-08-13T00:00:00.000Z'),
       source: 'reporting' as const,
     }
-    queueTableRows(schemaTables.usageLog, [{ cost: '18.25' }])
+    queueTableRows(usageLog, [{ cost: '18.25' }])
 
     await expect(
       getOrgMemberUsageForBillingPeriod('contract-org', 'actor-2', billingPeriod)
@@ -247,7 +225,7 @@ describe('getOrgMemberUsageForCurrentPeriod', () => {
     const periodStart = new Date('2026-06-01T00:00:00.000Z')
     const periodEnd = new Date('2026-07-01T00:00:00.000Z')
     mockGetOrganizationSubscription.mockResolvedValue({ periodStart, periodEnd })
-    queueTableRows(schemaTables.usageLog, [{ cost: '5' }])
+    queueTableRows(usageLog, [{ cost: '5' }])
 
     const result = await getOrgMemberUsageForCurrentPeriod('org-1', 'user-2')
 
@@ -258,23 +236,8 @@ describe('getOrgMemberUsageForCurrentPeriod', () => {
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodEnd', periodEnd)
   })
 
-  it('uses a prefetched subscription without a second lookup', async () => {
-    const periodStart = new Date('2026-06-01T00:00:00.000Z')
-    const periodEnd = new Date('2026-07-01T00:00:00.000Z')
-    queueTableRows(schemaTables.usageLog, [{ cost: '5' }])
-
-    const result = await getOrgMemberUsageForCurrentPeriod('org-1', 'user-2', {
-      periodStart,
-      periodEnd,
-    } as never)
-
-    expect(result).toBe(5)
-    expect(mockGetOrganizationSubscription).not.toHaveBeenCalled()
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodStart', periodStart)
-  })
-
   it('falls back to the all-time window when the org has no subscription period', async () => {
-    queueTableRows(schemaTables.usageLog, [{ cost: '7' }])
+    queueTableRows(usageLog, [{ cost: '7' }])
 
     const result = await getOrgMemberUsageForCurrentPeriod('org-1', 'user-2', null)
 

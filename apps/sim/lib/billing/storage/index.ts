@@ -12,8 +12,10 @@ export {
   applyStorageUsageDeltasInTx,
   checkAndIncrementStorageUsageInTx,
   decrementStorageUsageForBillingContextInTx,
+  incrementAdmittedStorageUsageForBillingContextInTx,
   incrementStorageUsageForBillingContextInTx,
   type LegacyStorageUsageDelta,
+  lockWorkspaceStorageForMutationInTx,
   maybeNotifyStorageLimitForBillingContext,
   type WorkspaceStorageUsageDelta,
 } from './tracking'

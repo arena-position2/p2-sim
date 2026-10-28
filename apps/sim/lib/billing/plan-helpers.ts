@@ -76,9 +76,10 @@ export function hasOrganizationSeatEntitlement(sub: {
   periodEnd?: Date | null
 }): boolean {
   if (isPaid(sub.plan)) return true
-  if (!isStarterPlan(sub.plan)) return false
+  const plan = sub.plan
+  if (!plan || !isStarterPlan(plan)) return false
   return isStarterActive({
-    plan: sub.plan,
+    plan,
     status: sub.status ?? null,
     periodEnd: sub.periodEnd ?? null,
   })

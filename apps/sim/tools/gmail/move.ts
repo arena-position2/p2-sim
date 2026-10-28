@@ -1,4 +1,5 @@
 import type { GmailMoveParams, GmailToolResponse } from '@/tools/gmail/types'
+import { castGmailResponse } from '@/tools/gmail/utils'
 import type { InternalToolConfig } from '@/tools/types'
 
 export const gmailMoveTool: InternalToolConfig<GmailMoveParams, GmailToolResponse> = {
@@ -103,7 +104,9 @@ export const gmailMoveV2Tool: InternalToolConfig<GmailMoveParams, GmailModifyV2R
   params: gmailMoveTool.params,
   operation: gmailMoveTool.operation,
   transformResponse: async (response: Response, params?: GmailMoveParams) => {
-    return await gmailMoveTool.transformResponse!(response, params)
+    return castGmailResponse<GmailModifyV2Response>(
+      await gmailMoveTool.transformResponse!(response, params)
+    )
   },
   outputs: {
     content: { type: 'string', description: 'Success message' },

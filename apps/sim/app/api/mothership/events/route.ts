@@ -15,12 +15,12 @@ import {
   InternalUnauthenticatedError,
   internalSessionAuth,
 } from '@/lib/api/server/routes/internal-json-route'
-import { authorizeOrganizationChatEvents } from '@/lib/copilot/chat/organization-chats'
-import { chatPubSub } from '@/lib/copilot/chat-status'
 import { isChatEnabled } from '@/lib/core/config/env-flags'
 import { asOrchestrationError } from '@/lib/core/orchestration/types'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { createSSEStream, createWorkspaceSSE } from '@/lib/events/sse-endpoint'
+import { authorizeOrganizationChatEvents } from '@/lib/mothership/chat/organization-chats'
+import { chatPubSub } from '@/lib/mothership/chat-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +30,7 @@ const mothershipEventsHandler = createWorkspaceSSE({
   label: 'mothership-events',
   subscriptions: [
     {
-      subscribe: (workspaceId, send) => {
+      subscribe: (workspaceId, send, viewerUserId) => {
         if (!chatPubSub) return () => {}
         return chatPubSub.onStatusChanged((event) => {
           if (event.workspaceId !== workspaceId) return
@@ -38,10 +38,13 @@ const mothershipEventsHandler = createWorkspaceSSE({
             chatId: event.chatId,
             type: event.type,
             ...(event.streamId ? { streamId: event.streamId } : {}),
+            // Whether the chat is the viewer's own, never whose it is; absent when unknown.
+            ...(event.userId ? { ownChat: event.userId === viewerUserId } : {}),
             timestamp: Date.now(),
           })
         })
       },
+      ready: async () => chatPubSub?.ready(),
     },
   ],
 })
@@ -80,6 +83,7 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
                 timestamp: Date.now(),
               })
             }) ?? (() => {}),
+          ready: async () => chatPubSub?.ready(),
         },
       ],
     })

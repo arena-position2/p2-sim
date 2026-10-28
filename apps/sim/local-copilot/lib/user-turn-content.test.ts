@@ -7,7 +7,7 @@ const { mockReadChatUpload } = vi.hoisted(() => ({
   mockReadChatUpload: vi.fn(),
 }))
 
-vi.mock('@/lib/copilot/tools/handlers/upload-file-reader', () => ({
+vi.mock('@/lib/mothership/tools/handlers/upload-file-reader', () => ({
   readChatUpload: mockReadChatUpload,
 }))
 

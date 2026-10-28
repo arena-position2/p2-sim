@@ -80,17 +80,12 @@ export const getWorkspaceForkAvailability = defineForkUseCase({
   availability: true,
   execute: async ({
     context,
-    principal,
     input: _input,
   }: {
-    context: { workspace: { organizationId: string | null } }
-    principal: { userId: string }
+    context: { workspace: { organizationId: string | null }; userId: string }
     input: WorkspaceInput
   }) => ({
-    available: await isForkingAvailableForWorkspace(
-      context.workspace.organizationId,
-      principal.userId
-    ),
+    available: await isForkingAvailableForWorkspace(context.workspace.organizationId),
   }),
 })
 

@@ -109,7 +109,12 @@ export async function createWorkspace({
         })
 
         const { workflowState } = buildDefaultWorkflowArtifacts()
-        await saveWorkflowToNormalizedTables(workflowId, workflowState, tx)
+        await saveWorkflowToNormalizedTables(
+          workflowId,
+          workflowState,
+          { workspaceId, subjectUserId: null },
+          tx
+        )
       }
 
       logger.info(

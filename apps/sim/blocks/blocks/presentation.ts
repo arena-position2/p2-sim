@@ -1,16 +1,7 @@
 import { PresentationIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
-import type { ToolResponse } from '@/tools/types'
 
-export interface PresentationResponse extends ToolResponse {
-  output: {
-    presentationFile?: any
-    presentationId?: string
-    message?: string
-  }
-}
-
-export const PresentationBlock: BlockConfig<PresentationResponse> = {
+export const PresentationBlock: BlockConfig = {
   type: 'presentation',
   name: 'Presentation',
   description: 'Create presentations',

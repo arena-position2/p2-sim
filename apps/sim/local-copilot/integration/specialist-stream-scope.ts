@@ -3,13 +3,13 @@ import {
   MothershipStreamV1SpanLifecycleEvent,
   MothershipStreamV1SpanPayloadKind,
   type MothershipStreamV1StreamScope,
-} from '@/lib/copilot/generated/mothership-stream-v1'
+} from '@/lib/mothership/generated/mothership-stream-v1'
 import {
   flushSubagentThinkingBlock,
   flushThinkingBlock,
-} from '@/lib/copilot/request/handlers/types'
-import { isSubagentSpanStreamEvent } from '@/lib/copilot/request/session'
-import type { StreamEvent, StreamingContext } from '@/lib/copilot/request/types'
+} from '@/lib/mothership/request/handlers/types'
+import { isSubagentSpanStreamEvent } from '@/lib/mothership/request/session'
+import type { StreamEvent, StreamingContext } from '@/lib/mothership/request/types'
 import { isSpecialistDomain } from '@/local-copilot/lib/agent/specialists/domains'
 
 const MAIN_SPAN_ID = 'main'

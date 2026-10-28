@@ -11,9 +11,13 @@ export interface MysqlConnectionConfig {
   ssl: 'disabled' | 'required' | 'preferred'
 }
 
-const MYSQL_TYPED_PARAMETER_PROTOTYPE = Object.getPrototypeOf(mysql.TypedParameter.NULL())
+const typedParameter = (mysql as unknown as { TypedParameter?: { NULL?: () => object } })
+  .TypedParameter
+const MYSQL_TYPED_PARAMETER_PROTOTYPE = typedParameter?.NULL
+  ? Object.getPrototypeOf(typedParameter.NULL())
+  : null
 
-function isMysqlExecuteValue(value: unknown): value is mysql.ExecuteValues {
+function isMysqlExecuteValue(value: unknown): boolean {
   if (
     value === null ||
     ['string', 'number', 'bigint', 'boolean'].includes(typeof value) ||
@@ -27,14 +31,12 @@ function isMysqlExecuteValue(value: unknown): value is mysql.ExecuteValues {
   if (Array.isArray(value)) return value.every(isMysqlExecuteValue)
   if (typeof value !== 'object') return false
   const prototype = Object.getPrototypeOf(value)
-  if (prototype === MYSQL_TYPED_PARAMETER_PROTOTYPE) return true
+  if (MYSQL_TYPED_PARAMETER_PROTOTYPE && prototype === MYSQL_TYPED_PARAMETER_PROTOTYPE) return true
   if (prototype !== Object.prototype) return false
   return Object.values(value).every(isMysqlExecuteValue)
 }
 
-function assertMysqlExecuteValues(
-  values: unknown[] | undefined
-): asserts values is mysql.ExecuteValues[] | undefined {
+function assertMysqlExecuteValues(values: unknown[] | undefined): void {
   if (values?.some((value) => !isMysqlExecuteValue(value))) {
     throw new TypeError('MySQL bind values must contain only supported scalar or structured values')
   }

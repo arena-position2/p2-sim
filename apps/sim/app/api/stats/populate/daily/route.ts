@@ -205,6 +205,8 @@ async function processDateStats(
 
   // For each workflow, get template info and workflow info
   for (const stat of executionStats) {
+    if (!stat.workflowId) continue
+
     // Fetch template from the map
     const deployedChat = deployedChatMap.get(stat.workflowId)
 

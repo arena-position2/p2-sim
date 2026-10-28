@@ -1,11 +1,14 @@
-import chalk from 'chalk'
+import { sleep } from '@sim/utils/helpers'
+import { isRecordLike, toRecordOrNull } from '@sim/utils/object'
 import { type Command, Option } from 'commander'
-import { clientFrom } from '../../context'
+import { printError, writeStderr } from '#sim-cli/output/io'
+import { hasProgressTerminal, styles } from '#sim-cli/output/presentation'
 import { CLI_CONTRACT } from '../../contract/commands'
 import type { CommandSpec } from '../../contract/types'
+import { setSoftExitCode } from '../../embed-context'
 import { V2_OPERATIONS } from '../../generated/v2-api'
-import { sleep } from '../../helpers'
-import { resolvePath, SimApiError } from '../../http/client'
+import { SimApiError } from '../../http/client'
+import { apiCommand } from '../../runtime/called-operations'
 import { renderResult } from '../../runtime/result'
 
 /**
@@ -85,10 +88,6 @@ interface RunSnapshot {
   contextId: string | null
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
@@ -100,12 +99,17 @@ function optionalString(value: unknown): string | null {
  * record — what a self-hosted deployment behind an unwrapping proxy hands back —
  * still polls, rather than refusing to find a status that is right there.
  */
+/** The run itself: v2 answers `{ data: run }` and the renderer prints exactly what it is handed. */
+function runData(raw: unknown): unknown {
+  return isRecordLike(raw) && isRecordLike(raw.data) ? raw.data : raw
+}
+
 function readRun(raw: unknown): RunSnapshot {
-  const run = isRecord(raw) && isRecord(raw.data) ? raw.data : raw
-  if (!isRecord(run) || typeof run.status !== 'string') {
+  const run = isRecordLike(raw) && isRecordLike(raw.data) ? raw.data : raw
+  if (!isRecordLike(run) || typeof run.status !== 'string') {
     throw new SimApiError('Run status response carried no status.', 0)
   }
-  const paused = isRecord(run.paused) ? run.paused : null
+  const paused = toRecordOrNull(run.paused)
   return {
     status: run.status,
     pauseKind: paused ? optionalString(paused.pauseKind) : null,
@@ -154,10 +158,10 @@ function waitProgress(): WaitProgress {
   let reported = false
   return {
     advance: (status, elapsedMs) => {
-      if (!process.stderr.isTTY) return
+      if (!hasProgressTerminal()) return
       reported = true
-      process.stderr.write(
-        `\r${chalk.dim(`${status} — waiting ${Math.round(elapsedMs / 1000)}s…`)}\u001b[K`
+      writeStderr(
+        `\r${styles().dim(`${status} — waiting ${Math.round(elapsedMs / 1000)}s…`)}\u001b[K`
       )
     },
     // Idempotent: the loop clears the line before printing a result, and the
@@ -166,7 +170,7 @@ function waitProgress(): WaitProgress {
     finish: () => {
       if (!reported) return
       reported = false
-      process.stderr.write('\r\u001b[K')
+      writeStderr('\r\u001b[K')
     },
   }
 }
@@ -207,8 +211,8 @@ function runSpec(): CommandSpec {
 
 /** Adds `workflows runs wait` — poll one run until it stops moving. */
 export function attachWorkflowRunWait(runs: Command): void {
-  runs
-    .command('wait')
+  const [wait, connectWait] = apiCommand(runs, 'wait', ['getWorkflowRun'])
+  wait
     .argument('<runId>', V2_OPERATIONS.getWorkflowRun.pathParamDocs?.runId)
     .allowExcessArguments(false)
     .description('Wait for a run to reach a terminal state, then show it')
@@ -221,69 +225,62 @@ export function attachWorkflowRunWait(runs: Command): void {
         `Give up after this many seconds, or 0 to wait indefinitely (default: ${DEFAULT_WAIT_TIMEOUT_SECONDS}). Bounds the whole wait; SIM_TIMEOUT_SECONDS bounds one request`
       )
     )
-    .action(
-      async (
-        runId: string,
-        options: { workflow: string; waitTimeout?: string },
-        command: Command
-      ) => {
-        const timeoutSeconds =
-          options.waitTimeout === undefined
-            ? DEFAULT_WAIT_TIMEOUT_SECONDS
-            : parseWaitTimeout(options.waitTimeout)
+    .action(async (runId: string, options: { workflow: string; waitTimeout?: string }) => {
+      const timeoutSeconds =
+        options.waitTimeout === undefined
+          ? DEFAULT_WAIT_TIMEOUT_SECONDS
+          : parseWaitTimeout(options.waitTimeout)
 
-        const { client, profile } = clientFrom(command)
-        const operation = V2_OPERATIONS.getWorkflowRun
-        const path = resolvePath(operation.path, { workflowId: options.workflow, runId })
+      const { client, profile } = connectWait()
+      const params = { workflowId: options.workflow, runId }
 
-        const startedAt = Date.now()
-        const deadline =
-          timeoutSeconds === 0 ? Number.POSITIVE_INFINITY : startedAt + timeoutSeconds * 1000
-        const progress = waitProgress()
-        let delayMs = FIRST_POLL_DELAY_MS
+      const startedAt = Date.now()
+      const deadline =
+        timeoutSeconds === 0 ? Number.POSITIVE_INFINITY : startedAt + timeoutSeconds * 1000
+      const progress = waitProgress()
+      let delayMs = FIRST_POLL_DELAY_MS
 
-        // `finally`, because a request that throws part-way through would
-        // otherwise leave `running — waiting 12s…` sitting on the line the error
-        // is then written onto.
-        try {
-          while (true) {
-            const raw = await client.request<unknown>(path, { method: operation.method })
-            const snapshot = readRun(raw)
-            const outcome = classify(snapshot)
+      // `finally`, because a request that throws part-way through would
+      // otherwise leave `running — waiting 12s…` sitting on the line the error
+      // is then written onto.
+      try {
+        while (true) {
+          const raw = await client.request<unknown>('getWorkflowRun', { params })
+          const snapshot = readRun(raw)
+          const outcome = classify(snapshot)
 
-            if (outcome) {
-              progress.finish()
-              renderResult('getWorkflowRun', profile.output, raw, runSpec())
-              const message = explain(outcome, runId, options.workflow, snapshot)
-              if (message) console.error(chalk.red(message))
-              process.exitCode = WAIT_EXIT_CODES[outcome]
-              return
-            }
-
-            const remainingMs = deadline - Date.now()
-            if (remainingMs <= 0) {
-              progress.finish()
-              renderResult('getWorkflowRun', profile.output, raw, runSpec())
-              console.error(
-                chalk.red(
-                  `Timed out after ${timeoutSeconds}s waiting for run ${runId} (status: ${snapshot.status}${
-                    snapshot.resumeAt ? `, resuming at ${snapshot.resumeAt}` : ''
-                  }). Raise ${WAIT_TIMEOUT_FLAG}, or set it to 0 to wait indefinitely.`
-                )
-              )
-              process.exitCode = WAIT_EXIT_CODES.timeout
-              return
-            }
-
-            progress.advance(snapshot.status, Date.now() - startedAt)
-            // Clamped to the time left so the last sleep of a bounded wait ends
-            // at the deadline instead of overshooting it by a whole interval.
-            await sleep(Math.min(delayMs, remainingMs))
-            delayMs = Math.min(delayMs * POLL_BACKOFF_FACTOR, MAX_POLL_DELAY_MS)
+          if (outcome) {
+            progress.finish()
+            renderResult('getWorkflowRun', profile.output, runData(raw), runSpec())
+            const message = explain(outcome, runId, options.workflow, snapshot)
+            if (message) printError(styles().red(message))
+            setSoftExitCode(WAIT_EXIT_CODES[outcome])
+            return
           }
-        } finally {
-          progress.finish()
+
+          const remainingMs = deadline - Date.now()
+          if (remainingMs <= 0) {
+            progress.finish()
+            renderResult('getWorkflowRun', profile.output, runData(raw), runSpec())
+            printError(
+              styles().red(
+                `Timed out after ${timeoutSeconds}s waiting for run ${runId} (status: ${snapshot.status}${
+                  snapshot.resumeAt ? `, resuming at ${snapshot.resumeAt}` : ''
+                }). Raise ${WAIT_TIMEOUT_FLAG}, or set it to 0 to wait indefinitely.`
+              )
+            )
+            setSoftExitCode(WAIT_EXIT_CODES.timeout)
+            return
+          }
+
+          progress.advance(snapshot.status, Date.now() - startedAt)
+          // Clamped to the time left so the last sleep of a bounded wait ends
+          // at the deadline instead of overshooting it by a whole interval.
+          await sleep(Math.min(delayMs, remainingMs))
+          delayMs = Math.min(delayMs * POLL_BACKOFF_FACTOR, MAX_POLL_DELAY_MS)
         }
+      } finally {
+        progress.finish()
       }
-    )
+    })
 }

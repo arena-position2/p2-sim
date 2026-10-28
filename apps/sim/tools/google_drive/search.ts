@@ -44,108 +44,6 @@ async function splitContentIntoPassages(
 }
 
 /**
- * Parses time window patterns from prompt:
- * - today
- * - yesterday
- * - last week
- * - last month
- * - last N days
- * Returns ISO timestamps (start, end) in RFC3339 format or (null, null)
- */
-function parseTimeWindow(prompt: string): [string | null, string | null] {
-  const p = prompt.toLowerCase()
-  const now = new Date()
-  const end = now
-
-  let start: Date | null = null
-
-  if (p.includes('today')) {
-    start = new Date(now)
-    start.setHours(0, 0, 0, 0)
-  } else if (p.includes('yesterday')) {
-    const yesterday = new Date(now)
-    yesterday.setDate(yesterday.getDate() - 1)
-    start = new Date(yesterday)
-    start.setHours(0, 0, 0, 0)
-    end.setTime(yesterday.getTime())
-    end.setHours(23, 59, 59, 999)
-  } else if (p.includes('last week')) {
-    start = new Date(now)
-    start.setDate(start.getDate() - 7)
-  } else if (p.includes('last month')) {
-    start = new Date(now)
-    start.setMonth(start.getMonth() - 1)
-  } else {
-    const lastNDaysMatch = p.match(/last\s+(\d+)\s+days?/)
-    if (lastNDaysMatch) {
-      const days = Number.parseInt(lastNDaysMatch[1], 10)
-      if (Number.isFinite(days) && days > 0) {
-        start = new Date(now)
-        start.setDate(start.getDate() - days)
-      }
-    }
-  }
-
-  if (!start) {
-    return [null, null]
-  }
-
-  // Convert to RFC3339 format (Google Drive API expects this)
-  const toRFC3339 = (dt: Date): string => {
-    return dt.toISOString()
-  }
-
-  return [toRFC3339(start), toRFC3339(end)]
-}
-
-/**
- * Maps common keywords to Drive mime types.
- * Returns a list (OR-filtered) of mime types.
- */
-function detectMimeTypes(prompt: string): string[] {
-  const p = prompt.toLowerCase()
-  const mimes: string[] = []
-
-  if (p.includes('pdf')) {
-    mimes.push('application/pdf')
-  }
-
-  // Slides / decks / presentations
-  if (
-    ['deck', 'decks', 'slides', 'slide', 'presentation', 'presentations', 'ppt', 'pptx'].some((w) =>
-      p.includes(w)
-    )
-  ) {
-    mimes.push('application/vnd.google-apps.presentation')
-  }
-
-  // Docs
-  if (['doc', 'docs', 'document', 'documents'].some((w) => p.includes(w))) {
-    mimes.push('application/vnd.google-apps.document')
-  }
-
-  // Sheets
-  if (
-    ['sheet', 'sheets', 'spreadsheet', 'spreadsheets', 'excel', 'xlsx'].some((w) => p.includes(w))
-  ) {
-    mimes.push('application/vnd.google-apps.spreadsheet')
-  }
-
-  // Folders
-  if (p.includes('folder')) {
-    mimes.push('application/vnd.google-apps.folder')
-  }
-
-  // De-duplicate preserving order
-  const seen = new Set<string>()
-  return mimes.filter((m) => {
-    if (seen.has(m)) return false
-    seen.add(m)
-    return true
-  })
-}
-
-/**
  * Extracts folder name from prompt:
  * - in folder Marketing
  * - folder:Marketing
@@ -171,109 +69,6 @@ function extractFolderName(prompt: string): string | null {
   }
 
   return null
-}
-
-/**
- * Extracts keywords from prompt:
- * - Removes stop words
- * - Keeps tokens length >= 2
- * - Preserves alphanumeric tokens
- */
-function extractKeywords(prompt: string): string[] {
-  const stopWords = new Set([
-    'find',
-    'search',
-    'show',
-    'me',
-    'my',
-    'the',
-    'a',
-    'an',
-    'of',
-    'for',
-    'from',
-    'in',
-    'on',
-    'to',
-    'with',
-    'and',
-    'or',
-    'files',
-    'file',
-    'last',
-    'week',
-    'month',
-    'days',
-    'day',
-    'today',
-    'yesterday',
-    'recent',
-    'recently',
-    'please',
-    'within',
-    'between',
-    'after',
-    'before',
-    'folder',
-    'give',
-    'get',
-    'list',
-    'lists',
-    'which',
-    'are',
-    'is',
-    'was',
-    'were',
-    'be',
-    'been',
-    'being',
-    'have',
-    'has',
-    'had',
-    'do',
-    'does',
-    'did',
-    'available',
-    'availability',
-    'what',
-    'where',
-    'when',
-    'who',
-    'how',
-  ])
-
-  const tokens = prompt.match(/[A-Za-z0-9\-_]+/g) || []
-  const seen = new Set<string>()
-  const keywords: string[] = []
-
-  // Ignore type-hints that are mapped to mime types
-  const ignoreLiterals = new Set([
-    'deck',
-    'decks',
-    'slides',
-    'slide',
-    'presentation',
-    'presentations',
-    'pdf',
-    'ppt',
-    'pptx',
-  ])
-
-  for (const token of tokens) {
-    const lower = token.toLowerCase()
-    if (stopWords.has(lower)) continue
-    if (token.length < 2) continue
-    if (ignoreLiterals.has(lower)) continue
-    if (seen.has(lower)) continue
-
-    keywords.push(token)
-    seen.add(lower)
-
-    // Limit to 10 keywords
-    if (keywords.length >= 10) break
-  }
-
-  return keywords
 }
 
 /**
@@ -614,226 +409,6 @@ export const searchTool: ToolConfig<GoogleDriveSearchParams, GoogleDriveSearchRe
     },
   },
 
-  // // Request config is required but not used when directExecution is provided
-  // request: {
-  //   url: '/api/tools/google_drive/search',
-  //   method: 'GET',
-  //   headers: () => ({}),
-  // },
-
-  directExecution: async (params: GoogleDriveSearchParams) => {
-    const { prompt, accessToken, folderId: paramFolderId, pageSize, pageToken } = params
-
-    let folderId: string | null = null
-
-    if (paramFolderId?.trim()) {
-      folderId = paramFolderId.trim()
-      logger.info('Using folder from params', { folderId })
-    } else {
-      const folderName = extractFolderName(prompt)
-      if (folderName) {
-        folderId = await resolveFolderIdByName(accessToken, folderName, pageSize?.toString() || '5')
-        if (folderId) {
-          logger.info('Resolved folder by name', { folderName, folderId })
-        } else {
-          logger.warn('Could not resolve folder by name', { folderName })
-        }
-      }
-    }
-
-    let query = await buildDriveQueryWithAI(prompt, folderId)
-
-    if (folderId) {
-      const safeFolderId = folderId.replace(/'/g, "\\'")
-      const folderConstraint = `'${safeFolderId}' in parents`
-      if (!query.includes(' in parents')) {
-        query = `${query.trim()} and ${folderConstraint}`
-      } else {
-        query = query.replace(/'[^']*' in parents/g, folderConstraint)
-      }
-      logger.info('Enforced folder scope for search', { folderId })
-    }
-
-    logger.info('Built Drive query from prompt', { prompt, query, folderId })
-
-    const url = new URL('https://www.googleapis.com/drive/v3/files')
-    url.searchParams.append('q', query)
-    url.searchParams.append(
-      'fields',
-      'files(id,name,mimeType,modifiedTime,createdTime,webViewLink,webContentLink,size,owners(displayName,emailAddress),parents,driveId)'
-    )
-    url.searchParams.append('orderBy', 'modifiedTime desc')
-    url.searchParams.append('includeItemsFromAllDrives', 'true')
-    url.searchParams.append('supportsAllDrives', 'true')
-
-    if (pageSize) {
-      url.searchParams.append('pageSize', Math.min(Number(pageSize), 1000).toString())
-    } else {
-      url.searchParams.append('pageSize', '20')
-    }
-
-    if (pageToken) {
-      url.searchParams.append('pageToken', pageToken)
-    }
-
-    try {
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        logger.error('Failed to search Google Drive files', {
-          error: data.error?.message || data.error,
-          prompt,
-        })
-        throw new Error(data.error?.message || 'Failed to search Google Drive files')
-      }
-
-      // Map files to response format with metadata
-      const filePromises = (data.files || []).map(async (file: any) => {
-        const mimeType = file.mimeType || ''
-
-        // Build file object with metadata
-        const fileObj: any = {
-          id: file.id,
-          name: file.name,
-          mimeType: file.mimeType,
-          webViewLink: file.webViewLink,
-          modifiedTime: file.modifiedTime,
-          createdTime: file.createdTime,
-          owners: file.owners || [],
-          driveId: file.driveId,
-        }
-
-        // For non-folder files, include size and webContentLink
-        if (mimeType !== 'application/vnd.google-apps.folder') {
-          if (file.size) {
-            fileObj.size = file.size
-          }
-          if (file.webContentLink) {
-            fileObj.webContentLink = file.webContentLink
-          }
-        }
-
-        // For folders, include parents
-        if (mimeType === 'application/vnd.google-apps.folder' && file.parents) {
-          fileObj.parents = file.parents
-        }
-
-        // Add file type classification
-        if (mimeType.startsWith('application/vnd.google-apps.')) {
-          fileObj.isGoogleWorkspaceFile = true
-          if (mimeType === 'application/vnd.google-apps.document') {
-            fileObj.fileType = 'Google Doc'
-          } else if (mimeType === 'application/vnd.google-apps.spreadsheet') {
-            fileObj.fileType = 'Google Sheet'
-          } else if (mimeType === 'application/vnd.google-apps.presentation') {
-            fileObj.fileType = 'Google Slides'
-          } else if (mimeType === 'application/vnd.google-apps.folder') {
-            fileObj.fileType = 'Folder'
-          }
-        } else if (mimeType === 'application/pdf') {
-          fileObj.fileType = 'PDF'
-        } else if (mimeType.startsWith('image/')) {
-          fileObj.fileType = 'Image'
-        } else if (mimeType.startsWith('video/')) {
-          fileObj.fileType = 'Video'
-        } else if (mimeType.startsWith('audio/')) {
-          fileObj.fileType = 'Audio'
-        }
-
-        // Extract content from the file (for files with webViewLink)
-        // Content is extracted using the file ID via Google Drive API
-        if (file.webViewLink && file.id) {
-          const contentResult = await extractFileContent(
-            file.id,
-            mimeType,
-            file.name || '',
-            accessToken
-          )
-          if (contentResult) {
-            fileObj.content = contentResult.content
-            fileObj.extractionMethod = contentResult.extractionMethod
-            fileObj.contentSource = 'webViewLink'
-          }
-        }
-
-        return fileObj
-      })
-
-      let files = await Promise.all(filePromises)
-
-      // For each file with content, split into passages and rerank to extract relevant content
-      const filesWithContent = files.filter(
-        (file) => file.content && file.content.trim().length > 0
-      )
-
-      if (filesWithContent.length > 0) {
-        // Process each file individually to extract relevant passages
-        const processedFiles = await Promise.all(
-          filesWithContent.map(async (file) => {
-            try {
-              // Split content into passages using TextChunker
-              const passages = await splitContentIntoPassages(file.content || '', 1000, 100)
-
-              if (passages.length === 0) {
-                return file
-              }
-
-              // Wrap passages in objects for reranking
-              const passageObjects = passages.map((passage) => ({ text: passage }))
-
-              // Rerank passages for this file
-              const rerankedPassageObjects = await rerankContent<{ text: string }>(
-                prompt,
-                passageObjects,
-                (item) => item.text,
-                {
-                  enabled: true,
-                  topN: Math.min(passages.length, 10), // Get top 10 most relevant passages per file
-                  // maxContentLength: 4000,
-                }
-              )
-
-              // Extract text from reranked passage objects
-              file.relevantContent = rerankedPassageObjects.map((item) => item.text)
-              file.content = ''
-              return file
-            } catch (error) {
-              logger.warn('Failed to extract relevant content from file', {
-                fileId: file.id,
-                fileName: file.name,
-                error: error instanceof Error ? error.message : 'Unknown error',
-              })
-              // Return file without relevantContent if reranking fails
-              return file
-            }
-          })
-        )
-
-        // Replace files with processed versions
-        files = files.map((file) => {
-          const processed = processedFiles.find((pf) => pf.id === file.id)
-          return processed || file
-        })
-      }
-
-      return {
-        success: true,
-        output: {
-          files,
-        },
-      }
-    } catch (error) {
-      logger.error('Error executing Google Drive search', { error, prompt })
-      throw error
-    }
-  },
-
   request: {
     url: (params) => {
       const url = new URL('https://www.googleapis.com/drive/v3/files')
@@ -928,4 +503,215 @@ export const searchTool: ToolConfig<GoogleDriveSearchParams, GoogleDriveSearchRe
         'Page token for the next page of files; absent from the response when the end of the files list has been reached',
     },
   },
+}
+
+export async function executeGoogleDriveSearchDirect(params: GoogleDriveSearchParams) {
+  const { prompt, accessToken, folderId: paramFolderId, pageSize, pageToken } = params
+
+  let folderId: string | null = null
+
+  if (paramFolderId?.trim()) {
+    folderId = paramFolderId.trim()
+    logger.info('Using folder from params', { folderId })
+  } else {
+    const folderName = extractFolderName(prompt)
+    if (folderName) {
+      folderId = await resolveFolderIdByName(accessToken, folderName, pageSize?.toString() || '5')
+      if (folderId) {
+        logger.info('Resolved folder by name', { folderName, folderId })
+      } else {
+        logger.warn('Could not resolve folder by name', { folderName })
+      }
+    }
+  }
+
+  let query = await buildDriveQueryWithAI(prompt, folderId)
+
+  if (folderId) {
+    const safeFolderId = folderId.replace(/'/g, "\\'")
+    const folderConstraint = `'${safeFolderId}' in parents`
+    if (!query.includes(' in parents')) {
+      query = `${query.trim()} and ${folderConstraint}`
+    } else {
+      query = query.replace(/'[^']*' in parents/g, folderConstraint)
+    }
+    logger.info('Enforced folder scope for search', { folderId })
+  }
+
+  logger.info('Built Drive query from prompt', { prompt, query, folderId })
+
+  const url = new URL('https://www.googleapis.com/drive/v3/files')
+  url.searchParams.append('q', query)
+  url.searchParams.append(
+    'fields',
+    'files(id,name,mimeType,modifiedTime,createdTime,webViewLink,webContentLink,size,owners(displayName,emailAddress),parents,driveId)'
+  )
+  url.searchParams.append('orderBy', 'modifiedTime desc')
+  url.searchParams.append('includeItemsFromAllDrives', 'true')
+  url.searchParams.append('supportsAllDrives', 'true')
+
+  if (pageSize) {
+    url.searchParams.append('pageSize', Math.min(Number(pageSize), 1000).toString())
+  } else {
+    url.searchParams.append('pageSize', '20')
+  }
+
+  if (pageToken) {
+    url.searchParams.append('pageToken', pageToken)
+  }
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      logger.error('Failed to search Google Drive files', {
+        error: data.error?.message || data.error,
+        prompt,
+      })
+      throw new Error(data.error?.message || 'Failed to search Google Drive files')
+    }
+
+    // Map files to response format with metadata
+    const filePromises = (data.files || []).map(async (file: any) => {
+      const mimeType = file.mimeType || ''
+
+      // Build file object with metadata
+      const fileObj: any = {
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        webViewLink: file.webViewLink,
+        modifiedTime: file.modifiedTime,
+        createdTime: file.createdTime,
+        owners: file.owners || [],
+        driveId: file.driveId,
+      }
+
+      // For non-folder files, include size and webContentLink
+      if (mimeType !== 'application/vnd.google-apps.folder') {
+        if (file.size) {
+          fileObj.size = file.size
+        }
+        if (file.webContentLink) {
+          fileObj.webContentLink = file.webContentLink
+        }
+      }
+
+      // For folders, include parents
+      if (mimeType === 'application/vnd.google-apps.folder' && file.parents) {
+        fileObj.parents = file.parents
+      }
+
+      // Add file type classification
+      if (mimeType.startsWith('application/vnd.google-apps.')) {
+        fileObj.isGoogleWorkspaceFile = true
+        if (mimeType === 'application/vnd.google-apps.document') {
+          fileObj.fileType = 'Google Doc'
+        } else if (mimeType === 'application/vnd.google-apps.spreadsheet') {
+          fileObj.fileType = 'Google Sheet'
+        } else if (mimeType === 'application/vnd.google-apps.presentation') {
+          fileObj.fileType = 'Google Slides'
+        } else if (mimeType === 'application/vnd.google-apps.folder') {
+          fileObj.fileType = 'Folder'
+        }
+      } else if (mimeType === 'application/pdf') {
+        fileObj.fileType = 'PDF'
+      } else if (mimeType.startsWith('image/')) {
+        fileObj.fileType = 'Image'
+      } else if (mimeType.startsWith('video/')) {
+        fileObj.fileType = 'Video'
+      } else if (mimeType.startsWith('audio/')) {
+        fileObj.fileType = 'Audio'
+      }
+
+      // Extract content from the file (for files with webViewLink)
+      // Content is extracted using the file ID via Google Drive API
+      if (file.webViewLink && file.id) {
+        const contentResult = await extractFileContent(
+          file.id,
+          mimeType,
+          file.name || '',
+          accessToken
+        )
+        if (contentResult) {
+          fileObj.content = contentResult.content
+          fileObj.extractionMethod = contentResult.extractionMethod
+          fileObj.contentSource = 'webViewLink'
+        }
+      }
+
+      return fileObj
+    })
+
+    let files = await Promise.all(filePromises)
+
+    // For each file with content, split into passages and rerank to extract relevant content
+    const filesWithContent = files.filter((file) => file.content && file.content.trim().length > 0)
+
+    if (filesWithContent.length > 0) {
+      // Process each file individually to extract relevant passages
+      const processedFiles = await Promise.all(
+        filesWithContent.map(async (file) => {
+          try {
+            // Split content into passages using TextChunker
+            const passages = await splitContentIntoPassages(file.content || '', 1000, 100)
+
+            if (passages.length === 0) {
+              return file
+            }
+
+            // Wrap passages in objects for reranking
+            const passageObjects = passages.map((passage) => ({ text: passage }))
+
+            // Rerank passages for this file
+            const rerankedPassageObjects = await rerankContent<{ text: string }>(
+              prompt,
+              passageObjects,
+              (item) => item.text,
+              {
+                enabled: true,
+                topN: Math.min(passages.length, 10), // Get top 10 most relevant passages per file
+                // maxContentLength: 4000,
+              }
+            )
+
+            // Extract text from reranked passage objects
+            file.relevantContent = rerankedPassageObjects.map((item) => item.text)
+            file.content = ''
+            return file
+          } catch (error) {
+            logger.warn('Failed to extract relevant content from file', {
+              fileId: file.id,
+              fileName: file.name,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            })
+            // Return file without relevantContent if reranking fails
+            return file
+          }
+        })
+      )
+
+      // Replace files with processed versions
+      files = files.map((file) => {
+        const processed = processedFiles.find((pf) => pf.id === file.id)
+        return processed || file
+      })
+    }
+
+    return {
+      success: true,
+      output: {
+        files,
+      },
+    }
+  } catch (error) {
+    logger.error('Error executing Google Drive search', { error, prompt })
+    throw error
+  }
 }

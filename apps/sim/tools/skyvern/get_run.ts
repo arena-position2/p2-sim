@@ -39,7 +39,7 @@ export const skyvernGetRunTool: ToolConfig<SkyvernGetRunParams, SkyvernGetRunRes
   request: {
     allowHttp: true,
     url: (params) => {
-      const runsPath = resolveSkyvernRunsApiPath(params.baseUrl)
+      const runsPath = resolveSkyvernRunsApiPath()
       const runId = params.runId.trim()
       return buildSkyvernUrl(resolveSkyvernBaseUrl(params.baseUrl), `${runsPath}/${runId}`)
     },

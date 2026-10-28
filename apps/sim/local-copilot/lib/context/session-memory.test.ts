@@ -25,6 +25,8 @@ function makeMemory(overrides: Partial<SessionMemory> = {}): SessionMemory {
     coveredThroughMessageId: 'msg-1',
     goals: ['Build Slack digest'],
     decisions: ['Use webhook trigger'],
+    constraints: [],
+    activeDirective: '',
     entities: {
       workflows: ['wf-1'],
       blocks: ['agent-1'],
@@ -33,6 +35,9 @@ function makeMemory(overrides: Partial<SessionMemory> = {}): SessionMemory {
     },
     progress: ['Created workflow'],
     openQuestions: [],
+    approvals: [],
+    failures: [],
+    verification: [],
     notes: 'User wants weekly digest',
     ...overrides,
   }

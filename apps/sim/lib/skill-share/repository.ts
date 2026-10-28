@@ -398,7 +398,7 @@ export async function getCatalogPresence(
     .from(workspace)
     .where(and(inArray(workspace.id, workspaceIdsToLoad), isNull(workspace.archivedAt)))
 
-  const rows: PresenceRow[] = workspaces.flatMap((ws) => {
+  const rows: PresenceRow[] = workspaces.flatMap((ws): PresenceRow[] => {
     if (ws.id === catalog.originWorkspaceId) {
       return [{ workspaceId: ws.id, workspaceName: ws.name, status: 'source' as const }]
     }

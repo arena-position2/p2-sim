@@ -2,7 +2,6 @@ import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import { generateRequestId } from '@/lib/core/utils/request'
-import { memoryService } from '@/executor/handlers/agent/memory'
 import type { AgentInputs, Message } from '@/executor/handlers/agent/types'
 import type { ExecutionContext } from '@/executor/types'
 import { extractTextContent } from '@/providers/google/utils'
@@ -120,10 +119,10 @@ async function searchAndBuildMemoryContext(
 
   // Build token-limited memory context from sorted results
   const { getMemoryTokenLimit } = await import('@/executor/handlers/agent/memory-utils')
-  const { getAccurateTokenCount } = await import('@/lib/tokenization/estimators')
+  const { getAccurateTokenCount } = await import('@/lib/tokenization/accurate')
 
   const tokenLimit = getMemoryTokenLimit(model)
-  const baseTokens = getAccurateTokenCount(userPrompt, model)
+  const baseTokens = getAccurateTokenCount(userPrompt ?? '', model)
   let currentTokenCount = baseTokens
   let memoryContext = '\n=== PREVIOUS CONVERSATION ===:\n'
 
@@ -157,7 +156,7 @@ export async function combineAndSortSearchResults(
   inputs: AgentInputs,
   blockId: string,
   userPrompt: string | undefined,
-  model?: string
+  _model?: string
 ): Promise<Message[]> {
   // Get raw search results (before conversion to Messages) to access score field
   const rawResultsWithoutConversationId = await getRawSearchResults(
@@ -208,17 +207,15 @@ export async function combineAndSortSearchResults(
   })
 
   // Convert sorted raw results to Messages
-  const searchResults: Message[] = sortedResults
-    .map((result) => {
-      if (result.memory && typeof result.memory === 'string' && result.role) {
-        return {
-          role: result.role as 'system' | 'user' | 'assistant',
-          content: result.memory,
-        }
-      }
-      return null
-    })
-    .filter((msg): msg is Message => msg !== null)
+  const searchResults: Message[] = []
+  for (const result of sortedResults) {
+    if (result.memory && typeof result.memory === 'string' && result.role) {
+      searchResults.push({
+        role: result.role as 'system' | 'user' | 'assistant',
+        content: result.memory,
+      })
+    }
+  }
 
   return searchResults
 }
@@ -229,7 +226,7 @@ export async function combineAndSortSearchResults(
 async function getRawSearchResults(
   ctx: ExecutionContext,
   inputs: AgentInputs,
-  blockId: string,
+  _blockId: string,
   userPrompt: string | undefined,
   isConversation: boolean,
   includeConversationId: boolean
@@ -683,14 +680,27 @@ export async function analyzeIntent(params: IntentAnalyzerParams): Promise<Inten
     params.factMemories !== undefined
       ? params.factMemories
       : params.inputs.memoryType
-        ? await memoryService.searchMemories(
-            ctx,
-            params.inputs,
-            params.blockId,
-            userPrompt,
-            false,
-            false
-          )
+        ? await (async (): Promise<Message[]> => {
+            const raw = await getRawSearchResults(
+              ctx,
+              params.inputs,
+              params.blockId,
+              userPrompt,
+              false,
+              false
+            )
+            if (!raw?.length) return []
+            const messages: Message[] = []
+            for (const result of raw) {
+              if (result.memory && typeof result.memory === 'string' && result.role) {
+                messages.push({
+                  role: result.role as 'system' | 'user' | 'assistant',
+                  content: result.memory,
+                })
+              }
+            }
+            return messages
+          })()
         : []
 
   logger.info('Intent analyzer: step 4 done', { factMemoriesCount: factMemories.length })

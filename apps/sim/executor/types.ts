@@ -6,6 +6,7 @@ import type { BlockOutput } from '@/blocks/types'
 import type {
   ChildWorkflowContext,
   ExecutionCallbacks,
+  ExecutionTestHooks,
   IterationContext,
   ParentIteration,
   PiiBlockOutputRedaction,
@@ -29,6 +30,12 @@ export interface UserFile {
   key: string
   context?: string
   base64?: string
+  /**
+   * Version number of a workspace file's content, present when the record was read with it. Each
+   * version owns its own storage key, so `key` already pins the bytes; this is the number that
+   * names them in the file version API.
+   */
+  version?: number
   /** Provider Files API handle (OpenAI/Anthropic `file_...` id) set when a large file is uploaded instead of inlined as base64. */
   providerFileId?: string
   /** Provider File API uri (Gemini `fileUri`) set when a large file is uploaded instead of inlined as base64. */
@@ -216,6 +223,7 @@ export interface NormalizedBlockOutput {
     blockTitle?: string
   }
   selectedOption?: string
+  selectedTitle?: string | null
   conditionResult?: boolean
   result?: any
   stdout?: string
@@ -286,6 +294,13 @@ export interface BlockLog {
   errorHandled?: boolean
   /** Total handler tries, present only when the block retried at least once. */
   tries?: number
+  /**
+   * Models that failed before the one that answered, in the order tried.
+   * Present only when an Agent block fell back at least once. Under retry only
+   * the final try walks the fallbacks, so the field reflects that try; every
+   * earlier try clears it.
+   */
+  modelFallbacks?: string[]
   loopId?: string
   parallelId?: string
   iterationIndex?: number
@@ -366,11 +381,17 @@ interface ExecutionMetadata {
   capabilityGovernedUserId?: string | null
   principal?: WorkflowExecutionPrincipal
   executionId?: string
+  /** Root of the execution lineage tree; self when this run has no parent. */
+  rootExecutionId?: string
   triggerType?: string
   triggerBlockId?: string
   useDraftState?: boolean
   resumeFromSnapshot?: boolean
   resumeTerminalNoop?: boolean
+  /** Other durable pauses remain after the current context resumes. */
+  resumeHasPendingPauses?: boolean
+  /** Stop-after completion retires outstanding pause contexts when settling a resume. */
+  stopAfterBlockReached?: boolean
   executionMode?: 'sync' | 'stream' | 'async'
   /**
    * Run-level agent-events opt-in (see the snapshot ExecutionMetadata).
@@ -404,6 +425,8 @@ export interface ExecutorDelegationOrigin {
 
 export interface ExecutionContext {
   workflowId: string
+  /** Set during a workflow test run; Agent tool calls consult it before calling the tool. */
+  testHooks?: ExecutionTestHooks
   workspaceId?: string
   executionId?: string
   largeValueExecutionIds?: string[]
@@ -729,16 +752,6 @@ export interface StreamingExecution {
   onFullContent?: (content: string) => void | Promise<void>
 }
 
-interface BlockExecutor {
-  canExecute(block: SerializedBlock): boolean
-
-  execute(
-    block: SerializedBlock,
-    inputs: Record<string, any>,
-    context: ExecutionContext
-  ): Promise<BlockOutput>
-}
-
 /**
  * Per-invocation identity for one run of one block.
  *
@@ -757,6 +770,22 @@ export interface BlockNodeMetadata {
   originalBlockId?: string
   isLoopNode?: boolean
   executionOrder?: number
+  /** Where this invocation sits in the block's retry policy; absent when the block has none. */
+  retry?: BlockRetryAttempt
+}
+
+/**
+ * One try of a block under its retry policy, told to the handler so it can hold
+ * work for the last try. `isFinalTry` is the executor's own judgment, not
+ * `attempt >= maxTries` recomputed by the handler: what makes a try final is the
+ * policy's business, and a handler that fails on a non-final try is promised
+ * another invocation for any retryable error.
+ */
+export interface BlockRetryAttempt {
+  /** 1-based. */
+  attempt: number
+  maxTries: number
+  isFinalTry: boolean
 }
 
 export interface BlockHandler {
@@ -779,46 +808,4 @@ export interface BlockHandler {
     inputs: Record<string, any>,
     nodeMetadata: BlockNodeMetadata
   ) => Promise<BlockOutput | StreamingExecution>
-}
-
-interface Tool<P = any, O = Record<string, any>> {
-  id: string
-  name: string
-  description: string
-  version: string
-
-  params: {
-    [key: string]: {
-      type: string
-      required?: boolean
-      description?: string
-      default?: any
-    }
-  }
-
-  request?: {
-    url?: string | ((params: P) => string)
-    method?: string
-    headers?: (params: P) => Record<string, string>
-    body?: (params: P) => Record<string, any>
-  }
-
-  transformResponse?: (response: any) => Promise<{
-    success: boolean
-    output: O
-    error?: string
-  }>
-}
-
-interface ToolRegistry {
-  [key: string]: Tool
-}
-
-export interface ResponseFormatStreamProcessor {
-  processStream(
-    originalStream: ReadableStream,
-    blockId: string,
-    selectedOutputs: string[],
-    responseFormat?: any
-  ): ReadableStream
 }

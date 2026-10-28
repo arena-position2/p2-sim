@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server'
 import { resolveDeployedChatThreadAccess } from '@/lib/chat/deployed-chat-thread-auth'
 import { listDeployedChatThreadsForUser } from '@/lib/chat/deployed-chat-threads'
 import { generateRequestId } from '@/lib/core/utils/request'
-import { createErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 import { addCorsHeaders } from '../../utils'
 
 const logger = createLogger('ChatAllHistoryAPI')
@@ -42,6 +42,6 @@ export async function GET(
   } catch (error: unknown) {
     logger.error(`[${requestId}] Error fetching deployed chat history:`, error)
     const message = error instanceof Error ? error.message : 'Failed to fetch deployed chat history'
-    return addCorsHeaders(createErrorResponse(message, 500), request)
+    return addCorsHeaders(createCodedErrorResponse(message, 500), request)
   }
 }

@@ -61,7 +61,14 @@ export const GET = withRouteHandler(async (request: NextRequest, context: RouteC
   /** A sign-in that never starts is a failure, so it carries the error rather than a blank form. */
   let signIn: Response
   try {
-    signIn = await auth.api.signInSSO({
+    const ssoApi = auth.api as typeof auth.api & {
+      signInSSO: (input: {
+        body: { providerId: string; callbackURL: string; errorCallbackURL: string }
+        headers: Headers
+        asResponse: true
+      }) => Promise<Response>
+    }
+    signIn = await ssoApi.signInSSO({
       body: { providerId, callbackURL: DEFAULT_POST_AUTH_ROUTE, errorCallbackURL },
       headers: request.headers,
       asResponse: true,

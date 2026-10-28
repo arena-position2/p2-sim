@@ -42,6 +42,8 @@ async function executeReadWorkspaceFileContent({
   const file = await getWorkspaceFile(context.workspaceId, context.fileId, {
     includeDeleted: input.includeDeleted,
     throwOnError: true,
+    includeChatUploads: true,
+    includeOwnedFiles: true,
   })
   if (!file) throw new OrchestrationError('not_found', 'File not found')
   const content = await fetchWorkspaceFileBuffer(file, {
@@ -61,8 +63,18 @@ async function executeReadWorkspaceFileContent({
   }
 }
 
+/**
+ * A content read by id admits chat uploads: an id is an explicit reference, and the
+ * `uploads/<name>` resolution that hands one to run_code or the image tools reads it back
+ * through here. Listings never surface chat uploads and writes never resolve them.
+ */
 export const readWorkspaceFileContent = defineAuthorizedWorkspaceFileUseCase({
   operation: fileOperations.readContent,
-  resolveContext: ({ input }) => resolveActiveWorkspaceFileContext(input),
+  resolveContext: ({ principal, input }) =>
+    resolveActiveWorkspaceFileContext({
+      ...input,
+      includeChatUploads: true,
+      ownedFilePrincipal: principal,
+    }),
   execute: executeReadWorkspaceFileContent,
 })

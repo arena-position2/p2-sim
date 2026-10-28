@@ -1,8 +1,12 @@
-/** @vitest-environment node */
 import type { CredentialGroupOptionConfig } from '@sim/db/schema'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetUrlsMock, urlsMockFns } from '@sim/testing/mocks/urls.mock'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ configuration: vi.fn(), exchange: vi.fn(), revoke: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  configuration: vi.fn(),
+  exchange: vi.fn(),
+  revoke: vi.fn(),
+}))
 vi.mock('@/lib/credential-groups/provider-configuration', () => ({
   getSlackCredentialGroupConfiguration: mocks.configuration,
 }))
@@ -16,7 +20,6 @@ vi.mock('@/lib/credential-groups/slack-managed-users', () => ({
     email: 'member@fixture.test',
   }),
 }))
-vi.mock('@/lib/core/utils/urls', () => ({ getBaseUrl: () => 'https://sim.fixture.test' }))
 
 import type { CredentialGroupOAuthContext } from '@/lib/credential-groups/enrollments'
 import {
@@ -25,16 +28,18 @@ import {
 } from '@/lib/credential-groups/slack-managed-user-scopes'
 import { slackCredentialGroupProviderAdapter as adapter } from '@/lib/credential-groups/slack-provider'
 
+urlsMockFns.mockGetBaseUrl.mockReturnValue('https://sim.fixture.test')
+afterAll(resetUrlsMock)
+
 describe('Slack member scope policy', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mocks.configuration.mockResolvedValue({
       slackBotCredentialId: 'bot-1',
       clientId: 'client',
       clientSecret: 'secret',
       appId: 'A1',
       teamId: 'T1',
-      scopes: [...SLACK_MANAGED_USER_SCOPES],
+      scopes: [...new Set([...SLACK_MANAGED_USER_SCOPES, ...SLACK_SEARCH_USER_SCOPES])],
     })
     mocks.exchange.mockResolvedValue({
       appId: 'A1',
@@ -73,27 +78,25 @@ describe('Slack member scope policy', () => {
     }
   }
 
-  it.each([
-    { name: 'search', scopes: SLACK_SEARCH_USER_SCOPES },
-    { name: 'workflow', scopes: SLACK_MANAGED_USER_SCOPES },
-  ])('uses the $name option policy for enrollment instead of widening it', async ({ scopes }) => {
-    const current = context(scopes)
-    const policy = await adapter.getPolicy(current.option, {
-      workspaceId: current.workspaceId,
-      credentialGroupId: current.credentialGroupId,
-    })
-    expect(policy.requiredScopes).toEqual([...scopes])
-    const authorization = await adapter.prepareAuthorization(current, policy)
-    const url = new URL(
-      await authorization.buildAuthorizationUrl({ state: 'state', nonce: 'nonce' })
-    )
-    expect(url.searchParams.get('user_scope')?.split(',')).toEqual([...scopes])
-  })
+  it.each([{ scopes: SLACK_SEARCH_USER_SCOPES }, { scopes: SLACK_MANAGED_USER_SCOPES }])(
+    'requests exactly the configured permissions without broadening workflow consent',
+    async ({ scopes }) => {
+      const current = context(scopes)
+      const policy = await adapter.getPolicy(current.option, {
+        workspaceId: current.workspaceId,
+        credentialGroupId: current.credentialGroupId,
+      })
+      const authorization = await adapter.prepareAuthorization(current, policy)
+      const url = new URL(
+        await authorization.buildAuthorizationUrl({ state: 'state', nonce: 'nonce' })
+      )
+      expect(url.searchParams.get('user_scope')?.split(',')).toEqual([...scopes])
+      expect(policy.requiredScopes).toEqual([...scopes])
+    }
+  )
 
-  it.each([
-    { name: 'search', scopes: SLACK_SEARCH_USER_SCOPES },
-    { name: 'workflow', scopes: SLACK_MANAGED_USER_SCOPES },
-  ])('accepts a different provider email for a $name option', async ({ scopes }) => {
+  it('accepts a different provider email', async () => {
+    const scopes = SLACK_SEARCH_USER_SCOPES
     const current = context(scopes)
     mocks.exchange.mockResolvedValueOnce({
       appId: 'A1',

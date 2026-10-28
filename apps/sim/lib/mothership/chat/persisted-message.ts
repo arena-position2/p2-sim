@@ -1,0 +1,1013 @@
+import { generateId } from '@sim/utils/id'
+import { isPlainRecord } from '@sim/utils/object'
+import { truncateAtCodePoint } from '@sim/utils/string'
+import type {
+  PersistedContentBlock,
+  PersistedToolCall,
+  PersistedToolState,
+} from '@/lib/api/contracts/copilot-messages'
+
+export type { PersistedContentBlock } from '@/lib/api/contracts/copilot-messages'
+
+import { buildMothershipErrorTag } from '@/lib/mothership/chat/error-tag'
+import { isStoredAssistantMessage } from '@/lib/mothership/chat/live-message-id'
+import { compactRetrievalCitations } from '@/lib/mothership/chat/retrieval-citations'
+import {
+  mergeAndRedactPersistedBlocks,
+  redactSensitiveContent,
+  redactToolCallResult,
+} from '@/lib/mothership/chat/sim-key-redaction'
+import {
+  MothershipStreamV1CompletionStatus,
+  MothershipStreamV1EventType,
+  MothershipStreamV1SpanLifecycleEvent,
+  MothershipStreamV1SpanPayloadKind,
+  MothershipStreamV1TextChannel,
+  MothershipStreamV1ToolOutcome,
+  MothershipStreamV1ToolPhase,
+} from '@/lib/mothership/generated/mothership-stream-v1'
+import type {
+  ContentBlock,
+  LocalToolCallStatus,
+  OrchestratorResult,
+} from '@/lib/mothership/request/types'
+import { RETIRED_BROWSER_REQUEST_TAKEOVER_ID } from '@/lib/mothership/tools/retired-tools'
+import { normalizeToolActivityDescription } from '@/lib/mothership/tools/tool-display'
+import type { BrowserTextSelection, TerminalTextSelection } from '@/stores/panel/types'
+
+/**
+ * Tool writes that keep a compact receipt after output stripping so Claude
+ * follow-ups can see vfsPath / size instead of a bare `{ success: true }`.
+ */
+const FILE_RECEIPT_TOOL_NAMES = new Set([
+  'create_file',
+  'create_file_folder',
+  'workspace_file',
+  'edit_content',
+  'function_execute',
+])
+
+function extractFileWriteReceipt(output: unknown): Record<string, unknown> | undefined {
+  if (!isPlainRecord(output)) return undefined
+  const data = isPlainRecord(output.data) ? output.data : undefined
+  const receipt: Record<string, unknown> = {}
+
+  for (const key of [
+    'vfsPath',
+    'size',
+    'id',
+    'name',
+    'contentType',
+    'message',
+    'fileId',
+    'fileName',
+  ] as const) {
+    if (typeof output[key] === 'string' || typeof output[key] === 'number') {
+      receipt[key] = output[key]
+    }
+    if (data && (typeof data[key] === 'string' || typeof data[key] === 'number')) {
+      receipt[key] = data[key]
+    }
+  }
+
+  if (Array.isArray(output.files)) {
+    receipt.files = output.files.slice(0, 5).map((entry) => {
+      if (!isPlainRecord(entry)) return entry
+      return {
+        ...(typeof entry.vfsPath === 'string' ? { vfsPath: entry.vfsPath } : {}),
+        ...(typeof entry.fileName === 'string' ? { fileName: entry.fileName } : {}),
+        ...(typeof entry.size === 'number' ? { size: entry.size } : {}),
+        ...(typeof entry.fileId === 'string' ? { fileId: entry.fileId } : {}),
+      }
+    })
+  }
+
+  return Object.keys(receipt).length > 0 ? receipt : undefined
+}
+
+export interface PersistedFileAttachment {
+  id: string
+  key: string
+  filename: string
+  media_type: string
+  size: number
+}
+
+export interface PersistedMessageContext {
+  kind: string
+  label: string
+  workflowId?: string
+  knowledgeId?: string
+  tableId?: string
+  viewId?: string
+  fileId?: string
+  dashboardId?: string
+  folderId?: string
+  chatId?: string
+  blockType?: string
+  skillId?: string
+  serverId?: string
+  /**
+   * Source names for `file_selection` / `table_selection` chips. Persisted
+   * because the rendered chip reads them — the label carries a location suffix
+   * (`notes.md:12-40`), so the file icon cannot derive an extension from it.
+   *
+   * The rest of a selection's payload (`text`, `rowIds`, `columnIds`, line
+   * numbers) is deliberately NOT persisted: it exists to resolve the selection
+   * server-side when the message is sent, is never read when re-rendering a past
+   * message, and would put a selection-sized blob in every stored message.
+   */
+  fileName?: string
+  tableName?: string
+  tabId?: string
+  terminalId?: string
+  selection?: BrowserTextSelection | TerminalTextSelection
+}
+
+function copyTextSelection(
+  selection: BrowserTextSelection | TerminalTextSelection | undefined
+): BrowserTextSelection | TerminalTextSelection | undefined {
+  if (!selection) return undefined
+  if ('startLine' in selection) {
+    return {
+      text: selection.text,
+      startLine: selection.startLine,
+      endLine: selection.endLine,
+    }
+  }
+  return {
+    text: selection.text,
+    ...(selection.url ? { url: selection.url } : {}),
+    ...(selection.title ? { title: selection.title } : {}),
+  }
+}
+
+/** The one field-wise copy of a message context, shared by every write, read and display path. */
+export function copyPersistedMessageContext(c: PersistedMessageContext): PersistedMessageContext {
+  return {
+    kind: c.kind,
+    label: c.label,
+    ...(c.workflowId ? { workflowId: c.workflowId } : {}),
+    ...(c.knowledgeId ? { knowledgeId: c.knowledgeId } : {}),
+    ...(c.tableId ? { tableId: c.tableId } : {}),
+    ...(c.viewId ? { viewId: c.viewId } : {}),
+    ...(c.fileId ? { fileId: c.fileId } : {}),
+    ...(c.dashboardId ? { dashboardId: c.dashboardId } : {}),
+    ...(c.folderId ? { folderId: c.folderId } : {}),
+    ...(c.chatId ? { chatId: c.chatId } : {}),
+    ...(c.blockType ? { blockType: c.blockType } : {}),
+    ...(c.skillId ? { skillId: c.skillId } : {}),
+    ...(c.serverId ? { serverId: c.serverId } : {}),
+    ...(c.fileName ? { fileName: c.fileName } : {}),
+    ...(c.tableName ? { tableName: c.tableName } : {}),
+    ...(c.tabId ? { tabId: c.tabId } : {}),
+    ...(c.terminalId ? { terminalId: c.terminalId } : {}),
+    ...(c.selection ? { selection: copyTextSelection(c.selection) } : {}),
+  }
+}
+
+export interface PersistedMessage {
+  id: string
+  role: 'user' | 'assistant'
+  requestMode?: 'agent' | 'assistant' | 'plan'
+  content: string
+  timestamp: string
+  /** "task": a background-task notification opened this turn, not the user (rendered as a system chip). */
+  origin?: 'task'
+  requestId?: string
+  contentBlocks?: PersistedContentBlock[]
+  fileAttachments?: PersistedFileAttachment[]
+  contexts?: PersistedMessageContext[]
+  /** Ephemeral Local Copilot status for live turns; never saved as assistant prose. */
+  liveStatus?: string
+  /**
+   * Exact Gemini/Vertex model-turn parts (one array per tool-loop round).
+   * Preferred over reconstructing parts from thinking/prose blocks on reload.
+   */
+  geminiModelPartRounds?: Array<
+    Array<
+      | { text: string; thought?: boolean; thoughtSignature?: string }
+      | {
+          functionCall: { id: string; name: string; args: Record<string, unknown> }
+          thoughtSignature?: string
+        }
+    >
+  >
+}
+
+/**
+ * Drop persisted tool outputs, keeping `success` and `error`. Bounded UI-state
+ * exceptions preserve retrieval citations, watch-to-task identity, a browser
+ * takeover's answered question recap, and a compact file-write receipt
+ * (`vfsPath`, `size`, …) so a later turn can verify prior creates. Other
+ * outputs are never rendered or replayed to the model (the upstream service
+ * owns conversation memory), so storing them only bloats
+ * `copilot_messages.content` — a single `get_workflow_logs`/`run_workflow`
+ * result can reach hundreds of MB and stall task loads.
+ *
+ * Applied on both the write path (so new rows never store outputs) and the read
+ * path (so already-bloated rows still load fast). Returns the original
+ * reference when there is nothing to strip, preserving memoized identity for
+ * read-side consumers.
+ */
+export function stripToolResultOutput(message: PersistedMessage): PersistedMessage {
+  if (!message.contentBlocks?.length) return message
+  let changed = false
+  const contentBlocks = message.contentBlocks.map((block) => {
+    const toolCall = block.toolCall
+    const result = toolCall?.result
+    if (!toolCall || !result || typeof result !== 'object' || !('output' in result)) return block
+    const output = result.output
+    const citations = result.success ? compactRetrievalCitations(toolCall.name, output) : undefined
+    const taskId =
+      result.success && toolCall.name === 'watch' && isPlainRecord(output)
+        ? output.taskId
+        : undefined
+    const watchReceipt =
+      typeof taskId === 'string' && taskId.length > 0 && taskId.length <= 128
+        ? { taskId }
+        : undefined
+    if (watchReceipt && isPlainRecord(output) && Object.keys(output).length === 1) return block
+    const userInstruction =
+      toolCall.name === RETIRED_BROWSER_REQUEST_TAKEOVER_ID && isPlainRecord(output)
+        ? output.userInstruction
+        : undefined
+    const normalizedInstruction = typeof userInstruction === 'string' ? userInstruction.trim() : ''
+    if (
+      normalizedInstruction &&
+      isPlainRecord(output) &&
+      Object.keys(output).length === 1 &&
+      output.userInstruction === normalizedInstruction
+    ) {
+      return block
+    }
+    changed = true
+    const fileReceipt = FILE_RECEIPT_TOOL_NAMES.has(toolCall.name)
+      ? extractFileWriteReceipt(output)
+      : undefined
+    const strippedResult: { success: boolean; output?: unknown; error?: string } = {
+      success: result.success,
+      ...(citations
+        ? { output: citations }
+        : watchReceipt
+          ? { output: watchReceipt }
+          : normalizedInstruction
+            ? { output: { userInstruction: normalizedInstruction } }
+            : fileReceipt
+              ? { output: fileReceipt }
+              : {}),
+    }
+    if (result.error !== undefined) strippedResult.error = result.error
+    return { ...block, toolCall: { ...toolCall, result: strippedResult } }
+  })
+  return changed ? { ...message, contentBlocks } : message
+}
+
+/**
+ * Longest tool-call param string the chat UI receives verbatim. Every reader of
+ * a settled call's params derives a one-line title or a short id from them
+ * (path, toolId, operation, reason, url, argv, …), so 1024 code units keeps
+ * every value a renderer shows while dropping the bulk payloads the model
+ * wrote: sandbox stdout, `run_code` source, subagent task briefs.
+ */
+const MAX_DISPLAYED_PARAM_STRING_LENGTH = 1024
+const PARAM_TRUNCATION_SUFFIX = '…'
+
+/** Returns `value` itself when nothing in it exceeds the limit. */
+function compactParamValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.length > MAX_DISPLAYED_PARAM_STRING_LENGTH
+      ? truncateAtCodePoint(
+          value,
+          MAX_DISPLAYED_PARAM_STRING_LENGTH - PARAM_TRUNCATION_SUFFIX.length,
+          PARAM_TRUNCATION_SUFFIX
+        )
+      : value
+  }
+  if (Array.isArray(value)) {
+    let changed = false
+    const entries = value.map((entry) => {
+      const compacted = compactParamValue(entry)
+      if (compacted !== entry) changed = true
+      return compacted
+    })
+    return changed ? entries : value
+  }
+  return isPlainRecord(value) ? compactParamRecord(value) : value
+}
+
+function compactParamRecord(record: Record<string, unknown>): Record<string, unknown> {
+  let changed = false
+  const entries = Object.entries(record).map(([key, entry]) => {
+    const compacted = compactParamValue(entry)
+    if (compacted !== entry) changed = true
+    return [key, compacted] as const
+  })
+  return changed ? Object.fromEntries(entries) : record
+}
+
+/**
+ * Truncate long strings inside tool calls' params, keeping every key, array
+ * entry and short scalar. On the live assistant message a pending, executing or
+ * awaiting-approval call keeps its params whole: a reloaded executing workflow
+ * tool re-runs from them and the permission card previews them. A stored turn
+ * has ended, so its unfinished calls render as interrupted and are compacted
+ * like settled ones.
+ *
+ * A projection for the transcript served to the chat UI only. Stored rows keep
+ * full params: data drains export them verbatim, and fork and import copy
+ * them. Idempotent — a truncated value fits the limit — so it returns the
+ * original reference when there is nothing to compact.
+ */
+export function compactToolCallParams(message: PersistedMessage): PersistedMessage {
+  if (!message.contentBlocks?.length) return message
+  const stored = isStoredAssistantMessage(message)
+  let changed = false
+  const contentBlocks = message.contentBlocks.map((block) => {
+    const toolCall = block.toolCall
+    if (!toolCall?.params || (!stored && isUnsettledToolState(toolCall.state))) return block
+    const params = compactParamRecord(toolCall.params)
+    if (params === toolCall.params) return block
+    changed = true
+    return { ...block, toolCall: { ...toolCall, params } }
+  })
+  return changed ? { ...message, contentBlocks } : message
+}
+
+// Write: OrchestratorResult → PersistedMessage
+
+function resolveToolState(block: ContentBlock): PersistedToolState {
+  const tc = block.toolCall
+  if (!tc) return 'pending'
+  if (tc.result?.success !== undefined) {
+    return tc.result.success
+      ? MothershipStreamV1ToolOutcome.success
+      : MothershipStreamV1ToolOutcome.error
+  }
+  return tc.status as PersistedToolState
+}
+
+/**
+ * Copy `timestamp` / `endedAt` from a source object onto a target object.
+ * Shared by every block mapper (persist, display, snapshot) so the timing
+ * metadata that drives the `Thought for Ns` chip survives the full
+ * persist → normalize → display round-trip — and one rule lives in one place.
+ */
+export function withBlockTiming<T>(target: T, src: { timestamp?: number; endedAt?: number }): T {
+  const writable = target as { timestamp?: number; endedAt?: number }
+  if (typeof src.timestamp === 'number') writable.timestamp = src.timestamp
+  if (typeof src.endedAt === 'number') writable.endedAt = src.endedAt
+  return target
+}
+
+function withBlockParent<T>(target: T, src: { parentToolCallId?: string }): T {
+  if (src.parentToolCallId) {
+    ;(target as { parentToolCallId?: string }).parentToolCallId = src.parentToolCallId
+  }
+  return target
+}
+
+/**
+ * Carry deterministic span identity (spanId / parentSpanId) across a block
+ * mapping so the nesting tree survives the persist → normalize → display round
+ * trip. Shared by both the write and read paths.
+ */
+function withBlockSpan<T>(target: T, src: { spanId?: string; parentSpanId?: string }): T {
+  const writable = target as { spanId?: string; parentSpanId?: string }
+  if (src.spanId) writable.spanId = src.spanId
+  if (src.parentSpanId) writable.parentSpanId = src.parentSpanId
+  return target
+}
+
+function mapContentBlock(block: ContentBlock): PersistedContentBlock {
+  const persisted = mapContentBlockBody(block)
+  return withBlockSpan(withBlockParent(withBlockTiming(persisted, block), block), block)
+}
+
+function mapContentBlockBody(block: ContentBlock): PersistedContentBlock {
+  switch (block.type) {
+    case 'task':
+      return { type: 'task', ...(block.task ? { task: block.task } : {}) }
+    case 'text':
+      return {
+        type: MothershipStreamV1EventType.text,
+        channel: MothershipStreamV1TextChannel.assistant,
+        content: block.content,
+        ...(block.thoughtSignature ? { thoughtSignature: block.thoughtSignature } : {}),
+      }
+    case 'thinking':
+      return {
+        type: MothershipStreamV1EventType.text,
+        channel: MothershipStreamV1TextChannel.thinking,
+        content: block.content,
+        ...(block.thoughtSignature ? { thoughtSignature: block.thoughtSignature } : {}),
+      }
+    case 'subagent':
+      return {
+        type: MothershipStreamV1EventType.span,
+        kind: MothershipStreamV1SpanPayloadKind.subagent,
+        lifecycle: MothershipStreamV1SpanLifecycleEvent.start,
+        content: block.content,
+        ...(block.subagentName ? { name: block.subagentName } : {}),
+        ...(block.error ? { error: block.error } : {}),
+      }
+    case 'subagent_text':
+      return {
+        type: MothershipStreamV1EventType.text,
+        lane: 'subagent',
+        channel: MothershipStreamV1TextChannel.assistant,
+        content: block.content,
+        ...(block.subagent ? { agent: block.subagent } : {}),
+      }
+    case 'subagent_thinking':
+      return {
+        type: MothershipStreamV1EventType.text,
+        lane: 'subagent',
+        channel: MothershipStreamV1TextChannel.thinking,
+        content: block.content,
+        ...(block.subagent ? { agent: block.subagent } : {}),
+      }
+    case 'tool_call': {
+      if (!block.toolCall) {
+        return {
+          type: MothershipStreamV1EventType.tool,
+          phase: MothershipStreamV1ToolPhase.call,
+          content: block.content,
+        }
+      }
+      const state = resolveToolState(block)
+      const isSubagentTool = !!block.calledBy
+      const isNonTerminal =
+        state === MothershipStreamV1ToolOutcome.cancelled ||
+        state === 'pending' ||
+        state === 'executing'
+
+      const redactedResult = redactToolCallResult(block.toolCall.name, block.toolCall.result)
+
+      const activityDescription = normalizeToolActivityDescription(
+        block.toolCall.activityDescription
+      )
+      const toolCall: PersistedToolCall = {
+        id: block.toolCall.id,
+        name: block.toolCall.name,
+        state,
+        ...(activityDescription ? { activityDescription } : {}),
+        ...(isSubagentTool && isNonTerminal ? {} : { result: redactedResult }),
+        ...(isSubagentTool && isNonTerminal
+          ? {}
+          : block.toolCall.params
+            ? { params: block.toolCall.params }
+            : {}),
+        ...(block.calledBy ? { calledBy: block.calledBy } : {}),
+        ...(block.toolCall.thoughtSignature
+          ? { thoughtSignature: block.toolCall.thoughtSignature }
+          : {}),
+        ...(block.toolCall.displayTitle
+          ? {
+              display: {
+                title: block.toolCall.displayTitle,
+              },
+            }
+          : {}),
+      }
+
+      return {
+        type: MothershipStreamV1EventType.tool,
+        phase: MothershipStreamV1ToolPhase.call,
+        toolCall,
+      }
+    }
+    default:
+      return { type: MothershipStreamV1EventType.text, content: block.content }
+  }
+}
+
+export function buildPersistedAssistantMessage(
+  result: OrchestratorResult,
+  requestId?: string,
+  requestMode?: 'agent' | 'assistant' | 'plan'
+): PersistedMessage {
+  const message: PersistedMessage = {
+    id: generateId(),
+    role: 'assistant',
+    ...(requestMode ? { requestMode } : {}),
+    content: redactSensitiveContent(result.content),
+    timestamp: new Date().toISOString(),
+  }
+
+  if (requestId || result.requestId) {
+    message.requestId = requestId || result.requestId
+  }
+
+  if (result.contentBlocks.length > 0) {
+    // Keep thinking / reasoning-summary blocks so the session can show them at
+    // the top of the message after reload (AgentStreamThinkingChrome).
+    message.contentBlocks = mergeAndRedactPersistedBlocks(result.contentBlocks.map(mapContentBlock))
+  }
+
+  if (result.geminiModelPartRounds && result.geminiModelPartRounds.length > 0) {
+    message.geminiModelPartRounds = result.geminiModelPartRounds.map((round) =>
+      round.map((part) => {
+        if (!('functionCall' in part)) return part
+        return {
+          ...part,
+          functionCall: {
+            ...part.functionCall,
+            id: part.functionCall.id ?? generateId(),
+          },
+        }
+      })
+    )
+  }
+
+  if (!result.success && !result.cancelled) {
+    const normalized = normalizeMessage({ ...message })
+    const error = redactSensitiveContent(
+      result.error ||
+        result.errors?.[0] ||
+        'An unexpected error occurred while processing the response.'
+    )
+    normalized.contentBlocks = [
+      ...(normalized.contentBlocks
+        ? settleUnfinishedToolCalls(normalized.contentBlocks, 'error')
+        : message.content
+          ? [
+              {
+                type: MothershipStreamV1EventType.text,
+                channel: MothershipStreamV1TextChannel.assistant,
+                content: message.content,
+              },
+            ]
+          : []),
+      {
+        type: MothershipStreamV1EventType.error,
+        content: buildMothershipErrorTag({ message: error }),
+      },
+    ]
+    return normalized
+  }
+
+  // A finished turn settles its stragglers as the live view did at its terminal;
+  // background and API callers persist a stopped turn without withStoppedContentBlock.
+  if (message.contentBlocks) {
+    message.contentBlocks = result.success
+      ? settleUnfinishedToolCalls(message.contentBlocks, 'success')
+      : settleUnfinishedToolCalls(message.contentBlocks, 'cancelled', STOPPED_TOOL_DISPLAY)
+  }
+  return message
+}
+
+const STOPPED_TOOL_DISPLAY = { title: 'Stopped by user' } as const
+
+const UNSETTLED_TOOL_STATES: ReadonlySet<LocalToolCallStatus> = new Set<LocalToolCallStatus>([
+  'pending',
+  'executing',
+  'awaiting_approval',
+])
+
+/** A tool row that has not finished: waiting to run, running, or awaiting a decision. */
+export function isUnsettledToolState(state: string | undefined): boolean {
+  const unsettled: ReadonlySet<string | undefined> = UNSETTLED_TOOL_STATES
+  return unsettled.has(state)
+}
+
+/** Settles every unfinished tool row at a turn terminal so none reloads as a spinner. */
+function settleUnfinishedToolCalls(
+  blocks: PersistedContentBlock[],
+  state: 'success' | 'cancelled' | 'error',
+  display?: { title: string }
+): PersistedContentBlock[] {
+  return blocks.map((block) =>
+    block.toolCall && isUnsettledToolState(block.toolCall.state)
+      ? { ...block, toolCall: { ...block.toolCall, state, ...(display ? { display } : {}) } }
+      : block
+  )
+}
+
+export function withStoppedContentBlock(message: PersistedMessage): PersistedMessage {
+  const contentBlocks = settleUnfinishedToolCalls(
+    message.contentBlocks ?? [],
+    'cancelled',
+    STOPPED_TOOL_DISPLAY
+  )
+  const hasAssistantText = contentBlocks.some(
+    (block) =>
+      block.type === MothershipStreamV1EventType.text &&
+      block.channel !== MothershipStreamV1TextChannel.thinking &&
+      block.content?.trim()
+  )
+  if (
+    contentBlocks.some(
+      (block) =>
+        block.type === MothershipStreamV1EventType.complete &&
+        block.status === MothershipStreamV1CompletionStatus.cancelled
+    )
+  ) {
+    return { ...message, contentBlocks }
+  }
+
+  return normalizeMessage({
+    ...message,
+    contentBlocks: [
+      ...(hasAssistantText || !message.content.trim()
+        ? []
+        : [
+            {
+              type: MothershipStreamV1EventType.text,
+              channel: MothershipStreamV1TextChannel.assistant,
+              content: message.content,
+            },
+          ]),
+      ...contentBlocks,
+      {
+        type: MothershipStreamV1EventType.complete,
+        status: MothershipStreamV1CompletionStatus.cancelled,
+      },
+    ],
+  })
+}
+
+export interface UserMessageParams {
+  requestMode?: 'agent' | 'assistant' | 'plan'
+  id: string
+  content: string
+  fileAttachments?: PersistedFileAttachment[]
+  contexts?: PersistedMessageContext[]
+  origin?: 'task'
+}
+
+export function buildPersistedUserMessage(params: UserMessageParams): PersistedMessage {
+  const message: PersistedMessage = {
+    id: params.id,
+    role: 'user',
+    ...(params.requestMode ? { requestMode: params.requestMode } : {}),
+    content: params.content,
+    timestamp: new Date().toISOString(),
+    ...(params.origin ? { origin: params.origin } : {}),
+  }
+
+  if (params.fileAttachments && params.fileAttachments.length > 0) {
+    message.fileAttachments = params.fileAttachments
+  }
+
+  if (params.contexts && params.contexts.length > 0) {
+    message.contexts = params.contexts.map(copyPersistedMessageContext)
+  }
+
+  return message
+}
+
+// Read: raw JSONB → PersistedMessage
+// Handles both canonical (type: 'tool', 'text', 'span', 'complete') and
+// legacy (type: 'tool_call', 'thinking', 'subagent', 'stopped') blocks.
+
+const CANONICAL_BLOCK_TYPES: Set<string> = new Set(Object.values(MothershipStreamV1EventType))
+
+interface RawBlock {
+  error?: string
+  subagent?: string
+  type: string
+  lane?: string
+  task?: import('@/lib/mothership/request/types').TaskBlockInfo
+  agent?: string
+  /** Orchestrator-chosen subagent display name (legacy blocks store it as `subagentName`). */
+  name?: string
+  subagentName?: string
+  content?: string
+  /** Go persists text blocks with key "text" instead of "content" */
+  text?: string
+  channel?: string
+  phase?: string
+  kind?: string
+  lifecycle?: string
+  status?: string
+  timestamp?: number
+  endedAt?: number
+  parentToolCallId?: string
+  spanId?: string
+  parentSpanId?: string
+  thoughtSignature?: string
+  toolCall?: {
+    id?: string
+    name?: string
+    state?: string
+    params?: Record<string, unknown>
+    result?: { success: boolean; output?: unknown; error?: string }
+    display?: { text?: string; title?: string; phaseLabel?: string }
+    activityDescription?: string
+    calledBy?: string
+    durationMs?: number
+    error?: string
+    thoughtSignature?: string
+  } | null
+}
+
+interface LegacyToolCall {
+  id: string
+  name: string
+  status: string
+  params?: Record<string, unknown>
+  result?: unknown
+  error?: string
+  durationMs?: number
+}
+
+const OUTCOME_NORMALIZATION: Record<string, PersistedToolState> = {
+  [MothershipStreamV1ToolOutcome.success]: MothershipStreamV1ToolOutcome.success,
+  [MothershipStreamV1ToolOutcome.error]: MothershipStreamV1ToolOutcome.error,
+  [MothershipStreamV1ToolOutcome.cancelled]: MothershipStreamV1ToolOutcome.cancelled,
+  [MothershipStreamV1ToolOutcome.skipped]: MothershipStreamV1ToolOutcome.skipped,
+  [MothershipStreamV1ToolOutcome.rejected]: MothershipStreamV1ToolOutcome.rejected,
+  aborted: MothershipStreamV1ToolOutcome.cancelled,
+  failed: MothershipStreamV1ToolOutcome.error,
+  interrupted: 'interrupted',
+  pending: 'pending',
+  executing: 'executing',
+  awaiting_approval: 'awaiting_approval',
+}
+
+function normalizeToolState(state: string | undefined): PersistedToolState {
+  if (!state) return 'pending'
+  return OUTCOME_NORMALIZATION[state] ?? MothershipStreamV1ToolOutcome.error
+}
+
+function isCanonicalBlock(block: RawBlock): boolean {
+  return CANONICAL_BLOCK_TYPES.has(block.type)
+}
+
+function normalizeCanonicalBlock(block: RawBlock): PersistedContentBlock {
+  const result: PersistedContentBlock = {
+    type: block.type as MothershipStreamV1EventType,
+  }
+  if (block.lane === 'subagent' || (block.subagent && block.spanId)) {
+    result.lane = 'subagent'
+  }
+  const agent = block.agent ?? block.subagent
+  if (agent) result.agent = agent
+  if (block.name) result.name = block.name
+  const blockContent = block.content ?? block.text
+  if (blockContent !== undefined) result.content = blockContent
+  if (block.channel) result.channel = block.channel as MothershipStreamV1TextChannel
+  if (block.phase) result.phase = block.phase as MothershipStreamV1ToolPhase
+  if (block.kind) result.kind = block.kind as MothershipStreamV1SpanPayloadKind
+  if (block.lifecycle) result.lifecycle = block.lifecycle as MothershipStreamV1SpanLifecycleEvent
+  if (block.status) result.status = block.status as MothershipStreamV1CompletionStatus
+  if (block.parentToolCallId) result.parentToolCallId = block.parentToolCallId
+  if (typeof block.thoughtSignature === 'string' && block.thoughtSignature.length > 0) {
+    result.thoughtSignature = block.thoughtSignature
+  }
+  if (block.toolCall) {
+    const activityDescription = normalizeToolActivityDescription(block.toolCall.activityDescription)
+    result.toolCall = {
+      id: block.toolCall.id ?? '',
+      name: block.toolCall.name ?? '',
+      state: normalizeToolState(block.toolCall.state),
+      ...(activityDescription ? { activityDescription } : {}),
+      ...(block.toolCall.params ? { params: block.toolCall.params } : {}),
+      ...(block.toolCall.result ? { result: block.toolCall.result } : {}),
+      ...(block.toolCall.calledBy ? { calledBy: block.toolCall.calledBy } : {}),
+      ...(block.toolCall.error ? { error: block.toolCall.error } : {}),
+      ...(block.toolCall.durationMs ? { durationMs: block.toolCall.durationMs } : {}),
+      ...(typeof block.toolCall.thoughtSignature === 'string' &&
+      block.toolCall.thoughtSignature.length > 0
+        ? { thoughtSignature: block.toolCall.thoughtSignature }
+        : {}),
+      ...(block.toolCall.display
+        ? {
+            display: {
+              title:
+                block.toolCall.display.title ??
+                block.toolCall.display.text ??
+                block.toolCall.display.phaseLabel,
+            },
+          }
+        : {}),
+    }
+  }
+  return result
+}
+
+function normalizeLegacyBlock(block: RawBlock): PersistedContentBlock {
+  if (block.type === 'tool_call' && block.toolCall) {
+    const activityDescription = normalizeToolActivityDescription(block.toolCall.activityDescription)
+    return {
+      type: MothershipStreamV1EventType.tool,
+      phase: MothershipStreamV1ToolPhase.call,
+      toolCall: {
+        id: block.toolCall.id ?? '',
+        name: block.toolCall.name ?? '',
+        state: normalizeToolState(block.toolCall.state),
+        ...(activityDescription ? { activityDescription } : {}),
+        ...(block.toolCall.params ? { params: block.toolCall.params } : {}),
+        ...(block.toolCall.result ? { result: block.toolCall.result } : {}),
+        ...(block.toolCall.calledBy ? { calledBy: block.toolCall.calledBy } : {}),
+        ...(block.toolCall.display
+          ? {
+              display: {
+                title:
+                  block.toolCall.display.title ??
+                  block.toolCall.display.text ??
+                  block.toolCall.display.phaseLabel,
+              },
+            }
+          : {}),
+      },
+    }
+  }
+
+  if (block.type === 'thinking') {
+    return {
+      type: MothershipStreamV1EventType.text,
+      channel: MothershipStreamV1TextChannel.thinking,
+      content: block.content,
+    }
+  }
+
+  if (block.type === 'subagent' || block.type === 'subagent_text') {
+    if (block.type === 'subagent_text') {
+      return {
+        type: MothershipStreamV1EventType.text,
+        lane: 'subagent',
+        channel: MothershipStreamV1TextChannel.assistant,
+        content: block.content,
+      }
+    }
+    return {
+      type: MothershipStreamV1EventType.span,
+      kind: MothershipStreamV1SpanPayloadKind.subagent,
+      lifecycle: MothershipStreamV1SpanLifecycleEvent.start,
+      content: block.content,
+      ...(block.subagentName ? { name: block.subagentName } : {}),
+    }
+  }
+
+  if (block.type === 'subagent_thinking') {
+    return {
+      type: MothershipStreamV1EventType.text,
+      lane: 'subagent',
+      channel: MothershipStreamV1TextChannel.thinking,
+      content: block.content,
+    }
+  }
+
+  if (block.type === 'subagent_end') {
+    return {
+      type: MothershipStreamV1EventType.span,
+      kind: MothershipStreamV1SpanPayloadKind.subagent,
+      lifecycle: MothershipStreamV1SpanLifecycleEvent.end,
+    }
+  }
+
+  if (block.type === 'stopped') {
+    return {
+      type: MothershipStreamV1EventType.complete,
+      status: MothershipStreamV1CompletionStatus.cancelled,
+    }
+  }
+
+  /** Background-task blocks preserve their structured state on reload. */
+  if (block.type === 'task') {
+    return { type: 'task', ...(block.task ? { task: block.task } : {}) }
+  }
+
+  return {
+    type: MothershipStreamV1EventType.text,
+    channel: MothershipStreamV1TextChannel.assistant,
+    content: block.content ?? block.text,
+  }
+}
+
+function normalizeBlock(block: RawBlock): PersistedContentBlock {
+  const result = isCanonicalBlock(block)
+    ? normalizeCanonicalBlock(block)
+    : normalizeLegacyBlock(block)
+  if (result.type === 'span' && typeof block.error === 'string' && block.error) {
+    result.error = block.error
+  }
+  if (typeof block.timestamp === 'number' && result.timestamp === undefined) {
+    result.timestamp = block.timestamp
+  }
+  if (typeof block.endedAt === 'number' && result.endedAt === undefined) {
+    result.endedAt = block.endedAt
+  }
+  if (block.parentToolCallId && result.parentToolCallId === undefined) {
+    result.parentToolCallId = block.parentToolCallId
+  }
+  if (block.spanId && result.spanId === undefined) {
+    result.spanId = block.spanId
+  }
+  if (block.parentSpanId && result.parentSpanId === undefined) {
+    result.parentSpanId = block.parentSpanId
+  }
+  return result
+}
+
+function normalizeLegacyToolCall(tc: LegacyToolCall): PersistedContentBlock {
+  const state = normalizeToolState(tc.status)
+  return {
+    type: MothershipStreamV1EventType.tool,
+    phase: MothershipStreamV1ToolPhase.call,
+    toolCall: {
+      id: tc.id,
+      name: tc.name,
+      state,
+      ...(tc.params ? { params: tc.params } : {}),
+      ...(tc.result != null
+        ? {
+            result: {
+              success: tc.status === MothershipStreamV1ToolOutcome.success,
+              output: tc.result,
+              ...(tc.error ? { error: tc.error } : {}),
+            },
+          }
+        : {}),
+      ...(tc.durationMs ? { durationMs: tc.durationMs } : {}),
+    },
+  }
+}
+
+function blocksContainTools(blocks: RawBlock[]): boolean {
+  return blocks.some((b) => b.type === 'tool_call' || b.type === MothershipStreamV1EventType.tool)
+}
+
+function normalizeBlocks(rawBlocks: RawBlock[], messageContent: string): PersistedContentBlock[] {
+  const blocks = rawBlocks.map(normalizeBlock)
+  const hasAssistantText = blocks.some(
+    (b) =>
+      b.type === MothershipStreamV1EventType.text &&
+      b.channel !== MothershipStreamV1TextChannel.thinking &&
+      b.content?.trim()
+  )
+  if (!hasAssistantText && messageContent.trim()) {
+    blocks.push({
+      type: MothershipStreamV1EventType.text,
+      channel: MothershipStreamV1TextChannel.assistant,
+      content: messageContent,
+    })
+  }
+  return blocks
+}
+
+export function normalizeMessage(raw: Record<string, unknown>): PersistedMessage {
+  const msg: PersistedMessage = {
+    id: (raw.id as string) ?? generateId(),
+    role: (raw.role as 'user' | 'assistant') ?? 'assistant',
+    content: (raw.content as string) ?? '',
+    timestamp: (raw.timestamp as string) ?? new Date().toISOString(),
+  }
+
+  if (raw.requestMode === 'assistant' || raw.requestMode === 'agent' || raw.requestMode === 'plan')
+    msg.requestMode = raw.requestMode
+
+  if (raw.requestId && typeof raw.requestId === 'string') {
+    msg.requestId = raw.requestId
+  }
+  if (raw.origin === 'task') msg.origin = 'task'
+
+  if (Array.isArray(raw.geminiModelPartRounds) && raw.geminiModelPartRounds.length > 0) {
+    // double-cast-allowed: JSONB reload — rounds are opaque Gemini history parts
+    msg.geminiModelPartRounds =
+      raw.geminiModelPartRounds as PersistedMessage['geminiModelPartRounds']
+  }
+
+  const rawBlocks = raw.contentBlocks as RawBlock[] | undefined
+  const rawToolCalls = raw.toolCalls as LegacyToolCall[] | undefined
+  const hasBlocks = Array.isArray(rawBlocks) && rawBlocks.length > 0
+  const hasToolCalls = Array.isArray(rawToolCalls) && rawToolCalls.length > 0
+
+  if (hasBlocks) {
+    msg.contentBlocks = normalizeBlocks(rawBlocks!, msg.content)
+    const contentBlocksAlreadyContainTools = blocksContainTools(rawBlocks!)
+    if (hasToolCalls && !contentBlocksAlreadyContainTools) {
+      msg.contentBlocks.push(...rawToolCalls!.map(normalizeLegacyToolCall))
+    }
+  } else if (hasToolCalls) {
+    msg.contentBlocks = rawToolCalls!.map(normalizeLegacyToolCall)
+    if (msg.content.trim()) {
+      msg.contentBlocks.push({
+        type: MothershipStreamV1EventType.text,
+        channel: MothershipStreamV1TextChannel.assistant,
+        content: msg.content,
+      })
+    }
+  }
+
+  const rawAttachments = raw.fileAttachments as PersistedFileAttachment[] | undefined
+  if (Array.isArray(rawAttachments) && rawAttachments.length > 0) {
+    msg.fileAttachments = rawAttachments
+  }
+
+  const rawContexts = raw.contexts as PersistedMessageContext[] | undefined
+  if (Array.isArray(rawContexts) && rawContexts.length > 0) {
+    msg.contexts = rawContexts.map(copyPersistedMessageContext)
+  }
+
+  if (typeof raw.liveStatus === 'string') {
+    // Empty string clears a previous liveStatus when the turn completes.
+    if (raw.liveStatus.trim()) {
+      msg.liveStatus = raw.liveStatus
+    }
+  }
+
+  return msg
+}

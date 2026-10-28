@@ -5,7 +5,7 @@ import { vi } from 'vitest'
  * route handlers behave the same as in production. Mirrors the shape exported
  * by `@sim/platform-authz/workflow`.
  */
-export class MockWorkflowLockedError extends Error {
+class MockWorkflowLockedError extends Error {
   readonly status = 423
 
   constructor(message = 'Workflow is locked') {
@@ -19,7 +19,7 @@ export class MockWorkflowLockedError extends Error {
  * route handlers behave the same as in production. Mirrors the shape exported
  * by `@sim/platform-authz/workflow`.
  */
-export class MockFolderLockedError extends Error {
+class MockFolderLockedError extends Error {
   readonly status = 423
 
   constructor(message = 'Folder is locked') {
@@ -33,21 +33,13 @@ export class MockFolderLockedError extends Error {
  * route handlers behave the same as in production. Mirrors the shape exported
  * by `@sim/platform-authz/workflow`.
  */
-export class MockFolderNotFoundError extends Error {
+class MockFolderNotFoundError extends Error {
   readonly status = 400
 
   constructor(message = 'Target folder not found') {
     super(message)
     this.name = 'FolderNotFoundError'
   }
-}
-
-const unlockedStatus = {
-  locked: false,
-  directLocked: false,
-  inheritedLocked: false,
-  lockedBy: null as 'workflow' | 'folder' | null,
-  lockedFolderId: null as string | null,
 }
 
 /**
@@ -58,7 +50,7 @@ const unlockedStatus = {
  *
  * @example
  * ```ts
- * import { workflowAuthzMockFns } from '@sim/testing'
+ * import { workflowAuthzMockFns } from '@sim/testing/mocks/workflow-authz.mock'
  *
  * workflowAuthzMockFns.mockAuthorizeWorkflowByWorkspacePermission.mockResolvedValue({
  *   allowed: true,
@@ -72,9 +64,6 @@ export const workflowAuthzMockFns = {
   mockAuthorizeWorkflowByWorkspacePermission: vi.fn(),
   mockGetActiveWorkflowContext: vi.fn(),
   mockGetActiveWorkflowRecord: vi.fn(),
-  mockAssertActiveWorkflowContext: vi.fn(),
-  mockGetFolderLockStatus: vi.fn().mockResolvedValue(unlockedStatus),
-  mockGetWorkflowLockStatus: vi.fn().mockResolvedValue(unlockedStatus),
   mockAssertWorkflowMutable: vi.fn().mockResolvedValue(undefined),
   mockAssertFolderMutable: vi.fn().mockResolvedValue(undefined),
   mockIsFolderInWorkspace: vi.fn().mockResolvedValue(true),
@@ -94,9 +83,6 @@ export const workflowAuthzMock = {
     workflowAuthzMockFns.mockAuthorizeWorkflowByWorkspacePermission,
   getActiveWorkflowContext: workflowAuthzMockFns.mockGetActiveWorkflowContext,
   getActiveWorkflowRecord: workflowAuthzMockFns.mockGetActiveWorkflowRecord,
-  assertActiveWorkflowContext: workflowAuthzMockFns.mockAssertActiveWorkflowContext,
-  getFolderLockStatus: workflowAuthzMockFns.mockGetFolderLockStatus,
-  getWorkflowLockStatus: workflowAuthzMockFns.mockGetWorkflowLockStatus,
   assertWorkflowMutable: workflowAuthzMockFns.mockAssertWorkflowMutable,
   assertFolderMutable: workflowAuthzMockFns.mockAssertFolderMutable,
   isFolderInWorkspace: workflowAuthzMockFns.mockIsFolderInWorkspace,

@@ -1,5 +1,5 @@
 import { hasWorkspaceSandboxAccess } from '@/lib/billing/core/subscription'
-import { listChatUploads } from '@/lib/copilot/tools/handlers/upload-file-reader'
+import { listChatUploads } from '@/lib/mothership/tools/handlers/upload-file-reader'
 import {
   type ActiveDocumentsState,
   parseActiveDocumentsState,

@@ -67,7 +67,12 @@ import {
 import { calculateHostedImageToolCost } from '@/lib/tools/image-pricing'
 import { BlockType } from '@/executor/constants'
 import { CostBlockHandler } from '@/executor/handlers/cost/cost-handler'
-import type { BlockLog, BlockState, ExecutionContext } from '@/executor/types'
+import type {
+  BlockLog,
+  BlockState,
+  ExecutionContext,
+  NormalizedBlockOutput,
+} from '@/executor/types'
 import { resolveBlockModelCost, shouldBillModelUsage } from '@/providers/utils'
 import type { SerializedBlock, SerializedConnection, SerializedWorkflow } from '@/serializer/types'
 import { browserUseHosting, readBrowserUseTotalCostUsd } from '@/tools/browser_use/hosting'
@@ -1684,7 +1689,7 @@ function isFailedToolSpan(span: TraceSpanLike): boolean {
  * Returns null when pricing throws or yields a non-positive cost.
  */
 function extractHostingGetCost(
-  pricing: ToolHostingPricing,
+  pricing: ToolHostingPricing<Record<string, unknown>>,
   params: Record<string, unknown>,
   output: Record<string, unknown>
 ): number | null {
@@ -1773,7 +1778,11 @@ function computeHostedCatalogToolCost(span: TraceSpanLike): {
   }
 
   if (toolId === 'serper_search' && serperSearchTool?.hosting) {
-    const cost = extractHostingGetCost(serperSearchTool.hosting.pricing, params, output)
+    const cost = extractHostingGetCost(
+      serperSearchTool.hosting.pricing as ToolHostingPricing<Record<string, unknown>>,
+      params,
+      output
+    )
     if (cost != null) {
       return {
         cost,
@@ -1806,7 +1815,11 @@ function computeHostedCatalogToolCost(span: TraceSpanLike): {
   }
 
   if (toolId === 'video_falai' && isSuccessfulVideoToolSpan(span) && falaiVideoTool?.hosting) {
-    const fromGetCost = extractHostingGetCost(falaiVideoTool.hosting.pricing, params, output)
+    const fromGetCost = extractHostingGetCost(
+      falaiVideoTool.hosting.pricing as ToolHostingPricing<Record<string, unknown>>,
+      params,
+      output
+    )
     if (fromGetCost != null) {
       return {
         cost: fromGetCost,
@@ -2083,7 +2096,9 @@ async function computeSnapshotCostBlockTargets(params: {
   }
 
   const graph = workflowSnapshotToGraph(params.snapshotState)
-  const { blockStates, blockLogs } = collectTraceExecutionArtifacts(params.traceSpans)
+  const { blockStates, blockLogs } = collectTraceExecutionArtifacts(
+    params.traceSpans as Parameters<typeof collectTraceExecutionArtifacts>[0]
+  )
   const ctx = buildSnapshotExecutionContext({
     workflowId: params.workflowId,
     graph,
@@ -2107,9 +2122,9 @@ async function computeSnapshotCostBlockTargets(params: {
     }
 
     const inputs = { ...costBlock.config.params }
-    const output = await handler.executeWithNode(ctx, costBlock, inputs, {
+    const output = (await handler.executeWithNode(ctx, costBlock, inputs, {
       nodeId: costBlockId,
-    })
+    })) as NormalizedBlockOutput
 
     if (!output.recorded || !output.cost?.total || output.cost.total <= RECONCILIATION_EPSILON) {
       continue
@@ -3095,12 +3110,14 @@ export async function applyHistoricalReconciliationBatch(params: {
 export async function loadHistoricalReconcileShadowArtifact(
   inputPath: string
 ): Promise<HistoricalReconcileShadowRecord[]> {
-  const file = Bun.file(inputPath)
-  if (!(await file.exists())) {
+  const { access, readFile } = await import('node:fs/promises')
+  try {
+    await access(inputPath)
+  } catch {
     throw new Error(`Shadow artifact not found: ${inputPath}`)
   }
 
-  const text = await file.text()
+  const text = await readFile(inputPath, 'utf8')
   const records: HistoricalReconcileShadowRecord[] = []
 
   for (const line of text.split('\n')) {

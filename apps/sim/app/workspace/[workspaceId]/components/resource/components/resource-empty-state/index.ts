@@ -1,3 +1,5 @@
+export { ChangelogEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/changelog-empty-state'
+export { DashboardEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/dashboard-empty-state'
 export { DocumentsEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/documents-empty-state'
 export { FilesEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/files-empty-state'
 export { KnowledgeEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/knowledge-empty-state'
@@ -5,3 +7,4 @@ export { LogsEmptyState } from '@/app/workspace/[workspaceId]/components/resourc
 export { ResourceListLoading } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/resource-list-loading'
 export { ResourceNoResults } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/resource-no-results'
 export { TablesEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/tables-empty-state'
+export { TestsEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/tests-empty-state'

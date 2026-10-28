@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { escapeRegExp } from '@sim/utils/string'
 import { findWorkflowReferenceTokens } from '@sim/utils/workflow-references'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronRight } from '../../icons'
@@ -823,7 +824,7 @@ function applySearchHighlightingToLine(
 ): { html: string; matchesInLine: number } {
   if (!searchQuery.trim()) return { html, matchesInLine: 0 }
 
-  const escaped = escapeRegex(searchQuery)
+  const escaped = escapeRegExp(searchQuery)
   const regex = new RegExp(`(${escaped})`, 'gi')
   const parts = html.split(/(<[^>]+>)/g)
   let matchesInLine = 0
@@ -898,13 +899,6 @@ interface CodeViewerProps {
 }
 
 /**
- * Escapes special regex characters in a string.
- */
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/**
  * Applies search highlighting to already syntax-highlighted HTML.
  * Wraps matches in spans with appropriate highlighting classes.
  *
@@ -922,7 +916,7 @@ function applySearchHighlighting(
 ): string {
   if (!searchQuery.trim()) return html
 
-  const escaped = escapeRegex(searchQuery)
+  const escaped = escapeRegExp(searchQuery)
   const regex = new RegExp(`(${escaped})`, 'gi')
 
   // We need to be careful not to match inside HTML tags
@@ -1042,7 +1036,7 @@ const VirtualizedViewerInner = memo(function VirtualizedViewerInner({
 
     const offsets: number[] = []
     let cumulative = 0
-    const escaped = escapeRegex(searchQuery)
+    const escaped = escapeRegExp(searchQuery)
     const regex = new RegExp(escaped, 'gi')
     const visibleSet = new Set(visibleLineIndices)
 
@@ -1255,7 +1249,7 @@ const ViewerInner = memo(function ViewerInner({
     if (!searchQuery?.trim()) return { cumulativeMatches: [0], matchCount: 0 }
 
     const cumulative: number[] = [0]
-    const escaped = escapeRegex(searchQuery)
+    const escaped = escapeRegExp(searchQuery)
     const regex = new RegExp(escaped, 'gi')
     const visibleSet = new Set(visibleLineIndices)
 

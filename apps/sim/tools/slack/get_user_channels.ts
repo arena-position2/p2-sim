@@ -246,7 +246,7 @@ export const slackGetUserChannelsTool: ToolConfig<
     const ids = channels.map((channel: { id: string }) => channel.id)
     const names = channels.map((channel: { name: string }) => channel.name)
 
-    const cursor = shouldAutoPaginate
+    const nextCursor = shouldAutoPaginate
       ? null
       : typeof data.response_metadata?.next_cursor === 'string' &&
           data.response_metadata?.next_cursor.length > 0
@@ -260,7 +260,9 @@ export const slackGetUserChannelsTool: ToolConfig<
         ids,
         names,
         count: channels.length,
-        cursor,
+        cursor: nextCursor,
+        hasMore: Boolean(nextCursor),
+        nextCursor,
       },
     }
   },
@@ -289,6 +291,16 @@ export const slackGetUserChannelsTool: ToolConfig<
       description: 'Total number of channels returned',
     },
     cursor: {
+      type: 'string',
+      optional: true,
+      description:
+        'Cursor for the next page (`response_metadata.next_cursor`); absent or null when there are no more results',
+    },
+    hasMore: {
+      type: 'boolean',
+      description: 'Whether another page of results is available',
+    },
+    nextCursor: {
       type: 'string',
       optional: true,
       description:

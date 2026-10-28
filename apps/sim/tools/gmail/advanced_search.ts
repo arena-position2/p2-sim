@@ -26,15 +26,6 @@ function decodeBase64Url(data: string): string {
 }
 
 /**
- * Extracts Message-ID from header value (removes angle brackets if present)
- */
-function extractMessageId(msgId: string | undefined): string | null {
-  if (!msgId) return null
-  // Message-ID format: <message-id@domain.com> or just message-id@domain.com
-  return msgId.replace(/^<|>$/g, '').trim()
-}
-
-/**
  * Extracts text content from message payload
  * Falls back to HTML if plain text is not available
  */
@@ -83,8 +74,8 @@ function extractMessageContent(payload: any): string {
 async function downloadAndParseAttachment(
   messageId: string,
   attachmentId: string,
-  filename: string,
-  mimeType: string,
+  _filename: string,
+  _mimeType: string,
   accessToken: string
 ): Promise<Buffer> {
   try {
@@ -326,6 +317,165 @@ async function buildThreadedStructure(
   }
 }
 
+export async function executeGmailAdvancedSearchDirect(
+  params: GmailAdvancedSearchParams
+): Promise<GmailAdvancedSearchResponse> {
+  const { query, accessToken, maxResults = 5, includeAttachments = false } = params
+
+  // Search for messages
+  const searchParams = new URLSearchParams()
+  searchParams.append('q', query)
+  searchParams.append('maxResults', maxResults.toString())
+
+  const searchResponse = await fetch(`${GMAIL_API_BASE}/messages?${searchParams.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!searchResponse.ok) {
+    const errorData = await searchResponse.json().catch(() => ({}))
+    logger.error('Failed to search Gmail messages', {
+      status: searchResponse.status,
+      error: errorData,
+    })
+    throw new Error(errorData.error?.message || 'Failed to search Gmail messages')
+  }
+
+  const data = await searchResponse.json()
+
+  if (!data.messages || data.messages.length === 0) {
+    return {
+      success: true,
+      output: {
+        results: [],
+      },
+    }
+  }
+
+  const messagesToProcess = data.messages.slice(0, maxResults)
+
+  try {
+    // Get unique thread IDs from search results to avoid duplicate API calls
+    const uniqueThreadIds = new Set<string>()
+    messagesToProcess.forEach((msg: any) => {
+      if (msg.threadId) {
+        uniqueThreadIds.add(msg.threadId)
+      }
+    })
+
+    logger.info(
+      `Found ${uniqueThreadIds.size} unique threads from ${messagesToProcess.length} search results`
+    )
+
+    // Fetch full thread details for each unique thread ID
+    const threadPromises = Array.from(uniqueThreadIds).map(async (threadId: string) => {
+      try {
+        const threadResponse = await fetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        })
+
+        if (!threadResponse.ok) {
+          const errorData = await threadResponse.json().catch(() => ({}))
+          logger.error(`Failed to fetch thread ${threadId}`, {
+            status: threadResponse.status,
+            statusText: threadResponse.statusText,
+            error: errorData,
+          })
+          return null
+        }
+
+        const threadData = await threadResponse.json()
+        return {
+          threadId,
+          messages: threadData.messages || [],
+        }
+      } catch (error: any) {
+        logger.error(`Error fetching thread ${threadId}:`, error)
+        return null
+      }
+    })
+
+    const threads = (await Promise.all(threadPromises)).filter((t) => t !== null)
+
+    // Get execution context if available
+    const execContext = (params as any)._executionContext as ExecutionContext | undefined
+
+    // Build threaded structure for each thread
+    const processedResults: ThreadedEmailMessage[] = []
+
+    if (threads.length > 0) {
+      // Process threads successfully fetched
+      for (const thread of threads) {
+        const threadedMessage = await buildThreadedStructure(
+          thread.messages,
+          accessToken,
+          includeAttachments,
+          execContext
+        )
+        if (threadedMessage) {
+          processedResults.push(threadedMessage)
+        }
+      }
+    } else {
+      // Fallback: If thread API fails, fetch individual messages
+      logger.warn('Thread API calls failed, falling back to individual message fetching')
+      const messagePromises = messagesToProcess.map(async (msg: any) => {
+        try {
+          const messageResponse = await fetch(`${GMAIL_API_BASE}/messages/${msg.id}?format=full`, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          })
+
+          if (!messageResponse.ok) {
+            logger.warn(`Failed to fetch message ${msg.id}`)
+            return null
+          }
+
+          const messageData = await messageResponse.json()
+          return await processMessage(messageData, accessToken, includeAttachments, execContext)
+        } catch (error: any) {
+          logger.error(`Error fetching message ${msg.id}:`, error)
+          return null
+        }
+      })
+
+      const individualMessages = (await Promise.all(messagePromises)).filter((m) => m !== null)
+      for (const msg of individualMessages) {
+        processedResults.push({
+          ...msg,
+          replies: undefined,
+        })
+      }
+    }
+
+    logger.info(`Returning ${processedResults.length} email results`)
+
+    return {
+      success: true,
+      output: {
+        results: processedResults,
+      },
+    }
+  } catch (error: any) {
+    logger.error('Error processing advanced search results:', error)
+
+    return {
+      success: false,
+      output: {
+        results: [],
+      },
+      error: error.message || 'Failed to process search results',
+    }
+  }
+}
+
 export const gmailAdvancedSearchTool: ToolConfig<
   GmailAdvancedSearchParams,
   GmailAdvancedSearchResponse
@@ -374,171 +524,10 @@ export const gmailAdvancedSearchTool: ToolConfig<
     },
   },
 
-  // Request config is required but not used when directExecution is provided
   request: {
     url: '/api/tools/gmail/advanced_search',
     method: 'GET',
     headers: () => ({}),
-  },
-
-  directExecution: async (params: GmailAdvancedSearchParams) => {
-    const { query, accessToken, maxResults = 5, includeAttachments = false, clientName } = params
-
-    // Search for messages
-    const searchParams = new URLSearchParams()
-    searchParams.append('q', query)
-    searchParams.append('maxResults', maxResults.toString())
-
-    const searchResponse = await fetch(`${GMAIL_API_BASE}/messages?${searchParams.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (!searchResponse.ok) {
-      const errorData = await searchResponse.json().catch(() => ({}))
-      logger.error('Failed to search Gmail messages', {
-        status: searchResponse.status,
-        error: errorData,
-      })
-      throw new Error(errorData.error?.message || 'Failed to search Gmail messages')
-    }
-
-    const data = await searchResponse.json()
-
-    if (!data.messages || data.messages.length === 0) {
-      return {
-        success: true,
-        output: {
-          results: [],
-        },
-      }
-    }
-
-    const messagesToProcess = data.messages.slice(0, maxResults)
-
-    try {
-      // Get unique thread IDs from search results to avoid duplicate API calls
-      const uniqueThreadIds = new Set<string>()
-      messagesToProcess.forEach((msg: any) => {
-        if (msg.threadId) {
-          uniqueThreadIds.add(msg.threadId)
-        }
-      })
-
-      logger.info(
-        `Found ${uniqueThreadIds.size} unique threads from ${messagesToProcess.length} search results`
-      )
-
-      // Fetch full thread details for each unique thread ID
-      const threadPromises = Array.from(uniqueThreadIds).map(async (threadId: string) => {
-        try {
-          const threadResponse = await fetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-            },
-          })
-
-          if (!threadResponse.ok) {
-            const errorData = await threadResponse.json().catch(() => ({}))
-            logger.error(`Failed to fetch thread ${threadId}`, {
-              status: threadResponse.status,
-              statusText: threadResponse.statusText,
-              error: errorData,
-            })
-            return null
-          }
-
-          const threadData = await threadResponse.json()
-          return {
-            threadId,
-            messages: threadData.messages || [],
-          }
-        } catch (error: any) {
-          logger.error(`Error fetching thread ${threadId}:`, error)
-          return null
-        }
-      })
-
-      const threads = (await Promise.all(threadPromises)).filter((t) => t !== null)
-
-      // Get execution context if available
-      const execContext = (params as any)._executionContext as ExecutionContext | undefined
-
-      // Build threaded structure for each thread
-      const processedResults: ThreadedEmailMessage[] = []
-
-      if (threads.length > 0) {
-        // Process threads successfully fetched
-        for (const thread of threads) {
-          const threadedMessage = await buildThreadedStructure(
-            thread.messages,
-            accessToken,
-            includeAttachments,
-            execContext
-          )
-          if (threadedMessage) {
-            processedResults.push(threadedMessage)
-          }
-        }
-      } else {
-        // Fallback: If thread API fails, fetch individual messages
-        logger.warn('Thread API calls failed, falling back to individual message fetching')
-        const messagePromises = messagesToProcess.map(async (msg: any) => {
-          try {
-            const messageResponse = await fetch(
-              `${GMAIL_API_BASE}/messages/${msg.id}?format=full`,
-              {
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  'Content-Type': 'application/json',
-                },
-              }
-            )
-
-            if (!messageResponse.ok) {
-              logger.warn(`Failed to fetch message ${msg.id}`)
-              return null
-            }
-
-            const messageData = await messageResponse.json()
-            return await processMessage(messageData, accessToken, includeAttachments, execContext)
-          } catch (error: any) {
-            logger.error(`Error fetching message ${msg.id}:`, error)
-            return null
-          }
-        })
-
-        const individualMessages = (await Promise.all(messagePromises)).filter((m) => m !== null)
-        for (const msg of individualMessages) {
-          processedResults.push({
-            ...msg,
-            replies: undefined,
-          })
-        }
-      }
-
-      logger.info(`Returning ${processedResults.length} email results`)
-
-      return {
-        success: true,
-        output: {
-          results: processedResults,
-        },
-      }
-    } catch (error: any) {
-      logger.error('Error processing advanced search results:', error)
-
-      return {
-        success: false,
-        output: {
-          results: [],
-        },
-        error: error.message || 'Failed to process search results',
-      }
-    }
   },
 
   outputs: {
@@ -562,6 +551,5 @@ export const gmailAdvancedSearchV2Tool: ToolConfig<
   oauth: gmailAdvancedSearchTool.oauth,
   params: gmailAdvancedSearchTool.params,
   request: gmailAdvancedSearchTool.request,
-  directExecution: gmailAdvancedSearchTool.directExecution,
   outputs: gmailAdvancedSearchTool.outputs,
 }

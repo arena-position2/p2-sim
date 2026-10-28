@@ -1,6 +1,6 @@
 import { isPlainRecord, omit, toRecord } from '@sim/utils/object'
-import { extractResourcesFromToolResult } from '@/lib/copilot/resources/extraction'
-import type { MothershipResource } from '@/lib/copilot/resources/types'
+import { extractResourcesFromToolResult } from '@/lib/mothership/resources/extraction'
+import type { MothershipResource } from '@/lib/mothership/resources/types'
 import { FILE_BODY_ARG_KEYS, firstFileBodyString } from '@/local-copilot/lib/tools/file-body-args'
 
 const FILE_BODY_TOOL_NAMES = new Set(['create_file', 'edit_content'])

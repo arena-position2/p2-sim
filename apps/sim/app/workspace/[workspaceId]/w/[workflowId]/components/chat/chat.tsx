@@ -1,9 +1,18 @@
 'use client'
 
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   Badge,
   Button,
+  ComposerActionButton,
   cn,
   Input,
   Popover,
@@ -11,8 +20,11 @@ import {
   PopoverItem,
   PopoverScrollArea,
   PopoverTrigger,
+  scrollFadeAttributes,
+  scrollFadeClass,
   Tooltip,
   Trash,
+  useScrollEdges,
 } from '@sim/emcn'
 import { CircleAlert, Download } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
@@ -29,7 +41,6 @@ import { resolveChartContentFromFinalOutput } from '@/lib/chart-generation/resol
 import {
   extractAssistantFilesFromData,
   extractGeneratedImagesFromData,
-  isAssistantImageUrl,
 } from '@/lib/chat/assistant-assets'
 import { useGeneratedImageReuse } from '@/lib/chat/use-generated-image-reuse'
 import {
@@ -64,6 +75,7 @@ import {
 import {
   useFloatBoundarySync,
   useFloatDrag,
+  useFloatLayout,
   useFloatResize,
 } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/float'
 import {
@@ -74,11 +86,11 @@ import {
 import type { UploadedWorkflowAttachment } from '@/app/workspace/[workspaceId]/w/[workflowId]/utils/workflow-attachment-upload'
 import type { BlockLog, ExecutionResult } from '@/executor/types'
 import { useWorkspaceSettings } from '@/hooks/queries/workspace'
+import { isMobileViewport, useIsMobile } from '@/hooks/use-is-mobile'
 import { useChatStore } from '@/stores/chat/store'
 import { getChatPosition } from '@/stores/chat/utils'
 import { useIsCurrentWorkflowExecuting } from '@/stores/execution'
 import { useOperationQueue } from '@/stores/operation-queue/store'
-import { useTerminalConsoleStore, useWorkflowConsoleEntries } from '@/stores/terminal'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { useSubBlockStore } from '@/stores/workflows/subblock/store'
 import { useWorkflowStore } from '@/stores/workflows/workflow/store'
@@ -135,30 +147,44 @@ function ChatFilePreview({ file, onRemove }: ChatFilePreviewProps) {
   return (
     <div
       className={cn(
-        'group relative shrink-0 overflow-hidden rounded-md bg-[var(--surface-2)]',
+        'group relative pointer-coarse:flex shrink-0 pointer-coarse:items-center overflow-hidden rounded-md bg-[var(--surface-2)]',
         previewUrl
-          ? 'size-[40px]'
-          : 'flex min-w-[80px] max-w-[120px] items-center justify-center px-2 py-0.5'
+          ? 'size-[40px] pointer-coarse:h-12 pointer-coarse:w-auto'
+          : 'flex pointer-coarse:min-h-12 min-w-[80px] max-w-[120px] items-center justify-center px-2 py-0.5'
       )}
     >
       {previewUrl ? (
-        <img src={previewUrl} alt={file.name} className='size-full object-cover' />
+        <img
+          src={previewUrl}
+          alt={file.name}
+          className='pointer-coarse:size-12 size-full pointer-coarse:shrink-0 object-cover'
+        />
       ) : (
         <div className='min-w-0 flex-1'>
-          <div className='truncate font-medium text-[var(--white)] text-micro'>{file.name}</div>
+          <div className='truncate font-medium text-[var(--text-body)] text-micro'>{file.name}</div>
           <div className='text-[9px] text-[var(--text-tertiary)]'>{formatFileSize(file.size)}</div>
         </div>
       )}
 
       <Button
+        aria-label='Remove file'
         variant='ghost'
+        size='icon'
         onClick={(event) => {
           event.stopPropagation()
           onRemove(file.id)
         }}
-        className='absolute top-0.5 right-0.5 size-4 p-0 opacity-0 transition-opacity group-hover:opacity-100'
+        className='pointer-coarse:static absolute top-0.5 right-0.5 pointer-coarse:size-11 pointer-coarse:shrink-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 md:pointer-fine:opacity-0'
       >
-        <X className='size-2.5' />
+        <span
+          className={cn(
+            'flex items-center justify-center',
+            previewUrl &&
+              'size-4 rounded-full border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-body)]'
+          )}
+        >
+          <X className='size-2.5' />
+        </span>
       </Button>
     </div>
   )
@@ -229,51 +255,6 @@ const resolveStreamedChartContent = (
   selectedOutputs: string[]
 ): string | null => resolveChartContentFromFinalOutput(output, selectedOutputs)
 
-const getImageUrlsFromOutput = (output: unknown): string[] => {
-  const extractedUrls = extractGeneratedImagesFromData(output).map((image) => image.url)
-  if (extractedUrls.length > 0) {
-    return extractedUrls
-  }
-
-  if (!output || typeof output !== 'object') {
-    return []
-  }
-
-  const outputRecord = output as Record<string, unknown>
-  const nestedOutput = outputRecord.output as Record<string, unknown> | undefined
-  const fallbackUrl =
-    nestedOutput?.image ??
-    outputRecord.image ??
-    (isAssistantImageUrl(outputRecord.content) ? outputRecord.content : null)
-
-  return typeof fallbackUrl === 'string' && isAssistantImageUrl(fallbackUrl) ? [fallbackUrl] : []
-}
-
-const getAssistantAssetSourcesFromResult = (
-  result: ExecutionResult & { output?: Record<string, Record<string, unknown>> },
-  selectedOutputs: string[],
-  streamedBlockIds?: Set<string>
-): unknown[] => {
-  if (selectedOutputs.length > 0 && Array.isArray(result.logs)) {
-    return selectedOutputs
-      .map((outputId) => extractOutputFromLogs(result.logs as BlockLog[], outputId))
-      .filter((output) => output !== undefined)
-  }
-
-  if (streamedBlockIds && streamedBlockIds.size > 0 && Array.isArray(result.logs)) {
-    return result.logs
-      .filter((log) => streamedBlockIds.has(log.blockId))
-      .map((log) => log.output)
-      .filter((output) => output !== undefined)
-  }
-
-  if (result.output && typeof result.output === 'object') {
-    return Object.values(result.output)
-  }
-
-  return []
-}
-
 /**
  * Represents a field in the start block's input format configuration
  */
@@ -300,6 +281,7 @@ interface StartInputFormatField {
 export function Chat() {
   const params = useParams()
   const workspaceId = params.workspaceId as string
+  const isMobile = useIsMobile()
   const activeWorkflowId = useWorkflowRegistry((s) => s.activeWorkflowId)
   const blocks = useWorkflowStore((state) => state.blocks)
   const triggerWorkflowUpdate = useWorkflowStore((state) => state.triggerUpdate)
@@ -348,23 +330,30 @@ export function Chat() {
     }))
   )
 
-  const hasConsoleHydrated = useTerminalConsoleStore((state) => state._hasHydrated)
-  const entries = useWorkflowConsoleEntries(
-    hasConsoleHydrated && typeof activeWorkflowId === 'string' ? activeWorkflowId : undefined
+  const promptHistory = useChatStore(
+    useShallow((state) =>
+      !activeWorkflowId
+        ? []
+        : state.messages
+            .filter((message) => message.workflowId === activeWorkflowId && message.type === 'user')
+            .map((message) => message.content)
+            .filter((content): content is string => typeof content === 'string')
+    )
   )
+
   const isExecuting = useIsCurrentWorkflowExecuting()
   const { handleRunWorkflow, handleCancelExecution } = useWorkflowExecution()
   const { data: session } = useSession()
   const { addToQueue } = useOperationQueue()
 
   const [chatMessage, setChatMessage] = useState('')
-  const [promptHistory, setPromptHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [isInputModalOpen, setIsInputModalOpen] = useState(false)
   const [startBlockInputs, setStartBlockInputs] = useState<Record<string, unknown>>({})
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const attachmentsRef = useRef<HTMLDivElement>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
   const hasShownModalRef = useRef<boolean>(false)
   const hasCheckedModalRef = useRef<boolean>(false)
@@ -385,6 +374,9 @@ export function Chat() {
     handleDragLeave,
     handleDrop,
   } = useChatFileUpload()
+  const attachmentEdges = useScrollEdges(attachmentsRef, {
+    enabled: isChatOpen && chatFiles.length > 0,
+  })
 
   /**
    * Resolves the unified start block for chat execution, if available.
@@ -444,24 +436,27 @@ export function Chat() {
   const shouldShowConfigureStartInputsButton =
     Boolean(startBlockId) && missingStartReservedFields.length > 0
 
-  const actualPosition = useMemo(
-    () => getChatPosition(chatPosition, chatWidth, chatHeight),
-    [chatPosition, chatWidth, chatHeight]
-  )
+  const { isFloatingLayout, updatePosition, updateDimensions } = useFloatLayout({
+    ref: preventZoomRef,
+    onPositionChange: setChatPosition,
+    onDimensionsChange: setChatDimensions,
+  })
+
+  const actualPosition = getChatPosition(chatPosition, chatWidth, chatHeight)
 
   const { handleMouseDown } = useFloatDrag({
     position: actualPosition,
     width: chatWidth,
     height: chatHeight,
-    onPositionChange: setChatPosition,
+    onPositionChange: updatePosition,
   })
 
   useFloatBoundarySync({
-    isOpen: isChatOpen,
+    isOpen: isChatOpen && !isMobile,
     position: actualPosition,
     width: chatWidth,
     height: chatHeight,
-    onPositionChange: setChatPosition,
+    onPositionChange: updatePosition,
   })
 
   const {
@@ -473,13 +468,9 @@ export function Chat() {
     position: actualPosition,
     width: chatWidth,
     height: chatHeight,
-    onPositionChange: setChatPosition,
-    onDimensionsChange: setChatDimensions,
+    onPositionChange: updatePosition,
+    onDimensionsChange: updateDimensions,
   })
-
-  const outputEntries = useMemo(() => {
-    return entries.filter((entry) => entry.output)
-  }, [entries])
 
   const workflowMessages = useMemo(() => {
     if (!activeWorkflowId) return []
@@ -552,13 +543,6 @@ export function Chat() {
     }
   )
 
-  const userMessages = useMemo(() => {
-    return workflowMessages
-      .filter((msg) => msg.type === 'user')
-      .map((msg) => msg.content)
-      .filter((content): content is string => typeof content === 'string')
-  }, [workflowMessages])
-
   const handleToggleUserAttachmentImageSelection = useCallback(
     (messageId: string, attachment: ChatMessageAttachment) => {
       if (!attachment.previewUrl || !attachment.media_type.startsWith('image/')) {
@@ -576,15 +560,8 @@ export function Chat() {
   )
 
   useEffect(() => {
-    if (!activeWorkflowId) {
-      setPromptHistory([])
-      setHistoryIndex(-1)
-      return
-    }
-
-    setPromptHistory(userMessages)
     setHistoryIndex(-1)
-  }, [activeWorkflowId, userMessages])
+  }, [activeWorkflowId, promptHistory])
 
   useEffect(() => {
     if (workflowMessages.length > 0 && isChatOpen) {
@@ -602,7 +579,7 @@ export function Chat() {
     timeoutRef.current && clearTimeout(timeoutRef.current)
 
     timeoutRef.current = setTimeout(() => {
-      if (inputRef.current && document.contains(inputRef.current)) {
+      if (!isMobileViewport() && inputRef.current && document.contains(inputRef.current)) {
         inputRef.current.focus({ preventScroll: true })
       }
     }, delay)
@@ -961,9 +938,6 @@ export function Chat() {
       }
       const messageAttachments = toChatMessageAttachments(result.uploadedAttachments)
 
-      if (sentMessage && promptHistory[promptHistory.length - 1] !== sentMessage) {
-        setPromptHistory((prev) => [...prev, sentMessage])
-      }
       setHistoryIndex(-1)
 
       const messageContent =
@@ -1000,7 +974,6 @@ export function Chat() {
     effectiveGeneratedImages,
     activeWorkflowId,
     isExecuting,
-    promptHistory,
     getConversationId,
     addMessage,
     handleRunWorkflow,
@@ -1214,7 +1187,7 @@ export function Chat() {
       ref={preventZoomRef}
       role='dialog'
       aria-label='Chat'
-      className='fixed z-30 flex flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 pt-0.5 pb-2'
+      className='fixed z-30 flex flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 pt-0.5 pb-2 motion-reduce:transition-none max-md:absolute max-md:inset-0! max-md:size-auto! max-md:cursor-default! max-md:rounded-none max-md:border-0 max-md:pb-[max(8px,env(safe-area-inset-bottom))]'
       style={{
         left: `${actualPosition.x}px`,
         top: `${actualPosition.y}px`,
@@ -1222,19 +1195,25 @@ export function Chat() {
         height: `${chatHeight}px`,
         cursor: resizeCursor || undefined,
       }}
-      onMouseMove={handleResizeMouseMove}
+      onMouseMove={(event) => {
+        if (isFloatingLayout()) handleResizeMouseMove(event)
+      }}
       onMouseLeave={handleResizeMouseLeave}
-      onMouseDown={handleResizeMouseDown}
+      onMouseDown={(event) => {
+        if (isFloatingLayout()) handleResizeMouseDown(event)
+      }}
     >
       <div
         role='presentation'
-        className='flex h-[32px] shrink-0 cursor-grab items-center justify-between gap-2.5 bg-[var(--surface-1)] p-0 active:cursor-grabbing'
-        onMouseDown={handleMouseDown}
+        className='flex h-[32px] shrink-0 cursor-grab items-center justify-between gap-2.5 bg-[var(--surface-1)] p-0 active:cursor-grabbing max-md:h-auto max-md:min-h-11 max-md:cursor-default max-md:flex-wrap'
+        onMouseDown={(event) => {
+          if (isFloatingLayout()) handleMouseDown(event)
+        }}
       >
         <span className='shrink-0 pr-0.5 text-[var(--text-primary)] text-sm'>Chat</span>
 
         <div
-          className='ml-auto flex min-w-0 shrink items-center gap-1.5'
+          className='ml-auto flex min-w-0 shrink items-center gap-1.5 max-md:order-3 max-md:w-full max-md:justify-end max-md:pb-2'
           onMouseDown={(e) => e.stopPropagation()}
         >
           {customFields.length > 0 && (
@@ -1242,7 +1221,7 @@ export function Chat() {
               variant='outline'
               className='flex-none cursor-pointer whitespace-nowrap rounded-[6px]'
               title='Re-run with new inputs'
-              onMouseDown={(e) => {
+              onMouseDown={(e: MouseEvent) => {
                 e.stopPropagation()
                 handleRerun()
               }}
@@ -1254,7 +1233,7 @@ export function Chat() {
           {shouldShowConfigureStartInputsButton && (
             <button
               type='button'
-              className='flex flex-none cursor-pointer items-center whitespace-nowrap rounded-md border border-[var(--border-1)] bg-[var(--surface-5)] px-2.5 py-0.5 font-sans text-[var(--text-primary)] text-caption hover-hover:bg-[var(--surface-active)]'
+              className='flex flex-none cursor-pointer items-center whitespace-nowrap rounded-md border border-[var(--border-1)] bg-[var(--surface-5)] px-2.5 py-0.5 font-sans text-[var(--text-primary)] text-caption hover-hover:bg-[var(--surface-active)] max-md:pointer-coarse:min-h-11'
               title='Add chat inputs to Start block'
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
@@ -1280,6 +1259,7 @@ export function Chat() {
             maxHeight={180}
             workspaceName={workspaceName}
             workspaceId={workspaceId}
+            className='max-md:pointer-coarse:min-h-11'
           />
         </div>
 
@@ -1288,8 +1268,10 @@ export function Chat() {
           <Popover size='sm' open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
             <PopoverTrigger asChild>
               <Button
+                aria-label='Chat actions'
                 variant='ghost'
-                className='-m-1.5 p-1.5!'
+                iconPadding='md'
+                className='-m-1.5 max-md:m-0 max-md:size-11'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreVertical className='size-[14px]' />
@@ -1328,13 +1310,21 @@ export function Chat() {
           </Popover>
 
           {/* Close button */}
-          <Button variant='ghost' className='-m-1.5 p-1.5!' onClick={handleClose}>
+          <Button
+            aria-label='Close chat'
+            variant='ghost'
+            iconPadding='md'
+            className='-m-1.5 max-md:m-0 max-md:size-11'
+            onClick={handleClose}
+          >
             <X className='size-[16px]' />
           </Button>
         </div>
       </div>
 
-      <div className='flex flex-1 flex-col overflow-hidden'>
+      {/* Chat content */}
+      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+        {/* Messages */}
         <div className='flex-1 overflow-hidden'>
           {workflowMessages.length === 0 ? (
             <div className='flex h-full items-center justify-center text-[var(--text-placeholder)] text-small'>
@@ -1420,14 +1410,24 @@ export function Chat() {
             )}
 
             {chatFiles.length > 0 && (
-              <div className='mt-1 flex flex-wrap gap-1.5'>
-                {chatFiles.map((file) => (
-                  <ChatFilePreview key={file.id} file={file} onRemove={removeFile} />
-                ))}
+              <div
+                ref={attachmentsRef}
+                className={cn(
+                  'mt-1 pointer-coarse:max-h-[102px] pointer-coarse:overflow-y-auto pointer-coarse:overscroll-contain',
+                  scrollFadeClass
+                )}
+                {...scrollFadeAttributes(attachmentEdges)}
+              >
+                <div className='flex flex-wrap gap-1.5'>
+                  {chatFiles.map((file) => (
+                    <ChatFilePreview key={file.id} file={file} onRemove={removeFile} />
+                  ))}
+                </div>
               </div>
             )}
 
-            <div className='relative'>
+            {/* Input field with inline buttons */}
+            <div className='relative max-md:flex max-md:items-center'>
               <Input
                 ref={inputRef}
                 value={chatMessage}
@@ -1437,38 +1437,49 @@ export function Chat() {
                 }}
                 onKeyDown={handleKeyPress}
                 placeholder={isDragOver ? 'Drop files here...' : 'Type a message...'}
-                className='w-full border-0 bg-transparent pr-[56px] pl-1 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0'
+                className='w-full border-0 bg-transparent pr-[56px] pl-1 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 max-md:min-w-0 max-md:flex-1 max-md:pr-1'
                 disabled={!activeWorkflowId}
               />
 
-              <div className='-translate-y-1/2 absolute top-1/2 right-[2px] flex items-center gap-2.5'>
+              {/* Buttons positioned absolutely on the right */}
+              <div className='-translate-y-1/2 absolute top-1/2 right-[2px] flex items-center gap-2.5 max-md:static max-md:translate-y-0 max-md:gap-1'>
                 <Tooltip.Root>
                   <Tooltip.Trigger asChild>
-                    <Badge
+                    <Button
+                      aria-label='Attach file'
+                      variant='ghost'
+                      size={null}
+                      disabled={
+                        !activeWorkflowId || isExecuting || chatFiles.length >= MAX_CHAT_FILES
+                      }
                       onClick={() => document.getElementById('floating-chat-file-input')?.click()}
                       className={cn(
-                        'cursor-pointer rounded-md border-0! bg-transparent! p-[0px]',
+                        'size-[14px] cursor-pointer rounded-md border-0! bg-transparent! p-0 max-md:size-11',
                         (!activeWorkflowId || isExecuting || chatFiles.length >= MAX_CHAT_FILES) &&
                           'cursor-not-allowed opacity-50'
                       )}
                     >
-                      <Paperclip className='h-3.5! w-3.5!' />
-                    </Badge>
+                      <Paperclip className='size-3.5!' />
+                    </Button>
                   </Tooltip.Trigger>
                   <Tooltip.Content>Attach file</Tooltip.Content>
                 </Tooltip.Root>
 
                 {isStreaming ? (
-                  <Button
+                  <ComposerActionButton
+                    aria-label='Stop generation'
                     onClick={handleStopStreaming}
-                    variant='ghost'
-                    className='size-[22px] rounded-full bg-[#383838] p-0 transition-colors hover-hover:bg-[#575757] dark:bg-[#E0E0E0] dark:hover-hover:bg-[#CFCFCF]'
+                    size='sm'
+                    className='max-md:size-11'
                   >
-                    <Square className='h-2.5 w-2.5 fill-white text-white dark:fill-black dark:text-black' />
-                  </Button>
+                    <Square className='size-2.5 fill-white text-white dark:fill-black dark:text-black' />
+                  </ComposerActionButton>
                 ) : (
-                  <Button
+                  <ComposerActionButton
+                    aria-label='Send message'
                     onClick={handleSendMessage}
+                    size='sm'
+                    className='max-md:size-11'
                     disabled={
                       (!chatMessage.trim() &&
                         chatFiles.length === 0 &&
@@ -1477,17 +1488,16 @@ export function Chat() {
                       isExecuting ||
                       isStreaming
                     }
-                    className={cn(
-                      'h-[22px] w-[22px] rounded-full border-0 p-0 transition-colors',
-                      chatMessage.trim() ||
+                    active={
+                      !!(
+                        chatMessage.trim() ||
                         chatFiles.length > 0 ||
                         effectiveGeneratedImages.length > 0
-                        ? 'bg-[var(--text-primary)] hover-hover:bg-[var(--text-secondary)] dark:bg-[var(--border-1)] dark:hover-hover:bg-[var(--text-body)]'
-                        : 'bg-[var(--text-subtle)] dark:bg-[var(--text-subtle)]'
-                    )}
+                      )
+                    }
                   >
                     <ArrowUp className='size-3.5 text-white dark:text-black' />
-                  </Button>
+                  </ComposerActionButton>
                 )}
               </div>
             </div>

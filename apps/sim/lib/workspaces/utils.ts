@@ -79,33 +79,24 @@ export async function getScheduleExecutionActorUserId(
 }
 
 /**
- * The organization that owns a workspace (null for personal workspaces). Used to
- * gate features by org cohort — the flag model allowlists org ids, and API routes
- * only carry a `workspaceId`, so this resolves the one from the other.
- */
-export async function getWorkspaceOrganizationId(workspaceId: string): Promise<string | null> {
-  if (!workspaceId) return null
-  const rows = await db
-    .select({ organizationId: workspaceTable.organizationId })
-    .from(workspaceTable)
-    .where(eq(workspaceTable.id, workspaceId))
-    .limit(1)
-  return rows[0]?.organizationId ?? null
-}
-
-/**
  * Workspaces the user administers purely through organization owner/admin role,
  * with no explicit permission row required. Empty when the user is not an org
  * owner/admin. Implements the workspace-permission inheritance model.
  */
-export async function getOrgAdminWorkspaceRows(
+async function getOrgAdminWorkspaceRows(
   userId: string,
-  scope: WorkspaceScope = 'active'
+  scope: WorkspaceScope = 'active',
+  organizationId?: string
 ): Promise<Array<typeof workspaceTable.$inferSelect>> {
   const [membership] = await db
     .select({ organizationId: member.organizationId, role: member.role })
     .from(member)
-    .where(eq(member.userId, userId))
+    .where(
+      and(
+        eq(member.userId, userId),
+        organizationId ? eq(member.organizationId, organizationId) : undefined
+      )
+    )
     .limit(1)
 
   if (!membership || !isOrgAdminRole(membership.role)) {
@@ -129,7 +120,8 @@ export async function getOrgAdminWorkspaceRows(
  */
 export async function listAccessibleWorkspaceRowsForUser(
   userId: string,
-  scope: WorkspaceScope = 'active'
+  scope: WorkspaceScope = 'active',
+  organizationId?: string
 ): Promise<
   Array<{
     workspace: typeof workspaceTable.$inferSelect
@@ -164,7 +156,7 @@ export async function listAccessibleWorkspaceRowsForUser(
     .orderBy(asc(workspaceTable.name))
   // .orderBy(desc(workspaceTable.createdAt))
 
-  const orgRows = await getOrgAdminWorkspaceRows(userId, scope)
+  const orgRows = await getOrgAdminWorkspaceRows(userId, scope, organizationId)
   if (orgRows.length === 0) {
     return explicit.map((row) => ({ ...row, viaOrgAdmin: false }))
   }
@@ -186,9 +178,9 @@ export async function listAccessibleWorkspaceRowsForUser(
   )
 }
 
+/** Membership workspaces for usage analytics: owned rows stay `owner`, other grants keep their permission. */
 export async function listUserWorkspaces(userId: string, scope: WorkspaceScope = 'active') {
   const rows = await listAccessibleWorkspaceRowsForUser(userId, scope)
-
   return rows.map(({ workspace: ws, permissionType }) => ({
     workspaceId: ws.id,
     workspaceName: ws.name,
@@ -393,6 +385,34 @@ export async function reassignWorkflowOwnershipForWorkspaceMemberRemovalTx({
   return { reassigned, unresolved }
 }
 
+/** Resolves the billing replacement consistently for deletion previews and transactional handoff. */
+export async function findWorkspaceBillingReplacement(
+  executor: DbOrTx,
+  ws: { id: string; ownerId: string },
+  departingUserId: string
+): Promise<string | null> {
+  let replacement: string | null = ws.ownerId !== departingUserId ? ws.ownerId : null
+
+  if (!replacement) {
+    const [admin] = await executor
+      .select({ userId: permissions.userId })
+      .from(permissions)
+      .where(
+        and(
+          eq(permissions.entityType, 'workspace'),
+          eq(permissions.entityId, ws.id),
+          eq(permissions.permissionType, 'admin'),
+          ne(permissions.userId, departingUserId)
+        )
+      )
+      .limit(1)
+
+    replacement = admin?.userId ?? null
+  }
+
+  return replacement
+}
+
 /**
  * Reassigns `billedAccountUserId` on every workspace that points to `departingUserId` to
  * another eligible user, so the user can be deleted without violating the `workspace.billed_account_user_id`
@@ -432,25 +452,7 @@ export async function reassignBilledAccountForUser(
   const unresolved: string[] = []
 
   for (const ws of billedWorkspaces) {
-    let replacement: string | null = ws.ownerId !== departingUserId ? ws.ownerId : null
-
-    if (!replacement) {
-      const [admin] = await executor
-        .select({ userId: permissions.userId })
-        .from(permissions)
-        .where(
-          and(
-            eq(permissions.entityType, 'workspace'),
-            eq(permissions.entityId, ws.id),
-            eq(permissions.permissionType, 'admin'),
-            ne(permissions.userId, departingUserId)
-          )
-        )
-        .limit(1)
-
-      replacement = admin?.userId ?? null
-    }
-
+    const replacement = await findWorkspaceBillingReplacement(executor, ws, departingUserId)
     if (!replacement) {
       unresolved.push(ws.id)
       continue

@@ -247,7 +247,7 @@ export async function checkHybridAuth(
             keyId: result.keyId,
           }
         }
-        await updateApiKeyLastUsed(result.keyId)
+        updateApiKeyLastUsed(result.keyId)
         return {
           success: true,
           userId: result.userId,

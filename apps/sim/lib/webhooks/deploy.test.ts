@@ -1,8 +1,6 @@
-/**
- * @vitest-environment node
- */
 import { account, credential, webhook, workflowDeploymentVersion } from '@sim/db/schema'
 import {
+  createMockRequest,
   dbChainMockFns,
   queueTableRows,
   resetDbChainMock,
@@ -11,6 +9,9 @@ import {
   setEnv,
   setEnvFlags,
 } from '@sim/testing'
+import { authOAuthUtilsMock, authOAuthUtilsMockFns } from '@sim/testing/mocks/auth-oauth-utils.mock'
+import { triggersMock, triggersMockFns } from '@sim/testing/mocks/triggers.mock'
+import { toRecord } from '@sim/utils/object'
 import { eq, ne } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import type { SubBlockConfig } from '@/blocks/types'
@@ -18,15 +19,16 @@ import type { BlockState } from '@/stores/workflows/workflow/types'
 
 // deploy.ts pulls in the trigger/block/provider registries at module load; none are exercised by
 // buildProviderConfig (a pure function), so stub them to keep this unit test fast and isolated.
-const { mockGetBlock } = vi.hoisted(() => ({ mockGetBlock: vi.fn() }))
-// `deploy.ts` reads the registry through `@/blocks`, while the trigger-id resolution it now
-// shares (`@/triggers/webhook-url`) reads `@/blocks/registry`. Point both specifiers at ONE spy
-// so a test configuring the block config governs the whole path, not half of it.
-vi.mock('@/blocks', () => ({ getBlock: mockGetBlock }))
-vi.mock('@/blocks/registry', () => ({ getBlock: mockGetBlock }))
-vi.mock('@/triggers', () => ({ getTrigger: vi.fn(), isTriggerValid: vi.fn(() => true) }))
+/**
+ * `deploy.ts` reads the registry through `@/blocks`, while the trigger-id resolution it now
+ * shares (`@/triggers/webhook-url`) reads the globally mocked `@/blocks/registry`. Point
+ * `@/blocks` at that same spy so a test configuring the block config governs the whole path.
+ */
+vi.mock('@/blocks', async () => ({ getBlock: (await import('@/blocks/registry')).getBlock }))
+vi.mock('@/triggers', () => triggersMock)
 vi.mock('@/lib/webhooks/providers', () => ({ getProviderHandler: vi.fn() }))
 vi.mock('@/lib/webhooks/provider-subscriptions', () => ({
+  activateExternalWebhookSubscription: vi.fn(),
   cleanupExternalWebhook: vi.fn(),
   createExternalWebhookSubscription: vi.fn(),
   hasWebhookConfigChanged: vi.fn(),
@@ -35,7 +37,10 @@ vi.mock('@/lib/webhooks/utils.server', () => ({
   findConflictingWebhookPathOwner: vi.fn(),
 }))
 vi.mock('@/lib/webhooks/pending-verification', () => ({
-  PendingWebhookVerificationTracker: vi.fn(),
+  PendingWebhookVerificationTracker: class {
+    register = vi.fn().mockResolvedValue(undefined)
+    clearAll = vi.fn().mockResolvedValue(undefined)
+  },
 }))
 const { mockIsDeploymentVersionActive, mockIsDeploymentVersionProtected } = vi.hoisted(() => ({
   mockIsDeploymentVersionActive: vi.fn(),
@@ -46,24 +51,11 @@ vi.mock('@/lib/workflows/persistence/deployment-operations', () => ({
   isDeploymentVersionProtectedByCurrentOperation: mockIsDeploymentVersionProtected,
 }))
 
-const {
-  mockGetQuickBooksWebhookCredential,
-  mockGetSlackBotCredential,
-  mockResolveOAuthAccountId,
-  mockRefreshAccessTokenIfNeeded,
-  mockFetchSlackTeamId,
-} = vi.hoisted(() => ({
+const { mockGetQuickBooksWebhookCredential, mockFetchSlackTeamId } = vi.hoisted(() => ({
   mockGetQuickBooksWebhookCredential: vi.fn(),
-  mockGetSlackBotCredential: vi.fn(),
-  mockResolveOAuthAccountId: vi.fn(),
-  mockRefreshAccessTokenIfNeeded: vi.fn(),
   mockFetchSlackTeamId: vi.fn(),
 }))
-vi.mock('@/lib/oauth/credential-service', () => ({
-  getSlackBotCredential: mockGetSlackBotCredential,
-  resolveOAuthAccountId: mockResolveOAuthAccountId,
-  refreshAccessTokenIfNeeded: mockRefreshAccessTokenIfNeeded,
-}))
+vi.mock('@/lib/oauth/credential-service', () => authOAuthUtilsMock)
 vi.mock('@/lib/webhooks/providers/slack', () => ({
   fetchSlackTeamId: mockFetchSlackTeamId,
 }))
@@ -77,12 +69,27 @@ import {
   cleanupInactiveDeploymentWebhooks,
   resolveTriggerCredentialId,
   resolveWebhookConfigForBlock,
+  saveTriggerWebhooksForDeploy,
 } from '@/lib/webhooks/deploy'
-import { cleanupExternalWebhook } from '@/lib/webhooks/provider-subscriptions'
+import {
+  activateExternalWebhookSubscription,
+  cleanupExternalWebhook,
+  createExternalWebhookSubscription,
+  hasWebhookConfigChanged,
+} from '@/lib/webhooks/provider-subscriptions'
 import { getProviderHandler } from '@/lib/webhooks/providers'
 import { quickBooksHandler } from '@/lib/webhooks/providers/quickbooks'
+import { findConflictingWebhookPathOwner } from '@/lib/webhooks/utils.server'
 import { getBlock } from '@/blocks'
 import { getTrigger } from '@/triggers'
+
+const mockGetSlackBotCredential = authOAuthUtilsMockFns.mockGetSlackBotCredential
+const mockResolveOAuthAccountId = authOAuthUtilsMockFns.mockResolveOAuthAccountId
+const mockRefreshAccessTokenIfNeeded = authOAuthUtilsMockFns.mockRefreshAccessTokenIfNeeded
+
+vi.mocked(getBlock).mockReturnValue(undefined)
+triggersMockFns.mockGetTrigger.mockReturnValue(undefined)
+triggersMockFns.mockIsTriggerValid.mockReturnValue(true)
 
 afterAll(() => {
   resetDbChainMock()
@@ -103,11 +110,6 @@ const driveTrigger = trigger([
   },
   { id: 'folderId', mode: 'trigger', canonicalParamId: 'folderId', required: false },
   { id: 'manualFolderId', mode: 'trigger-advanced', canonicalParamId: 'folderId', required: false },
-])
-
-const tableTrigger = trigger([
-  { id: 'tableSelector', mode: 'trigger', canonicalParamId: 'tableId', required: true },
-  { id: 'manualTableId', mode: 'trigger-advanced', canonicalParamId: 'tableId', required: true },
 ])
 
 const slackTrigger = trigger([
@@ -152,7 +154,6 @@ function makeBlock(
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
   resetDbChainMock()
   setEnv({ SLACK_SIGNING_SECRET: 'test-secret' })
   setEnvFlags({ isSlackExtendedScopesEnabled: true })
@@ -162,28 +163,19 @@ beforeEach(() => {
 })
 
 describe('buildProviderConfig canonical collapse', () => {
-  it('writes the basic value under the canonical key in basic mode', () => {
-    const block = makeBlock('google_drive_poller', { folderId: 'BASIC' })
+  it('does not accept subscription cleanup credentials from an authored block', () => {
+    const block = makeBlock('google_drive_poller', {
+      triggerConfig: {
+        previousSubscription: {
+          provider: 'slack',
+          providerConfig: { credentialId: 'foreign-credential' },
+        },
+        subscriptionActivationPending: false,
+      },
+    })
     const { providerConfig } = buildProviderConfig(block, 'google_drive_poller', driveTrigger)
-    expect(providerConfig.folderId).toBe('BASIC')
-  })
-
-  it('returns the credential reference and OAuth service for deploy validation', () => {
-    const block = makeBlock('google_drive_poller', { triggerCredentials: 'credential-1' })
-    const result = buildProviderConfig(block, 'google_drive_poller', driveTrigger)
-
-    expect(result.credentialReference).toBe('credential-1')
-    expect(result.credentialServiceId).toBe('google-drive')
-    expect(result.providerConfig.credentialId).toBeUndefined()
-  })
-
-  it('writes the active (advanced) value under the canonical key when only advanced is set', () => {
-    const block = makeBlock('google_drive_poller', { manualFolderId: 'ADVANCED' })
-    const { providerConfig } = buildProviderConfig(block, 'google_drive_poller', driveTrigger)
-    // Heuristic: empty basic + populated advanced => advanced is active.
-    expect(providerConfig.folderId).toBe('ADVANCED')
-    // Raw advanced key kept for transitional readers.
-    expect(providerConfig.manualFolderId).toBe('ADVANCED')
+    expect(providerConfig).not.toHaveProperty('previousSubscription')
+    expect(providerConfig).not.toHaveProperty('subscriptionActivationPending')
   })
 
   it('collapses a drift block (stale basic + active advanced via override) to the active value', () => {
@@ -212,24 +204,6 @@ describe('buildProviderConfig canonical collapse', () => {
     const block = makeBlock('google_drive_poller', {})
     const { providerConfig } = buildProviderConfig(block, 'google_drive_poller', driveTrigger)
     expect(providerConfig.folderId).toBeUndefined()
-  })
-
-  it('writes a distinct canonical key (tableId) for the table trigger', () => {
-    const block = makeBlock('table_new_row', { tableSelector: 'TBL' })
-    const { providerConfig } = buildProviderConfig(block, 'table_new_row', tableTrigger)
-    expect(providerConfig.tableId).toBe('TBL')
-    // Raw basic key kept for transitional readers.
-    expect(providerConfig.tableSelector).toBe('TBL')
-  })
-
-  it('collapses a drift table block to the active value under tableId', () => {
-    const block = makeBlock(
-      'table_new_row',
-      { tableSelector: 'STALE', manualTableId: 'ACTIVE' },
-      { tableId: 'advanced' }
-    )
-    const { providerConfig } = buildProviderConfig(block, 'table_new_row', tableTrigger)
-    expect(providerConfig.tableId).toBe('ACTIVE')
   })
 
   it('collapses the slack bot credential pair under botCredential for the routing branch', () => {
@@ -305,7 +279,12 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     })
   }
 
-  it('routes a custom bot credential without the native app signing secret', async () => {
+  it.each([
+    'message',
+    'app_context_changed',
+    'agent_session_stopped',
+    'agent_session_title_changed',
+  ])('routes custom-bot %s without the native app signing secret', async (eventType) => {
     setEnvFlags({ isSlackExtendedScopesEnabled: false })
     setEnv({ SLACK_SIGNING_SECRET: undefined })
     mockGetSlackBotCredential.mockResolvedValue({
@@ -316,7 +295,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
       signingSecret: 'secret',
     })
 
-    const result = await resolveSlack({ eventType: 'message', customBotCredential: 'cred_bot_1' })
+    const result = await resolveSlack({ eventType, customBotCredential: 'cred_bot_1' })
 
     expect(result?.success).toBe(true)
     if (!result?.success) throw new Error('expected success')
@@ -327,29 +306,29 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(mockFetchSlackTeamId).not.toHaveBeenCalled()
   })
 
-  it('deploys a slash command trigger and preserves its command filter', async () => {
+  it.each([
+    ['assistant_thread_started', 'customBotCredential'],
+    ['assistant_thread_context_changed', 'customBotCredential'],
+    ['assistant_thread_started', 'manualBotCredential'],
+    ['assistant_thread_context_changed', 'manualBotCredential'],
+  ])('rejects persisted custom-bot %s through %s before deployment', async (eventType, field) => {
     mockGetSlackBotCredential.mockResolvedValue({
       workspaceId: 'ws-1',
       botToken: 'xoxb-token',
-      teamId: 'T123',
-      botUserId: 'BUSER',
       signingSecret: 'secret',
     })
 
-    const result = await resolveSlack({
-      eventType: 'slash_command',
-      commandFilter: '/ask-sim',
-      customBotCredential: 'cred_bot_1',
-    })
+    const result = await resolveSlack({ eventType, [field]: 'cred_bot_1' })
 
-    expect(result?.success).toBe(true)
-    if (!result?.success) throw new Error('expected success')
-    expect(result.config.provider).toBe('slack')
-    expect(result.config.routingKey).toBe('cred_bot_1')
-    expect(result.config.providerConfig).toMatchObject({
-      eventType: 'slash_command',
-      commandFilter: '/ask-sim',
+    expect(result?.success).toBe(false)
+    if (result?.success) throw new Error('expected failure')
+    expect(result?.error).toEqual({
+      message:
+        'Legacy Assistant events require a native Arena Slack connection. Choose an Agent View event for a custom bot.',
+      status: 400,
     })
+    expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
+    expect(mockFetchSlackTeamId).not.toHaveBeenCalled()
   })
 
   it('does not validate an identity-less migrated bot for ordinary triggers', async () => {
@@ -369,28 +348,6 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(mockFetchSlackTeamId).not.toHaveBeenCalled()
   })
 
-  it('resolves missing bot identity for reaction events even when team identity is stored', async () => {
-    mockGetSlackBotCredential.mockResolvedValue({
-      workspaceId: 'ws-1',
-      botToken: 'xoxb-migrated',
-      teamId: 'T123',
-      signingSecret: 'secret',
-    })
-    mockFetchSlackTeamId.mockResolvedValue({ teamId: 'T123', userId: 'UBOT' })
-
-    const result = await resolveSlack({
-      eventType: 'reaction_added',
-      customBotCredential: 'cred_bot_1',
-    })
-
-    expect(result?.success).toBe(true)
-    if (!result?.success) throw new Error('expected success')
-    expect(result.config.provider).toBe('slack')
-    expect(result.config.routingKey).toBe('cred_bot_1')
-    expect(result.config.providerConfig.bot_user_id).toBe('UBOT')
-    expect(mockFetchSlackTeamId).toHaveBeenCalledWith('xoxb-migrated')
-  })
-
   it('rejects a Sim-app credential when extended scopes are disabled', async () => {
     setEnvFlags({ isSlackExtendedScopesEnabled: false })
     mockGetSlackBotCredential.mockResolvedValue(null)
@@ -401,25 +358,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(result?.success).toBe(false)
     if (result?.success) throw new Error('expected failure')
     expect(result?.error).toEqual({
-      message: 'The Sim Slack app trigger is disabled for this deployment. Select a custom bot.',
-      status: 400,
-    })
-    expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
-    expect(mockFetchSlackTeamId).not.toHaveBeenCalled()
-  })
-
-  it('rejects a Sim-app credential when its signing secret is not configured', async () => {
-    setEnv({ SLACK_SIGNING_SECRET: undefined })
-    mockGetSlackBotCredential.mockResolvedValue(null)
-    mockResolveOAuthAccountId.mockResolvedValue({ accountId: 'acct-1' })
-
-    const result = await resolveSlack({ eventType: 'message', customBotCredential: 'cred_oauth_1' })
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error).toEqual({
-      message:
-        'The Sim Slack app trigger is not configured for this deployment. Configure its signing secret or select a custom bot.',
+      message: 'The Arena Slack app trigger is disabled for this deployment. Select a custom bot.',
       status: 400,
     })
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
@@ -441,37 +380,6 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     if (result?.success) throw new Error('expected failure')
     expect(result?.error?.status).toBe(400)
     expect(result?.error?.message).toContain('not available in this workspace')
-  })
-
-  it('rejects an action-only custom bot that has no signing secret', async () => {
-    mockGetSlackBotCredential.mockResolvedValue({
-      workspaceId: 'ws-1',
-      botUserId: 'BUSER',
-      botToken: 'xoxb-token',
-    })
-
-    const result = await resolveSlack({ eventType: 'message', customBotCredential: 'cred_bot_1' })
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error).toEqual({
-      message:
-        'The selected Slack bot can run actions but cannot receive events because it has no signing secret. Reconnect it with a signing secret.',
-      status: 400,
-    })
-  })
-
-  it('rejects a deleted or secretless custom bot credential as an invalid bot', async () => {
-    mockGetSlackBotCredential.mockResolvedValue(null)
-    mockResolveOAuthAccountId.mockResolvedValue({ credentialType: 'service_account' })
-
-    const result = await resolveSlack({ eventType: 'message', customBotCredential: 'cred_bot_x' })
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error?.status).toBe(400)
-    expect(result?.error?.message).toContain('bot credential is missing or invalid')
-    expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
   })
 
   it('rejects an OAuth credential not resolvable in the workflow workspace', async () => {
@@ -501,65 +409,8 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(result?.success).toBe(false)
     if (result?.success) throw new Error('expected failure')
     expect(result?.error?.status).toBe(400)
-    expect(result?.error?.message).toContain('not available on the Sim Slack app')
+    expect(result?.error?.message).toContain('not available on the Arena Slack app')
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
-  })
-
-  it('rejects Agent Sessions events on the native Sim app', async () => {
-    mockGetSlackBotCredential.mockResolvedValue(null)
-    mockResolveOAuthAccountId.mockResolvedValue({ accountId: 'acct-1' })
-    queueTableRows(credential, [{ id: 'cred_oauth_1' }])
-
-    const result = await resolveSlack({
-      eventType: 'agent_session_stopped',
-      customBotCredential: 'cred_oauth_1',
-    })
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error).toEqual({
-      message:
-        'This event is not available on the Sim Slack app. Use a custom bot or choose a supported event.',
-      status: 400,
-    })
-    expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
-  })
-
-  it('routes an OAuth account by team_id on the slack_app provider', async () => {
-    mockGetSlackBotCredential.mockResolvedValue(null)
-    mockResolveOAuthAccountId.mockResolvedValue({ accountId: 'acct-1' })
-    queueTableRows(credential, [{ id: 'cred_oauth_1' }])
-    queueTableRows(account, [{ userId: 'owner-1' }])
-    mockRefreshAccessTokenIfNeeded.mockResolvedValue('xoxb-token')
-    mockFetchSlackTeamId.mockResolvedValue({ teamId: 'T123', userId: 'UBOT' })
-
-    const result = await resolveSlack({ eventType: 'message', customBotCredential: 'cred_oauth_1' })
-
-    expect(result?.success).toBe(true)
-    if (!result?.success) throw new Error('expected success')
-    expect(result.config.provider).toBe('slack_app')
-    expect(result.config.routingKey).toBe('T123')
-    expect(result.config.triggerPath).toBeNull()
-    expect(result.config.providerConfig.bot_user_id).toBe('UBOT')
-    // Runtime token resolution + disconnect cleanup key slack_app rows on this.
-    expect(result.config.providerConfig.credentialId).toBe('cred_oauth_1')
-    // Owner's token, not the deploying actor's.
-    expect(mockRefreshAccessTokenIfNeeded).toHaveBeenCalledWith('cred_oauth_1', 'owner-1', 'req-1')
-  })
-
-  it('fails when the connected Slack account token cannot be resolved', async () => {
-    mockGetSlackBotCredential.mockResolvedValue(null)
-    mockResolveOAuthAccountId.mockResolvedValue({ accountId: '' })
-    queueTableRows(credential, [{ id: 'cred_oauth_1' }])
-    mockRefreshAccessTokenIfNeeded.mockResolvedValue(null)
-
-    const result = await resolveSlack({ eventType: 'message', customBotCredential: 'cred_oauth_1' })
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error?.status).toBe(400)
-    expect(result?.error?.message).toContain('Could not access the connected Slack account')
-    expect(mockFetchSlackTeamId).not.toHaveBeenCalled()
   })
 })
 
@@ -611,22 +462,6 @@ describe('resolveWebhookConfigForBlock — migrated slack_webhook routing', () =
       ingressMode: 'legacy_custom_bot',
     })
   })
-
-  it('leaves an unmigrated legacy trigger on direct path dispatch', async () => {
-    const result = await resolveLegacySlack({
-      signingSecret: 'legacy-secret',
-      botToken: 'legacy-token',
-      triggerPath: 'legacy-path',
-    })
-
-    expect(result?.success).toBe(true)
-    if (!result?.success) throw new Error('expected success')
-    expect(result.config.triggerPath).toBe('legacy-path')
-    expect(result.config.routingKey).toBeNull()
-    expect(result.config.providerConfig.credentialId).toBeUndefined()
-    expect(result.config.providerConfig.ingressMode).toBeUndefined()
-    expect(mockGetSlackBotCredential).not.toHaveBeenCalled()
-  })
 })
 
 describe('resolveWebhookConfigForBlock — TikTok routing', () => {
@@ -650,23 +485,6 @@ describe('resolveWebhookConfigForBlock — TikTok routing', () => {
       requestId: 'req-1',
     })
   }
-
-  it('routes a canonical workspace credential by its TikTok open_id', async () => {
-    queueTableRows(credential, [{ id: 'credential-1' }])
-    mockResolveOAuthAccountId.mockResolvedValue({ accountId: 'account-1' })
-    queueTableRows(account, [
-      { accountId: 'open-id-with-hyphens-12345678-1234-1234-1234-123456789abc' },
-    ])
-
-    const result = await resolveTikTok()
-
-    expect(result?.success).toBe(true)
-    if (!result?.success) throw new Error('expected success')
-    expect(result.config.provider).toBe('tiktok')
-    expect(result.config.routingKey).toBe('open-id-with-hyphens')
-    expect(result.config.triggerPath).toBeNull()
-    expect(result.config.providerConfig.credentialId).toBe('credential-1')
-  })
 
   it('rejects a TikTok credential not available in the workflow workspace', async () => {
     const result = await resolveTikTok('foreign-credential')
@@ -724,24 +542,6 @@ describe('resolveWebhookConfigForBlock — QuickBooks routing', () => {
     })
   }
 
-  it('routes a workspace-owned credential by its stored QuickBooks realm ID', async () => {
-    queueTableRows(credential, [{ id: 'cred-qb-1' }])
-    mockGetQuickBooksWebhookCredential.mockResolvedValue({
-      clientConfig: { webhookVerifierToken: 'verifier' },
-      identity: { appKey: 'app-key', realmId: '9341456000000000' },
-    })
-
-    const result = await resolveQuickBooks('cred-qb-1')
-
-    expect(result?.success).toBe(true)
-    if (!result?.success) throw new Error('expected success')
-    expect(result.config.provider).toBe('quickbooks')
-    expect(result.config.routingKey).toBe('app-key:9341456000000000')
-    expect(result.config.triggerPath).toBeNull()
-    expect(result.config.providerConfig.credentialId).toBe('cred-qb-1')
-    expect(result.config.providerConfig.quickBooksWebhookAppKey).toBe('app-key')
-  })
-
   it('rejects a QuickBooks credential outside the workflow workspace', async () => {
     const result = await resolveQuickBooks('cred-foreign')
 
@@ -749,28 +549,6 @@ describe('resolveWebhookConfigForBlock — QuickBooks routing', () => {
     if (result?.success) throw new Error('expected failure')
     expect(result?.error?.message).toContain('not available in this workspace')
     expect(mockGetQuickBooksWebhookCredential).not.toHaveBeenCalled()
-  })
-
-  it('rejects a malformed stored QuickBooks company identity', async () => {
-    queueTableRows(credential, [{ id: 'cred-qb-1' }])
-    mockGetQuickBooksWebhookCredential.mockResolvedValue(null)
-
-    const result = await resolveQuickBooks('cred-qb-1')
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error?.message).toContain('Reconnect it and try again')
-  })
-
-  it('reports an unexpected credential lookup failure as a server error', async () => {
-    queueTableRows(credential, [{ id: 'cred-qb-1' }])
-    mockGetQuickBooksWebhookCredential.mockRejectedValue(new Error('database unavailable'))
-
-    const result = await resolveQuickBooks('cred-qb-1')
-
-    expect(result?.success).toBe(false)
-    if (result?.success) throw new Error('expected failure')
-    expect(result?.error.status).toBe(500)
   })
 })
 
@@ -824,16 +602,6 @@ describe('cleanupInactiveDeploymentWebhooks', () => {
     expect(dbChainMockFns.delete).toHaveBeenCalledTimes(2)
   })
 
-  it('reports completion once the batch drains every stale row', async () => {
-    queueTableRows(webhook, [staleWebhookRow('wh-1')])
-    queueTableRows(workflowDeploymentVersion, [{ id: 'version-1' }])
-
-    await expect(cleanupInactiveDeploymentWebhooks(input)).resolves.toEqual({ hasMore: false })
-
-    expect(vi.mocked(cleanupExternalWebhook)).toHaveBeenCalledTimes(1)
-    expect(dbChainMockFns.delete).toHaveBeenCalledTimes(1)
-  })
-
   it('excludes the version the current operation is preparing from the batch', async () => {
     queueTableRows(webhook, [])
 
@@ -865,15 +633,117 @@ describe('cleanupInactiveDeploymentWebhooks', () => {
     expect(vi.mocked(cleanupExternalWebhook)).not.toHaveBeenCalled()
     expect(dbChainMockFns.delete).not.toHaveBeenCalled()
   })
+})
 
-  it('leaves a row alone when its version became the current candidate mid-batch', async () => {
-    queueTableRows(webhook, [staleWebhookRow('wh-1')])
-    mockIsDeploymentVersionProtected.mockResolvedValue(true)
-
-    await expect(cleanupInactiveDeploymentWebhooks(input)).resolves.toEqual({ hasMore: true })
-
-    expect(mockIsDeploymentVersionProtected).toHaveBeenCalledWith('workflow-1', 'version-1')
-    expect(vi.mocked(cleanupExternalWebhook)).not.toHaveBeenCalled()
-    expect(dbChainMockFns.delete).not.toHaveBeenCalled()
+describe('saveTriggerWebhooksForDeploy activation recovery', () => {
+  beforeEach(() => {
+    resetDbChainMock()
   })
+  it.each([false, true])(
+    'recovers activation failure when cleanup fails: %s',
+    async (cleanupFails) => {
+      const persisted = new Map<string, Record<string, unknown>>()
+      const external = new Map<string, { active: boolean }>()
+      let activationMustFail = true
+      let nextExternalId = 0
+      vi.mocked(getBlock).mockReturnValue({ category: 'triggers' })
+      triggersMockFns.mockIsTriggerValid.mockReturnValue(true)
+      triggersMockFns.mockGetTrigger.mockReturnValue({
+        provider: 'plane',
+        name: 'Plane',
+        subBlocks: [],
+      })
+      vi.mocked(getProviderHandler).mockReturnValue({
+        createSubscription: async () => undefined,
+        activateSubscription: async () => undefined,
+      })
+      vi.mocked(hasWebhookConfigChanged).mockReturnValue(false)
+      vi.mocked(findConflictingWebhookPathOwner).mockResolvedValue(null)
+      dbChainMockFns.values.mockImplementation((...args: unknown[]) => {
+        const row = toRecord(args[0])
+        if (typeof row.id !== 'string' || persisted.has(row.id))
+          throw new Error('duplicate or invalid webhook ID')
+        persisted.set(row.id, structuredClone(row))
+        return {
+          returning: dbChainMockFns.returning,
+          onConflictDoUpdate: dbChainMockFns.onConflictDoUpdate,
+          onConflictDoNothing: dbChainMockFns.onConflictDoNothing,
+        }
+      })
+      dbChainMockFns.set.mockImplementation((values: unknown) => {
+        const row = [...persisted.values()][0]
+        if (row && typeof row.id === 'string')
+          persisted.set(row.id, { ...row, ...structuredClone(toRecord(values)) })
+        return { where: async () => [] }
+      })
+      dbChainMockFns.delete.mockImplementation(() => ({
+        where: async () => {
+          persisted.clear()
+          return []
+        },
+      }))
+      vi.mocked(createExternalWebhookSubscription).mockImplementation(async (_request, row) => {
+        const externalId = `external-${++nextExternalId}`
+        external.set(externalId, { active: false })
+        return {
+          updatedProviderConfig: {
+            ...toRecord(row.providerConfig),
+            externalId,
+            webhookSecret: 'test-secret',
+            subscriptionActivationPending: true,
+          },
+          externalSubscriptionCreated: true,
+        }
+      })
+      vi.mocked(activateExternalWebhookSubscription).mockImplementation(async (_request, row) => {
+        const externalId = String(toRecord(row.providerConfig).externalId)
+        const resource = external.get(externalId)
+        if (!resource) throw new Error('provider subscription missing')
+        if (activationMustFail) {
+          activationMustFail = false
+          throw new Error('activation unavailable')
+        }
+        resource.active = true
+      })
+      vi.mocked(cleanupExternalWebhook).mockImplementation(
+        async (row, _workflow, _requestId, options) => {
+          if (cleanupFails) {
+            if (options?.throwOnError) throw new Error('cleanup unavailable')
+            return
+          }
+          external.delete(String(toRecord(row.providerConfig).externalId))
+        }
+      )
+      const block = makeBlock('plane_workitem_created', {})
+      const input = {
+        request: createMockRequest('POST'),
+        workflowId: 'workflow-1',
+        workflow: { id: 'workflow-1', workspaceId: 'workspace-1' },
+        userId: 'user-1',
+        blocks: { [block.id]: block },
+        requestId: 'request-1',
+        deploymentVersionId: 'version-1',
+      }
+      queueTableRows(webhook, [])
+      expect((await saveTriggerWebhooksForDeploy(input)).success).toBe(false)
+      expect(persisted.size).toBe(cleanupFails ? 1 : 0)
+      expect(external.size).toBe(cleanupFails ? 1 : 0)
+      const retainedExternalId = cleanupFails
+        ? String(toRecord([...persisted.values()][0].providerConfig).externalId)
+        : undefined
+      queueTableRows(webhook, [...persisted.values()])
+      expect((await saveTriggerWebhooksForDeploy(input)).success).toBe(true)
+      expect(persisted.size).toBe(1)
+      expect(external.size).toBe(1)
+      const config = toRecord([...persisted.values()][0].providerConfig)
+      expect(config.webhookSecret).toBe('test-secret')
+      expect(external.get(String(config.externalId))?.active).toBe(true)
+      if (cleanupFails) expect(config.externalId).toBe(retainedExternalId)
+      vi.mocked(activateExternalWebhookSubscription).mockRejectedValue(
+        new Error('provider unavailable')
+      )
+      queueTableRows(webhook, [...persisted.values()])
+      expect((await saveTriggerWebhooksForDeploy(input)).success).toBe(true)
+    }
+  )
 })

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
-import { sleep } from '../helpers'
+import { sleep } from '@sim/utils/helpers'
+import { writeStderr } from '#sim-cli/output/io'
 import { buildUrl, REDIRECT_STATUSES, redirectEndpoint, SimApiError } from '../http/client'
 import { identityHeaders } from '../telemetry/client-info'
 
@@ -206,7 +207,7 @@ export async function pollForKey(
         consecutiveTransportFailures >= TRANSPORT_FAILURES_BEFORE_WARNING
       ) {
         warnedAboutTransport = true
-        process.stderr.write(
+        writeStderr(
           `Still waiting: ${endpoint} is not answering the login poll (${(cause as Error).message}). Check the endpoint; retrying until you approve or the login times out.\n`
         )
       }

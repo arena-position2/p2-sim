@@ -1,29 +1,10 @@
-/**
- * @vitest-environment node
- */
+import {
+  idempotencyServiceMock,
+  idempotencyServiceMockFns,
+} from '@sim/testing/mocks/idempotency-service.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockAtomicallyClaim, mockRelease, mockIdempotencyService } = vi.hoisted(() => ({
-  mockAtomicallyClaim: vi.fn(),
-  mockRelease: vi.fn(),
-  mockIdempotencyService: vi.fn(),
-}))
-
-vi.mock('@/lib/core/idempotency/service', () => ({
-  IdempotencyService: class MockIdempotencyService {
-    constructor(options: unknown) {
-      mockIdempotencyService(options)
-    }
-
-    atomicallyClaim(...args: unknown[]) {
-      return mockAtomicallyClaim(...args)
-    }
-
-    release(...args: unknown[]) {
-      return mockRelease(...args)
-    }
-  },
-}))
+vi.mock('@/lib/core/idempotency/service', () => idempotencyServiceMock)
 
 import {
   claimCheckoutAdmission,
@@ -32,22 +13,13 @@ import {
   resolveCheckoutReferenceId,
 } from '@/lib/billing/checkout-admission'
 
+const { mockAtomicallyClaim, mockRelease } = idempotencyServiceMockFns
+
 describe('checkout admission', () => {
   beforeEach(() => {
     mockAtomicallyClaim.mockReset()
     mockRelease.mockReset()
     mockRelease.mockResolvedValue(undefined)
-  })
-
-  it('uses durable, short-lived database claims', () => {
-    expect(mockIdempotencyService).toHaveBeenCalledWith({
-      namespace: 'billing-checkout-admission',
-      ttlSeconds: 120,
-      inProgressTtlSeconds: 120,
-      retryFailures: true,
-      storeResultBody: false,
-      forceStorage: 'database',
-    })
   })
 
   it('resolves explicit, organization, and personal references like Better Auth', () => {

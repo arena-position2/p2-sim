@@ -1,3 +1,4 @@
+import type { Principal } from '@sim/auth/principal'
 import { getErrorMessage } from '@sim/utils/errors'
 import type { AuthorizedWorkspaceUseCaseContext } from '@/lib/core/application'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
@@ -5,11 +6,13 @@ import { isPayloadSizeLimitError } from '@/lib/core/utils/stream-limits'
 import { isSupportedFileType } from '@/lib/file-parsers'
 import { getFileParserErrorCode } from '@/lib/file-parsers/errors'
 import {
-  type ActiveWorkspaceFileContext,
   fetchWorkspaceFileBuffer,
-  getWorkspaceFile,
   type WorkspaceFileRecord,
 } from '@/lib/uploads/contexts/workspace'
+import {
+  getBoundWorkspaceFileSecretProvenance,
+  type WorkspaceFileSecretProvenance,
+} from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
 import {
   formatFileSize,
   getFileExtension,
@@ -17,20 +20,37 @@ import {
   needsRenderedArtifact,
 } from '@/lib/uploads/utils/file-utils'
 import { defineAuthorizedWorkspaceFileUseCase } from '@/lib/workspace-files/application/authorized-workspace-file-use-case'
+import {
+  hasWorkspaceFileDeliveryObserver,
+  reportWorkspaceFileDelivery,
+  requireCopilotWorkspaceFileDeliveryObserver,
+} from '@/lib/workspace-files/application/file-delivery-observer'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
 import { resolveRenderedWorkspaceArtifact } from '@/lib/workspace-files/application/resolve-rendered-workspace-artifact'
-import { resolveActiveWorkspaceFileContext } from '@/lib/workspace-files/application/workspace-file-context'
+import {
+  type ReferencedWorkspaceFileContext,
+  resolveReferencedWorkspaceFileContext,
+} from '@/lib/workspace-files/application/resolve-workspace-file-reference'
 import { parseWorkspaceFileText } from '@/lib/workspace-files/text-extraction'
+import { workspaceFileTextFormat } from '@/lib/workspace-files/text-format'
 import { sliceFileTextLines } from '@/lib/workspace-files/text-lines'
 
 export interface ReadWorkspaceFileTextInput {
-  fileId: string
-  assertedWorkspaceId?: string
+  /** Workspace the reference is resolved in. */
+  workspaceId: string
+  /** File id, or its VFS path: `files/<folder>/<name>`, or `uploads/<name>` for a chat upload. */
+  reference: string
+  /** Internal Mothership upload namespace, absent from public request contracts. */
+  chatId?: string
   maxBytes?: number
   /** First line to return, 1-based. Absent starts at the first line. */
   offset?: number
   /** How many lines to return from `offset`. Absent reads to the end. */
   limit?: number
+  /** Private classification for runtime consumers, omitted from ordinary API reads. */
+  includeSecretProvenance?: boolean
+  /** Internal agent reads can decode plain source files identified by their MIME type. */
+  allowPlainText?: boolean
 }
 
 export interface ReadWorkspaceFileTextResult {
@@ -54,6 +74,7 @@ export interface ReadWorkspaceFileTextResult {
     /** False when extraction was truncated, so `totalLines` is not the file's end. */
     totalLinesExact: boolean
   }
+  secretProvenance?: WorkspaceFileSecretProvenance
 }
 
 /**
@@ -90,15 +111,43 @@ async function executeReadWorkspaceFileText({
 }: AuthorizedWorkspaceUseCaseContext<
   typeof fileOperations.readContent,
   ReadWorkspaceFileTextInput,
-  ActiveWorkspaceFileContext
+  ReferencedWorkspaceFileContext
 >): Promise<ReadWorkspaceFileTextResult> {
   const signal = request?.signal
   signal?.throwIfAborted()
-  const file = await getWorkspaceFile(context.workspaceId, context.fileId, { throwOnError: true })
-  signal?.throwIfAborted()
-  if (!file) throw new OrchestrationError('not_found', 'File not found')
+  requireCopilotWorkspaceFileDeliveryObserver(principal)
+  return extractWorkspaceFileRecordText(context.file, input, principal, signal)
+}
 
-  const extension = getFileExtension(file.name)
+/**
+ * Extracts the text of the bytes a record points at. Version reads pass a record whose key, size,
+ * and type describe a previous version, so both surfaces extract through one path.
+ */
+export async function extractWorkspaceFileRecordText(
+  file: WorkspaceFileRecord,
+  input: Pick<
+    ReadWorkspaceFileTextInput,
+    'maxBytes' | 'offset' | 'limit' | 'allowPlainText' | 'includeSecretProvenance'
+  >,
+  principal: Principal,
+  signal?: AbortSignal,
+  sourceProvenance?: WorkspaceFileSecretProvenance
+): Promise<ReadWorkspaceFileTextResult> {
+  const secretProvenance =
+    sourceProvenance ??
+    (input.includeSecretProvenance || hasWorkspaceFileDeliveryObserver()
+      ? await getBoundWorkspaceFileSecretProvenance(file.workspaceId, {
+          fileId: file.id,
+          key: file.key,
+          context: file.storageContext ?? 'workspace',
+          contentUpdatedAt: file.contentUpdatedAt ?? undefined,
+        })
+      : undefined)
+  await reportWorkspaceFileDelivery(secretProvenance, file.id)
+
+  const extension = input.allowPlainText
+    ? (workspaceFileTextFormat(file) ?? getFileExtension(file.name))
+    : getFileExtension(file.name)
   if (!isSupportedFileType(extension)) {
     throw new OrchestrationError(
       'validation',
@@ -144,6 +193,7 @@ async function executeReadWorkspaceFileText({
     degraded: metadata.degraded === true,
     degradedReason: metadata.degraded === true ? (metadata.warning ?? null) : null,
     byteCount: content.byteLength,
+    ...(input.includeSecretProvenance && secretProvenance ? { secretProvenance } : {}),
     ...(lineRange ? { lineRange } : {}),
   }
 }
@@ -163,7 +213,7 @@ async function executeReadWorkspaceFileText({
  * well formed, it is the stored bytes that cannot become the representation
  * being asked for, and the caller needs to know that retrying will not help.
  */
-async function parseFileText(
+export async function parseFileText(
   content: Buffer,
   extension: string,
   fileName: string,
@@ -199,9 +249,17 @@ async function parseFileText(
  * Runs on `files.read_content` unchanged: extracting text reads exactly the
  * bytes that operation already authorizes, and turning them into text grants
  * no further reach. No audit is projected, matching the existing content read.
+ *
+ * The file is addressed by reference rather than id so a chat upload — which no
+ * listing shows — is readable by the `uploads/<name>` path its upload notice
+ * names, and any file by the `files/…` path `glob` prints.
  */
 export const readWorkspaceFileText = defineAuthorizedWorkspaceFileUseCase({
   operation: fileOperations.readContent,
-  resolveContext: ({ input }) => resolveActiveWorkspaceFileContext(input),
+  resolveContext: ({ principal, input }) =>
+    resolveReferencedWorkspaceFileContext(principal, input, {
+      includeChatUploads: true,
+      includeOwnedFiles: true,
+    }),
   execute: executeReadWorkspaceFileText,
 })

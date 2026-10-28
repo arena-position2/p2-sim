@@ -2,8 +2,13 @@ import { AuditAction, AuditResourceType } from '@sim/audit'
 import { db } from '@sim/db'
 import { credential, slackApp, slackSearchInstallation } from '@sim/db/schema'
 import { generateId } from '@sim/utils/id'
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
+import {
+  loadOrganizationSlackMemberApps,
+  lockOrganizationSlackApp,
+} from '@/lib/credential-groups/organization-slack-app'
+import { acquireAdvisoryXactLock } from '@/lib/db/advisory-locks'
 import {
   SlackSearchConfigurationError,
   SlackSearchProviderError,
@@ -24,6 +29,7 @@ import {
   readSharedSlackSearchApp,
   requireSlackSearchAppAvailable,
 } from '@/lib/slack-search/shared-app'
+import { getSharedSlackSearchAppConfiguration } from '@/lib/slack-search/shared-app-env'
 
 interface OrganizationInput {
   organizationId: string
@@ -42,7 +48,7 @@ export const listSlackSearchInstallations = defineAuthorizedKnowledgeUseCase({
     resolveKnowledgeOrganizationContext(input),
   async execute({ context }) {
     await requireOrganizationSearchAvailable(context.organizationId)
-    const [installations, bots, sharedApp] = await Promise.all([
+    const [installations, bots, sharedApp, memberApps] = await Promise.all([
       db
         .select({
           id: slackSearchInstallation.id,
@@ -78,7 +84,16 @@ export const listSlackSearchInstallations = defineAuthorizedKnowledgeUseCase({
         )
         .limit(101),
       readSharedSlackSearchApp(context.organizationId),
+      loadOrganizationSlackMemberApps(context.organizationId),
     ])
+    const memberAppIds = memberApps.flatMap((row) =>
+      row.configuration.slack ? [row.configuration.slack.appId] : []
+    )
+    /** Any custom member app blocks the shared-app path, so it wins over a shared one. */
+    let memberAppKind: 'shared' | 'custom' | null = null
+    if (memberAppIds.some((appId) => !getSharedSlackSearchAppConfiguration(appId)))
+      memberAppKind = 'custom'
+    else if (memberAppIds.length) memberAppKind = 'shared'
     if (installations.length > 100 || bots.length > 100)
       throw new OrchestrationError(
         'validation',
@@ -86,6 +101,7 @@ export const listSlackSearchInstallations = defineAuthorizedKnowledgeUseCase({
       )
     return {
       sharedAppAvailable: Boolean(sharedApp),
+      memberAppKind,
       installations: installations.map(({ credentialVersion, ...installation }) => {
         const bot = bots.find((bot) => bot.id === installation.credentialId)
         const shared = installation.appKind === 'shared'
@@ -133,10 +149,9 @@ export const configureSlackSearchInstallation = defineAuthorizedKnowledgeUseCase
       }
     }
     return db.transaction(async (tx) => {
+      await lockOrganizationSlackApp(tx, context.organizationId)
       if (identity)
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtextextended(${`slack-search:${identity.teamId}`}, 0))`
-        )
+        await acquireAdvisoryXactLock(tx, 'slack_search', `slack-search:${identity.teamId}`)
       const [current] = await tx
         .select()
         .from(credential)
@@ -256,15 +271,19 @@ export const removeSlackSearchInstallation = defineAuthorizedKnowledgeUseCase({
   operation: knowledgeOperations.removeSlackInstallation,
   resolveContext: ({ input }: { input: RemoveInput }) => resolveKnowledgeOrganizationContext(input),
   async execute({ input, context }) {
-    const [removed] = await db
-      .delete(slackSearchInstallation)
-      .where(
-        and(
-          eq(slackSearchInstallation.id, input.installationId),
-          eq(slackSearchInstallation.organizationId, context.organizationId)
+    const removed = await db.transaction(async (tx) => {
+      await lockOrganizationSlackApp(tx, context.organizationId)
+      const [row] = await tx
+        .delete(slackSearchInstallation)
+        .where(
+          and(
+            eq(slackSearchInstallation.id, input.installationId),
+            eq(slackSearchInstallation.organizationId, context.organizationId)
+          )
         )
-      )
-      .returning({ id: slackSearchInstallation.id })
+        .returning({ id: slackSearchInstallation.id })
+      return row
+    })
     if (!removed) throw new OrchestrationError('not_found', 'Slack Search installation not found')
     return removed
   },

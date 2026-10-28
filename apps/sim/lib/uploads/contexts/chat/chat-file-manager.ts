@@ -1,12 +1,16 @@
 import { createLogger } from '@sim/logger'
+import { isPayloadSizeLimitError } from '@/lib/core/utils/stream-limits'
 import { processExecutionFiles } from '@/lib/execution/files'
-import { generateFileId } from '@/lib/uploads/contexts/execution/utils'
+import { uploadExecutionFile } from '@/lib/uploads/contexts/execution/execution-file-manager'
+import { downloadFile } from '@/lib/uploads/core/storage-service'
+import type { StorageContext } from '@/lib/uploads/shared/types'
 import { isInternalFileUrl, parseInternalFileUrl } from '@/lib/uploads/utils/file-utils'
 import type { UserFile } from '@/executor/types'
 
 const logger = createLogger('ChatFileManager')
 
-const DURABLE_CHAT_REFERENCE_CONTEXTS = new Set(['agent-generated-images', 'workspace'])
+/** Same ceiling as execution-file uploads. A reused image is copied into the run, so it must fit. */
+const MAX_REUSED_IMAGE_BYTES = 20 * 1024 * 1024
 
 export interface ChatFile {
   data?: string // Legacy field - base64-encoded file data (data:mime;base64,...) or raw base64
@@ -31,36 +35,99 @@ function toAbsoluteInternalUrl(fileUrl: string): string {
   return `${baseUrl}${fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`}`
 }
 
-/**
- * Reuse an already-stored internal file by key instead of copying into execution storage.
- */
-function resolveDurableInternalFileReference(
-  fileUrl: string,
-  name: string,
-  mime: string
-): UserFile | null {
-  if (!isInternalFileUrl(fileUrl)) {
-    return null
-  }
-
+function internalStorageKey(fileUrl: string): string | null {
+  if (!isInternalFileUrl(fileUrl)) return null
   try {
-    const { key, context } = parseInternalFileUrl(fileUrl)
-    if (!DURABLE_CHAT_REFERENCE_CONTEXTS.has(context)) {
-      return null
-    }
-
-    return {
-      id: generateFileId(),
-      name,
-      size: 1,
-      type: mime,
-      url: toAbsoluteInternalUrl(fileUrl),
-      key,
-      context,
-    }
+    return parseInternalFileUrl(fileUrl).key
   } catch {
     return null
   }
+}
+
+function hasSafeKeyParts(parts: string[]): boolean {
+  return parts.every((part) => part.length > 0 && part !== '.' && part !== '..')
+}
+
+/**
+ * Storage key for an image this workflow already produced.
+ *
+ * Chat runs as a public principal, so a stored key from another file is refused later.
+ * Two stores are allowed: `agent-generated-images/{workflowId}/...`, and an image file
+ * under `execution/{workspaceId}/{workflowId}/...` from an earlier run of this same
+ * workflow. Image Generator saves the picture the chat shows into that execution path
+ * (`generated-image.png`). A later edit starts a new execution, and the previous key
+ * is not this run's file — copying it here is what lets the edit use the picture.
+ * The key prefix is the check; a `context` query on the URL is ignored.
+ */
+function reusableWorkflowImageKey(
+  fileUrl: string,
+  executionContext: ChatExecutionContext
+): { key: string; context: StorageContext } | null {
+  const { workflowId, workspaceId } = executionContext
+  if (!workflowId || workflowId.includes('/') || !workspaceId || workspaceId.includes('/')) {
+    return null
+  }
+
+  const key = internalStorageKey(fileUrl)
+  if (!key) return null
+
+  const parts = key.split('/')
+  if (!hasSafeKeyParts(parts)) return null
+
+  if (parts.length >= 4 && parts[0] === 'agent-generated-images' && parts[1] === workflowId) {
+    return { key, context: 'agent-generated-images' }
+  }
+
+  const fileName = parts[parts.length - 1] ?? ''
+  if (
+    parts.length >= 5 &&
+    parts[0] === 'execution' &&
+    parts[1] === workspaceId &&
+    parts[2] === workflowId &&
+    /\.(png|jpe?g|gif|webp)$/i.test(fileName)
+  ) {
+    return { key, context: 'execution' }
+  }
+
+  return null
+}
+
+async function copyReusableWorkflowImage(
+  key: string,
+  context: StorageContext,
+  name: string,
+  mime: string,
+  executionContext: ChatExecutionContext,
+  userId?: string
+): Promise<UserFile> {
+  let buffer: Buffer
+  try {
+    buffer = await downloadFile({
+      key,
+      context,
+      maxBytes: MAX_REUSED_IMAGE_BYTES,
+    })
+  } catch (error) {
+    if (isPayloadSizeLimitError(error)) {
+      throw new Error(`File "${name}" exceeds the maximum size limit of 20MB`)
+    }
+    throw error
+  }
+
+  if (buffer.length > MAX_REUSED_IMAGE_BYTES) {
+    const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+    throw new Error(
+      `File "${name}" exceeds the maximum size limit of 20MB (actual size: ${fileSizeMB}MB)`
+    )
+  }
+
+  return uploadExecutionFile(
+    executionContext,
+    buffer,
+    name,
+    mime || 'application/octet-stream',
+    userId
+  )
 }
 
 /**
@@ -69,10 +136,10 @@ function resolveDurableInternalFileReference(
  * Handles three input formats:
  * 1. Base64 dataUrl - File content encoded as data URL (uploaded from client)
  * 2. Direct URL - Pass-through URL to existing file (already uploaded)
- * 3. Internal serve URL to durable storage - Reused by key without re-upload
+ * 3. Internal serve URL for an image this workflow already stored - copied into this execution
  *
- * Fresh uploads are stored in the execution context. Reused generated or workspace
- * images keep their original storage keys for chat history.
+ * Fresh uploads and reused generated images are stored under the current execution.
+ * Any other stored reference is left for the execution-scope check to refuse.
  *
  * @param files Array of chat file attachments
  * @param executionContext Execution context for temporary storage
@@ -94,7 +161,7 @@ export async function processChatFiles(
     }
   )
 
-  const durableReferences: UserFile[] = []
+  const copiedFiles: UserFile[] = []
   const transformedFiles: Array<{
     type: 'file' | 'url'
     data: string
@@ -109,16 +176,21 @@ export async function processChatFiles(
       directUrl ||
       (inlineData && isInternalFileUrl(inlineData) ? toAbsoluteInternalUrl(inlineData) : '')
 
-    if (internalUrl) {
-      const durableReference = resolveDurableInternalFileReference(
-        internalUrl,
-        file.name,
-        file.type
+    const reusableImage = internalUrl
+      ? reusableWorkflowImageKey(internalUrl, executionContext)
+      : null
+    if (reusableImage) {
+      copiedFiles.push(
+        await copyReusableWorkflowImage(
+          reusableImage.key,
+          reusableImage.context,
+          file.name,
+          file.type,
+          executionContext,
+          userId
+        )
       )
-      if (durableReference) {
-        durableReferences.push(durableReference)
-        continue
-      }
+      continue
     }
 
     if (directUrl) {
@@ -154,7 +226,7 @@ export async function processChatFiles(
       ? await processExecutionFiles(transformedFiles, executionContext, requestId, userId)
       : []
 
-  const userFiles = [...durableReferences, ...uploadedFiles]
+  const userFiles = [...copiedFiles, ...uploadedFiles]
 
   logger.info(`Successfully processed ${userFiles.length} chat files`, {
     requestId,

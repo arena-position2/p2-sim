@@ -85,6 +85,46 @@ describe('chat store message ordering', () => {
     })
   })
 
+  it('keeps stored file previews across reload and drops transient ones', () => {
+    const partialize = useChatStore.persist.getOptions().partialize
+    if (!partialize) {
+      throw new Error('chat store persist partialize is missing')
+    }
+
+    const persisted = partialize({
+      ...useChatStore.getState(),
+      messages: [
+        {
+          id: 'msg-file',
+          content: 'see attached',
+          workflowId: 'wf-1',
+          type: 'user',
+          timestamp: '2026-10-16T00:00:00.000Z',
+          attachments: [
+            {
+              id: 'stored',
+              filename: 'upload.png',
+              media_type: 'image/png',
+              size: 12,
+              previewUrl: '/api/files/serve/execution/ws/wf/run/upload.png',
+            },
+            {
+              id: 'local',
+              filename: 'local.png',
+              media_type: 'image/png',
+              size: 4,
+              previewUrl: 'blob:http://localhost/local',
+            },
+          ],
+        },
+      ],
+    })
+
+    const attachments = persisted.messages[0]?.attachments
+    expect(attachments?.[0]?.previewUrl).toBe('/api/files/serve/execution/ws/wf/run/upload.png')
+    expect(attachments?.[1]?.previewUrl).toBeUndefined()
+  })
+
   it('resets persisted identity and transient UI state', () => {
     useChatStore.setState({
       isChatOpen: true,

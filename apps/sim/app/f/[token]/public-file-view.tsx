@@ -5,6 +5,7 @@ import { Chip, OverflowText } from '@sim/emcn'
 import { Download } from '@sim/emcn/icons'
 import Image from 'next/image'
 import Link from 'next/link'
+import { SITE_URL } from '@/lib/core/utils/urls'
 import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
 import { DesktopTitleBarLane } from '@/app/_shell/desktop-title-bar'
 import arenaLogo from '@/app/(interfaces)/chat/components/message/components/ArenaLogo.svg'
@@ -73,7 +74,13 @@ export function PublicFileView({
         <div className='flex min-w-0 items-center gap-3'>
           {!brand.logoUrl && (
             <>
-              <Link href='/' aria-label='Arena home' className='flex shrink-0 items-center'>
+              <Link
+                href={SITE_URL}
+                target='_blank'
+                rel='noopener noreferrer'
+                aria-label='Arena home'
+                className='flex shrink-0 items-center'
+              >
                 <Image src={arenaLogo} alt='Arena' width={30} height={30} />
               </Link>
               <div className='h-5 w-px shrink-0 bg-[var(--border)]' />
@@ -82,7 +89,7 @@ export function PublicFileView({
           <div className='flex min-w-0 flex-col'>
             <OverflowText label={name} className='text-[var(--text-body)] text-sm' />
             {provenance ? (
-              <span className='truncate text-[12px] text-[var(--text-muted)]'>{provenance}</span>
+              <span className='truncate text-[var(--text-muted)] text-caption'>{provenance}</span>
             ) : null}
           </div>
         </div>

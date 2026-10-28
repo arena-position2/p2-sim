@@ -35,7 +35,7 @@ import {
 import { reconcileOrganizationSeats } from '@/lib/billing/organizations/seats'
 import { isEnterprise } from '@/lib/billing/plan-helpers'
 import { isBillingEnabled } from '@/lib/core/config/env-flags'
-import type { DbOrTx } from '@/lib/db/types'
+import type { DbOrTx, DbTransaction } from '@/lib/db/types'
 import { acquireInvitationMutationLocks } from '@/lib/invitations/locks'
 import { createWorkspace } from '@/lib/workspaces/create-workspace'
 import {
@@ -130,7 +130,7 @@ async function acquireClientOrganizationLock(tx: DbOrTx, clientId: string): Prom
 }
 
 async function attachOwnedWorkspacesInTx(
-  tx: DbOrTx,
+  tx: DbTransaction,
   params: { userId: string; organizationId: string }
 ): Promise<{ attachedWorkspaceIds: string[]; usageLimitUserIds: string[] }> {
   const { userId, organizationId } = params

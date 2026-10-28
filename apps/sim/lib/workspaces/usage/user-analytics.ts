@@ -2,13 +2,15 @@ import { dbReplica } from '@sim/db'
 import {
   copilotChats,
   copilotRuns,
+  member,
   usageLog,
   workflow,
   workflowExecutionLogs,
+  workspace,
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
-import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, notInArray, or, type SQL, sql } from 'drizzle-orm'
 import type { UserUsageAnalytics } from '@/lib/api/contracts/user-usage'
 import type { UsageChargeTypeValue } from '@/lib/api/contracts/workspace-usage'
 import type { UsageLogSource } from '@/lib/billing/core/usage-log'
@@ -36,10 +38,13 @@ import {
   ledgerCostSelect,
   ledgerOccurredAt,
   ledgerPeriodBounds,
+  listExternalApiCostBuckets,
+  listExternalApiUsage,
   mapBySourceBucketRow,
   mapExpensiveCopilotChatRows,
   mapExpensiveWorkflowRows,
   mapUsageMetrics,
+  mergeExternalApiCostBuckets,
   normalizeBucketKey,
   parseActorType,
   parseChargeType,
@@ -177,6 +182,7 @@ function emptyUserAnalytics(
       count: 0,
       usage: { ...EMPTY_USAGE_METRICS },
     })),
+    byApi: [],
     byChargeType: [],
     attribution: {
       missingChatId: { billableCost: 0, rawCost: 0, count: 0 },
@@ -293,6 +299,9 @@ export async function getUserUsageAnalytics(
       executionWorkspaceCondition,
       eq(workflowExecutionLogs.actorUserId, userId)
     )
+    if (!chatMembershipScope || !expensiveWorkflowExecutionScope) {
+      throw new Error('Missing usage analytics scope')
+    }
     const useHourlyBuckets = shouldUseHourlyTimeBuckets(options, period)
     const bucketExpr = timeBucketExpr(useHourlyBuckets)
     const executionBucket = executionBucketExpr(useHourlyBuckets)
@@ -798,6 +807,35 @@ export async function getUserUsageAnalytics(
         )
       )
 
+    const [homeOrganizations, scopedOrganizations] = await Promise.all([
+      dbReplica
+        .selectDistinct({ organizationId: member.organizationId })
+        .from(member)
+        .where(eq(member.userId, userId)),
+      dbReplica
+        .selectDistinct({ organizationId: workspace.organizationId })
+        .from(workspace)
+        .where(inArray(workspace.id, workspaceIds)),
+    ])
+    const billedOrganizationIds = scopedOrganizations.flatMap((row) =>
+      row.organizationId ? [row.organizationId] : []
+    )
+    const externalApiQuery =
+      billedOrganizationIds.length > 0
+        ? {
+            payerCondition: and(
+              eq(usageLog.actorUserId, userId),
+              inArray(usageLog.billingEntityId, billedOrganizationIds)
+            ) as SQL,
+            homeOrganizationIds: homeOrganizations.map((row) => row.organizationId),
+            period,
+          }
+        : null
+    const [byApi, externalApiBuckets] = await Promise.all([
+      externalApiQuery ? listExternalApiUsage(externalApiQuery) : [],
+      externalApiQuery ? listExternalApiCostBuckets({ ...externalApiQuery, useHourlyBuckets }) : [],
+    ])
+
     const embeddedToolSplit = computeEmbeddedToolVirtualSplit(modelMetadataRows)
 
     const bySource = sortByBillableCostDesc(
@@ -933,6 +971,7 @@ export async function getUserUsageAnalytics(
     }
 
     timeSeries.sort((a, b) => a.bucketStart.localeCompare(b.bucketStart))
+    mergeExternalApiCostBuckets(timeSeries, externalApiBuckets)
 
     const densifiedTimeSeries = densifyTimeSeries(timeSeries, period, useHourlyBuckets)
 
@@ -1043,6 +1082,7 @@ export async function getUserUsageAnalytics(
         usage: summaryUsage,
       },
       byWorkspace,
+      byApi,
       byChargeType,
       attribution: {
         missingChatId: {
@@ -1202,15 +1242,26 @@ export async function getUserUsageAnalytics(
       timeSeries: densifiedTimeSeries,
       lineage: {
         roots: lineageRootRows
-          .filter(
-            (row): row is typeof row & { rootExecutionId: string } => row.rootExecutionId !== null
+          .flatMap(
+            (
+              row
+            ): Array<{
+              rootExecutionId: string
+              executionCount: number
+              inclusiveBillableCost: number
+              inclusiveRawCost: number
+            }> => {
+              if (typeof row.rootExecutionId !== 'string') return []
+              return [
+                {
+                  rootExecutionId: row.rootExecutionId,
+                  executionCount: parseIntMetric(row.executionCount),
+                  inclusiveBillableCost: parseDecimal(row.inclusiveBillableCost),
+                  inclusiveRawCost: parseDecimal(row.inclusiveRawCost),
+                },
+              ]
+            }
           )
-          .map((row) => ({
-            rootExecutionId: row.rootExecutionId,
-            executionCount: parseIntMetric(row.executionCount),
-            inclusiveBillableCost: parseDecimal(row.inclusiveBillableCost),
-            inclusiveRawCost: parseDecimal(row.inclusiveRawCost),
-          }))
           .sort((a, b) => b.inclusiveBillableCost - a.inclusiveBillableCost)
           .slice(0, 25),
         drillDown,

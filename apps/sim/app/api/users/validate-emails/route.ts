@@ -45,8 +45,8 @@ export async function POST(request: NextRequest) {
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      logger.warn(`[${requestId}] Invalid request body`, { errors: error.errors })
-      return NextResponse.json({ error: 'Invalid request', details: error.errors }, { status: 400 })
+      logger.warn(`[${requestId}] Invalid request body`, { errors: error.issues })
+      return NextResponse.json({ error: 'Invalid request', details: error.issues }, { status: 400 })
     }
 
     logger.error(`[${requestId}] Error validating emails`, error)

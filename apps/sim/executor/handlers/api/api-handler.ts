@@ -1,11 +1,9 @@
-import { createLogger } from '@sim/logger'
+import { adoptToolFailure } from '@/lib/core/errors/failure-log'
 import { BlockType, HTTP } from '@/executor/constants'
 import type { BlockHandler, ExecutionContext } from '@/executor/types'
 import type { SerializedBlock } from '@/serializer/types'
 import { executeTool } from '@/tools'
 import { getTool } from '@/tools/utils'
-
-const logger = createLogger('ApiBlockHandler')
 
 /**
  * Handler for API blocks that make external HTTP requests.
@@ -78,6 +76,7 @@ export class ApiBlockHandler implements BlockHandler {
             triggerType: ctx.metadata?.triggerType,
             enforceCredentialAccess: ctx.enforceCredentialAccess,
             callChain: ctx.callChain,
+            blockId: block.id,
           },
         },
         { executionContext: ctx }
@@ -131,7 +130,7 @@ export class ApiBlockHandler implements BlockHandler {
           timestamp: new Date().toISOString(),
         })
 
-        throw error
+        throw adoptToolFailure(error, result)
       }
 
       return result.output

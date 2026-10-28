@@ -9,6 +9,7 @@ import {
   ChipModalError,
   ChipModalField,
   ChipModalHeader,
+  toast,
 } from '@sim/emcn'
 import { Search } from '@sim/emcn/icons'
 import dynamic from 'next/dynamic'
@@ -23,6 +24,7 @@ import {
 import { organizationRoutes } from '@/lib/navigation/paths'
 import { getSearchConnectionLabels } from '@/lib/sim-search/connection-labels'
 import { getConnectorAccessAvailability, SEARCH_SOURCE_TYPES } from '@/lib/sim-search/connectors'
+import { defaultLiveSearchPolicy } from '@/lib/sim-search/live/policy-schema'
 import {
   managedSourceParam,
   searchSetupAccessParam,
@@ -39,6 +41,7 @@ import {
 } from '@/app/workspace/[workspaceId]/settings/components/settings-resource-row'
 import { CONNECTOR_META_REGISTRY } from '@/connectors/registry'
 import { usePrepareSearchSource, useSearchIndex } from '@/hooks/queries/kb/connectors'
+import { useUpdateSearchIntegration } from '@/hooks/queries/search-integrations'
 import { usePermissionConfig } from '@/hooks/use-permission-config'
 
 const AddConnectorModal = dynamic(
@@ -90,6 +93,7 @@ export function SearchSourceSetup({
   const attemptedPreparation = useRef<string | null>(null)
   const router = useRouter()
   const prepare = usePrepareSearchSource()
+  const updateSearchIntegration = useUpdateSearchIntegration()
   const { mutate: prepareSource, isPending: preparing } = prepare
   const selectedMeta = selectedType ? CONNECTOR_META_REGISTRY[selectedType] : undefined
   const redirectPersonalSetup = Boolean(
@@ -97,7 +101,8 @@ export function SearchSourceSetup({
       selectedMeta &&
       setup['source-access'] !== 'members' &&
       !selectedMeta.mirrorsSourceAcls &&
-      selectedType !== 'slack'
+      selectedType !== 'slack' &&
+      selectedType !== 'github'
   )
   const redirectManagement = canAdmin && managedSource !== null && selectedType === null
   const { organizationId } = scope
@@ -128,7 +133,7 @@ export function SearchSourceSetup({
   }
   const failedQuery = index.isError ? index : null
   const initialMode = (type: string) =>
-    setup['source-access'] === 'members' || type === 'slack'
+    type === 'github' || type === 'slack' || setup['source-access'] === 'members'
       ? ('members' as const)
       : ('admin' as const)
 
@@ -192,9 +197,7 @@ export function SearchSourceSetup({
   ) {
     if (selectedType && session?.user?.id) {
       const accessMode = initialMode(selectedType)
-      const setupMode = !(selectedMeta?.mirrorsSourceAcls && selectedMeta.auth.mode === 'oauth')
-        ? accessMode
-        : 'choose'
+      const setupMode = accessMode
       return (
         <AddConnectorModal
           key={`${session.user.id}:${knowledgeBaseId}:${selectedType}:${setupMode}:${accessMode}`}
@@ -208,14 +211,37 @@ export function SearchSourceSetup({
           initialConnectorType={selectedType}
           initialAccessMode={accessMode}
           lockConnectorType
-          lockedAccessMode={setupMode === 'choose' ? undefined : setupMode}
+          lockedAccessMode={setupMode}
           setupDraftKey={`${session.user.id}:${resourceScopeKey(scope)}:${knowledgeBaseId}:${selectedType}:${setupMode}`}
           onConnectorTypeChange={(type) =>
             void setSelectedType(type !== null ? searchSetupParam.parser.parse(type) : null)
           }
-          onCreated={async (_type, connector) => {
+          onCreated={async (type, connector) => {
             await setSelectedType(null)
-            router.push(organizationRoutes(scope.organizationId).searchSource(connector.id))
+            const destination = organizationRoutes(scope.organizationId).searchSource(connector.id)
+            if (accessMode === 'admin' && type !== 'gitlab') {
+              updateSearchIntegration.mutate(
+                {
+                  organizationId: scope.organizationId,
+                  connectorType: type,
+                  approved: true,
+                  policy: {
+                    ...defaultLiveSearchPolicy(type),
+                    accessMode: 'service_account',
+                    sourceId: connector.id,
+                  },
+                },
+                {
+                  onSuccess: () => router.push(destination),
+                  onError: (error) => {
+                    toast.error(`Source added but search is not ready: ${error.message}`)
+                    router.push(destination)
+                  },
+                }
+              )
+            } else {
+              router.push(destination)
+            }
           }}
         />
       )
@@ -235,7 +261,10 @@ export function SearchSourceSetup({
   const normalizedSearch = search.trim().toLowerCase()
   const visibleTypes = SEARCH_SOURCE_TYPES.filter(
     ([type, meta]) =>
-      (setup['source-access'] === 'members' || meta.mirrorsSourceAcls || type === 'slack') &&
+      (setup['source-access'] === 'members' ||
+        meta.mirrorsSourceAcls ||
+        type === 'slack' ||
+        type === 'github') &&
       `${meta.name} ${meta.description}`.toLowerCase().includes(normalizedSearch)
   )
 
@@ -276,12 +305,12 @@ export function SearchSourceSetup({
           </ChipModalField>
         ) : isIntegrationAvailabilityLoading ? (
           <ChipModalField type='custom' title='Sources'>
-            <SettingsEmptyState variant='inline'>Loading sources…</SettingsEmptyState>
+            <SettingsEmptyState variant='inline'>Loading sources</SettingsEmptyState>
           </ChipModalField>
         ) : managedSource ? (
           <ChipModalField type='custom' title='Source'>
             <SettingsEmptyState variant='inline'>
-              {index.isPending ? 'Loading source…' : 'This source is no longer available.'}
+              {index.isPending ? 'Loading source' : 'This source is no longer available.'}
             </SettingsEmptyState>
           </ChipModalField>
         ) : selectedType ? (
@@ -306,7 +335,7 @@ export function SearchSourceSetup({
                 variant='inline'
               />
             ) : (
-              <SettingsEmptyState variant='inline'>Loading source setup…</SettingsEmptyState>
+              <SettingsEmptyState variant='inline'>Loading source setup</SettingsEmptyState>
             )}
           </ChipModalField>
         ) : (
@@ -314,7 +343,7 @@ export function SearchSourceSetup({
             <ChipModalField type='custom' title='Find a source' submitOnEnter={false}>
               <ChipInput
                 icon={Search}
-                placeholder='Find a source…'
+                placeholder='Find a source'
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -332,8 +361,7 @@ export function SearchSourceSetup({
                       isIntegrationAvailabilityReady,
                     }
                   )
-                  const available =
-                    setup['source-access'] === 'members' || type === 'slack' ? members : central
+                  const available = initialMode(type) === 'members' ? members : central
                   return (
                     <SettingsResourceRow
                       key={type}

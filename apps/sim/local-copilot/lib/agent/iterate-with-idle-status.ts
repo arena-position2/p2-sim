@@ -113,17 +113,14 @@ export async function* iterateWithIdleStatus<T>(options: {
       const winner = await Promise.race([
         nextItem.then((result) => ({ side: 'source' as const, result })),
         nextGap.then((result) => ({ side: 'idle' as const, result })),
-        !aiConsumed
-          ? aiReady.then(() => ({ side: 'ai' as const }))
-          : new Promise<'never'>(() => {}),
+        !aiConsumed ? aiReady.then(() => ({ side: 'ai' as const })) : new Promise<never>(() => {}),
       ])
-
-      if (winner === 'never') continue
 
       if (winner.side === 'ai') {
         aiConsumed = true
-        if (!pendingAiBatch || pendingAiBatch.length === 0) continue
-        messages = pendingAiBatch
+        const aiMessages = (pendingAiBatch as string[] | null) ?? []
+        if (aiMessages.length === 0) continue
+        messages = aiMessages
         index = 0
         gapController.abort()
         yield { type: 'status', message: messages[index % messages.length]! }

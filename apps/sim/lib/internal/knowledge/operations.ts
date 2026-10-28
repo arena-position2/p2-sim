@@ -621,7 +621,7 @@ export async function searchOperation(
   const body = {
     success: true,
     data: {
-      results: result.results.map((item) => ({
+      results: result.results.map((item, index) => ({
         documentId: item.documentId,
         documentName: item.documentName,
         sourceUrl: item.sourceUrl,
@@ -629,6 +629,8 @@ export async function searchOperation(
         chunkIndex: item.chunkIndex,
         metadata: item.metadata,
         similarity: item.similarity,
+        rankScore: item.rankScore ?? item.similarity,
+        rank: item.rank ?? index + 1,
         ...(item.rerankerScore !== undefined ? { rerankerScore: item.rerankerScore } : {}),
         knowledgeBaseId: item.knowledgeBaseId,
         chunkId: item.chunkId ?? item.embeddingId,

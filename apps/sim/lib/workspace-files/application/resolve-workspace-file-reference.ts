@@ -2,14 +2,16 @@ import type { Principal } from '@sim/auth/principal'
 import type { OperationUseCase, WorkspaceOperation } from '@/lib/core/application'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
-  fetchWorkspaceFileBuffer,
+  type ActiveWorkspaceFileContext,
   getWorkspaceFileByName,
   loadActiveWorkspaceFileContext,
   resolveWorkspaceFileReference as resolveStoredWorkspaceFileReference,
+  type WorkspaceFileLookupOptions,
   type WorkspaceFileRecord,
 } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
 import { defineAuthorizedWorkspaceFileUseCase } from '@/lib/workspace-files/application/authorized-workspace-file-use-case'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
+import { assertOwnedFileAccess } from '@/lib/workspace-files/application/workspace-file-context'
 
 export interface ResolveWorkspaceFileReferenceInput {
   principal: Principal
@@ -18,45 +20,84 @@ export interface ResolveWorkspaceFileReferenceInput {
   reference: string
   /** Resolve `reference` as an exact file name in this folder instead of as a path or id. */
   folderId?: string | null
+  /** Trusted internal chat scope; never accepted from public file contracts. */
+  chatId?: string
 }
 
 interface WorkspaceFileReferenceInput {
   workspaceId: string
   reference: string
   folderId?: string | null
+  /** Trusted internal caller scope; public route contracts do not expose it. */
+  chatId?: string
 }
 
 interface WorkspaceFileReferenceResult {
   file: WorkspaceFileRecord
 }
 
-interface WorkspaceFileReferenceReadInput extends WorkspaceFileReferenceInput {
-  maxBytes: number
+/** Canonical file context plus the record the reference resolved to. */
+export interface ReferencedWorkspaceFileContext extends ActiveWorkspaceFileContext {
+  file: WorkspaceFileRecord
 }
 
-async function resolveWorkspaceFileReferenceContext({
-  input,
-}: {
-  input: WorkspaceFileReferenceInput
-}) {
+/**
+ * Reads may reach a chat upload through its explicit `uploads/<name>` reference (or its
+ * own id) and a test file through `tests/<name>.test.js`; every other file operation resolves workspace files only, so no
+ * move, rename, delete, or share can land on any of them.
+ */
+const READ_CONTENT_LOOKUP: WorkspaceFileLookupOptions = {
+  includeChatUploads: true,
+  includeOwnedFiles: true,
+}
+
+/** Content writes reach test files; no other write can. */
+const CONTENT_WRITE_LOOKUP: WorkspaceFileLookupOptions = {
+  includeOwnedFiles: true,
+}
+
+/**
+ * Resolves a VFS reference to its canonical authorization context, carrying the resolved
+ * record so the caller needs no second load. Chat uploads are reachable only on opt-in.
+ */
+export async function resolveReferencedWorkspaceFileContext(
+  principal: Principal,
+  input: WorkspaceFileReferenceInput,
+  options?: WorkspaceFileLookupOptions
+): Promise<ReferencedWorkspaceFileContext> {
+  const chatId =
+    (principal.kind === 'delegated' && principal.serviceId === 'copilot'
+      ? principal.resourceScope?.chatId
+      : undefined) ?? input.chatId
+  const lookup = chatId === undefined ? options : { ...options, chatId }
   const file =
     input.folderId === undefined
-      ? await resolveStoredWorkspaceFileReference(input.workspaceId, input.reference)
+      ? await resolveStoredWorkspaceFileReference(input.workspaceId, input.reference, lookup)
       : await getWorkspaceFileByName(input.workspaceId, input.reference, {
           folderId: input.folderId,
         })
   if (!file) throw new OrchestrationError('not_found', 'File not found')
-  const canonical = await loadActiveWorkspaceFileContext(file.id)
+  const canonical = await loadActiveWorkspaceFileContext(file.id, options)
   if (!canonical || canonical.workspaceId !== input.workspaceId) {
     throw new OrchestrationError('not_found', 'File not found')
   }
+  await assertOwnedFileAccess(principal, canonical)
   return { ...canonical, file }
 }
 
-function defineWorkspaceFileReferenceUseCase<const O extends WorkspaceOperation>(operation: O) {
+function defineWorkspaceFileReferenceUseCase<const O extends WorkspaceOperation>(
+  operation: O,
+  options?: WorkspaceFileLookupOptions
+) {
   return defineAuthorizedWorkspaceFileUseCase({
     operation,
-    resolveContext: resolveWorkspaceFileReferenceContext,
+    resolveContext: ({
+      principal,
+      input,
+    }: {
+      principal: Principal
+      input: WorkspaceFileReferenceInput
+    }) => resolveReferencedWorkspaceFileContext(principal, input, options),
     async execute({ context }): Promise<WorkspaceFileReferenceResult> {
       return { file: context.file }
     },
@@ -70,11 +111,15 @@ type WorkspaceFileReferenceUseCase = OperationUseCase<
 >
 
 const workspaceFileReferenceUseCases = {
-  [fileOperations.readContent.id]: defineWorkspaceFileReferenceUseCase(fileOperations.readContent),
+  [fileOperations.readContent.id]: defineWorkspaceFileReferenceUseCase(
+    fileOperations.readContent,
+    READ_CONTENT_LOOKUP
+  ),
   [fileOperations.create.id]: defineWorkspaceFileReferenceUseCase(fileOperations.create),
   [fileOperations.rename.id]: defineWorkspaceFileReferenceUseCase(fileOperations.rename),
   [fileOperations.updateContent.id]: defineWorkspaceFileReferenceUseCase(
-    fileOperations.updateContent
+    fileOperations.updateContent,
+    CONTENT_WRITE_LOOKUP
   ),
   [fileOperations.move.id]: defineWorkspaceFileReferenceUseCase(fileOperations.move),
   [fileOperations.delete.id]: defineWorkspaceFileReferenceUseCase(fileOperations.delete),
@@ -98,47 +143,17 @@ export async function resolveWorkspaceFileReference({
   workspaceId,
   reference,
   folderId,
+  chatId,
 }: ResolveWorkspaceFileReferenceInput): Promise<WorkspaceFileRecord> {
   const useCase = getWorkspaceFileReferenceUseCase(operation)
   const result = await useCase.execute({
     principal,
-    input: { workspaceId, reference, ...(folderId === undefined ? {} : { folderId }) },
-  })
-  return result.file
-}
-
-export interface ReadWorkspaceFileReferenceInput
-  extends Omit<ResolveWorkspaceFileReferenceInput, 'operation'> {
-  maxBytes: number
-}
-
-const readWorkspaceFileReferenceUseCase = defineAuthorizedWorkspaceFileUseCase({
-  operation: fileOperations.readContent,
-  resolveContext: ({ input }: { input: WorkspaceFileReferenceReadInput }) =>
-    resolveWorkspaceFileReferenceContext({ input }),
-  async execute({ input, context }): Promise<{ file: WorkspaceFileRecord; content: Buffer }> {
-    return {
-      file: context.file,
-      content: await fetchWorkspaceFileBuffer(context.file, { maxBytes: input.maxBytes }),
-    }
-  },
-})
-
-/** Resolve one trusted workspace-file reference and read it under the shared file policy. */
-export async function readWorkspaceFileReference({
-  principal,
-  workspaceId,
-  reference,
-  folderId,
-  maxBytes,
-}: ReadWorkspaceFileReferenceInput): Promise<{ file: WorkspaceFileRecord; content: Buffer }> {
-  return readWorkspaceFileReferenceUseCase.execute({
-    principal,
     input: {
       workspaceId,
       reference,
-      maxBytes,
       ...(folderId === undefined ? {} : { folderId }),
+      ...(chatId === undefined ? {} : { chatId }),
     },
   })
+  return result.file
 }

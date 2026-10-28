@@ -44,7 +44,7 @@ export const scrapeTool: ToolConfig<ScrapeParams, ScrapeResponse> = {
     },
   },
 
-  hosting: firecrawlHosting(),
+  hosting: firecrawlHosting<ScrapeParams>(),
 
   request: {
     modelInput: {

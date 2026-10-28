@@ -1,6 +1,7 @@
 import type { MirroredDocumentAcl } from '@/lib/knowledge/access/types'
 import type { ConnectorAccessMode } from '@/lib/knowledge/connectors/access-modes'
 import type { ConnectorPermissionConfigCapability } from '@/lib/knowledge/connectors/permission-config'
+import type { ImageExtractionDeclaration } from '@/lib/knowledge/documents/image-extraction-policy'
 import type { OAuthService } from '@/lib/oauth/types'
 import type { SelectorKey } from '@/lib/selectors/manifest'
 import type { ConnectorSourceReasonState } from '@/connectors/source-error'
@@ -205,6 +206,8 @@ export interface ExternalListingFailures {
     status?: number
     reasons: string[]
     reasonState?: ConnectorSourceReasonState
+    /** When a standing account condition was first observed, bounding how long it is retained. */
+    since?: string
   }[]
 }
 
@@ -237,6 +240,16 @@ export type ExternalChange =
   | { kind: 'upsert'; externalId: string; document: ExternalDocument }
   | { kind: 'removed'; externalId: string }
 
+/**
+ * One page of the containers a caller can still read, as external-ID prefixes.
+ * Each listed prefix proves access on its own; `nextCursor` continues the
+ * listing and is absent on its last page.
+ */
+export interface AccessibleScopePage {
+  prefixes: string[]
+  nextCursor?: string
+}
+
 export interface ExternalChangeList {
   changes: ExternalChange[]
   /**
@@ -255,6 +268,8 @@ export const SYNC_SKIP_REASONS = [
   'sync_in_progress',
   'sync_superseded',
   'connector_deleted_during_sync',
+  'credential_missing',
+  'credential_revoked',
 ] as const
 
 export type SyncSkipReason = (typeof SYNC_SKIP_REASONS)[number]
@@ -371,6 +386,12 @@ export interface ConnectorMeta {
    * knowledge-base connectors ignore these defaults.
    */
   searchDefaultSourceConfig?: Readonly<Record<string, string>>
+  /**
+   * Settings written into every new connector when the request leaves them unset,
+   * from any surface. Existing connectors are never back-filled, so an unset value
+   * keeps meaning what it meant before the default existed.
+   */
+  defaultSourceConfig?: Readonly<Record<string, string>>
   /** Unique connector identifier, e.g. 'confluence', 'google_drive', 'notion' */
   id: string
   /** Human-readable name, e.g. 'Confluence', 'Google Drive' */
@@ -408,6 +429,14 @@ export interface ConnectorMeta {
    * picked up. Only the deliberate full resync pays this re-index cost.
    */
   rehydrateOnFullSync?: boolean
+
+  /**
+   * Declared when this connector's image documents go through the vision
+   * extractor instead of OCR, gated by the named source setting. When the
+   * setting stops indexing images, the sync removes the images already indexed,
+   * as a setting change rather than a source deletion.
+   */
+  imageExtraction?: ImageExtractionDeclaration
 
   /**
    * Tag definitions this connector populates. Shown in the add-connector modal
@@ -555,6 +584,34 @@ export interface ConnectorConfig extends ConnectorMeta {
   isChangeCursorInvalidError?: (error: unknown) => boolean
   /** Whether a saved full-listing cursor expired and must restart from a new generation. */
   isListingCursorInvalidError?: (error: unknown) => boolean
+
+  /**
+   * Whether `candidate` describes the content `stored` already holds, for a
+   * connector whose hashes are not compared by equality alone. `current` means
+   * the stored document is up to date; `equivalent` means it holds the same
+   * content under an older hash, which is advanced without re-indexing; `stale`
+   * means the document must be refreshed. Consulted for listing hashes, which
+   * may identify a source version without its content, and for hydrated hashes.
+   * Without it, hashes match only when identical.
+   */
+  matchContentHash?: (candidate: string, stored: string) => 'current' | 'equivalent' | 'stale'
+
+  /**
+   * External-ID prefixes of everything the caller can still read, when access is
+   * granted to whole containers (a Slack channel) rather than item by item. A
+   * members-mode crawl renews the caller's observations under these prefixes
+   * without relisting each item, so access stays fresh while a large listing is
+   * still in progress, and lapses for containers the caller has lost. Paged, so
+   * a renewal can resume where an earlier run stopped; an expired cursor is
+   * recognised by {@link ConnectorConfig.isListingCursorInvalidError}. Only
+   * meaningful alongside {@link ConnectorMeta.permissionScopedListing}.
+   */
+  listAccessibleScopes?: (
+    accessToken: string,
+    sourceConfig: Record<string, unknown>,
+    cursor?: string,
+    syncContext?: Record<string, unknown>
+  ) => Promise<AccessibleScopePage>
 
   /**
    * Opens the external directory whose groups this connector's mirrored ACLs

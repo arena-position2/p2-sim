@@ -31,7 +31,7 @@ import {
   mapToThinkingBudget,
   mapToThinkingLevel,
 } from '@/providers/google/utils'
-import { isGemini3Model } from '@/providers/utils'
+import { isGemini3OrLaterModel } from '@/providers/utils'
 
 const logger = createLogger('LocalCopilotGeminiProvider')
 
@@ -553,7 +553,7 @@ export async function* streamGoogleGenAiChatCompletion(params: {
 
   const thinkingConfig: ThinkingConfig | undefined = (() => {
     if (!thinkingLevel || thinkingLevel === 'none') return undefined
-    if (isGemini3Model(model)) {
+    if (isGemini3OrLaterModel(model)) {
       return {
         includeThoughts: true,
         thinkingLevel: mapToThinkingLevel(thinkingLevel),

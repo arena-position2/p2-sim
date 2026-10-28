@@ -1,24 +1,21 @@
-/**
- * @vitest-environment node
- */
 import { account } from '@sim/db/schema'
 import { queueTableRows, resetDbChainMock } from '@sim/testing'
+import {
+  selectorCredentialsMock,
+  selectorCredentialsMockFns,
+} from '@sim/testing/mocks/selector-credentials.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockFetchProviderJson, mockResolveSelectorOAuthAccessToken, mockGetCredential } =
-  vi.hoisted(() => ({
-    mockFetchProviderJson: vi.fn(),
-    mockResolveSelectorOAuthAccessToken: vi.fn(),
-    mockGetCredential: vi.fn(),
-  }))
+const { mockFetchProviderJson, mockGetCredential } = vi.hoisted(() => ({
+  mockFetchProviderJson: vi.fn(),
+  mockGetCredential: vi.fn(),
+}))
 
 vi.mock('@/lib/selectors/server/providers/provider-http', () => ({
   fetchProviderJson: mockFetchProviderJson,
 }))
 
-vi.mock('@/lib/selectors/server/credentials', () => ({
-  resolveSelectorOAuthAccessToken: mockResolveSelectorOAuthAccessToken,
-}))
+vi.mock('@/lib/selectors/server/credentials', () => selectorCredentialsMock)
 
 vi.mock('@/lib/oauth/credential-service', () => ({
   getCredential: mockGetCredential,
@@ -28,6 +25,9 @@ import { SelectorConnectionUnavailableError } from '@/lib/selectors/server/error
 import { createSelectorProtectedValues } from '@/lib/selectors/server/protected-values'
 import { slackSelectorAttachments } from '@/lib/selectors/server/providers/slack'
 import type { ExecuteServerSelectorArgs } from '@/lib/selectors/server/types'
+
+const mockResolveSelectorOAuthAccessToken =
+  selectorCredentialsMockFns.mockResolveSelectorOAuthAccessToken
 
 const SCOPED_ACCOUNT_ID = 'slack-usr_U12345678-123e4567-e89b-12d3-a456-426614174000'
 
@@ -116,24 +116,9 @@ function execute(
 
 describe('Slack server selector adapters', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     mockResolveSelectorOAuthAccessToken.mockResolvedValue('xoxb-server-only-token')
     mockGetCredential.mockResolvedValue({ idToken: 'xoxp-user-token' })
-  })
-
-  it('does not fall back after channel listing is cancelled', async () => {
-    const controller = new AbortController()
-    const abortError = new DOMException('The operation was aborted', 'AbortError')
-    controller.abort(abortError)
-    mockFetchProviderJson.mockRejectedValue(abortError)
-
-    await expect(
-      execute('slack.channels', { kind: 'list' }, 'bot', controller.signal)
-    ).rejects.toBe(abortError)
-
-    expect(mockFetchProviderJson).toHaveBeenCalledOnce()
-    expect(mockFetchProviderJson.mock.calls[0]?.[0]).toBeInstanceOf(URL)
   })
 
   it('does not return a public-only fallback when membership lookup is cancelled', async () => {

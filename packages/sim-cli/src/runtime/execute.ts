@@ -1,16 +1,18 @@
 import { getErrorMessage } from '@sim/utils/errors'
 import type { Command } from 'commander'
+import { writeStderr } from '#sim-cli/output/io'
+import { styles } from '#sim-cli/output/presentation'
 import {
   assertWorkspaceOperationOutcome,
   readWorkspaceOperation,
   waitWorkspaceOperation,
   workspaceWaitTimeout,
 } from '../commands/protocol/workspace-operation-wait'
-import { clientFrom } from '../context'
 import type { CommandSpec } from '../contract/types'
 import type { GetWorkspaceOperationResponse, V2OperationName } from '../generated/v2-api'
 import { assertCursorAdvances, pageProgress, SimApiError, type V2Page } from '../http/client'
 import { safeOneLine } from '../output/render'
+import { connect } from './called-operations'
 import { camel } from './derive'
 import { DEFAULT_PAGE_SIZE, defaultListLimit } from './options'
 import { warnRenamedFlag } from './renamed'
@@ -99,7 +101,7 @@ export function runFailureMessage(operation: V2OperationName, payload: unknown):
  * `sim tables batch-delete --table-ids '["tbl_typo"]'` indistinguishable from a
  * real deletion in a CI step.
  *
- * Only a total miss fails. A partial success still exits `0`: the payload names
+ * Most checks fail only a total miss. A partial success still exits `0`: the payload names
  * every item that did not make it, and failing the process there would break
  * every caller that legitimately sweeps a list containing already-gone items.
  */
@@ -117,6 +119,12 @@ type BulkOutcomeCheck = (
 ) => string | null
 
 export const BULK_OUTCOME_CHECKS: Readonly<Partial<Record<V2OperationName, BulkOutcomeCheck>>> = {
+  /** Invitation batches explicitly promise success only when every recipient succeeds. */
+  createWorkspaceInvitations: (payload) => {
+    const failed = lengthOf(payload.failed)
+    if (failed === 0 && payload.success !== false) return null
+    return `${failed > 0 ? `Invitation batch failed for ${failed} ${failed === 1 ? 'recipient' : 'recipients'}.` : 'Invitation batch failed.'} Successful results remain committed; inspect failed recipients before retrying.`
+  },
   bulkDeleteFiles: (payload, body) => {
     if (countOf((payload.deletedItems as { files?: unknown } | undefined)?.files) > 0) return null
     const requested = lengthOf(body?.fileIds)
@@ -193,6 +201,53 @@ function countOf(value: unknown): number {
 /** The length of an array field, or `0` when the payload omits it. */
 function lengthOf(value: unknown): number {
   return Array.isArray(value) ? value.length : 0
+}
+
+/**
+ * One line of context a successful result deserves, on stderr, in every format.
+ *
+ * `workflows chat publish` defaults `authType` to `public`, so a caller who
+ * never typed `--auth-type` has just put a chat on the open internet, and the
+ * result — `authType: public` among a dozen other fields of the record — does
+ * not make that leap out. The note is printed whether the default or an
+ * explicit `--auth-type public` chose it: the exposure is the same either way.
+ * stderr, so `sim workflows chat publish … --output json | jq` still reads
+ * exactly the record; every format gets it because a JSON consumer is the one
+ * least likely to look at the record.
+ *
+ * Judged on the response first and the request second: the server states what
+ * it stored, and a body that omitted the field landed on the server's default.
+ */
+const RESULT_NOTES: Readonly<
+  Partial<
+    Record<
+      V2OperationName,
+      (payload: Record<string, unknown>, body: Record<string, unknown> | undefined) => string | null
+    >
+  >
+> = {
+  replaceWorkflowChatDeployment: (payload, body) => {
+    const authType = payload.authType ?? body?.authType ?? 'public'
+    return authType === 'public'
+      ? 'note: auth type is public — anyone with the link can chat; pass --auth-type password|email to restrict it.'
+      : null
+  },
+}
+
+/** Writes the operation's result note to stderr, when it has one and the result calls for it. */
+function writeResultNote(
+  operation: V2OperationName,
+  payload: unknown,
+  body: Record<string, unknown> | undefined
+): void {
+  const note = RESULT_NOTES[operation]
+  if (!note) return
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {}
+  const message = note(record, body)
+  if (message) writeStderr(styles().dim(`${message}\n`))
 }
 
 /** The one-line explanation of a bulk call that changed nothing, or `null`. */
@@ -377,7 +432,7 @@ export async function executeOperation(
     throw new SimApiError('--all-workspaces cannot be combined with --workspace', 0)
   }
 
-  const { client, profile } = clientFrom(host)
+  const { client, profile } = connect(host)
   const hasWorkspaceField = Boolean(
     (operationSpec.query && PROFILE_INJECTED_FIELD in operationSpec.query) ||
       (operationSpec.body && PROFILE_INJECTED_FIELD in operationSpec.body)
@@ -402,7 +457,7 @@ export async function executeOperation(
    */
   const pagedLimit = paging ? readPagedLimit(requestFlags.limit, operation) : 0
   const requestWorkspaceId = needsWorkspace ? client.requireWorkspace() : profile.workspaceId
-  const request = buildRequest(operation, positional, requestFlags, requestWorkspaceId)
+  const request = await buildRequest(operation, positional, requestFlags, requestWorkspaceId)
 
   if (commandSpec.workspaceOperation) {
     if (!WORKSPACE_OPERATION_KINDS[operation])
@@ -444,8 +499,8 @@ export async function executeOperation(
       do {
         const pageSize = Math.min(DEFAULT_PAGE_SIZE, limit - rows.length)
         const pageLimit = 'limit' in (operationSpec[paging] ?? {}) ? { limit: pageSize } : {}
-        const page: V2Page<unknown> = await client.request(request.path, {
-          method: operationSpec.method,
+        const page: V2Page<unknown> = await client.request(operation, {
+          params: request.params,
           headers: request.headers,
           query: paging === 'query' ? { ...request.query, ...pageLimit, cursor } : request.query,
           body:
@@ -474,8 +529,8 @@ export async function executeOperation(
 
   let result: { data?: unknown }
   try {
-    result = await client.request<{ data?: unknown }>(request.path, {
-      method: operationSpec.method,
+    result = await client.request<{ data?: unknown }>(operation, {
+      params: request.params,
       headers: request.headers,
       query: request.query,
       body: request.body,
@@ -562,6 +617,7 @@ export async function executeOperation(
     // its own truncation there, and unwrapping `data` discarded it.
     result
   )
+  writeResultNote(operation, payload, request.body)
 
   // Printed first, then failed, for the reason `followRun` gives: the envelope
   // carries the block outputs that explain *why* the run failed, and exiting

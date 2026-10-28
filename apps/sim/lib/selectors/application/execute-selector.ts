@@ -1,3 +1,4 @@
+import { requirePrincipalSubjectUserId } from '@sim/auth/principal'
 import { createLogger } from '@sim/logger'
 import {
   type ExecuteSelectorRequest,
@@ -9,9 +10,11 @@ import type { OperationUseCase } from '@/lib/core/application/operation'
 import { requireOrganizationMembership } from '@/lib/core/application/organization-authorization'
 import { withResourceOutboundScope } from '@/lib/core/network/resource-scope.server'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
-import { authorizePersonalSearchSetup } from '@/lib/knowledge/application/personal-search-account'
 import { type CredentialAuditRequest, recordCredentialAccess } from '@/lib/oauth/token-resolution'
-import { selectorOperations } from '@/lib/selectors/application/operations'
+import {
+  SELECTOR_DELEGATION_AUDIENCE,
+  selectorOperations,
+} from '@/lib/selectors/application/operations'
 import {
   resolveSelectorApplicationContext,
   type SelectorApplicationContext,
@@ -41,8 +44,6 @@ const logger = createLogger('ExecuteSelector')
 export interface ExecuteSelectorInput extends ExecuteSelectorRequest {
   signal?: AbortSignal
   auditRequest?: CredentialAuditRequest
-  /** Set only by the personal Search setup use case; excluded from the public selector contract. */
-  personalSearchSetup?: 'jira' | 'confluence'
 }
 
 function validateAuthorizedInput(
@@ -144,7 +145,7 @@ async function executeAuthorizedSelector(args: {
       selectorKey: args.input.selectorKey as ServerSelectorKey,
       context: args.input.context,
       request: args.input.request,
-      requesterUserId: args.principal.userId,
+      requesterUserId: requirePrincipalSubjectUserId(args.principal),
       workspaceId: args.context.workspaceId,
       protectedValues,
     })
@@ -168,7 +169,6 @@ async function executeAuthorizedSelector(args: {
             scope: args.input.scope,
             workspaceId: args.context.workspaceId,
             organizationId,
-            personalSearchSetup: args.input.personalSearchSetup,
             policy: attachment.credential,
             protectedValues,
             references: resolved.references,
@@ -199,9 +199,7 @@ async function executeAuthorizedSelector(args: {
     })
 
     const credentialAccess = credential?.access
-    const credentialResourceId = credential?.personalSearchSetup
-      ? credential.suppliedId
-      : credentialAccess?.resolvedCredentialId
+    const credentialResourceId = credentialAccess?.resolvedCredentialId
     let credentialUseRecorded = false
     const recordCredentialUse =
       attachment.auditCredentialUse && credentialResourceId
@@ -209,7 +207,7 @@ async function executeAuthorizedSelector(args: {
             if (credentialUseRecorded) return
             credentialUseRecorded = true
             recordCredentialAccess({
-              actorId: args.principal.userId,
+              actorId: requirePrincipalSubjectUserId(args.principal),
               workspaceId: args.context.workspaceId ?? null,
               resourceId: credentialResourceId,
               providerId: credential?.providerId ?? providerId,
@@ -230,7 +228,7 @@ async function executeAuthorizedSelector(args: {
       workspaceId: args.context.workspaceId,
       organizationId,
       principal: args.principal,
-      requesterUserId: args.principal.userId,
+      requesterUserId: requirePrincipalSubjectUserId(args.principal),
       credential,
       references: resolved.references,
       signal: args.input.signal,
@@ -326,7 +324,9 @@ const executeWorkspaceSelector = defineAuthorizedWorkspaceUseCase<
     if (context.workspaceId === undefined) throw new SelectorContextUnavailableError()
     return context
   },
-  authorizationOptions: {},
+  authorizationOptions: {
+    delegation: { audience: SELECTOR_DELEGATION_AUDIENCE, isWithinScope: () => true },
+  },
   authorizeResource: ({ input, context }) => validateAuthorizedInput(input, context),
   execute: executeAuthorizedSelector,
 })
@@ -338,6 +338,7 @@ export const executeSelector: OperationUseCase<
   SelectorExecutionResult
 > = {
   operation: selectorOperations.execute,
+  delegationAudience: executeWorkspaceSelector.delegationAudience,
   async execute(args) {
     args = {
       ...args,
@@ -348,25 +349,15 @@ export const executeSelector: OperationUseCase<
       },
     }
     if (args.input.scope.kind !== 'organization') {
-      if (args.input.personalSearchSetup) throw new SelectorContextUnavailableError()
       return executeWorkspaceSelector.execute(args)
     }
     if (args.principal.kind !== 'session') throw new SelectorContextUnavailableError()
-    if (args.input.personalSearchSetup) {
-      const selectorKey =
-        args.input.personalSearchSetup === 'jira' ? 'jira.projectKeys' : 'confluence.spaces'
-      if (args.input.selectorKey !== selectorKey) throw new SelectorContextUnavailableError()
-      await authorizePersonalSearchSetup(args.principal, {
-        organizationId: args.input.scope.organizationId,
-        connectorType: args.input.personalSearchSetup,
-      })
-    } else
-      await requireOrganizationMembership(
-        args.principal,
-        args.input.scope.organizationId,
-        'admin',
-        'knowledge.use'
-      )
+    await requireOrganizationMembership(
+      args.principal,
+      args.input.scope.organizationId,
+      'admin',
+      'knowledge.use'
+    )
     const context = await resolveSelectorApplicationContext({
       selectorKey: args.input.selectorKey as ServerSelectorKey,
       scope: args.input.scope,

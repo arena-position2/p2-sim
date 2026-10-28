@@ -1,6 +1,6 @@
 'use client'
 
-import { type ComponentProps, memo, useCallback, useRef, useState } from 'react'
+import { type ComponentProps, memo, useRef, useState } from 'react'
 import { Chip, cn, scrollFadeAttributes, scrollFadeClass, useScrollEdges } from '@sim/emcn'
 import { PanelLeft } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
@@ -16,10 +16,7 @@ import {
   OrganizationHeader,
   WorkspacesSection,
 } from '@/app/o/[organizationId]/components/organization-sidebar/components'
-import {
-  useCollapsedTooltips,
-  useOrganizationChats,
-} from '@/app/o/[organizationId]/components/organization-sidebar/hooks'
+import { useOrganizationChats } from '@/app/o/[organizationId]/components/organization-sidebar/hooks'
 import { buildOrganizationNavItems } from '@/app/o/[organizationId]/components/organization-sidebar/navigation'
 import { useOrganizationContext } from '@/app/o/[organizationId]/providers/organization-provider'
 import { OrganizationSettingsSidebar } from '@/app/o/[organizationId]/settings/organization-settings-sidebar'
@@ -40,8 +37,9 @@ import {
   SIDEBAR_SECTION_GAP_CLASS,
 } from '@/app/workspace/[workspaceId]/w/components/sidebar/constants'
 import { useSidebarResize } from '@/app/workspace/[workspaceId]/w/components/sidebar/hooks'
+import { isSidebarBackgroundClick } from '@/app/workspace/[workspaceId]/w/components/sidebar/utils'
 import { useContextMenu } from '@/hooks/use-context-menu'
-import { useSidebarStore } from '@/stores/sidebar/store'
+import { useFolderStore } from '@/stores/folders/store'
 
 const logger = createLogger('OrganizationSidebar')
 
@@ -72,7 +70,7 @@ function OrganizationChats({ organizationId, ...props }: OrganizationChatsProps)
  * the chrome through {@link useSidebarChrome}.
  */
 export const OrganizationSidebar = memo(function OrganizationSidebar() {
-  const { isCollapsed: railCollapsed, isPeeking } = useSidebarChrome()
+  const { isCollapsed: railCollapsed, isPeeking, onToggle: toggleCollapsed } = useSidebarChrome()
   /** The peek card always renders the expanded layout, whatever the rail's state. */
   const isCollapsed = railCollapsed && !isPeeking
 
@@ -81,17 +79,18 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
 
   const pathname = usePathname()
   const posthog = usePostHog()
-  const { organization, viewer, searchAccess } = useOrganizationContext()
-  const toggleCollapsed = useSidebarStore((state) => state.toggleCollapsed)
+  const { organization, viewer, searchAccess, mothershipAvailable, canBuild } =
+    useOrganizationContext()
   const { handlePointerDown } = useSidebarResize()
-  const showCollapsedTooltips = useCollapsedTooltips(isCollapsed)
+  const showCollapsedTooltips = isCollapsed
   const scrollEdges = useScrollEdges(scrollContainerRef, {
     contentRef: scrollContentRef,
     enabled: !isCollapsed,
   })
 
   const isMac = isMacPlatform()
-  const navItems = buildOrganizationNavItems(organization.id, searchAccess.memberScoped)
+  const canUseHome = mothershipAvailable && (canBuild || searchAccess.memberScoped)
+  const navItems = buildOrganizationNavItems(organization.id, searchAccess.memberScoped, canUseHome)
   const settingsPath = organizationRoutes(organization.id).settings
   const isSettings = pathname === settingsPath || pathname?.startsWith(`${settingsPath}/`)
 
@@ -105,13 +104,10 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
     closeMenu: closeHrefMenu,
   } = useContextMenu()
 
-  const handleHrefContextMenu = useCallback(
-    (e: React.MouseEvent, href: string) => {
-      setMenuHref(href)
-      openHrefMenu(e)
-    },
-    [openHrefMenu]
-  )
+  const handleHrefContextMenu = (e: React.MouseEvent, href: string) => {
+    setMenuHref(href)
+    openHrefMenu(e)
+  }
 
   const handleHrefMenuClose = () => {
     closeHrefMenu()
@@ -148,6 +144,11 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
     }
   }
 
+  const handleSidebarClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!isSidebarBackgroundClick(event)) return
+    useFolderStore.getState().clearChatSelection()
+  }
+
   useRegisterGlobalCommands(() =>
     createCommands([
       {
@@ -165,6 +166,7 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
         className='group/rail sidebar-container relative h-full overflow-hidden bg-[var(--surface-1)] [&_.group.cursor-pointer]:duration-0'
         data-collapsed={isCollapsed || undefined}
         aria-label='Organization sidebar'
+        onClick={handleSidebarClick}
       >
         <div className='flex h-full flex-col'>
           {/* The peek card already sits below the lane; reserving it again doubles the offset. */}
@@ -191,7 +193,7 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
             <div
               inert={isCollapsed}
               className={cn(
-                'flex h-[30px] items-center gap-[1px] overflow-hidden',
+                'flex h-[30px] items-center gap-[1px] overflow-hidden max-md:hidden',
                 isCollapsed
                   ? 'w-0 opacity-0'
                   : 'w-[32px] [[data-sim-desktop-title-bar=inset]_&]:w-0'
@@ -208,7 +210,10 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
                   aria-label='Collapse sidebar'
                   onClick={toggleCollapsed}
                   tabIndex={isCollapsed ? -1 : undefined}
-                  className={cn(DRAG_EXEMPT_CLASS, '[[data-sim-desktop-title-bar=inset]_&]:hidden')}
+                  className={cn(
+                    DRAG_EXEMPT_CLASS,
+                    'max-md:hidden [[data-sim-desktop-title-bar=inset]_&]:hidden'
+                  )}
                 />
               </SidebarTooltip>
             </div>
@@ -267,7 +272,7 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
                     isCollapsed={isCollapsed}
                     pathname={pathname}
                   />
-                  {searchAccess.memberScoped && (
+                  {canUseHome && (
                     <OrganizationChats
                       key={organization.id}
                       organizationId={organization.id}
@@ -306,7 +311,7 @@ export const OrganizationSidebar = memo(function OrganizationSidebar() {
       {!isPeeking && (
         <div
           className={cn(
-            'absolute top-0 right-0 bottom-0 z-20 w-[8px] translate-x-1/2',
+            'absolute top-0 right-0 bottom-0 z-20 hidden w-[8px] translate-x-1/2 md:block',
             isCollapsed ? 'cursor-e-resize' : 'cursor-ew-resize'
           )}
           onPointerDown={isCollapsed ? undefined : handlePointerDown}

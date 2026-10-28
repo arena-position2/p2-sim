@@ -3,7 +3,6 @@
 import { type ComponentType, useRef } from 'react'
 import {
   Chip,
-  ChipConfirmModal,
   ChipTag,
   chipContentIconClass,
   chipVariants,
@@ -23,7 +22,9 @@ import {
   type StandaloneSettingsPlane,
 } from '@/components/settings/navigation'
 import { SettingsIntentLink } from '@/components/settings/settings-intent-link'
-import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
+import { usePendingSettingsSelection } from '@/components/settings/use-pending-settings-selection'
+import { APP_ENTRY_PATH, LANDING_HREF } from '@/lib/navigation/paths'
+import { popSettingsReturnUrl } from '@/lib/navigation/settings-return'
 import arenaLogo from '@/app/(interfaces)/chat/components/message/components/ArenaLogo.svg'
 import { SidebarSection } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/sidebar-section'
 import { SidebarTooltip } from '@/app/workspace/[workspaceId]/w/components/sidebar/components/sidebar-tooltip'
@@ -35,12 +36,6 @@ import {
   SIDEBAR_SECTION_GAP_CLASS,
 } from '@/app/workspace/[workspaceId]/w/components/sidebar/constants'
 import { useSettingsDirtyStore } from '@/stores/settings/dirty/store'
-
-/**
- * The marketing landing page. `?home` is required: the proxy bounces a
- * signed-in user off `/` to the app entry unless the param is present.
- */
-const LANDING_HREF = '/?home'
 
 interface SettingsNavigationGroup {
   key: string
@@ -92,11 +87,10 @@ export function SettingsSidebar<Section extends SettingsSection>({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const scrollContentRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
+  const { activeSection: selectedSection, navigateToSection } =
+    usePendingSettingsSelection(activeSection)
 
   const requestLeave = useSettingsDirtyStore((state) => state.requestLeave)
-  const confirmLeave = useSettingsDirtyStore((state) => state.confirmLeave)
-  const cancelLeave = useSettingsDirtyStore((state) => state.cancelLeave)
-  const pendingLeave = useSettingsDirtyStore((state) => state.pendingLeave)
   const scrollEdges = useScrollEdges(scrollContainerRef, {
     contentRef: scrollContentRef,
     enabled: !isCollapsed,
@@ -132,7 +126,7 @@ export function SettingsSidebar<Section extends SettingsSection>({
               fullWidth
               leftIcon={ChevronLeft}
               className={SIDEBAR_RAIL_CHIP_CLASS}
-              onClick={() => requestLeave(() => router.push(backHref))}
+              onClick={() => requestLeave(() => router.push(popSettingsReturnUrl(backHref)))}
             >
               <span className='sidebar-collapse-hide'>Back</span>
             </Chip>
@@ -168,7 +162,7 @@ export function SettingsSidebar<Section extends SettingsSection>({
                 <div className={cn(SIDEBAR_ITEM_GAP_CLASS, 'flex flex-col px-2')}>
                   {group.items.map((item) => {
                     const Icon = item.icon
-                    const active = activeSection === item.id
+                    const active = selectedSection === item.id
                     const href = hrefForSection(item.id)
                     return (
                       <SidebarTooltip
@@ -177,6 +171,7 @@ export function SettingsSidebar<Section extends SettingsSection>({
                         enabled={showCollapsedTooltips}
                       >
                         <SettingsIntentLink
+                          data-settings-navigation='managed'
                           href={href}
                           replace
                           scroll={false}
@@ -193,10 +188,13 @@ export function SettingsSidebar<Section extends SettingsSection>({
                               event.preventDefault()
                               return
                             }
-                            const { isDirty, navigationBlocked } = useSettingsDirtyStore.getState()
-                            if (!isDirty && !navigationBlocked) return
                             event.preventDefault()
-                            requestLeave(() => router.replace(href, { scroll: false }))
+                            const { isDirty, navigationBlocked } = useSettingsDirtyStore.getState()
+                            if (!isDirty && !navigationBlocked) {
+                              navigateToSection(item.id, href)
+                              return
+                            }
+                            requestLeave(() => navigateToSection(item.id, href))
                           }}
                         >
                           <Icon className={chipContentIconClass} />
@@ -247,16 +245,6 @@ export function SettingsSidebar<Section extends SettingsSection>({
             ))}
         </div>
       </div>
-
-      <ChipConfirmModal
-        open={pendingLeave !== null}
-        onOpenChange={(open) => !open && cancelLeave()}
-        srTitle='Unsaved changes'
-        title='Unsaved changes'
-        text='You have unsaved changes. Are you sure you want to discard them?'
-        dismissLabel='Keep editing'
-        confirm={{ label: 'Discard changes', onClick: confirmLeave }}
-      />
     </>
   )
 }

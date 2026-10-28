@@ -46,7 +46,7 @@ interface ApproveAgentAccessRequestsVariables {
   approvedBy: string
 }
 
-export function useApproveAgentAccessRequests(workspaceId?: string) {
+export function useApproveAgentAccessRequests() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({ accessIds, status, approvedBy }: ApproveAgentAccessRequestsVariables) => {
@@ -59,9 +59,7 @@ export function useApproveAgentAccessRequests(workspaceId?: string) {
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({
-        queryKey: workspaceId
-          ? agentAccessRequestKeys.list(workspaceId)
-          : agentAccessRequestKeys.lists(),
+        queryKey: agentAccessRequestKeys.lists(),
       })
     },
   })

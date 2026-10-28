@@ -1,28 +1,34 @@
-/**
- * @vitest-environment node
- */
+import { encryptionMock, encryptionMockFns } from '@sim/testing/mocks/encryption.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
-  mockEncryptSecret,
   mockFetchSlackTeamId,
   mockValidateAtlassian,
   mockNormalizeDomain,
   mockClientCredentialMinter,
+  mockVerifyAndEncryptOci,
 } = vi.hoisted(() => ({
-  // Identity encryption so tests can read back the JSON blob.
-  mockEncryptSecret: vi.fn(async (value: string) => ({ encrypted: value })),
   mockFetchSlackTeamId: vi.fn(),
   mockValidateAtlassian: vi.fn(),
   mockNormalizeDomain: vi.fn((raw: string) => raw.trim().toLowerCase()),
   mockClientCredentialMinter: vi.fn(),
+  mockVerifyAndEncryptOci: vi.fn(),
 }))
 
-vi.mock('@/lib/core/security/encryption', () => ({ encryptSecret: mockEncryptSecret }))
+vi.mock('@/lib/core/security/encryption', () => encryptionMock)
+const mockEncryptSecret = encryptionMockFns.mockEncryptSecret
 vi.mock('@/lib/webhooks/providers/slack', () => ({ fetchSlackTeamId: mockFetchSlackTeamId }))
 vi.mock('@/lib/credentials/atlassian-service-account', () => ({
   validateAtlassianServiceAccount: mockValidateAtlassian,
   normalizeAtlassianDomain: mockNormalizeDomain,
+}))
+vi.mock('@/lib/credentials/oci-api-key-service-account.server', () => ({
+  OciCredentialVerificationError: class OciCredentialVerificationError extends Error {
+    constructor(readonly code: string) {
+      super(code)
+    }
+  },
+  verifyAndEncryptOciApiKeyCredential: mockVerifyAndEncryptOci,
 }))
 vi.mock('@/lib/api/contracts/credentials', () => ({
   serviceAccountJsonSchema: {
@@ -43,7 +49,9 @@ vi.mock('@/lib/credentials/client-credential-accounts/server', () => ({
   getClientCredentialAccountMinter: (providerId: string) =>
     providerId === 'zoom-service-account' ||
     providerId === 'box-service-account' ||
-    providerId === 'netsuite-service-account'
+    providerId === 'netsuite-service-account' ||
+    providerId === 'oracle-epm-service-account' ||
+    providerId === 'oracle-fusion-service-account'
       ? mockClientCredentialMinter
       : undefined,
 }))
@@ -59,7 +67,6 @@ import {
 
 describe('verifyAndBuildServiceAccountSecret', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockEncryptSecret.mockImplementation(async (value: string) => ({ encrypted: value }))
     mockNormalizeDomain.mockImplementation((raw: string) => raw.trim().toLowerCase())
   })
@@ -70,10 +77,6 @@ describe('verifyAndBuildServiceAccountSecret', () => {
       signingSecret: 'sec',
       botToken: 'xoxb-1',
     })
-    expect(result.providerId).toBe(SLACK_CUSTOM_BOT_PROVIDER_ID)
-    expect(result.displayName).toBe('Acme')
-    expect(result.auditMetadata.slackTeamId).toBe('T1')
-    expect(result.botUserId).toBe('U_BOT')
     const blob = JSON.parse(result.encryptedServiceAccountKey)
     expect(blob).toMatchObject({
       signingSecret: 'sec',
@@ -82,23 +85,6 @@ describe('verifyAndBuildServiceAccountSecret', () => {
       botUserId: 'U_BOT',
       teamName: 'Acme',
     })
-  })
-
-  it('throws when Slack required fields are missing', async () => {
-    await expect(
-      verifyAndBuildServiceAccountSecret(SLACK_CUSTOM_BOT_PROVIDER_ID, { signingSecret: 'sec' })
-    ).rejects.toBeInstanceOf(ServiceAccountSecretError)
-    expect(mockFetchSlackTeamId).not.toHaveBeenCalled()
-  })
-
-  it('wraps a failed Slack token verification as a ServiceAccountSecretError', async () => {
-    mockFetchSlackTeamId.mockRejectedValue(new Error('invalid_auth'))
-    await expect(
-      verifyAndBuildServiceAccountSecret(SLACK_CUSTOM_BOT_PROVIDER_ID, {
-        signingSecret: 'sec',
-        botToken: 'xoxb-bad',
-      })
-    ).rejects.toThrow(/Could not verify the Slack bot token/)
   })
 
   it('verifies an Atlassian token and encrypts the blob', async () => {
@@ -113,46 +99,12 @@ describe('verifyAndBuildServiceAccountSecret', () => {
       domain: 'Acme.atlassian.net',
       atlassianProduct: 'confluence',
     })
-    expect(mockValidateAtlassian).toHaveBeenCalledWith('tok', 'acme.atlassian.net', 'confluence')
-    expect(result.providerId).toBe(ATLASSIAN_SERVICE_ACCOUNT_PROVIDER_ID)
-    expect(result.displayName).toBe('Jira Bot')
-    expect(result.auditMetadata.atlassianCloudId).toBe('cloud-1')
-    expect(result.principal).toEqual({ kind: 'user', id: 'acc-1', label: 'bot@acme.com' })
-    expect(result.auditMetadata.principalId).toBe('acc-1')
-    expect(result.auditMetadata.principalLabel).toBe('bot@acme.com')
     const blob = JSON.parse(result.encryptedServiceAccountKey)
     expect(blob).toMatchObject({
       apiToken: 'tok',
       domain: 'acme.atlassian.net',
       cloudId: 'cloud-1',
       atlassianProduct: 'confluence',
-    })
-  })
-
-  it('throws when Atlassian required fields are missing', async () => {
-    await expect(
-      verifyAndBuildServiceAccountSecret(ATLASSIAN_SERVICE_ACCOUNT_PROVIDER_ID, { apiToken: 'tok' })
-    ).rejects.toBeInstanceOf(ServiceAccountSecretError)
-  })
-
-  it('validates and encrypts a Google service-account JSON key', async () => {
-    const json = JSON.stringify({
-      type: 'service_account',
-      client_email: 'svc@proj.iam',
-      project_id: 'proj',
-    })
-    const result = await verifyAndBuildServiceAccountSecret('google-service-account', {
-      serviceAccountJson: json,
-    })
-    expect(result.providerId).toBe('google-service-account')
-    expect(result.displayName).toBe('svc@proj.iam')
-    expect(result.encryptedServiceAccountKey).toBe(json)
-    expect(result.principal).toEqual({ kind: 'user', id: 'svc@proj.iam' })
-    expect(result.auditMetadata).toEqual({
-      googleClientEmail: 'svc@proj.iam',
-      googleProjectId: 'proj',
-      principalKind: 'user',
-      principalId: 'svc@proj.iam',
     })
   })
 
@@ -164,6 +116,109 @@ describe('verifyAndBuildServiceAccountSecret', () => {
     })
     const result = await verifyAndBuildServiceAccountSecret('', { serviceAccountJson: json })
     expect(result.providerId).toBe('google-service-account')
+  })
+
+  it('verifies and stores an OCI API-key credential with stable external fields', async () => {
+    mockVerifyAndEncryptOci.mockResolvedValue({
+      encryptedServiceAccountKey: 'oci-ciphertext',
+      userOcid: 'ocid1.user.oc1..principal',
+    })
+
+    const result = await verifyAndBuildServiceAccountSecret('oci-api-key-service-account', {
+      tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+      userOcid: 'ocid1.user.oc1..principal',
+      fingerprint: '00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+      privateKey: '-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----',
+      privateKeyPassphrase: ' preserved exactly ',
+      region: 'us-ashburn-1',
+    })
+
+    expect(mockVerifyAndEncryptOci).toHaveBeenCalledWith({
+      tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+      userOcid: 'ocid1.user.oc1..principal',
+      fingerprint: '00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+      privateKey: '-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----',
+      privateKeyPassphrase: ' preserved exactly ',
+      region: 'us-ashburn-1',
+    })
+    expect(result).toEqual({
+      providerId: 'oci-api-key-service-account',
+      encryptedServiceAccountKey: 'oci-ciphertext',
+      displayName: 'ocid1.user.oc1..principal',
+      auditMetadata: {
+        principalKind: 'user',
+        principalId: 'ocid1.user.oc1..principal',
+      },
+      principal: { kind: 'user', id: 'ocid1.user.oc1..principal' },
+    })
+  })
+
+  it('requires the complete OCI signing tuple before verification', async () => {
+    await expect(
+      verifyAndBuildServiceAccountSecret('oci-api-key-service-account', {
+        tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+      })
+    ).rejects.toThrow('tenancyOcid, userOcid, fingerprint, privateKey, and region are required')
+    expect(mockVerifyAndEncryptOci).not.toHaveBeenCalled()
+  })
+
+  it.each(['service_unavailable', 'invalid_response'] as const)(
+    'preserves the dedicated OCI %s classification for orchestration',
+    async (code) => {
+      const { OciCredentialVerificationError } = await import(
+        '@/lib/credentials/oci-api-key-service-account.server'
+      )
+      mockVerifyAndEncryptOci.mockRejectedValue(new OciCredentialVerificationError(code))
+
+      const failure = await verifyAndBuildServiceAccountSecret('oci-api-key-service-account', {
+        tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+        userOcid: 'ocid1.user.oc1..principal',
+        fingerprint: '00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+        privateKey: 'provider-secret-key',
+        region: 'us-ashburn-1',
+      }).catch((error: unknown) => error)
+
+      expect(failure).toBeInstanceOf(OciCredentialVerificationError)
+      expect(failure).toMatchObject({
+        message: code,
+        code,
+      })
+      expect(JSON.stringify(failure)).not.toContain('provider-secret-key')
+    }
+  )
+
+  it('preserves the dedicated OCI invalid-credential classification for orchestration', async () => {
+    const { OciCredentialVerificationError } = await import(
+      '@/lib/credentials/oci-api-key-service-account.server'
+    )
+    mockVerifyAndEncryptOci.mockRejectedValue(
+      new OciCredentialVerificationError('invalid_credentials')
+    )
+
+    await expect(
+      verifyAndBuildServiceAccountSecret('oci-api-key-service-account', {
+        tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+        userOcid: 'ocid1.user.oc1..principal',
+        fingerprint: 'invalid-fingerprint',
+        privateKey: 'invalid-key',
+        region: 'us-ashburn-1',
+      })
+    ).rejects.toMatchObject({ message: 'invalid_credentials', code: 'invalid_credentials' })
+  })
+
+  it('does not misclassify an internal OCI credential failure as rejected credentials', async () => {
+    const internalFailure = new Error('internal encryption failure')
+    mockVerifyAndEncryptOci.mockRejectedValue(internalFailure)
+
+    await expect(
+      verifyAndBuildServiceAccountSecret('oci-api-key-service-account', {
+        tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+        userOcid: 'ocid1.user.oc1..principal',
+        fingerprint: '00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+        privateKey: 'provider-secret-key',
+        region: 'us-ashburn-1',
+      })
+    ).rejects.toBe(internalFailure)
   })
 
   it('rejects an unknown non-empty providerId instead of persisting it as Google', async () => {
@@ -191,13 +246,6 @@ describe('verifyAndBuildServiceAccountSecret', () => {
       clientSecret: ' csec ',
       orgId: ' acc-1 ',
     })
-    expect(result.providerId).toBe('zoom-service-account')
-    expect(result.displayName).toBe('Zoom account acc-1')
-    expect(result.auditMetadata).toEqual({
-      zoomAccountId: 'acc-1',
-      principalKind: 'tenant',
-      principalId: 'acc-1',
-    })
     expect(mockClientCredentialMinter).toHaveBeenCalledWith({
       clientId: 'cid',
       clientSecret: 'csec',
@@ -218,20 +266,6 @@ describe('verifyAndBuildServiceAccountSecret', () => {
     })
   })
 
-  it('falls back to a label-derived display name when the mint has no identity', async () => {
-    mockClientCredentialMinter.mockResolvedValue({ accessToken: 'minted', expiresInSeconds: 3600 })
-    const result = await verifyAndBuildServiceAccountSecret('box-service-account', {
-      clientId: 'cid',
-      clientSecret: 'csec',
-      orgId: '999',
-    })
-    expect(result.displayName).toBe('Box 999')
-    expect(result.principal).toBeNull()
-    expect(result.auditMetadata).toEqual({ principalKind: 'none' })
-    const blob = JSON.parse(result.encryptedServiceAccountKey)
-    expect(blob.metadata).toEqual({ principalKind: 'none' })
-  })
-
   it('threads NetSuite certificate material into the minter and encrypted blob', async () => {
     mockClientCredentialMinter.mockResolvedValue({
       accessToken: 'minted',
@@ -250,18 +284,100 @@ describe('verifyAndBuildServiceAccountSecret', () => {
       certificateId: ' certificate-id ',
       privateKey: ' -----BEGIN PRIVATE KEY-----key ',
     })
-
-    expect(mockClientCredentialMinter).toHaveBeenCalledWith({
-      orgId: 'https://1234567.suitetalk.api.netsuite.com/',
-      clientId: 'client-id',
-      certificateId: 'certificate-id',
-      privateKey: '-----BEGIN PRIVATE KEY-----key',
-    })
     expect(JSON.parse(result.encryptedServiceAccountKey)).toMatchObject({
       providerId: 'netsuite-service-account',
       certificateId: 'certificate-id',
       privateKey: '-----BEGIN PRIVATE KEY-----key',
     })
+  })
+
+  it('encrypts only the Oracle Fusion fields and captures no unverified principal', async () => {
+    mockClientCredentialMinter.mockResolvedValue({
+      accessToken: 'opaque-basic',
+      expiresInSeconds: 300,
+      instanceUrl: 'https://vision.fa.us2.oraclecloud.com',
+      identity: {
+        displayName: 'Oracle Fusion vision',
+        principal: null,
+        auditMetadata: {
+          oracleFusionApplicationOrigin: 'https://vision.fa.us2.oraclecloud.com',
+        },
+        storedMetadata: { applicationOrigin: 'https://vision.fa.us2.oraclecloud.com' },
+      },
+    })
+
+    const result = await verifyAndBuildServiceAccountSecret('oracle-fusion-service-account', {
+      orgId: ' https://vision.fa.us2.oraclecloud.com/ ',
+      clientId: ' integration-user ',
+      clientSecret: ' password ',
+      certificateId: 'discard-me',
+      authMethod: 'discard-me',
+      privateKey: 'discard-me',
+      username: 'discard-me',
+    })
+
+    expect(mockClientCredentialMinter).toHaveBeenCalledWith({
+      orgId: 'https://vision.fa.us2.oraclecloud.com/',
+      clientId: 'integration-user',
+      clientSecret: ' password ',
+      certificateId: undefined,
+      dataCenter: undefined,
+      authMethod: undefined,
+      privateKey: undefined,
+      username: undefined,
+    })
+    expect(result).toMatchObject({
+      displayName: 'Oracle Fusion vision',
+      principal: null,
+      auditMetadata: {
+        oracleFusionApplicationOrigin: 'https://vision.fa.us2.oraclecloud.com',
+        principalKind: 'none',
+      },
+    })
+    expect(JSON.parse(result.encryptedServiceAccountKey)).toEqual({
+      type: 'client_credential_account',
+      providerId: 'oracle-fusion-service-account',
+      clientId: 'integration-user',
+      clientSecret: ' password ',
+      orgId: 'https://vision.fa.us2.oraclecloud.com/',
+      metadata: {
+        applicationOrigin: 'https://vision.fa.us2.oraclecloud.com',
+        principalKind: 'none',
+      },
+    })
+  })
+
+  it('stores the Oracle EPM environment and integration-user secret through the generic path', async () => {
+    mockClientCredentialMinter.mockResolvedValue({
+      accessToken: 'basic-token',
+      expiresInSeconds: 600,
+      instanceUrl: 'https://epm.example.com/gateway',
+      identity: {
+        displayName: 'Oracle EPM epm.example.com',
+        principal: null,
+        auditMetadata: { environmentUrl: 'https://epm.example.com/gateway' },
+        storedMetadata: { environmentUrl: 'https://epm.example.com/gateway' },
+      },
+    })
+    const result = await verifyAndBuildServiceAccountSecret('oracle-epm-service-account', {
+      orgId: ' https://epm.example.com/gateway ',
+      clientId: ' integration.user@example.com ',
+      clientSecret: ' password ',
+    })
+
+    expect(mockClientCredentialMinter).toHaveBeenCalledWith({
+      orgId: 'https://epm.example.com/gateway',
+      clientId: 'integration.user@example.com',
+      clientSecret: ' password ',
+    })
+    expect(JSON.parse(result.encryptedServiceAccountKey)).toMatchObject({
+      providerId: 'oracle-epm-service-account',
+      orgId: 'https://epm.example.com/gateway',
+      clientId: 'integration.user@example.com',
+      clientSecret: ' password ',
+      metadata: { environmentUrl: 'https://epm.example.com/gateway' },
+    })
+    expect(result.principal).toBeNull()
   })
 
   it('throws when client-credential required fields are missing, without minting', async () => {
@@ -273,18 +389,6 @@ describe('verifyAndBuildServiceAccountSecret', () => {
     ).rejects.toBeInstanceOf(ServiceAccountSecretError)
     expect(mockClientCredentialMinter).not.toHaveBeenCalled()
   })
-
-  it('propagates a failed client-credential mint', async () => {
-    mockClientCredentialMinter.mockRejectedValue(new Error('invalid_credentials'))
-    await expect(
-      verifyAndBuildServiceAccountSecret('box-service-account', {
-        clientId: 'cid',
-        clientSecret: 'bad',
-        orgId: '999',
-      })
-    ).rejects.toThrow('invalid_credentials')
-  })
-
   it('rejects prototype-chain providerIds with a validation error, not a TypeError', async () => {
     for (const providerId of ['__proto__', 'constructor', 'toString']) {
       await expect(

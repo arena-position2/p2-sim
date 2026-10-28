@@ -1,6 +1,8 @@
 import { getErrorMessage } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
+import { getChatImageFetchUrl } from '@/lib/chat/image-fetch-url'
 import { uploadInternalFileSession } from '@/lib/uploads/client/session-upload'
+import { ensureFileNameExtension } from '@/lib/uploads/utils/file-utils'
 
 export interface WorkflowAttachmentInput {
   name: string
@@ -37,7 +39,8 @@ function inferStoredAttachmentContext(key: string): UploadedWorkflowAttachment['
 }
 
 /**
- * Reuses an image already stored in app file serving instead of uploading an empty File.
+ * Reuses a workspace or execution file already stored for this app.
+ * Generated images are not workspace file references, so the caller uploads their bytes instead.
  */
 export function reuseStoredWorkflowAttachment(
   fileData: WorkflowAttachmentInput
@@ -83,15 +86,18 @@ export async function uploadWorkflowAttachments({
 
   for (const fileData of files) {
     const reusedAttachment = reuseStoredWorkflowAttachment(fileData)
-    if (reusedAttachment) {
+    if (reusedAttachment && reusedAttachment.context !== 'agent-generated-images') {
       uploadedFiles.push(reusedAttachment)
       continue
     }
 
     try {
+      const file = reusedAttachment
+        ? await fileFromServeUrl(fileData, reusedAttachment.url)
+        : fileData.file
       const result = await uploadInternalFileSession({
         purpose: 'execution_attachment',
-        file: fileData.file,
+        file,
         workspaceId,
         workflowId,
         executionId,
@@ -105,4 +111,18 @@ export async function uploadWorkflowAttachments({
   }
 
   return uploadedFiles
+}
+
+async function fileFromServeUrl(fileData: WorkflowAttachmentInput, url: string): Promise<File> {
+  const response = await fetch(getChatImageFetchUrl(url), { credentials: 'include' })
+  if (!response.ok) {
+    throw new Error(`Failed to load ${fileData.name}: ${response.status} ${response.statusText}`)
+  }
+
+  const blob = await response.blob()
+  const type =
+    blob.type && blob.type !== 'application/octet-stream'
+      ? blob.type
+      : fileData.type || 'application/octet-stream'
+  return new File([blob], ensureFileNameExtension(fileData.name, type), { type })
 }

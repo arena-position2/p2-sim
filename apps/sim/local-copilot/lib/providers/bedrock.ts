@@ -4,6 +4,7 @@ import {
   type ContentBlock,
   type ConversationRole,
   ConverseCommand,
+  type ConverseCommandInput,
   ConverseStreamCommand,
   type SystemContentBlock,
   type Tool,
@@ -596,7 +597,13 @@ export function createBedrockProvider(config: LocalCopilotConfig): LocalCopilotP
       system: system.length > 0 ? system : undefined,
       inferenceConfig,
       toolConfig,
-      ...(thinkingFields ? { additionalModelRequestFields: thinkingFields } : {}),
+      ...(thinkingFields
+        ? {
+            additionalModelRequestFields: thinkingFields as unknown as NonNullable<
+              ConverseCommandInput['additionalModelRequestFields']
+            >,
+          }
+        : {}),
     }
 
     const useStream = !(toolConfig && !bedrockSupportsStreamingWithTools(model))

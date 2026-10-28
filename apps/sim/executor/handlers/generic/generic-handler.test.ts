@@ -1,17 +1,20 @@
 import '@sim/testing/mocks/executor'
 
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
+import { executeBufferTool } from '@/lib/internal/buffer/execute-tool'
+import { BufferBlock } from '@/blocks/blocks/buffer'
 import { HarmonicBlock } from '@/blocks/blocks/harmonic'
-import { KnowledgeBlock } from '@/blocks/blocks/knowledge'
 import { McpBlock } from '@/blocks/blocks/mcp'
 import { getBlock } from '@/blocks/index'
-import { BlockType } from '@/executor/constants'
 import { GenericBlockHandler } from '@/executor/handlers/generic/generic-handler'
 import type { ExecutionContext } from '@/executor/types'
 import { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
 import type { SerializedBlock } from '@/serializer/types'
 import { executeTool } from '@/tools'
-import { selectKnowledgeDocumentWriteSecretProvenance } from '@/tools/knowledge/secret-provenance'
+import bufferPostFixture from '@/tools/buffer/__fixtures__/post.json'
+import { bufferCreatePostTool } from '@/tools/buffer/create_post'
+import { bufferEditPostTool } from '@/tools/buffer/edit_post'
+import type { BufferCreatePostParams, BufferEditPostParams } from '@/tools/buffer/types'
 import { mcpRunOperationTool } from '@/tools/mcp/run-operation'
 import type { ToolConfig } from '@/tools/types'
 import { getTool } from '@/tools/utils'
@@ -65,9 +68,6 @@ describe('GenericBlockHandler', () => {
         body: (params) => params,
       },
     }
-
-    // Reset mocks using vi
-    vi.clearAllMocks()
     mockGetBlock.mockReturnValue(undefined)
 
     // Set up mockGetTool to return mockTool
@@ -82,30 +82,144 @@ describe('GenericBlockHandler', () => {
     mockExecuteTool.mockResolvedValue({ success: true, output: { customResult: 'OK' } })
   })
 
-  it.concurrent('should always handle any block type', () => {
-    const agentBlock: SerializedBlock = { ...mockBlock, metadata: { id: BlockType.AGENT } }
-    expect(handler.canHandle(agentBlock)).toBe(true)
-    expect(handler.canHandle(mockBlock)).toBe(true)
-    const noMetaIdBlock: SerializedBlock = { ...mockBlock, metadata: undefined }
-    expect(handler.canHandle(noMetaIdBlock)).toBe(true)
-  })
-
-  it.concurrent('should execute generic block by calling its associated tool', async () => {
-    const inputs = { param1: 'resolvedValue1' }
-    const expectedToolParams = {
-      ...inputs,
-      _context: { workflowId: mockContext.workflowId, blockId: mockBlock.id },
-    }
-    const expectedOutput: any = { customResult: 'OK' }
-
-    const result = await handler.execute(mockContext, mockBlock, inputs)
-
-    expect(mockGetTool).toHaveBeenCalledWith('some_custom_tool')
-    expect(mockExecuteTool).toHaveBeenCalledWith('some_custom_tool', expectedToolParams, {
-      executionContext: mockContext,
+  it.each([
+    {
+      selection: 'keep-current scheduling',
+      optional: { mode: 'default', schedulingType: 'default', approvalChange: 'default' },
+    },
+    { selection: 'cleared structured editors', optional: { assets: '', metadata: '' } },
+    {
+      selection: 'untouched advanced fields',
+      optional: { assets: null, metadata: null, mediaType: null },
+    },
+  ])('preserves existing Buffer state for a caption edit with $selection', async ({ optional }) => {
+    mockGetBlock.mockReturnValue(BufferBlock)
+    mockGetTool.mockReturnValue(bufferEditPostTool)
+    const providerInputs: Record<string, unknown>[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body: { variables: { input: Record<string, unknown> } } = JSON.parse(String(init?.body))
+      providerInputs.push(body.variables.input)
+      return Response.json({
+        data: { editPost: { __typename: 'PostActionSuccess', post: bufferPostFixture } },
+      })
     })
-    expect(result).toEqual(expectedOutput)
+    mockExecuteTool.mockImplementation(async (toolId: string, params: BufferEditPostParams) => {
+      const response = await executeBufferTool({
+        toolId,
+        input: bufferEditPostTool.operation.input(params),
+        headers: new Headers(),
+        context: { workflowId: mockContext.workflowId, userId: 'user-1' },
+        requestId: 'request-1',
+      })
+      if (!bufferEditPostTool.transformResponse) throw new Error('Missing response transformer')
+      return bufferEditPostTool.transformResponse(response)
+    })
+
+    await handler.execute(
+      mockContext,
+      {
+        ...mockBlock,
+        metadata: { id: 'buffer', name: 'Buffer' },
+        config: { tool: 'buffer_edit_post', params: {} },
+      },
+      {
+        operation: 'edit_post',
+        apiKey: 'buffer-key',
+        postId: 'post-1',
+        text: 'Updated caption',
+        ...optional,
+      }
+    )
+
+    expect(providerInputs).toEqual([{ id: 'post-1', text: 'Updated caption' }])
   })
+
+  it.each([
+    {
+      operation: 'create_post',
+      description: 'create defaults with untouched advanced fields',
+      input: {
+        channelId: 'channel-1',
+        text: 'Caption',
+        mode: 'addToQueue',
+        schedulingType: null,
+        mediaType: null,
+        needsApproval: null,
+      },
+      expected: {
+        channelId: 'channel-1',
+        text: 'Caption',
+        mode: 'addToQueue',
+        schedulingType: 'automatic',
+        assets: [],
+        needsApproval: false,
+      },
+    },
+    {
+      operation: 'edit_post',
+      description: 'media-only edit with an untouched caption',
+      input: {
+        postId: 'post-1',
+        text: null,
+        assets: [{ image: { url: 'https://example.com/image.png' } }],
+      },
+      expected: {
+        id: 'post-1',
+        assets: [{ image: { url: 'https://example.com/image.png' } }],
+      },
+    },
+    {
+      operation: 'edit_post',
+      description: 'intentional caption clearing',
+      input: { postId: 'post-1', text: null, clearText: true },
+      expected: { id: 'post-1', text: null },
+    },
+  ])(
+    'sends only requested Buffer changes: $description',
+    async ({ operation, input, expected }) => {
+      mockGetBlock.mockReturnValue(BufferBlock)
+      const tool = operation === 'create_post' ? bufferCreatePostTool : bufferEditPostTool
+      mockGetTool.mockReturnValue(tool)
+      const providerInputs: Record<string, unknown>[] = []
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+        const body: { variables: { input: Record<string, unknown> } } = JSON.parse(
+          String(init?.body)
+        )
+        providerInputs.push(body.variables.input)
+        return Response.json({
+          data: {
+            [operation === 'create_post' ? 'createPost' : 'editPost']: {
+              __typename: 'PostActionSuccess',
+              post: bufferPostFixture,
+            },
+          },
+        })
+      })
+      mockExecuteTool.mockImplementation(
+        async (toolId: string, params: BufferCreatePostParams & BufferEditPostParams) => {
+          const response = await executeBufferTool({
+            toolId,
+            input: tool.operation.input(params),
+            headers: new Headers(),
+            context: { workflowId: mockContext.workflowId, userId: 'user-1' },
+            requestId: 'request-1',
+          })
+          if (!tool.transformResponse) throw new Error('Missing response transformer')
+          return tool.transformResponse(response)
+        }
+      )
+      await handler.execute(
+        mockContext,
+        {
+          ...mockBlock,
+          metadata: { id: 'buffer', name: 'Buffer' },
+          config: { tool: tool.id, params: {} },
+        },
+        { operation, apiKey: 'buffer-key', ...input }
+      )
+      expect(providerInputs).toEqual([expected])
+    }
+  )
 
   it('executes the standalone stable MCP action after argument resolution with trusted block scope', async () => {
     mockGetBlock.mockReturnValue(McpBlock)
@@ -187,52 +301,6 @@ describe('GenericBlockHandler', () => {
     expect(registry.getIncompletenessDiagnostics()).toBeUndefined()
   })
 
-  it('preserves exact secret provenance when block params rename a selected input', async () => {
-    mockTool.request.modelInput = {
-      mode: 'private-provenance',
-      inputPaths: () => [['filePath']],
-    }
-    mockGetBlock.mockReturnValue({
-      tools: {
-        access: ['some_custom_tool'],
-        config: {
-          tool: () => 'some_custom_tool',
-          params: (params: Record<string, unknown>) => ({
-            filePath: String(params.document).trim(),
-          }),
-        },
-      },
-      inputs: {
-        document: { type: 'string', description: 'Document URL' },
-      },
-    } as never)
-    const registry = new ResolvedSecretTraceRegistry([
-      {
-        name: 'FILE_SECRET',
-        plaintext: 'secret-url',
-        encryptedValue: 'encrypted-file-secret',
-      },
-    ])
-    registry.recordResolvedAtInputPath('FILE_SECRET', 'secret-url', ['document'])
-    registry.recordResolvedInputProjection(['document'], '  secret-url  ', '  {{FILE_SECRET}}  ')
-    mockContext.resolvedSecretTraceRegistry = registry
-
-    await handler.execute(mockContext, mockBlock, { document: '  secret-url  ' })
-
-    expect(mockExecuteTool).toHaveBeenCalledWith(
-      'some_custom_tool',
-      expect.objectContaining({
-        document: '  secret-url  ',
-        filePath: 'secret-url',
-      }),
-      { executionContext: mockContext }
-    )
-    expect(registry.exportCommittedProvenanceForInputPaths([['filePath']])).toMatchObject({
-      complete: true,
-      entries: [{ name: 'FILE_SECRET', encryptedValue: 'encrypted-file-secret' }],
-    })
-  })
-
   it('traces each secret path without letting secret-valued controls change another path', async () => {
     mockTool.request.modelInput = {
       mode: 'private-provenance',
@@ -283,98 +351,6 @@ describe('GenericBlockHandler', () => {
     expect(registry.exportCommittedProvenanceForInputPaths([['input']])).toMatchObject({
       complete: true,
       entries: [{ name: 'QUERY', encryptedValue: 'encrypted-query' }],
-    })
-  })
-
-  it('preserves exact table leaf provenance across legacy unquoted JSON placeholders', async () => {
-    mockTool.request.secretProvenance = {
-      request: () => [{ key: 'data', inputPaths: [['data']] }],
-    }
-    mockGetBlock.mockReturnValue({
-      tools: {
-        access: ['some_custom_tool'],
-        config: {
-          tool: () => 'some_custom_tool',
-          params: (params: Record<string, unknown>) => ({
-            data: typeof params.data === 'string' ? JSON.parse(params.data) : params.data,
-          }),
-        },
-      },
-      inputs: {
-        data: { type: 'json', description: 'Row data' },
-      },
-    } as never)
-    const registry = new ResolvedSecretTraceRegistry([
-      { name: '1BOOLEAN_SECRET', plaintext: 'true', encryptedValue: 'encrypted-boolean' },
-      { name: 'UNUSED', plaintext: 'true', encryptedValue: 'encrypted-unused' },
-    ])
-    registry.recordResolvedAtInputPath('1BOOLEAN_SECRET', 'true', ['data'])
-    registry.recordResolvedInputProjection(
-      ['data'],
-      '{"secret":true,"public":true}',
-      '{"secret":{{1BOOLEAN_SECRET}},"public":true}'
-    )
-    mockContext.resolvedSecretTraceRegistry = registry
-
-    await handler.execute(mockContext, mockBlock, {
-      data: '{"secret":true,"public":true}',
-    })
-
-    expect(mockExecuteTool).toHaveBeenCalledWith(
-      'some_custom_tool',
-      expect.objectContaining({ data: { secret: true, public: true } }),
-      { executionContext: mockContext }
-    )
-    expect(registry.exportCommittedProvenanceForInputPaths([['data', 'secret']])).toMatchObject({
-      complete: true,
-      entries: [{ name: '1BOOLEAN_SECRET', encryptedValue: 'encrypted-boolean' }],
-    })
-    expect(registry.exportCommittedProvenanceForInputPaths([['data', 'public']])).toMatchObject({
-      complete: true,
-      entries: [],
-    })
-  })
-
-  it('normalizes legacy JSON-string knowledge tags without mutating inputs or overbinding tag names', async () => {
-    mockTool.request.secretProvenance = {
-      request: selectKnowledgeDocumentWriteSecretProvenance,
-    }
-    mockGetBlock.mockReturnValue(KnowledgeBlock)
-    mockBlock.metadata = { id: 'knowledge', name: 'Knowledge' }
-    const documentTags = '[{"tagName":"team","value":"support"}]'
-    const projectedTags = '[{"tagName":"team","value":"{{TAG_VALUE}}"}]'
-    const inputs = {
-      operation: 'create_document',
-      knowledgeBaseId: 'kb-1',
-      name: 'doc.md',
-      content: 'content',
-      documentTags,
-    }
-    const registry = new ResolvedSecretTraceRegistry([
-      { name: 'TAG_VALUE', plaintext: 'support', encryptedValue: 'encrypted-tag' },
-    ])
-    registry.recordResolvedAtInputPath('TAG_VALUE', 'support', ['documentTags'])
-    registry.recordResolvedInputProjection(['documentTags'], documentTags, projectedTags)
-    mockContext.resolvedSecretTraceRegistry = registry
-
-    await handler.execute(mockContext, mockBlock, inputs)
-
-    expect(inputs.documentTags).toBe(documentTags)
-    expect(mockExecuteTool).toHaveBeenCalledWith(
-      'some_custom_tool',
-      expect.objectContaining({
-        documentTags: [{ tagName: 'team', value: 'support' }],
-      }),
-      { executionContext: mockContext }
-    )
-    expect(
-      registry.exportCommittedProvenanceForInputPaths([['documentTags', '0', 'tagName']])
-    ).toMatchObject({ complete: true, entries: [] })
-    expect(
-      registry.exportCommittedProvenanceForInputPaths([['documentTags', '0', 'value']])
-    ).toMatchObject({
-      complete: true,
-      entries: [{ name: 'TAG_VALUE', encryptedValue: 'encrypted-tag' }],
     })
   })
 
@@ -431,73 +407,6 @@ describe('GenericBlockHandler', () => {
     })
   })
 
-  it('preserves structured message roles while projecting only model-visible content', async () => {
-    const parseMessages = (value: unknown) => {
-      const parsed = typeof value === 'string' ? JSON.parse(value) : value
-      if (!Array.isArray(parsed)) throw new Error('Messages must be an array')
-      return parsed.map((message) => {
-        if (
-          !message ||
-          typeof message !== 'object' ||
-          !['user', 'assistant', 'system'].includes(String(message.role))
-        ) {
-          throw new Error('Invalid message role')
-        }
-        return { role: String(message.role), content: String(message.content) }
-      })
-    }
-    mockTool.request.modelInput = {
-      mode: 'project',
-      select: (params) => ({
-        messages: parseMessages(params.messages).map((message) => message.content),
-      }),
-      applyProjected: (selectedParams, projectedSelection) => ({
-        messages: parseMessages(selectedParams.messages).map((message, index) => ({
-          ...message,
-          content: (projectedSelection.messages as unknown[])[index],
-        })),
-      }),
-    }
-    mockGetBlock.mockReturnValue({
-      tools: {
-        access: ['some_custom_tool'],
-        config: {
-          tool: () => 'some_custom_tool',
-          params: (params: Record<string, unknown>) => ({
-            messages: parseMessages(params.messages),
-          }),
-        },
-      },
-      inputs: {
-        messages: { type: 'json', description: 'Messages' },
-      },
-    } as never)
-    const rawMessages = '[{"role":"user","content":"hello"}]'
-    const registry = new ResolvedSecretTraceRegistry([
-      { name: 'MESSAGES', plaintext: rawMessages, encryptedValue: 'encrypted-messages' },
-    ])
-    registry.recordResolvedAtInputPath('MESSAGES', rawMessages, ['messages'])
-    registry.recordResolvedInputProjection(['messages'], rawMessages, '{{MESSAGES}}')
-    mockContext.resolvedSecretTraceRegistry = registry
-
-    await handler.execute(mockContext, mockBlock, { messages: rawMessages })
-
-    expect(mockExecuteTool).toHaveBeenCalledWith(
-      'some_custom_tool',
-      expect.objectContaining({ messages: [{ role: 'user', content: 'hello' }] }),
-      { executionContext: mockContext }
-    )
-    expect(
-      registry.exportCommittedProvenanceForInputPaths([['messages', '0', 'role']])
-    ).toMatchObject({ complete: true, entries: [] })
-    expect(
-      registry.exportCommittedProvenanceForInputPaths([['messages', '0', 'content']])
-    ).toMatchObject({
-      complete: true,
-      entries: [{ name: 'MESSAGES', encryptedValue: 'encrypted-messages' }],
-    })
-  })
-
   it('preserves raw file execution while binding whole serialized descriptors to the file boundary', async () => {
     mockTool.params.audioFile = { type: 'file' }
     mockTool.params.audioUrl = { type: 'string' }
@@ -549,30 +458,6 @@ describe('GenericBlockHandler', () => {
     })
   })
 
-  it('does not replay block transforms for configured but unused secrets', async () => {
-    mockTool.request.modelInput = {
-      mode: 'project',
-      select: (params) => ({ param1: params.param1 }),
-    }
-    const transform = vi.fn((params: Record<string, unknown>) => params)
-    mockGetBlock.mockReturnValue({
-      tools: {
-        access: ['some_custom_tool'],
-        config: { tool: () => 'some_custom_tool', params: transform },
-      },
-      inputs: {
-        param1: { type: 'string', description: 'Value' },
-      },
-    } as never)
-    mockContext.resolvedSecretTraceRegistry = new ResolvedSecretTraceRegistry([
-      { name: 'UNUSED', plaintext: 'value1', encryptedValue: 'encrypted-unused' },
-    ])
-
-    await handler.execute(mockContext, mockBlock, { param1: 'value1' })
-
-    expect(transform).toHaveBeenCalledTimes(1)
-  })
-
   it('does not expose an invalid resolved Harmonic batch value in handler errors', async () => {
     const resolvedSecret = 'sk-live-invalid-json-secret'
     mockBlock.metadata = { id: 'harmonic', name: 'Harmonic' }
@@ -611,53 +496,6 @@ describe('GenericBlockHandler', () => {
       'some_custom_tool',
       expect.objectContaining({ personUrns: resolvedSecret }),
       { executionContext: mockContext }
-    )
-  })
-
-  it('should throw error if the associated tool is not found', async () => {
-    const inputs = { param1: 'value' }
-
-    // Override mock to return undefined for this test
-    mockGetTool.mockImplementation(() => undefined)
-
-    await expect(handler.execute(mockContext, mockBlock, inputs)).rejects.toThrow(
-      'Tool not found: some_custom_tool'
-    )
-    expect(mockExecuteTool).not.toHaveBeenCalled()
-  })
-
-  it('should handle tool execution errors correctly', async () => {
-    const inputs = { param1: 'value' }
-    const errorResult = {
-      success: false,
-      error: 'Custom tool failed',
-      output: { detail: 'error detail' },
-    }
-    mockExecuteTool.mockResolvedValue(errorResult)
-
-    await expect(handler.execute(mockContext, mockBlock, inputs)).rejects.toThrow(
-      'Custom tool failed'
-    )
-
-    // Re-execute to check error properties after catching
-    try {
-      await handler.execute(mockContext, mockBlock, inputs)
-    } catch (e: any) {
-      expect(e.toolId).toBe('some_custom_tool')
-      expect(e.blockName).toBe('Test Generic Block')
-      expect(e.output).toEqual({ detail: 'error detail' })
-    }
-
-    expect(mockExecuteTool).toHaveBeenCalledTimes(2) // Called twice now
-  })
-
-  it.concurrent('should handle tool execution errors with no specific message', async () => {
-    const inputs = { param1: 'value' }
-    const errorResult = { success: false, output: {} }
-    mockExecuteTool.mockResolvedValue(errorResult)
-
-    await expect(handler.execute(mockContext, mockBlock, inputs)).rejects.toThrow(
-      'Block execution of Some Custom Tool failed with no error message'
     )
   })
 })

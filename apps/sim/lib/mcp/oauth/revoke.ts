@@ -6,6 +6,7 @@ import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { and, eq } from 'drizzle-orm'
 import { decryptSecret } from '@/lib/core/security/encryption'
+import type { StoredOAuthTokens } from '@/lib/mcp/oauth/provider'
 import { loadOauthRow } from '@/lib/mcp/oauth/storage'
 import { createSsrfGuardedMcpFetch } from '@/lib/mcp/pinned-fetch'
 
@@ -41,7 +42,15 @@ export async function revokeMcpOauthTokens(
     const info = await discoverOAuthServerInfo(server.url, { fetchFn: ssrfGuardedFetch }).catch(
       () => undefined
     )
-    const metadata = info?.authorizationServerMetadata as
+    const tokens = row.tokens as StoredOAuthTokens
+    if (
+      !info ||
+      !tokens.issuer ||
+      !isSameAuthorizationServer(tokens.issuer, info.authorizationServerUrl)
+    ) {
+      return
+    }
+    const metadata = info.authorizationServerMetadata as
       | (Record<string, unknown> & { revocation_endpoint?: string })
       | undefined
     const revocationEndpoint = metadata?.revocation_endpoint
@@ -77,6 +86,21 @@ export async function revokeMcpOauthTokens(
       error: toError(error).message,
     })
   }
+}
+
+/**
+ * Tokens are only posted, with the client secret, to the authorization server the SDK stamped
+ * them for. Unstamped legacy tokens are never revoked: their issuer cannot be verified.
+ */
+function isSameAuthorizationServer(issuer: string, authorizationServerUrl: string): boolean {
+  const normalize = (value: string) => {
+    try {
+      return new URL(value).href
+    } catch {
+      return value
+    }
+  }
+  return normalize(issuer) === normalize(authorizationServerUrl)
 }
 
 async function postRevoke(

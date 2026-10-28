@@ -5,7 +5,6 @@ import { resolveWorkspaceIdForAdminCheck } from '@/lib/workspaces/is-admin-works
 import { resolveZoomAdminAccessForUi } from '@/lib/workspaces/zoom-admin-access-cache'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
-import type { ZoomResponse } from '@/tools/zoom/types'
 import { getTrigger } from '@/triggers'
 
 const ZOOM_MEETING_SUBBLOCK_OPS = [
@@ -82,7 +81,7 @@ function personalZoomMeetingSubblockCondition(values: Record<string, unknown> | 
  */
 const MEETING_FIELD = ['meetingSelector', 'meetingId'] as const
 
-export const ZoomBlock: BlockConfig<ZoomResponse> = {
+export const ZoomBlock: BlockConfig = {
   type: 'zoom',
   name: 'Zoom',
   description: 'Create and manage Zoom meetings and recordings',

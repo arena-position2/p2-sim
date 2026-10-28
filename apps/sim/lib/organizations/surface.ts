@@ -22,6 +22,7 @@ import {
   getUserPermissionConfigForOrganization,
   isOrganizationPermissionRegimeActive,
 } from '@/lib/permission-groups/resolve.server'
+import { canCreateOrganizationWorkspace } from '@/lib/workspaces/policy'
 
 export interface OrganizationSurfaceOrganization {
   id: string
@@ -35,6 +36,7 @@ interface OrganizationSurfaceViewer {
   role: OrganizationRole
   isAdmin: boolean
   canInviteMembers: boolean
+  canConnectSearchIntegrations: boolean
   canUsePersonalApiKeys: boolean
   canUseSearchMcp: boolean
 }
@@ -50,6 +52,8 @@ export interface OrganizationSurfaceContext {
   organization: OrganizationSurfaceOrganization
   viewer: OrganizationSurfaceViewer
   connectedAccountsAvailable: boolean
+  mothershipAvailable: boolean
+  canBuild: boolean
   searchAccess: KnowledgeAccessAvailability
   settingsFeatures: OrganizationSettingsFeatures
   deployment: DeploymentShape
@@ -123,6 +127,9 @@ async function resolveOrganizationSurfaceContext(
       isAdmin: access.isAdmin,
       canInviteMembers:
         access.isAdmin && !isInvitationsDisabled && !capabilityDeniedBy('invitations.send', config),
+      canConnectSearchIntegrations:
+        !capabilityDeniedBy('integrations.manage', config) &&
+        !capabilityDeniedBy('knowledge.use', config),
       canUsePersonalApiKeys:
         !capabilityDeniedBy('personal_api_key.use', config) &&
         !capabilityDeniedBy('api_keys.manage', config),
@@ -131,6 +138,10 @@ async function resolveOrganizationSurfaceContext(
         !capabilityDeniedBy('oauth_apps.use', config),
     },
     connectedAccountsAvailable,
+    mothershipAvailable: !capabilityDeniedBy('copilot.use', config),
+    canBuild:
+      !capabilityDeniedBy('copilot.use', config) &&
+      canCreateOrganizationWorkspace(access.role, config),
     searchAccess,
     settingsFeatures: getOrganizationSettingsFeatures(
       hasEnterprisePlan,

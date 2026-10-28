@@ -4,7 +4,7 @@ import type { SearchConnectionTarget } from '@/lib/knowledge/search/connection-t
 import { SEARCH_DEBOUNCE_MS } from '@/lib/url-state'
 import { OrganizationPage } from '@/app/o/[organizationId]/components/organization-page'
 import { useOrganizationPageFilters } from '@/app/o/[organizationId]/components/organization-page/use-organization-page-filters'
-import { MemberIntegrationsList } from '@/app/o/[organizationId]/integrations/member-integrations-list'
+import { LiveMemberIntegrations } from '@/app/o/[organizationId]/integrations/live-member-integrations'
 import { SlackSearchActions } from '@/app/o/[organizationId]/integrations/slack-search-actions'
 import { useOrganizationContext } from '@/app/o/[organizationId]/providers/organization-provider'
 import { SearchIntegrationConnection } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/search-integration-connection'
@@ -29,7 +29,6 @@ export function OrganizationIntegrations({
   return (
     <OrganizationPage
       title='Integrations'
-      description='Connect your accounts for Sim Search'
       searchMode='expanded'
       searchPlaceholder='Search integrations'
       action={
@@ -45,7 +44,7 @@ export function OrganizationIntegrations({
           controlId='integrations-link'
         />
       )}
-      <MemberIntegrationsList search={sourceSearch} />
+      <LiveMemberIntegrations organizationId={organization.id} search={sourceSearch} />
     </OrganizationPage>
   )
 }

@@ -11,13 +11,11 @@ import { resolveSelectableGeneratedImage } from '@/lib/chat/assistant-assets'
 import { ChatEChartsRenderer } from '@/app/(interfaces)/chat/components/message/components/chat-echarts-renderer'
 import { ChatFileDownload } from '@/app/(interfaces)/chat/components/message/components/file-download'
 import { StreamingIndicator } from '@/app/(interfaces)/chat/components/message/components/streaming-indicator'
-import { ChatMessageAttachments } from '@/app/workspace/[workspaceId]/home/components'
+import { ChatMessageAttachments } from '@/app/workspace/[workspaceId]/home/components/chat-message-attachments'
 import type { ChatMessageAttachment } from '@/app/workspace/[workspaceId]/home/types'
 import ArenaCopilotMarkdownRenderer from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/copilot/components/copilot-message/components/arena-markdown-renderer'
 import { useThrottledValue } from '@/hooks/use-throttled-value'
 import {
-  downloadImage,
-  extractAllBase64Images,
   extractBase64Image,
   getImageUrlFromContent,
   hasBase64Images,
@@ -30,14 +28,6 @@ import {
   resolveMessageImagesAndProse,
   S3UploadFailedAlert,
 } from './constants'
-
-interface ChatAttachment {
-  id: string
-  name: string
-  type: string
-  dataUrl: string
-  size?: number
-}
 
 interface ChatMessageProps {
   message: {
@@ -119,20 +109,6 @@ const RenderButtons = ({
     setTimeout(() => setIsCopied(false), 2000)
   }
 
-  const handleDownload = () => {
-    const imageUrl = getImageUrlFromContent(message?.content)
-    if (imageUrl) {
-      downloadImage(false, undefined, imageUrl)
-      return
-    }
-    const base64Images = extractAllBase64Images(message?.content)
-    if (base64Images.length > 0) {
-      base64Images.forEach((imageData) => {
-        downloadImage(true, imageData)
-      })
-    }
-  }
-
   const containsBase64Images = hasBase64Images(message?.content)
   const hasImageUrl = !!getImageUrlFromContent(message?.content)
 
@@ -163,24 +139,6 @@ const RenderButtons = ({
               </Tooltip.Root>
             </Tooltip.Provider>
           )}
-
-          {/* {(containsBase64Images || hasImageUrl) && (
-            <Tooltip.Provider>
-              <Tooltip.Root delayDuration={300}>
-                <Tooltip.Trigger asChild>
-                  <button
-                    className='text-muted-foreground transition-colors hover:bg-muted'
-                    onClick={handleDownload}
-                  >
-                    <Download className='h-4 w-4' strokeWidth={2} />
-                  </button>
-                </Tooltip.Trigger>
-                <Tooltip.Content side='top' align='center' sideOffset={5}>
-                  Download image
-                </Tooltip.Content>
-              </Tooltip.Root>
-            </Tooltip.Provider>
-          )} */}
         </div>
       )}
     </>
@@ -458,7 +416,7 @@ export function ChatMessage({
       return (
         <ArenaCopilotMarkdownRenderer content={String(content)} renderImage={renderMarkdownImage} />
       )
-    } catch (error) {
+    } catch {
       return (
         <div className='rounded-lg border border-red-200 bg-red-50 p-3 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300'>
           <p className='text-sm'>⚠️ Error displaying content. Please try refreshing the chat.</p>

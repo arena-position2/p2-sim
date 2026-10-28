@@ -477,69 +477,6 @@ async function determineNextRunAfterError(
 
   return new Date(now.getTime() + 24 * 60 * 60 * 1000)
 }
-/**
- * Known server environment variables that might be available from server config
- * even if not in user's personal/workspace env vars. These will be checked
- * during execution via getApiKey fallback mechanism.
- */
-const SERVER_ENV_VARS = new Set([
-  'OPENAI_API_KEY',
-  'OPENAI_API_KEY_1',
-  'OPENAI_API_KEY_2',
-  'OPENAI_API_KEY_3',
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_API_KEY_1',
-  'ANTHROPIC_API_KEY_2',
-  'ANTHROPIC_API_KEY_3',
-  'GEMINI_API_KEY',
-  'SAMBANOVA_API_KEY',
-  'SAMBANOVA_API_KEY_1',
-  'SAMBANOVA_API_KEY_2',
-  'SAMBANOVA_API_KEY_3',
-  'XAI_API_KEY',
-  'XAI_API_KEY_1',
-  'XAI_API_KEY_2',
-  'XAI_API_KEY_3',
-  'AZURE_OPENAI_API_KEY',
-  'BROWSERBASE_API_KEY',
-  'PRESENTATION_API_BASE_URL',
-  'EXA_API_KEY',
-  'COPILOT_API_KEY',
-  'COPILOT_API_KEY_2',
-  'S3_PROFILE_PICTURES_BUCKET_NAME',
-  'S3_COPILOT_BUCKET_NAME',
-  'S3_CHAT_BUCKET_NAME',
-  'S3_EXECUTION_FILES_BUCKET_NAME',
-  'S3_KB_BUCKET_NAME',
-  'S3_LOGS_BUCKET_NAME',
-  'NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS',
-  'CRON_SECRET',
-  'FB_CLIENT_SECRET',
-  'FB_CLIENT_ID',
-  'FB_ACCESS_TOKEN',
-  'FROM_EMAIL_ADDRESS',
-  'NEXT_PUBLIC_FIRECRAWL_API_KEY',
-  'FIRECRAWL_API_KEY',
-  'BROWSER_USE_API_KEY',
-  'SKYVERN_API_KEY',
-  'SPYFU_API_PASSWORD',
-  'SPYFU_API_USER_ID',
-  'CHROMEDRIVER_PATH',
-  'FIGMA_API_KEY',
-  'GOOGLE_ADS_REFRESH_TOKEN',
-  'GOOGLE_ADS_CLIENT_SECRET',
-  'GOOGLE_ADS_CLIENT_ID',
-  'GOOGLE_ADS_DEVELOPER_TOKEN',
-  'INTERNAL_API_SECRET',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_REGION',
-  'S3_BUCKET_NAME',
-  'SLACK_CLIENT_ID',
-  'SLACK_CLIENT_SECRET',
-  'GOOGLE_CLIENT_SECRET',
-  'GOOGLE_CLIENT_ID',
-])
 
 async function isScheduleDeploymentVersionActive(
   workflowId: string,
@@ -743,7 +680,7 @@ async function runWorkflowExecution({
       timeoutController.isTimedOut() &&
       timeoutMs !== undefined
     if (timedOut) {
-      const timeoutErrorMessage = getTimeoutErrorMessage(null, timeoutMs)
+      const timeoutErrorMessage = getTimeoutErrorMessage(timeoutMs)
       logger.info(`[${requestId}] Scheduled workflow execution timed out`, {
         timeoutMs,
       })

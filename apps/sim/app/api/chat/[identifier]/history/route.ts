@@ -10,7 +10,7 @@ import {
 } from '@/lib/chat/history-persistence'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { getWorkspaceIdsForUser } from '@/lib/workspaces/permissions/utils'
-import { createErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 import { addCorsHeaders } from '../../utils'
 
 const logger = createLogger('ChatHistoryAPI')
@@ -61,13 +61,13 @@ export async function GET(
     // Validate date parameters
     if (startDate && Number.isNaN(Date.parse(startDate))) {
       return addCorsHeaders(
-        createErrorResponse('Invalid startDate format. Use ISO 8601 format.', 400),
+        createCodedErrorResponse('Invalid startDate format. Use ISO 8601 format.', 400),
         request
       )
     }
     if (endDate && Number.isNaN(Date.parse(endDate))) {
       return addCorsHeaders(
-        createErrorResponse('Invalid endDate format. Use ISO 8601 format.', 400),
+        createCodedErrorResponse('Invalid endDate format. Use ISO 8601 format.', 400),
         request
       )
     }
@@ -75,7 +75,7 @@ export async function GET(
     // Validate level parameter
     if (level && !['info', 'error'].includes(level)) {
       return addCorsHeaders(
-        createErrorResponse('Invalid level parameter. Must be "info" or "error".', 400),
+        createCodedErrorResponse('Invalid level parameter. Must be "info" or "error".', 400),
         request
       )
     }
@@ -85,7 +85,7 @@ export async function GET(
     const executingUserId = session?.user?.id
     if (!executingUserId) {
       logger.info(`[${requestId}] Unauthorized request for history: missing session user`)
-      return addCorsHeaders(createErrorResponse('Authentication required', 401), request)
+      return addCorsHeaders(createCodedErrorResponse('Authentication required', 401), request)
     }
 
     const deploymentResult = await db
@@ -100,11 +100,14 @@ export async function GET(
       .limit(1)
 
     if (deploymentResult.length === 0) {
-      return addCorsHeaders(createErrorResponse('Chat not found', 404), request)
+      return addCorsHeaders(createCodedErrorResponse('Chat not found', 404), request)
     }
 
     if (!deploymentResult[0].isActive) {
-      return addCorsHeaders(createErrorResponse('This chat is currently unavailable', 403), request)
+      return addCorsHeaders(
+        createCodedErrorResponse('This chat is currently unavailable', 403),
+        request
+      )
     }
 
     const deploymentWorkflowId = deploymentResult[0].workflowId
@@ -309,7 +312,7 @@ export async function GET(
   } catch (error: any) {
     logger.error(`[${requestId}] Error fetching chat history:`, error)
     return addCorsHeaders(
-      createErrorResponse(error.message || 'Failed to fetch chat history', 500),
+      createCodedErrorResponse(error.message || 'Failed to fetch chat history', 500),
       request
     )
   }

@@ -1,5 +1,6 @@
 import { isUtf8 } from 'node:buffer'
 import { AuditAction, AuditResourceType } from '@sim/audit'
+import type { Principal } from '@sim/auth/principal'
 import { resolvePrincipalAttribution } from '@sim/auth/principal'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
@@ -10,13 +11,16 @@ import { PayloadSizeLimitError } from '@/lib/core/utils/stream-limits'
 import {
   ContentVersionConflictError,
   fetchWorkspaceFileBuffer,
-  getWorkspaceFile,
+  getWorkspaceFileWithCurrentVersion,
   updateWorkspaceFileContent as updateStoredWorkspaceFileContent,
-  type WorkspaceFileRecord,
+  type VersionedWorkspaceFileRecord,
 } from '@/lib/uploads/contexts/workspace'
 import type { WorkspaceFileSecretProvenance } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
 import { defineAuthorizedWorkspaceFileUseCase } from '@/lib/workspace-files/application/authorized-workspace-file-use-case'
+import { parseWorkspaceFileRevision } from '@/lib/workspace-files/application/file-revision'
+import { resolveWorkspaceFileVersionWrite } from '@/lib/workspace-files/application/file-version-write'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
+import { prepareOwnedFileContentWrite } from '@/lib/workspace-files/application/owned-file-content'
 import { resolveActiveWorkspaceFileContext } from '@/lib/workspace-files/application/workspace-file-context'
 import {
   applyWorkspaceFileContentEdit,
@@ -38,10 +42,16 @@ export interface EditWorkspaceFileContentInput {
   assertedWorkspaceId?: string
   edit: EditWorkspaceFileContentEdit
   secretProvenance?: WorkspaceFileSecretProvenance
+  /**
+   * Refuse the edit unless the file still holds exactly this content, as reported by the
+   * `revision` an earlier read or write returned.
+   */
+  expectedRevision?: string
 }
 
 export interface EditWorkspaceFileContentResult {
-  file: WorkspaceFileRecord
+  /** The updated record, carrying the number of the version this edit recorded. */
+  file: VersionedWorkspaceFileRecord
   /** Lines in the file after the edit, so a caller can re-anchor without re-reading. */
   lineCount: number
 }
@@ -65,8 +75,13 @@ export interface EditWorkspaceFileContentResult {
  */
 export const editWorkspaceFileContent = defineAuthorizedWorkspaceFileUseCase({
   operation: fileOperations.updateContent,
-  resolveContext: ({ input }: { input: EditWorkspaceFileContentInput }) =>
-    resolveActiveWorkspaceFileContext(input),
+  resolveContext: ({
+    principal,
+    input,
+  }: {
+    principal: Principal
+    input: EditWorkspaceFileContentInput
+  }) => resolveActiveWorkspaceFileContext({ ...input, ownedFilePrincipal: principal }),
   async execute({ principal, input, context }): Promise<EditWorkspaceFileContentResult> {
     const lockKey = `file-edit:${context.workspaceId}:${context.fileId}`
     const lockValue = `${Date.now()}-${generateShortId()}`
@@ -84,8 +99,8 @@ export const editWorkspaceFileContent = defineAuthorizedWorkspaceFileUseCase({
     }
 
     try {
-      const file = await getWorkspaceFile(context.workspaceId, context.fileId, {
-        throwOnError: true,
+      const file = await getWorkspaceFileWithCurrentVersion(context.workspaceId, context.fileId, {
+        includeOwnedFiles: true,
       })
       if (!file) throw new OrchestrationError('not_found', 'File not found')
       if (!file.contentUpdatedAt) {
@@ -168,10 +183,11 @@ export const editWorkspaceFileContent = defineAuthorizedWorkspaceFileUseCase({
         )
       }
 
+      const commitOwner = await prepareOwnedFileContentWrite(context, content)
       const attribution = resolvePrincipalAttribution(principal, {
         workspaceBillingOwnerUserId: context.billedAccountUserId,
       })
-      let updated: WorkspaceFileRecord
+      let updated: VersionedWorkspaceFileRecord
       try {
         updated = await updateStoredWorkspaceFileContent(
           context.workspaceId,
@@ -180,7 +196,15 @@ export const editWorkspaceFileContent = defineAuthorizedWorkspaceFileUseCase({
           content,
           file.type,
           {
-            expectedUpdatedAt: file.contentUpdatedAt,
+            version: resolveWorkspaceFileVersionWrite(principal),
+            /*
+             * The caller's own revision when it sent one, so the guard covers everything since
+             * the content it read — not merely since this use case loaded the file.
+             */
+            commitOwner,
+            expectedUpdatedAt: input.expectedRevision
+              ? parseWorkspaceFileRevision(input.expectedRevision, context.fileId)
+              : file.contentUpdatedAt,
             secretProvenancePolicy: input.secretProvenance
               ? { mode: 'replace' as const, provenance: input.secretProvenance }
               : /*

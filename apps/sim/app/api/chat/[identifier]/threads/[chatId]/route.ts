@@ -13,7 +13,7 @@ import { resolveDeployedChatThreadAccess } from '@/lib/chat/deployed-chat-thread
 import { generateRequestId } from '@/lib/core/utils/request'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { addCorsHeaders } from '@/app/api/chat/utils'
-import { createErrorResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('DeployedChatThreadAPI')
 
@@ -74,7 +74,7 @@ export const PATCH = withRouteHandler(
       .returning({ id: deployedChat.id })
 
     if (!updated) {
-      return addCorsHeaders(createErrorResponse('Thread not found', 404), request)
+      return addCorsHeaders(createCodedErrorResponse('Thread not found', 404), request)
     }
 
     logger.info(`[${requestId}] Updated deployed chat thread`, {
@@ -130,7 +130,7 @@ export const DELETE = withRouteHandler(
       .returning({ id: deployedChat.id })
 
     if (!archived) {
-      return addCorsHeaders(createErrorResponse('Thread not found', 404), request)
+      return addCorsHeaders(createCodedErrorResponse('Thread not found', 404), request)
     }
 
     logger.info(`[${requestId}] Archived deployed chat thread`, {

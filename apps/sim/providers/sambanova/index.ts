@@ -9,6 +9,7 @@ import type {
   TimeSegment,
 } from '@/providers/types'
 import {
+  isFunctionToolCall,
   prepareToolExecution,
   prepareToolsWithUsageControl,
   trackForcedToolUsage,
@@ -377,7 +378,7 @@ export const sambanovaProvider: ProviderConfig = {
         if (!toolCallsInResponse?.length) break
 
         const toolsStartTime = Date.now()
-        for (const toolCall of toolCallsInResponse) {
+        for (const toolCall of toolCallsInResponse.filter(isFunctionToolCall)) {
           try {
             const toolName = toolCall.function.name
             const toolArgs = JSON.parse(toolCall.function.arguments)
@@ -385,8 +386,13 @@ export const sambanovaProvider: ProviderConfig = {
             if (!tool) continue
 
             const toolCallStartTime = Date.now()
-            const { toolParams, executionParams } = prepareToolExecution(tool, toolArgs, request)
-            const result = await executeTool(toolName, executionParams, true)
+            const { toolParams, executionParams } = prepareToolExecution(
+              tool,
+              toolArgs,
+              request,
+              toolCall.id
+            )
+            const result = await executeTool(toolName, executionParams)
             const toolCallEndTime = Date.now()
             const toolCallDuration = toolCallEndTime - toolCallStartTime
 
@@ -439,7 +445,7 @@ export const sambanovaProvider: ProviderConfig = {
           } catch (error) {
             logger.error('Error processing SambaNova tool call:', {
               error,
-              toolName: toolCall?.function?.name,
+              toolName: toolCall.function.name,
             })
           }
         }

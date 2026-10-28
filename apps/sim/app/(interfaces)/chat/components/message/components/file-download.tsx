@@ -2,13 +2,12 @@
 
 import { useState } from 'react'
 import { Button, Download, Loader } from '@sim/emcn'
-import { Music } from '@sim/emcn/icons'
+import { DefaultFileIcon, Music } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { sleep } from '@sim/utils/helpers'
-import { DefaultFileIcon, getDocumentIcon } from '@/components/icons/document-icons'
+import { getDocumentIcon } from '@/components/icons/document-icons'
 import type { AssistantChatFile as ChatFile } from '@/lib/chat/assistant-assets'
 import { isSafeHttpUrl } from '@/lib/core/utils/urls'
-// import type { ChatFile } from '@/app/(interfaces)/chat/components/message/message'
 import { saveBlob } from '@/lib/uploads/client/download'
 import { tryInferContextFromKey } from '@/lib/uploads/utils/file-utils'
 
@@ -173,7 +172,7 @@ export function ChatFileDownload({ file }: ChatFileDownloadProps) {
         variant='default'
         onClick={handleDownload}
         disabled={isDownloading}
-        className='group flex h-auto w-[200px] items-center gap-2 rounded-lg px-3 py-2'
+        className='group flex h-auto w-[200px] gap-2 rounded-lg px-3 py-2'
       >
         <div className='flex size-8 shrink-0 items-center justify-center'>{renderIcon()}</div>
         <div className='min-w-0 flex-1 text-left'>
@@ -251,6 +250,7 @@ export function ChatFileDownloadAll({ files }: ChatFileDownloadAllProps) {
   return (
     <div className='flex flex-col items-start gap-2'>
       <Button
+        aria-label='Download all files'
         variant='ghost-secondary'
         onClick={handleDownloadAll}
         disabled={isDownloading}

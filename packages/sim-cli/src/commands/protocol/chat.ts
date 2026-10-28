@@ -1,10 +1,12 @@
-import chalk from 'chalk'
 import type { Command } from 'commander'
-import { clientFrom } from '../../context'
-import { type ChatResponse, V2_OPERATIONS } from '../../generated/v2-api'
+import { embedStore } from '#sim-cli/embed-context'
+import { writeStderr, writeStdout } from '#sim-cli/output/io'
+import { styles } from '#sim-cli/output/presentation'
+import type { ChatResponse } from '../../generated/v2-api'
 import { SimApiError } from '../../http/client'
 import { readNdjson } from '../../http/ndjson'
 import { sanitize } from '../../output/render'
+import { apiCommand } from '../../runtime/called-operations'
 import { printProtocolResult } from './result'
 
 /** The final payload, as `POST /api/v2/chat` answers it. */
@@ -96,8 +98,8 @@ function ignoreBrokenPipe(stream: NodeJS.WriteStream): () => void {
  */
 
 export function attachChat(program: Command): void {
-  program
-    .command('chat')
+  const [chat, connectChat] = apiCommand(program, 'chat', ['chat'])
+  chat
     .description('Ask Sim and print the reply')
     .argument('<message>', 'What to ask Sim')
     .allowExcessArguments(false)
@@ -116,7 +118,7 @@ Examples:
   $ sim --output json chat "Summarize yesterday's failed runs" | jq -r '.content'
 `
     )
-    .action(async (message: string, options: ChatOptions, command: Command) => {
+    .action(async (message: string, options: ChatOptions) => {
       /**
        * Refused here so the refusal names what the caller typed: the route
        * answers in its own field names, and this command builds its request by
@@ -135,11 +137,10 @@ Examples:
         )
       }
 
-      const { client, profile } = clientFrom(command)
+      const { client, profile } = connectChat()
       const workspaceId = client.requireWorkspace()
 
-      const response = await client.requestRaw(V2_OPERATIONS.chat.path, {
-        method: 'POST',
+      const response = await client.requestRaw('chat', {
         body: {
           workspaceId,
           message,
@@ -156,18 +157,19 @@ Examples:
       /** Closes off streamed text so nothing is glued onto the line after it. */
       const endStreamedLine = (): void => {
         if (streamed.length > 0 && !streamed.endsWith('\n')) {
-          process.stdout.write('\n')
+          writeStdout('\n')
           streamed += '\n'
         }
       }
 
-      const restorePipeHandling = streaming ? ignoreBrokenPipe(process.stdout) : undefined
+      const restorePipeHandling =
+        streaming && !embedStore.getStore() ? ignoreBrokenPipe(process.stdout) : undefined
 
       try {
         const result = await readChatStream(response, (content) => {
           if (!streaming) return
           streamed += content
-          process.stdout.write(content)
+          writeStdout(content)
         })
 
         if (!streaming) {
@@ -182,11 +184,11 @@ Examples:
         // rather than duplicating the reply.
         const content = sanitize(result.content ?? '')
         if (content.startsWith(streamed) && content.length > streamed.length) {
-          process.stdout.write(content.slice(streamed.length))
+          writeStdout(content.slice(streamed.length))
           streamed = content
         }
         endStreamedLine()
-        process.stderr.write(`${chalk.dim(`conversation: ${result.conversationId}`)}\n`)
+        writeStderr(`${styles().dim(`conversation: ${result.conversationId}`)}\n`)
       } catch (error) {
         endStreamedLine()
         throw error

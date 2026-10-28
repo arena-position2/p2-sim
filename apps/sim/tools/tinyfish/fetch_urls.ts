@@ -53,7 +53,7 @@ export const fetchUrlsTool: ToolConfig<TinyFishFetchParams, TinyFishFetchRespons
     },
   },
 
-  hosting: tinyfishFetchHosting(),
+  hosting: tinyfishFetchHosting<TinyFishFetchParams>(),
 
   request: {
     url: `${TINYFISH_FETCH_API_BASE}/`,

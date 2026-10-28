@@ -29,8 +29,8 @@ export async function setChatAuthCookie(
 }
 
 /**
- * Whether a GET for an agent-generated image may proceed without Sim session.
- * Deployed chat visitors use {@code chat_auth_*} cookies, not session; {@code <img>} cannot send Bearer/API key.
+ * Whether a GET for an agent-generated image may proceed without a session.
+ * Deployed chat visitors use `chat_auth_*` cookies, not a session; an image request cannot send a Bearer token or API key.
  */
 export async function canAccessAgentGeneratedImageViaDeployedChat(
   request: NextRequest,
@@ -61,30 +61,6 @@ export async function canAccessAgentGeneratedImageViaDeployedChat(
   }
 
   return false
-}
-
-/**
- * Check if user has permission to create a chat for a specific workflow
- */
-export async function checkWorkflowAccessForChatCreation(
-  workflowId: string,
-  userId: string
-): Promise<{ hasAccess: boolean; workflow?: any }> {
-  const authorization = await authorizeWorkflowByWorkspacePermission({
-    workflowId,
-    userId,
-    action: 'admin',
-  })
-
-  if (!authorization.workflow) {
-    return { hasAccess: false }
-  }
-
-  if (authorization.allowed) {
-    return { hasAccess: true, workflow: authorization.workflow }
-  }
-
-  return { hasAccess: false }
 }
 
 export function addCorsHeaders(response: NextResponse, request: NextRequest) {

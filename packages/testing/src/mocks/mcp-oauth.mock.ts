@@ -5,13 +5,15 @@ import { vi } from 'vitest'
  *
  * @example
  * ```ts
- * import { mcpOauthMockFns } from '@sim/testing'
+ * import { mcpOauthMockFns } from '@sim/testing/mocks/mcp-oauth.mock'
  *
  * mcpOauthMockFns.mockGetOrCreateOauthRow.mockResolvedValue({ id: 'oauth-row-1', ... })
  * ```
  */
 export const mcpOauthMockFns = {
   mockAssertSafeOauthServerUrl: vi.fn(),
+  mockDetectMcpAuthType: vi.fn(),
+  mockOauthCredsChanged: vi.fn(),
   mockMcpAuthGuarded: vi.fn(),
   mockGetOrCreateOauthRow: vi.fn(),
   mockLoadOauthRow: vi.fn(),
@@ -37,7 +39,7 @@ export class McpOauthRedirectRequiredMock extends Error {
   }
 }
 
-export class McpOauthInsecureUrlErrorMock extends Error {
+class McpOauthInsecureUrlErrorMock extends Error {
   constructor(public readonly url: string) {
     super(`Insecure MCP OAuth server URL: ${url}`)
     this.name = 'McpOauthInsecureUrlErrorMock'
@@ -71,6 +73,8 @@ function buildSimMcpOauthProvider(value: object) {
  */
 export const mcpOauthMock = {
   assertSafeOauthServerUrl: mcpOauthMockFns.mockAssertSafeOauthServerUrl,
+  detectMcpAuthType: mcpOauthMockFns.mockDetectMcpAuthType,
+  oauthCredsChanged: mcpOauthMockFns.mockOauthCredsChanged,
   mcpAuthGuarded: mcpOauthMockFns.mockMcpAuthGuarded,
   getOrCreateOauthRow: mcpOauthMockFns.mockGetOrCreateOauthRow,
   loadOauthRow: mcpOauthMockFns.mockLoadOauthRow,

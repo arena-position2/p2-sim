@@ -137,42 +137,6 @@ export function mcpOrchestrationStatus(errorCode: string | undefined): number {
 }
 
 /**
- * Validate string parameter
- * Consolidates parameter validation logic found across routes
- */
-export function validateStringParam(
-  value: unknown,
-  paramName: string
-): { isValid: true } | { isValid: false; error: string } {
-  if (!value || typeof value !== 'string') {
-    return {
-      isValid: false,
-      error: `${paramName} is required and must be a string`,
-    }
-  }
-  return { isValid: true }
-}
-
-/**
- * Validate required fields in request body
- */
-export function validateRequiredFields(
-  body: Record<string, unknown>,
-  requiredFields: string[]
-): { isValid: true } | { isValid: false; error: string } {
-  const missingFields = requiredFields.filter((field) => !(field in body))
-
-  if (missingFields.length > 0) {
-    return {
-      isValid: false,
-      error: `Missing required fields: ${missingFields.join(', ')}`,
-    }
-  }
-
-  return { isValid: true }
-}
-
-/**
  * Enhanced error categorization for more specific HTTP status codes.
  * Returns safe, generic messages to prevent leaking internal details.
  */
@@ -277,6 +241,26 @@ export function generateMcpServerId(workspaceId: string, url: string): string {
   const hash = simpleHash(input)
 
   return `mcp-${hash}`
+}
+
+/**
+ * Whether two URLs name the same MCP server destination: the same origin,
+ * credentials, and exact path. Only the query string and fragment may differ — paths can be
+ * case-sensitive, so this is stricter than the id hash.
+ */
+export function isSameMcpServerDestination(a: string, b: string): boolean {
+  try {
+    const parsedA = new URL(a)
+    const parsedB = new URL(b)
+    return (
+      parsedA.origin === parsedB.origin &&
+      parsedA.username === parsedB.username &&
+      parsedA.password === parsedB.password &&
+      parsedA.pathname === parsedB.pathname
+    )
+  } catch {
+    return a === b
+  }
 }
 
 /**

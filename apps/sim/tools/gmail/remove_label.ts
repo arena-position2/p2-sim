@@ -1,4 +1,5 @@
 import type { GmailLabelParams, GmailToolResponse } from '@/tools/gmail/types'
+import { castGmailResponse } from '@/tools/gmail/utils'
 import type { InternalToolConfig } from '@/tools/types'
 
 export const gmailRemoveLabelTool: InternalToolConfig<GmailLabelParams, GmailToolResponse> = {
@@ -96,7 +97,9 @@ export const gmailRemoveLabelV2Tool: InternalToolConfig<GmailLabelParams, GmailM
   params: gmailRemoveLabelTool.params,
   operation: gmailRemoveLabelTool.operation,
   transformResponse: async (response) => {
-    return await gmailRemoveLabelTool.transformResponse!(response)
+    return castGmailResponse<GmailModifyV2Response>(
+      await gmailRemoveLabelTool.transformResponse!(response)
+    )
   },
   outputs: {
     content: { type: 'string', description: 'Success message' },

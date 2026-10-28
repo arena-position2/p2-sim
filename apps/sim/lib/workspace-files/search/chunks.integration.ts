@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { DB_POOL_PROFILES } from '@sim/db/pool-profiles'
 import { withUtcTimestamps } from '@sim/db/timestamps'
 import { generateId } from '@sim/utils/id'
 import { sql } from 'drizzle-orm'
@@ -9,8 +10,15 @@ import postgres from 'postgres'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildLiteralMatchStart } from '@/lib/workspace-files/search/sql-pattern'
 
-const database = vi.hoisted(() => ({ current: undefined as PostgresJsDatabase | undefined }))
+const database = vi.hoisted(() => ({
+  current: undefined as PostgresJsDatabase | undefined,
+  search: undefined as PostgresJsDatabase | undefined,
+}))
 vi.mock('@sim/db', () => ({
+  dbFor: (role: string) => {
+    if (role !== 'search' || !database.search) throw new Error('Search database not initialized')
+    return database.search
+  },
   get db() {
     if (!database.current) throw new Error('Test database not initialized')
     return database.current
@@ -20,14 +28,20 @@ vi.mock('@/lib/uploads/contexts/workspace', () => ({
   getWorkspaceFile: vi.fn(),
   fetchWorkspaceFileBuffer: vi.fn(),
 }))
-vi.mock('@/lib/copilot/tools/server/files/doc-compile', () => ({ resolveServableDoc: vi.fn() }))
+vi.mock('@/lib/mothership/tools/server/files/doc-compile', () => ({ resolveServableDoc: vi.fn() }))
 vi.mock('@/lib/file-parsers', () => ({ parseBuffer: vi.fn(), isSupportedFileType: vi.fn() }))
 
+import { readTestDatabaseUrl } from '@sim/db/testing/test-infrastructure'
 import {
   FILE_SEARCH_CLEANUP_BATCH_ROWS,
+  FILE_SEARCH_CLEANUP_BUDGET_MS,
   FILE_SEARCH_CLEANUP_MAX_BATCHES,
+  FILE_SEARCH_INSERT_BATCH_TRIGRAM_KEYS,
+  FILE_SEARCH_QUERY_GLOBAL_CONCURRENCY,
+  FILE_SEARCH_QUERY_WORKSPACE_CONCURRENCY,
 } from '@/lib/workspace-files/search/constants'
 import { prepareWorkspaceFileSearchDispatch } from '@/lib/workspace-files/search/dispatcher'
+import { iterateFileSearchBatches } from '@/lib/workspace-files/search/index-batches'
 import {
   iterateFileSearchChunks,
   planFileSearchIndex,
@@ -52,16 +66,7 @@ const revision: FileSearchRevision = {
 
 describe('chunked workspace file search on PostgreSQL', () => {
   const schema = `chunk_test_${generateId().replaceAll('-', '')}`
-  const databaseUrl = process.env.KNOWLEDGE_ACL_TEST_DATABASE_URL
-  if (!databaseUrl) throw new Error('Use a disposable local database')
-  const target = new URL(databaseUrl)
-  if (
-    !['postgres:', 'postgresql:'].includes(target.protocol) ||
-    !['localhost', '127.0.0.1'].includes(target.hostname) ||
-    (!target.pathname.startsWith('/sim_acl_test') && target.pathname !== '/sim_auth_scim')
-  ) {
-    throw new Error('File search tests require a disposable local integration database')
-  }
+  const databaseUrl = readTestDatabaseUrl()
   const connection = postgres(
     databaseUrl,
     withUtcTimestamps({
@@ -72,6 +77,45 @@ describe('chunked workspace file search on PostgreSQL', () => {
       onnotice: () => {},
     })
   )
+  const searchConnection = postgres(
+    databaseUrl,
+    withUtcTimestamps({
+      max: DB_POOL_PROFILES.search.primaryMax,
+      prepare: false,
+      fetch_types: false,
+      connection: { search_path: `${schema},public` },
+      onnotice: () => {},
+    })
+  )
+  const ginWriteMigration = '0364_workspace_file_search_direct_gin.sql'
+
+  async function applyMigration(migration: string) {
+    const source = readFileSync(
+      resolve(process.cwd(), '../../packages/db/migrations', migration),
+      'utf8'
+    ).replaceAll('"public".', `"${schema}".`)
+    const session = await connection.reserve()
+    try {
+      await session`BEGIN`
+      for (const statement of source.split('--> statement-breakpoint'))
+        if (statement.trim()) await session.unsafe(statement)
+      await session`COMMIT`
+    } finally {
+      await session`ROLLBACK`
+      await session`RESET statement_timeout`
+      session.release()
+    }
+  }
+
+  async function ginState() {
+    const [state] =
+      await connection`SELECT c.oid, 'fastupdate=off' = ANY(c.reloptions) AS direct_writes,
+      i.indisvalid, pending.pending_pages
+      FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+      CROSS JOIN LATERAL pgstatginindex(c.oid) pending
+      WHERE c.oid = 'workspace_file_search_chunk_content_idx'::regclass`
+    return state
+  }
 
   async function addFile(
     fileId: string,
@@ -89,10 +133,8 @@ describe('chunked workspace file search on PostgreSQL', () => {
     expect(build).not.toBeNull()
     const plan = planFileSearchIndex({ text, partial: false }, signal)
     const chunks = [...iterateFileSearchChunks(plan, signal)]
-    for (let offset = 0; offset < chunks.length; offset += 100)
-      expect(await appendFileSearchChunks(build!, chunks.slice(offset, offset + 100), signal)).toBe(
-        true
-      )
+    for (const batch of iterateFileSearchBatches(chunks, signal))
+      expect(await appendFileSearchChunks(build!, batch, signal)).toBe(true)
     expect(
       await publishFileSearchBuild(
         build!,
@@ -119,6 +161,7 @@ describe('chunked workspace file search on PostgreSQL', () => {
   let captureQuery = false
 
   beforeAll(async () => {
+    await connection`CREATE EXTENSION IF NOT EXISTS pgstattuple`
     await connection`CREATE SCHEMA ${connection(schema)}`
     await connection`CREATE TABLE workspace (id text PRIMARY KEY)`
     await connection`CREATE TABLE workspace_files (id text PRIMARY KEY, workspace_id text REFERENCES workspace(id) ON DELETE CASCADE,
@@ -128,15 +171,13 @@ describe('chunked workspace file search on PostgreSQL', () => {
       '0313_puzzling_zodiak.sql',
       '0358_workspace_file_content_version_precision.sql',
       '0359_workspace_file_search_chunks.sql',
+      ginWriteMigration,
+      '0382_workspace_file_search_dispatch_handoff.sql',
     ]) {
-      const source = readFileSync(
-        resolve(process.cwd(), '../../packages/db/migrations', migration),
-        'utf8'
-      ).replaceAll('"public".', `"${schema}".`)
-      for (const statement of source.split('--> statement-breakpoint'))
-        if (statement.trim()) await connection.unsafe(statement)
+      await applyMigration(migration)
     }
-    database.current = drizzle(connection, {
+    database.current = drizzle(connection)
+    database.search = drizzle(searchConnection, {
       logger: {
         logQuery(query, params) {
           if (
@@ -162,8 +203,128 @@ describe('chunked workspace file search on PostgreSQL', () => {
       await connection`DROP SCHEMA ${connection(schema)} CASCADE`
     } finally {
       database.current = undefined
-      await connection.end()
+      database.search = undefined
+      await Promise.all([connection.end(), searchConnection.end()])
     }
+  })
+
+  it('preserves search through disabling, draining, and replaying GIN pending-list maintenance', async () => {
+    await connection`ALTER INDEX workspace_file_search_chunk_content_idx SET (fastupdate = on)`
+    try {
+      await index('heading\nold needle αβγ\ntail')
+      const before = await ginState()
+      expect(before.pending_pages).toBeGreaterThan(0)
+
+      /** Simulate an interrupted rollout after the storage option commits but before the drain. */
+      await connection`ALTER INDEX workspace_file_search_chunk_content_idx SET (fastupdate = off)`
+      await index('heading\nnew needle αβγ\ntail', await addFile('file-2'))
+      expect((await ginState()).pending_pages).toBe(before.pending_pages)
+      const expected = [
+        { fileId: 'file-1', lineNumber: 2 },
+        { fileId: 'file-2', lineNumber: 2 },
+      ]
+      expect((await search('^(old|new) needle αβγ$', 'regex')).results).toMatchObject(expected)
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await applyMigration(ginWriteMigration)
+        expect(await ginState()).toMatchObject({
+          oid: before.oid,
+          indisvalid: true,
+          direct_writes: true,
+          pending_pages: 0,
+        })
+        expect((await search('needle αβγ')).results).toMatchObject(expected)
+      }
+      await index('heading\nnew needle αβγ\ntail', await addFile('file-3'))
+      expect((await ginState()).pending_pages).toBe(0)
+      expect((await search('^(old|new) needle αβγ$', 'regex')).results).toHaveLength(3)
+    } finally {
+      await applyMigration(ginWriteMigration)
+    }
+  })
+
+  it('cancels a slow chunk statement without losing the connection or publishing partial content', async () => {
+    const build = (await beginFileSearchBuild(revision))!
+    const plan = planFileSearchIndex({ text: 'needle', partial: false }, signal)
+    const chunks = [...iterateFileSearchChunks(plan, signal)]
+    const writer = postgres(databaseUrl, {
+      max: 1,
+      prepare: false,
+      connection: { search_path: `${schema},public` },
+    })
+    const original = database.current
+    await connection`CREATE FUNCTION slow_chunk_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN PERFORM pg_sleep(11); RETURN NEW; END $$`
+    await connection`CREATE TRIGGER slow_chunk_insert BEFORE INSERT ON workspace_file_search_chunk
+      FOR EACH STATEMENT EXECUTE FUNCTION slow_chunk_insert()`
+    try {
+      database.current = drizzle(writer)
+      const [before] = await writer`SELECT pg_backend_pid() AS pid`
+      await expect(appendFileSearchChunks(build, chunks, signal)).rejects.toMatchObject({
+        cause: { code: '57014' },
+      })
+      expect((await writer`SELECT pg_backend_pid() AS pid`)[0].pid).toBe(before.pid)
+      expect(
+        (await connection`SELECT count(*)::int AS count FROM workspace_file_search_chunk`)[0].count
+      ).toBe(0)
+      expect((await search('needle')).results).toEqual([])
+    } finally {
+      database.current = original
+      await writer.end()
+      await connection`DROP TRIGGER slow_chunk_insert ON workspace_file_search_chunk`
+      await connection`DROP FUNCTION slow_chunk_insert()`
+    }
+    expect(await appendFileSearchChunks(build, chunks, signal)).toBe(true)
+    expect(
+      await publishFileSearchBuild(
+        build,
+        {
+          status: 'ready',
+          chunkCount: chunks.length,
+          lineCount: plan.lineCount,
+          indexedBytes: plan.indexedBytes,
+        },
+        signal
+      )
+    ).toBe(true)
+    expect((await search('needle')).results).toMatchObject([{ fileId: 'file-1', lineNumber: 1 }])
+  })
+
+  it('bounds native GIN posting work and keeps dense-file exact and regex line results', async () => {
+    const lines = Array.from(
+      { length: 1200 },
+      (_, i) => `dependency-${i}: sha512-${createHash('sha512').update(String(i)).digest('base64')}`
+    )
+    const text = lines.join('\n')
+    const plan = planFileSearchIndex({ text, partial: false }, signal)
+    const chunks = [...iterateFileSearchChunks(plan, signal)]
+    const build = (await beginFileSearchBuild(revision))!
+    await expect(appendFileSearchChunks(build, chunks.slice(0, 16), signal)).rejects.toThrow(
+      'insert batch exceeds its budget'
+    )
+    for (const batch of iterateFileSearchBatches(chunks, signal)) {
+      const [{ keys }] = await connection`SELECT sum(cardinality(show_trgm(content)))::int AS keys
+        FROM (VALUES ${connection(batch.map((c) => [c.content]))}) AS chunk(content)`
+      expect(keys).toBeLessThanOrEqual(FILE_SEARCH_INSERT_BATCH_TRIGRAM_KEYS)
+      expect(await appendFileSearchChunks(build, batch, signal)).toBe(true)
+    }
+    expect((await search('dependency-1199')).results).toEqual([])
+    expect(
+      await publishFileSearchBuild(
+        build,
+        {
+          status: 'ready',
+          chunkCount: chunks.length,
+          lineCount: plan.lineCount,
+          indexedBytes: plan.indexedBytes,
+        },
+        signal
+      )
+    ).toBe(true)
+    expect((await search(lines[1199])).results).toMatchObject([{ lineNumber: 1200 }])
+    expect(
+      (await search('^dependency-1199: sha512-[A-Za-z0-9+/]+=*$', 'regex')).results
+    ).toMatchObject([{ lineNumber: 1200 }])
   })
 
   it('packs a million short lines without a million rows and bounds every stored value', async () => {
@@ -373,6 +534,51 @@ describe('chunked workspace file search on PostgreSQL', () => {
       (await connection`SELECT count(*)::int AS count FROM workspace_file_search_chunk`)[0].count
     ).toBe(0)
   })
+  it('ends a cleanup run cleanly when its time budget runs out', async () => {
+    const build = (await beginFileSearchBuild(revision))!
+    await connection`INSERT INTO workspace_file_search_chunk (build_id, workspace_id, ordinal, line_start, fragment, content)
+      SELECT ${build.id}, 'workspace-1', n, n + 1, false, 'x' FROM generate_series(0, 999) n`
+    await connection`UPDATE workspace_file_search_build SET expires_at = now() WHERE id = ${build.id}`
+
+    /** The deadline is read first; every read after it reports a budget all but consumed. */
+    const startedAt = Date.now()
+    const clock = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(startedAt)
+      .mockReturnValue(startedAt + FILE_SEARCH_CLEANUP_BUDGET_MS - 1)
+    try {
+      await expect(cleanupFileSearchBuilds()).resolves.toBe(0)
+    } finally {
+      clock.mockRestore()
+    }
+
+    expect(
+      (await connection`SELECT count(*)::int AS count FROM workspace_file_search_chunk`)[0].count
+    ).toBe(1000)
+  })
+  it('abandons a batch whose budget was spent acquiring its connection', async () => {
+    const build = (await beginFileSearchBuild(revision))!
+    await connection`INSERT INTO workspace_file_search_chunk (build_id, workspace_id, ordinal, line_start, fragment, content)
+      SELECT ${build.id}, 'workspace-1', n, n + 1, false, 'x' FROM generate_series(0, 999) n`
+    await connection`UPDATE workspace_file_search_build SET expires_at = now() WHERE id = ${build.id}`
+
+    /** Full budget when the batch is admitted, none left once its connection is in hand. */
+    const startedAt = Date.now()
+    const clock = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(startedAt)
+      .mockReturnValueOnce(startedAt)
+      .mockReturnValue(startedAt + FILE_SEARCH_CLEANUP_BUDGET_MS - 1)
+    try {
+      await expect(cleanupFileSearchBuilds()).resolves.toBe(0)
+    } finally {
+      clock.mockRestore()
+    }
+
+    expect(
+      (await connection`SELECT count(*)::int AS count FROM workspace_file_search_chunk`)[0].count
+    ).toBe(1000)
+  })
   it('retires many small builds within one cleanup run', async () => {
     await connection`INSERT INTO workspace_file_search_build (id, file_id, workspace_id, source_content_updated_at, expires_at)
       SELECT 'retired-' || n, 'file-1', 'workspace-1', now(), now() FROM generate_series(1, 100) n`
@@ -428,12 +634,90 @@ describe('chunked workspace file search on PostgreSQL', () => {
       'pending'
     )
   })
+  it('completes a claim handoff when its run begins, never for an older claim', async () => {
+    const older = new Date('2026-01-01T01:00:00Z')
+    const newer = new Date('2026-01-01T02:00:00Z')
+    await connection`UPDATE workspace_file_search_revision
+      SET dispatched_at = ${newer.toISOString()}::timestamp,
+        handoff_expires_at = clock_timestamp() + interval '2 minutes'`
+    const handoff = async () =>
+      (await connection`SELECT handoff_expires_at FROM workspace_file_search_revision`)[0]
+        .handoff_expires_at
+    expect(await beginFileSearchBuild(revision, older.toISOString())).toBeNull()
+    expect(await handoff()).not.toBeNull()
+    expect(await beginFileSearchBuild(revision, newer.toISOString())).not.toBeNull()
+    expect(await handoff()).toBeNull()
+  })
 
-  it('releases query admission slots after a busy response', async () => {
+  async function withOccupiedPool(client: postgres.Sql, count: number, run: () => Promise<void>) {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let started = 0
+    const transactions: Promise<unknown>[] = []
+    const ready = new Promise<void>((resolve, reject) => {
+      for (let i = 0; i < count; i++) {
+        transactions.push(
+          client
+            .begin(async () => {
+              if (++started === count) resolve()
+              await held
+            })
+            .catch(reject)
+        )
+      }
+    })
+    try {
+      await ready
+      await run()
+    } finally {
+      release()
+      await Promise.all(transactions)
+    }
+  }
+
+  it('searches while every shared application connection is occupied', async () => {
+    await index('needle')
+    await withOccupiedPool(connection, 4, async () => {
+      expect((await search('needle')).results).toHaveLength(1)
+    })
+  })
+
+  it('keeps application queries available while every search connection is occupied', async () => {
+    await withOccupiedPool(searchConnection, DB_POOL_PROFILES.search.primaryMax, async () => {
+      expect((await connection`SELECT 1 AS available`)[0].available).toBe(1)
+    })
+  })
+
+  it('serves a twenty-search workspace burst through the bounded search pool', async () => {
+    await index('needle')
+    const results = await Promise.all(Array.from({ length: 20 }, () => search('needle')))
+    expect(results).toHaveLength(20)
+    for (const result of results) expect(result.results).toHaveLength(1)
+  })
+
+  it('admits a search up to the workspace and global ceilings', async () => {
     const held = await connection.reserve()
     try {
       await held`BEGIN`
-      await held`SELECT pg_advisory_xact_lock(hashtextextended('workspace-file-search-read:workspace:workspace-1:' || n::text, 0)) FROM generate_series(1, 2) n`
+      await held`SELECT pg_advisory_xact_lock(hashtextextended('workspace-file-search-read:workspace:workspace-1:' || n::text, 0)) FROM generate_series(1, ${FILE_SEARCH_QUERY_WORKSPACE_CONCURRENCY - 1}) n`
+      await held`SELECT pg_advisory_xact_lock(hashtextextended('workspace-file-search-read:global:' || n::text, 0)) FROM generate_series(1, ${FILE_SEARCH_QUERY_GLOBAL_CONCURRENCY - 1}) n`
+      expect((await search('needle')).results).toEqual([])
+    } finally {
+      await held`ROLLBACK`
+      held.release()
+    }
+  })
+
+  it.each([
+    ['workspace:workspace-1', FILE_SEARCH_QUERY_WORKSPACE_CONCURRENCY],
+    ['global', FILE_SEARCH_QUERY_GLOBAL_CONCURRENCY],
+  ])('releases query admission slots after %s saturation', async (scope, capacity) => {
+    const held = await connection.reserve()
+    try {
+      await held`BEGIN`
+      await held`SELECT pg_advisory_xact_lock(hashtextextended('workspace-file-search-read:' || ${scope} || ':' || n::text, 0)) FROM generate_series(1, ${capacity}) n`
       await expect(search('needle')).rejects.toThrow('busy')
     } finally {
       await held`ROLLBACK`

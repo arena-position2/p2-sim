@@ -44,5 +44,18 @@ export * from './v1'
 export * from './workflows'
 export * from './workspace-file-folders'
 export * from './workspace-files'
-export * from './workspace-usage'
+export {
+  getWorkspaceUsageAnalyticsContract,
+  type UsageActorTypeValue,
+  type UsageChargeTypeValue,
+  type UsageLogSourceValue,
+  usageActorTypeSchema,
+  usageChargeTypeSchema,
+  type WorkspaceUsageAnalytics,
+  type WorkspaceUsageAnalyticsQuery,
+  type WorkspaceUsageAnalyticsQueryOutput,
+  workspaceUsageAnalyticsQuerySchema,
+  workspaceUsageAnalyticsResponseSchema,
+  workspaceUsagePeriodSchema,
+} from './workspace-usage'
 export * from './workspaces'

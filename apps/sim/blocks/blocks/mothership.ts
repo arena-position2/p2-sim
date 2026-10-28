@@ -1,35 +1,27 @@
-import { ArenaIcon } from '@/components/icons'
+import { Blimp } from '@sim/emcn/icons'
+import {
+  DEFAULT_MOTHERSHIP_EFFORT,
+  MOTHERSHIP_EFFORT_OPTIONS,
+  MOTHERSHIP_MODEL_OPTIONS,
+} from '@/lib/mothership/model-options'
 import type { BlockConfig } from '@/blocks/types'
-import type { ToolResponse } from '@/tools/types'
 
-interface MothershipResponse extends ToolResponse {
-  output: {
-    content: string
-    model: string
-    conversationId?: string
-    tokens?: {
-      prompt?: number
-      completion?: number
-      total?: number
-    }
-  }
-}
-
-export const MothershipBlock: BlockConfig<MothershipResponse> = {
+export const MothershipBlock: BlockConfig = {
   type: 'mothership',
-  name: 'Arena Chat',
-  description: 'Talk to Arena AI',
+  name: 'Sim Chat',
+  description: 'Reason, use tools, and stream a conversational response',
   longDescription:
-    'The Arena Chat block sends messages to Arena AI, which has access to subagents, integration tools, and workspace context. Use it to perform complex multi-step reasoning, cross-service queries, or any task that benefits from the full Arena AI intelligence within a workflow.',
+    'Run a prompt with workspace integration operations, selected MCP tools, and skill context. A stable conversation ID continues the conversation. The content output supports live response streaming, including Slack native agent sessions when selected by a supported custom-bot trigger. Tool access follows the selected operations.',
   bestPractices: `
   - Use for tasks that require multi-step reasoning, tool use, or cross-service coordination.
-  - Arena AI picks its own model and tools internally — you only provide a prompt.
+  - Choose Astra or Opus and a reasoning effort. Astra supports Fast mode.
+  - For Slack streaming, select this block’s content output in the trigger’s agent session. Keep interactive button and modal callbacks on their own authorized paths; do not duplicate the streamed reply with another send.
   `,
   category: 'blocks',
   bgColor: '#802FDE',
-  icon: ArenaIcon,
+  icon: Blimp,
   canvasPresentation: {
-    defaultTitle: 'Arena Chat',
+    defaultTitle: 'Sim Chat',
     sentences: {
       default: [
         { text: 'Ask', field: 'prompt', core: true },
@@ -43,7 +35,28 @@ export const MothershipBlock: BlockConfig<MothershipResponse> = {
       id: 'prompt',
       title: 'Prompt',
       type: 'long-input',
-      placeholder: 'Enter your prompt for Arena AI...',
+      placeholder: 'Enter your prompt for Sim...',
+    },
+    {
+      id: 'model',
+      title: 'Model',
+      type: 'dropdown',
+      options: MOTHERSHIP_MODEL_OPTIONS.map(({ value, label }) => ({ id: value, label })),
+      value: () => 'gpt-6-astra',
+    },
+    {
+      id: 'effort',
+      title: 'Reasoning Effort',
+      type: 'dropdown',
+      options: MOTHERSHIP_EFFORT_OPTIONS.map(({ value, label }) => ({ id: value, label })),
+      value: () => DEFAULT_MOTHERSHIP_EFFORT,
+    },
+    {
+      id: 'fastMode',
+      title: 'Fast',
+      type: 'switch',
+      defaultValue: false,
+      condition: { field: 'model', value: 'gpt-6-astra' },
     },
     {
       id: 'conversationId',
@@ -111,9 +124,12 @@ export const MothershipBlock: BlockConfig<MothershipResponse> = {
     access: [],
   },
   inputs: {
+    model: { type: 'string', description: 'Astra or Opus from the supported model catalog' },
+    effort: { type: 'string', description: 'Reasoning effort: low, medium, high, xhigh, or max' },
+    fastMode: { type: 'boolean', description: 'Enable Fast mode for Astra' },
     prompt: {
       type: 'string',
-      description: 'The prompt to send to Arena AI',
+      description: 'The prompt to send to Sim',
     },
     conversationId: {
       type: 'string',
@@ -122,15 +138,12 @@ export const MothershipBlock: BlockConfig<MothershipResponse> = {
     },
     files: {
       type: 'file',
-      description: 'Files to send to Arena AI as attachments',
+      description: 'Files to send to Sim as attachments',
     },
-    tools: { type: 'json', description: 'MCP tools available to Arena AI for this request' },
+    tools: { type: 'json', description: 'MCP tools available to Sim for this request' },
     skills: { type: 'json', description: 'Skills activated for this request' },
     secretScope: { type: 'string', description: 'Secret access mode: all or selected' },
-    mountedSecrets: {
-      type: 'json',
-      description: 'Secret names available to Arena AI code execution',
-    },
+    mountedSecrets: { type: 'json', description: 'Secret names available to Sim code execution' },
   },
   outputs: {
     content: { type: 'string', description: 'Generated response content' },

@@ -1,6 +1,36 @@
+import { createLogger } from '@sim/logger'
+import { createSessionPrincipal } from '@sim/testing/factories/principal.factory'
+import { jsonResponse } from '@sim/testing/helpers/http'
+import { apiKeyByokMock, apiKeyByokMockFns } from '@sim/testing/mocks/api-key-byok.mock'
+import { authInternalMock, authInternalMockFns } from '@sim/testing/mocks/auth-internal.mock'
+import { billingUsageLogMock } from '@sim/testing/mocks/billing-usage-log.mock'
+import {
+  executorPrincipalMock,
+  executorPrincipalMockFns,
+} from '@sim/testing/mocks/executor-principal.mock'
+import { getMockLogger } from '@sim/testing/mocks/logger.mock'
+import {
+  permissionCheckMock,
+  permissionCheckMockFns,
+} from '@sim/testing/mocks/permission-check.mock'
+import { permissionGroupsResolveMock } from '@sim/testing/mocks/permission-groups-resolve.mock'
+import { storageServiceMock } from '@sim/testing/mocks/storage-service.mock'
+import { uploadsCopilotMock, uploadsCopilotMockFns } from '@sim/testing/mocks/uploads-copilot.mock'
+import {
+  uploadsExecutionMock,
+  uploadsExecutionMockFns,
+} from '@sim/testing/mocks/uploads-execution.mock'
+import { uploadsMetadataMock } from '@sim/testing/mocks/uploads-metadata.mock'
+import {
+  workspaceFileManagerMock,
+  workspaceFileManagerMockFns,
+} from '@sim/testing/mocks/workspace-file-manager.mock'
+import {
+  workspaceFileSecretProvenanceMock,
+  workspaceFileSecretProvenanceMockFns,
+} from '@sim/testing/mocks/workspace-file-secret-provenance.mock'
+import { observeServiceCosts } from '@/lib/mothership/billing/service-observer'
 /**
- * @vitest-environment node
- *
  * Tools Registry and Executor Unit Tests
  *
  * This file contains unit tests for the tools registry and executeTool function,
@@ -8,14 +38,15 @@
  */
 
 import {
+  createDeferred,
   createExecutionContext,
   createMockFetch,
   type ExecutionContext,
+  encryptionMock,
   encryptionMockFns,
   environmentUtilsMockFns,
   inputValidationMock,
   inputValidationMockFns,
-  loggerMock,
   type MockFetchResponse,
   resetEnvFlagsMock,
   resetEnvironmentUtilsMock,
@@ -27,69 +58,66 @@ import {
 import { DrizzleQueryError } from 'drizzle-orm/errors'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
-import { projectToolResultForCopilot } from '@/lib/copilot/request/tools/resolved-secret-result'
 import type { EnvironmentResolutionSnapshot } from '@/lib/environment/utils'
 import { executeBitbucketTool } from '@/lib/internal/bitbucket/execute-tool'
 import { createInternalToolFileResult } from '@/lib/internal/tool-operations/file-result'
 import type { InternalToolOperationCall } from '@/lib/internal/tool-operations/types'
+import { executeVantaTool } from '@/lib/internal/vanta/execute-tool'
+import { projectToolResultForCopilot } from '@/lib/mothership/request/tools/resolved-secret-result'
+import { VideoGeneratorV3Block } from '@/blocks/blocks/video_generator'
 import {
   ANONYMOUS_SECRET_TRACE_REPLACEMENT,
   ResolvedSecretTraceRegistry,
 } from '@/executor/utils/resolved-secret-trace-registry'
+import { prepareToolExecution, transformBlockTool } from '@/providers/utils'
 import { bitbucketGetPipelineStepLogTool } from '@/tools/bitbucket/get_pipeline_step_log'
 import { ErrorExtractorId } from '@/tools/error-extractors'
 import { fileGetContentTool } from '@/tools/file/get'
 import { fileFetchTool } from '@/tools/file/parser'
-import { buildFunctionExecuteBody } from '@/tools/function/execute'
+import { buildFunctionExecuteBody, functionExecuteTool } from '@/tools/function/execute'
+import { searchIssuesV2Tool } from '@/tools/github/search_issues'
 import { memoryAddTool } from '@/tools/memory/add'
 import { createInternalToolOperationInput } from '@/tools/operation-input'
+import { slackListsItemsListTool } from '@/tools/slack_lists/items_list'
+import { stripeListSubscriptionsTool } from '@/tools/stripe/list_subscriptions'
+import { stripeSearchSubscriptionsTool } from '@/tools/stripe/search_subscriptions'
 import { getCallerIdentityTool } from '@/tools/sts/get_caller_identity'
 import { tableBatchInsertRowsTool } from '@/tools/table/batch_insert_rows'
 import type { InternalToolConfig, ToolResponse } from '@/tools/types'
+import { vantaListFrameworksTool } from '@/tools/vanta/list_frameworks'
+import { vantaSubmitDocumentTool } from '@/tools/vanta/submit_document'
+import { vantaUploadDocumentFileTool } from '@/tools/vanta/upload_document_file'
+import { runwayVideoTool } from '@/tools/video/runway'
 import { customBlockExecutorTool } from '@/tools/workflow/custom-block-executor'
 import { workflowExecutorTool } from '@/tools/workflow/executor'
 
 // Hoisted mock state - these are available to vi.mock factories
 const {
-  mockGetBYOKKey,
   mockGetToolAsync,
   mockRateLimiterFns,
-  mockMarkWorkspaceFileSecretProvenanceUnknown,
   mockRunCustomBlockTool,
   mockRunWorkflowTool,
   mockReadAvailableCustomToolByIdOrTitleAsCopilot,
   mockReadAvailableCustomToolByIdOrTitleAsExecutor,
-  mockGenerateInternalToken,
-  mockResolveWorkspaceFileReference,
-  mockAssertPermissionsAllowed,
   mockExecuteFunction,
-  mockCreateExecutorPrincipalFromExecutionContext,
+  mockExecuteChatFunction,
   mockGetInternalToolOperationHandler,
   mockExecuteInternalToolOperation,
-  mockUploadExecutionFile,
-  mockUploadCopilotFile,
 } = vi.hoisted(() => ({
-  mockGetBYOKKey: vi.fn(),
   mockGetToolAsync: vi.fn(),
   mockRateLimiterFns: {
     acquireKey: vi.fn(),
     preConsumeCapacity: vi.fn(),
     consumeCapacity: vi.fn(),
   },
-  mockMarkWorkspaceFileSecretProvenanceUnknown: vi.fn(),
   mockRunCustomBlockTool: vi.fn(),
   mockRunWorkflowTool: vi.fn(),
   mockReadAvailableCustomToolByIdOrTitleAsCopilot: vi.fn(),
   mockReadAvailableCustomToolByIdOrTitleAsExecutor: vi.fn(),
-  mockGenerateInternalToken: vi.fn(),
-  mockResolveWorkspaceFileReference: vi.fn(),
-  mockAssertPermissionsAllowed: vi.fn(),
   mockExecuteFunction: vi.fn(),
-  mockCreateExecutorPrincipalFromExecutionContext: vi.fn(),
+  mockExecuteChatFunction: vi.fn(),
   mockGetInternalToolOperationHandler: vi.fn(),
   mockExecuteInternalToolOperation: vi.fn(),
-  mockUploadExecutionFile: vi.fn(),
-  mockUploadCopilotFile: vi.fn(),
 }))
 
 const mockSecureFetchWithPinnedIP = inputValidationMockFns.mockSecureFetchWithPinnedIP
@@ -97,84 +125,52 @@ const mockValidateUrlWithDNS = inputValidationMockFns.mockValidateUrlWithDNS
 const mockGetEffectiveEnvironmentSnapshot =
   environmentUtilsMockFns.mockGetEffectiveEnvironmentSnapshot
 
-// Mock getBYOKKey
-vi.mock('@/lib/api-key/byok', () => ({
-  getBYOKKey: (...args: unknown[]) => mockGetBYOKKey(...args),
-}))
+vi.mock('@/lib/api-key/byok', () => apiKeyByokMock)
 
-vi.mock('@/lib/auth/internal', () => ({
-  generateInternalToken: (...args: unknown[]) => mockGenerateInternalToken(...args),
-}))
+vi.mock('@/lib/auth/internal', () => authInternalMock)
 
-vi.mock('@/lib/core/security/encryption', () => ({
-  decryptSecret: encryptionMockFns.mockDecryptSecret,
-  encryptSecret: encryptionMockFns.mockEncryptSecret,
-}))
+vi.mock('@/lib/core/security/encryption', () => encryptionMock)
 
-vi.mock('@/ee/access-control/utils/permission-check', () => ({
-  assertPermissionsAllowed: mockAssertPermissionsAllowed,
-  validateBlockType: vi.fn().mockResolvedValue(undefined),
-  validateModelProvider: vi.fn().mockResolvedValue(undefined),
-  validateInvitationsAllowed: vi.fn().mockResolvedValue(undefined),
-  validatePublicApiAllowed: vi.fn().mockResolvedValue(undefined),
-  ProviderNotAllowedError: class ProviderNotAllowedError extends Error {},
-  IntegrationNotAllowedError: class IntegrationNotAllowedError extends Error {},
-  McpToolsNotAllowedError: class McpToolsNotAllowedError extends Error {},
-  CustomToolsNotAllowedError: class CustomToolsNotAllowedError extends Error {},
-  SkillsNotAllowedError: class SkillsNotAllowedError extends Error {},
-  InvitationsNotAllowedError: class InvitationsNotAllowedError extends Error {},
-  PublicApiNotAllowedError: class PublicApiNotAllowedError extends Error {},
-}))
+vi.mock('@/ee/access-control/utils/permission-check', () => permissionCheckMock)
 
-vi.mock('@/lib/permission-groups/resolve.server', () => ({
-  getUserPermissionConfig: vi.fn().mockResolvedValue(null),
-}))
+vi.mock('@/lib/permission-groups/resolve.server', () => permissionGroupsResolveMock)
 
-vi.mock('@/lib/billing/core/usage-log', () => ({}))
+vi.mock('@/lib/billing/core/usage-log', () => billingUsageLogMock)
 
 vi.mock('@/lib/core/security/input-validation.server', () => inputValidationMock)
+
+vi.mock('@/lib/function-execution/application/execute-chat-function', () => ({
+  executeChatFunction: { execute: mockExecuteChatFunction },
+}))
 
 vi.mock('@/lib/function-execution/application/execute-function', () => ({
   executeFunction: { execute: mockExecuteFunction },
 }))
 
-vi.mock('@/lib/internal/principals/executor', () => ({
-  createExecutorPrincipalFromExecutionContext: mockCreateExecutorPrincipalFromExecutionContext,
-}))
+vi.mock('@/lib/internal/principals/executor', () => executorPrincipalMock)
 
 vi.mock('@/lib/internal/tool-operations/registry.server', () => ({
   getInternalToolOperationHandler: mockGetInternalToolOperationHandler,
 }))
 
-vi.mock('@/lib/uploads/contexts/execution', () => ({
-  uploadExecutionFile: mockUploadExecutionFile,
-  uploadFileFromRawData: vi.fn(),
-}))
+vi.mock('@/lib/uploads/contexts/execution', () => uploadsExecutionMock)
 
-vi.mock('@/lib/uploads/contexts/copilot', () => ({
-  uploadCopilotFile: mockUploadCopilotFile,
-}))
+vi.mock('@/lib/uploads/contexts/copilot', () => uploadsCopilotMock)
 
-vi.mock('@/lib/uploads/core/storage-service', () => ({
-  deleteFile: vi.fn(),
-}))
+vi.mock('@/lib/uploads/core/storage-service', () => storageServiceMock)
 
-vi.mock('@/lib/uploads/server/metadata', () => ({
-  deleteFileMetadata: vi.fn(),
-}))
+vi.mock('@/lib/uploads/server/metadata', () => uploadsMetadataMock)
 
 vi.mock('@/lib/core/rate-limiter/hosted-key', () => ({
   getHostedKeyRateLimiter: () => mockRateLimiterFns,
 }))
 
-vi.mock('@/lib/uploads/contexts/workspace/workspace-file-manager', () => ({
-  resolveWorkspaceFileReference: (...args: unknown[]) => mockResolveWorkspaceFileReference(...args),
-}))
+vi.mock('@/lib/uploads/contexts/workspace/workspace-file-manager', () => workspaceFileManagerMock)
 
-vi.mock('@/lib/uploads/contexts/workspace/workspace-file-secret-provenance', () => ({
-  markWorkspaceFileSecretProvenanceUnknown: (...args: unknown[]) =>
-    mockMarkWorkspaceFileSecretProvenanceUnknown(...args),
-}))
+vi.mock(
+  '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance',
+  () => workspaceFileSecretProvenanceMock
+)
 
 const { mockResolveExecutorCredentialToken } = vi.hoisted(() => ({
   mockResolveExecutorCredentialToken: vi.fn(),
@@ -196,6 +192,10 @@ vi.mock('@/executor/handlers/workflow/custom-block-tool-runner', () => ({
 // Mock the tools registry to avoid loading the full 4500+ line registry file.
 // Only the tools actually exercised in tests are provided.
 const mockRegistryTools: Record<string, any> = {
+  stripe_list_subscriptions: stripeListSubscriptionsTool,
+  stripe_search_subscriptions: stripeSearchSubscriptionsTool,
+  slack_lists_items_list: slackListsItemsListTool,
+  github_search_issues_v2: searchIssuesV2Tool,
   bitbucket_get_pipeline_step_log: bitbucketGetPipelineStepLogTool,
   deployed_block_executor: customBlockExecutorTool,
   workflow_executor: workflowExecutorTool,
@@ -421,15 +421,39 @@ vi.mock('@/tools/utils.server', async (importOriginal) => {
 })
 
 import type { QueryClient } from '@tanstack/react-query'
+import { adoptToolFailure, classifyFailure, logFailureOnce } from '@/lib/core/errors/failure-log'
 import * as getQueryClientModule from '@/app/_shell/providers/get-query-client'
+import { ApiBlockHandler } from '@/executor/handlers/api/api-handler'
+import { buildBlockExecutionError } from '@/executor/utils/errors'
+import type { SerializedBlock } from '@/serializer/types'
 import { executeTool, postProcessToolOutput } from '@/tools'
 import { tools } from '@/tools/registry'
 import { createToolConfig, getTool } from '@/tools/utils'
 import { getToolAsync } from '@/tools/utils.server'
 
-const mockToolsLogger = vi.mocked(loggerMock.createLogger).mock.results[
-  vi.mocked(loggerMock.createLogger).mock.calls.findIndex(([name]) => name === 'Tools')
-].value
+const mockGetBYOKKey = apiKeyByokMockFns.mockGetBYOKKey
+const mockGenerateInternalToken = authInternalMockFns.mockGenerateInternalToken
+const mockCreateExecutorPrincipalFromExecutionContext =
+  executorPrincipalMockFns.mockCreateExecutorPrincipalFromExecutionContext
+const mockUploadExecutionFile = uploadsExecutionMockFns.mockUploadExecutionFile
+const mockUploadCopilotFile = uploadsCopilotMockFns.mockUploadCopilotFile
+
+const mockMarkWorkspaceFileSecretProvenanceUnknown =
+  workspaceFileSecretProvenanceMockFns.mockMarkWorkspaceFileSecretProvenanceUnknown
+const mockResolveWorkspaceFileReference =
+  workspaceFileManagerMockFns.mockResolveWorkspaceFileReference
+const mockAssertPermissionsAllowed = permissionCheckMockFns.mockAssertPermissionsAllowed
+
+const mockToolsLogger = getMockLogger('Tools')
+
+/** Every level, so a secret-leak assertion holds wherever a failure's severity lands. */
+function allToolLogCalls() {
+  return [
+    mockToolsLogger.error.mock.calls,
+    mockToolsLogger.warn.mock.calls,
+    mockToolsLogger.info.mock.calls,
+  ]
+}
 
 /**
  * Overlay the mock tools onto the REAL registry object instead of vi.mock:
@@ -486,11 +510,8 @@ function createMockQueryClient(): QueryClient {
  * Spy on the real get-query-client namespace instead of vi.mock: under
  * `isolate: false` the shared `@/tools/utils` module may be cached across test
  * files, so patching the real namespace is the only wiring that composes.
- * Re-applied in beforeEach because suites below call vi.resetAllMocks() /
- * vi.restoreAllMocks().
+ * Applied in beforeEach because spies are restored before every test.
  */
-vi.spyOn(getQueryClientModule, 'getQueryClient').mockImplementation(createMockQueryClient)
-
 beforeEach(() => {
   vi.spyOn(getQueryClientModule, 'getQueryClient').mockImplementation(createMockQueryClient)
   mockAssertPermissionsAllowed.mockResolvedValue(undefined)
@@ -612,7 +633,7 @@ function createToolExecutionContext(overrides?: Partial<ExecutionContext>): Exec
   const principal =
     overrides?.principal ??
     (overrides?.userId
-      ? { kind: 'session' as const, userId: overrides.userId, sessionId: 'test-session' }
+      ? createSessionPrincipal({ userId: overrides.userId, sessionId: 'test-session' })
       : undefined)
   const executorDelegationOrigin =
     overrides?.executorDelegationOrigin ??
@@ -659,48 +680,6 @@ beforeAll(() => {
 })
 
 afterAll(resetEnvFlagsMock)
-
-describe('Tools Registry', () => {
-  it('should include all expected built-in tools', () => {
-    expect(tools.http_request).toBeDefined()
-    expect(tools.function_execute).toBeDefined()
-
-    expect(tools.gmail_read).toBeDefined()
-    expect(tools.gmail_send).toBeDefined()
-    expect(tools.google_drive_list).toBeDefined()
-    expect(tools.serper_search).toBeDefined()
-  })
-
-  it('getTool should return the correct tool by ID', () => {
-    const httpTool = getTool('http_request')
-    expect(httpTool).toBeDefined()
-    expect(httpTool?.id).toBe('http_request')
-    expect(httpTool?.name).toBe('HTTP Request')
-
-    const gmailTool = getTool('gmail_read')
-    expect(gmailTool).toBeDefined()
-    expect(gmailTool?.id).toBe('gmail_read')
-    expect(gmailTool?.name).toBe('Gmail Read')
-  })
-
-  it.each([
-    ['notion_add_database_row', 'notion_add_database_row_v2'],
-    ['notion_update_page', 'notion_update_page_v2'],
-  ])('getTool resolves both the legacy and v2 ids for %s', (legacyId, v2Id) => {
-    const legacy = getTool(legacyId)
-    expect(legacy).toBeDefined()
-    expect(legacy?.id).toBe(legacyId)
-
-    const v2 = getTool(v2Id)
-    expect(v2).toBeDefined()
-    expect(v2?.id).toBe(v2Id)
-  })
-
-  it('getTool should return undefined for non-existent tool', () => {
-    const nonExistentTool = getTool('non_existent_tool')
-    expect(nonExistentTool).toBeUndefined()
-  })
-})
 
 describe('Custom Tools', () => {
   it('does not resolve custom tools through the synchronous client helper', () => {
@@ -1147,6 +1126,78 @@ describe('executeTool Function', () => {
     })
     expect(mockGenerateInternalToken).not.toHaveBeenCalled()
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('logs a fault that rethrows one object every time once per occurrence, not once per process', async () => {
+    /** A rejected dynamic `import()` or memoized rejected promise rethrows the same object. */
+    const persistentFault = new Error('internal operation module failed to load')
+    mockAssertPermissionsAllowed.mockRejectedValue(persistentFault)
+    mockToolsLogger.error.mockClear()
+
+    for (const executionId of ['execution-a', 'execution-b']) {
+      const result = await executeTool(
+        'http_request',
+        { url: 'https://example.com' },
+        { executionContext: createToolExecutionContext({ userId: 'user-123', executionId }) }
+      )
+      expect(result.success).toBe(false)
+    }
+
+    const toolFailureLogs = mockToolsLogger.error.mock.calls.filter(([message]) =>
+      String(message).includes('Error executing tool http_request')
+    )
+    expect(toolFailureLogs).toHaveLength(2)
+  })
+
+  it.each([
+    [400, 'user'],
+    [500, 'internal'],
+  ] as const)(
+    'attributes an in-process operation %i to Sim, never to a third party',
+    async (status, kind) => {
+      mockExecuteInternalToolOperation.mockResolvedValueOnce(
+        jsonResponse({ error: 'operation failed' }, status)
+      )
+
+      const result = await executeTool(
+        'sts_get_caller_identity',
+        { region: 'us-east-1', accessKeyId: 'access-key', secretAccessKey: 'secret-key' },
+        {
+          executionContext: createToolExecutionContext({
+            userId: 'user-1',
+            workspaceId: 'workspace-456',
+            workflowId: 'workflow-1',
+            executionId: 'execution-1',
+          }),
+        }
+      )
+
+      expect(result.success).toBe(false)
+      expect(classifyFailure(adoptToolFailure(new Error(result.error), result))).toBe(kind)
+    }
+  )
+
+  it('never logs the response body of an in-process operation failure', async () => {
+    const rowContent = 'author-row-content-7f3a'
+    mockExecuteInternalToolOperation.mockResolvedValueOnce(
+      jsonResponse({ error: 'duplicate row', details: { row: rowContent } }, 400)
+    )
+
+    const result = await executeTool(
+      'sts_get_caller_identity',
+      { region: 'us-east-1', accessKeyId: 'access-key', secretAccessKey: 'secret-key' },
+      {
+        executionContext: createToolExecutionContext({
+          userId: 'user-1',
+          workspaceId: 'workspace-456',
+          workflowId: 'workflow-1',
+          executionId: 'execution-1',
+        }),
+      }
+    )
+
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(allToolLogCalls())).not.toContain(rowContent)
   })
 
   it('preserves a registered operation failure without turning it into success', async () => {
@@ -1646,8 +1697,8 @@ describe('executeTool Function', () => {
         error: untrustedDetail,
       })
       expect(JSON.stringify(result)).not.toContain(untrustedHeader)
-      expect(JSON.stringify(mockToolsLogger.error.mock.calls)).not.toContain(untrustedDetail)
-      expect(JSON.stringify(mockToolsLogger.error.mock.calls)).not.toContain(untrustedHeader)
+      expect(JSON.stringify(allToolLogCalls())).not.toContain(untrustedDetail)
+      expect(JSON.stringify(allToolLogCalls())).not.toContain(untrustedHeader)
       expect(registry.isComplete()).toBe(true)
     }
   )
@@ -1801,7 +1852,8 @@ describe('executeTool Function', () => {
         JSON.stringify({
           success: false,
           error: `Execution failed with ${secret} via ${runtimeAlias}`,
-          output: { result: null, stdout: 'trace', cost },
+          output: { result: null, stdout: 'author-stdout-91c', cost },
+          debug: { lineContent: 'author-source-line-55a', stack: 'author-stack-3e1' },
           __resolvedSecretNames: ['API_KEY'],
         }),
         {
@@ -1829,8 +1881,17 @@ describe('executeTool Function', () => {
     expect(result.success).toBe(false)
     expect(result.error).toContain(secret)
     expect(result.output?.cost).toEqual(cost)
-    expect(JSON.stringify(mockToolsLogger.error.mock.calls)).not.toContain(secret)
-    expect(JSON.stringify(mockToolsLogger.error.mock.calls)).not.toContain(runtimeAlias)
+    expect(JSON.stringify(allToolLogCalls())).not.toContain(secret)
+    expect(JSON.stringify(allToolLogCalls())).not.toContain(runtimeAlias)
+    for (const authorContent of [
+      'author-stdout-91c',
+      'author-source-line-55a',
+      'author-stack-3e1',
+    ]) {
+      expect(JSON.stringify(allToolLogCalls())).not.toContain(authorContent)
+    }
+    /** A Function's 422 is the author's code throwing, not a third party refusing. */
+    expect(classifyFailure(adoptToolFailure(new Error(result.error), result))).toBe('user')
     expect(JSON.stringify(projectToolResultForCopilot(result, registry))).not.toContain(secret)
     expect(JSON.stringify(projectToolResultForCopilot(result, registry))).not.toContain(
       runtimeAlias
@@ -1867,8 +1928,8 @@ describe('executeTool Function', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain(secret)
-    expect(JSON.stringify(mockToolsLogger.error.mock.calls)).not.toContain(secret)
-    expect(JSON.stringify(mockToolsLogger.error.mock.calls)).not.toContain(runtimeAlias)
+    expect(JSON.stringify(allToolLogCalls())).not.toContain(secret)
+    expect(JSON.stringify(allToolLogCalls())).not.toContain(runtimeAlias)
   })
 
   it('does not lift an invalid sandbox cost from a Function error response', async () => {
@@ -2426,6 +2487,122 @@ describe('executeTool Function', () => {
     expect(registry.isComplete()).toBe(true)
   })
 
+  it.each([200, 400, 422])(
+    'preserves a generic Function response with empty provenance and omitted envVars (HTTP %i)',
+    async (status) => {
+      const registry = new ResolvedSecretTraceRegistry()
+      const originalTool = tools.function_execute
+      tools.function_execute = functionExecuteTool
+      const error = 'ValueError: expected one input image'
+      mockExecuteFunction.mockResolvedValueOnce(
+        Response.json(
+          {
+            success: status === 200,
+            ...(status === 200 ? {} : { error }),
+            output: { result: status === 200 ? { width: 160 } : null, stdout: '', files: [] },
+            __resolvedSecretNames: [],
+          },
+          {
+            status,
+            headers: {
+              'x-sim-private-tool-metadata': 'resolved-secret-names-durable-files-v2',
+            },
+          }
+        )
+      )
+
+      try {
+        const result = await executeTool(
+          'function_execute',
+          { code: '__sim_result__ = {"width": 160}', language: 'python' },
+          {
+            operationContext: {
+              userId: 'user-1',
+              workspaceId: 'workspace-456',
+              workflowId: '',
+              copilotToolExecution: true,
+            },
+            resolvedSecretTraceRegistry: registry,
+          }
+        )
+
+        const request = mockExecuteFunction.mock.calls[0]?.[0]
+        expect(request.input.body.envVars).toEqual({})
+        expect(request.input.headers.get('x-sim-request-private-tool-metadata')).toBe(
+          'resolved-secret-names-durable-files-v2'
+        )
+        expect(request.principal).toMatchObject({ kind: 'delegated', serviceId: 'copilot' })
+        expect(result).toMatchObject(
+          status === 200
+            ? { success: true, output: { result: { width: 160 }, files: [] } }
+            : { success: false, error }
+        )
+        expect(JSON.stringify(result)).not.toContain('__resolvedSecretNames')
+        expect(registry.isComplete()).toBe(true)
+        expect(registry.getActiveMatches()).toEqual([])
+        expect(mockMarkWorkspaceFileSecretProvenanceUnknown).not.toHaveBeenCalled()
+        expect(global.fetch).not.toHaveBeenCalled()
+      } finally {
+        tools.function_execute = originalTool
+      }
+    }
+  )
+
+  it.each([
+    { label: 'missing environment map', names: ['API_KEY'], envVars: undefined },
+    { label: 'missing named secret', names: ['API_KEY'], envVars: {} },
+    {
+      label: 'different named secret',
+      names: ['OTHER_KEY'],
+      envVars: { API_KEY: 'catalog-secret' },
+    },
+    { label: 'different secret value', names: ['API_KEY'], envVars: { API_KEY: 'wrong-secret' } },
+    { label: 'corrupt name list', names: {}, envVars: undefined },
+    { label: 'non-string name', names: [42], envVars: undefined },
+    { label: 'missing name list', names: undefined, envVars: undefined },
+    {
+      label: 'wrong capability',
+      names: [],
+      envVars: undefined,
+      marker: 'resolved-secret-provenance-v1',
+    },
+    { label: 'missing capability', names: [], envVars: undefined, marker: '' },
+  ])('rejects unverified Function provenance: $label', async ({ names, envVars, marker }) => {
+    const registry = new ResolvedSecretTraceRegistry([
+      { name: 'API_KEY', plaintext: 'catalog-secret', encryptedValue: 'encrypted-value' },
+    ])
+    mockExecuteFunction.mockResolvedValueOnce(
+      Response.json(
+        { success: true, output: { result: 'untrusted result' }, __resolvedSecretNames: names },
+        {
+          headers:
+            marker === ''
+              ? {}
+              : {
+                  'x-sim-private-tool-metadata': marker ?? 'resolved-secret-names-durable-files-v2',
+                },
+        }
+      )
+    )
+
+    const result = await executeTool(
+      'function_execute',
+      { code: 'return "result"', ...(envVars === undefined ? {} : { envVars }) },
+      {
+        executionContext: createToolExecutionContext({ userId: 'user-1' }),
+        resolvedSecretTraceRegistry: registry,
+      }
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Internal tool response metadata could not be verified',
+    })
+    expect(JSON.stringify(result)).not.toContain('untrusted result')
+    expect(JSON.stringify(result)).not.toContain('__resolvedSecretNames')
+    expect(registry.getActiveMatches()).toEqual([])
+  })
+
   it('strips private metadata even when an internal endpoint returns the wrong marker', async () => {
     const registry = new ResolvedSecretTraceRegistry()
     mockExecuteFunction.mockResolvedValueOnce(
@@ -2545,6 +2722,9 @@ describe('executeTool Function', () => {
     mockToolsLogger.error.mockImplementation(() => {
       throw originalError
     })
+    mockToolsLogger.warn.mockImplementation(() => {
+      throw originalError
+    })
 
     const execution = executeTool(
       'function_execute',
@@ -2588,6 +2768,9 @@ describe('executeTool Function', () => {
     mockToolsLogger.error.mockImplementation(() => {
       throw originalError
     })
+    mockToolsLogger.warn.mockImplementation(() => {
+      throw originalError
+    })
 
     const execution = executeTool(
       'function_execute',
@@ -2625,6 +2808,9 @@ describe('executeTool Function', () => {
     )
     const originalError = new Error('Box failed')
     mockToolsLogger.error.mockImplementation(() => {
+      throw originalError
+    })
+    mockToolsLogger.warn.mockImplementation(() => {
       throw originalError
     })
 
@@ -2789,20 +2975,162 @@ describe('executeTool Function', () => {
     expect(mockExecuteFunction).not.toHaveBeenCalled()
     expect(result.success).toBe(false)
   })
+})
 
-  it('should add timing information to results', async () => {
-    const result = await executeTool(
-      'http_request',
-      {
-        url: 'https://api.example.com/data',
-      },
-      { skipPostProcess: true }
+describe('Stripe subscription pagination through tool execution', () => {
+  beforeEach(() => {
+    mockValidateUrlWithDNS.mockResolvedValue({ isValid: true, resolvedIP: '93.184.216.34' })
+    mockSecureFetchWithPinnedIP.mockReset()
+  })
+
+  it('retains first-page filters and returns one page even when more subscriptions exist', async () => {
+    mockSecureFetchWithPinnedIP.mockResolvedValueOnce(
+      toSecureFetchResponse(
+        Response.json({
+          object: 'list',
+          data: [{ id: 'sub_first' }, { id: 'sub_last' }],
+          has_more: true,
+        })
+      )
     )
 
-    expect(result.timing).toBeDefined()
-    expect(result.timing?.startTime).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
-    expect(result.timing?.endTime).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
-    expect(result.timing?.duration).toBeGreaterThanOrEqual(0)
+    const result = await executeTool('stripe_list_subscriptions', {
+      apiKey: 'sk_test_pagination',
+      limit: 100,
+      customer: 'cus_example',
+      status: 'active',
+      price: 'price_example',
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      output: {
+        subscriptions: [{ id: 'sub_first' }, { id: 'sub_last' }],
+        metadata: { count: 2, has_more: true },
+      },
+    })
+    expect(mockSecureFetchWithPinnedIP).toHaveBeenCalledExactlyOnceWith(
+      'https://api.stripe.com/v1/subscriptions?limit=100&customer=cus_example&status=active&price=price_example',
+      '93.184.216.34',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ authorization: 'Bearer sk_test_pagination' }),
+      })
+    )
+  })
+
+  it.each(['starting_after', 'ending_before'] as const)(
+    'retrieves the requested %s page without interpreting cursor characters as filters',
+    async (direction) => {
+      const cursor = 'sub_cursor&status=canceled'
+      mockSecureFetchWithPinnedIP.mockImplementationOnce(async (url) => {
+        const request = new URL(url)
+        const valid =
+          request.pathname === '/v1/subscriptions' &&
+          request.searchParams.get(direction) === cursor &&
+          request.searchParams.get('status') === 'active'
+        return toSecureFetchResponse(
+          valid
+            ? Response.json({ object: 'list', data: [{ id: 'sub_next' }], has_more: false })
+            : Response.json(
+                { error: { message: 'Unexpected pagination request' } },
+                { status: 400 }
+              )
+        )
+      })
+
+      const result = await executeTool('stripe_list_subscriptions', {
+        apiKey: 'sk_test_pagination',
+        status: 'active',
+        [direction]: cursor,
+      })
+
+      expect(result).toMatchObject({
+        success: true,
+        output: { subscriptions: [{ id: 'sub_next' }], metadata: { count: 1, has_more: false } },
+      })
+      expect(mockSecureFetchWithPinnedIP).toHaveBeenCalledOnce()
+    }
+  )
+
+  it('rejects conflicting list cursors before contacting Stripe', async () => {
+    mockSecureFetchWithPinnedIP.mockResolvedValueOnce(
+      toSecureFetchResponse(Response.json({ object: 'list', data: [], has_more: false }))
+    )
+
+    const result = await executeTool('stripe_list_subscriptions', {
+      apiKey: 'sk_test_pagination',
+      starting_after: 'sub_last',
+      ending_before: 'sub_first',
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('Provide either starting_after or ending_before, not both'),
+    })
+    expect(mockSecureFetchWithPinnedIP).not.toHaveBeenCalled()
+  })
+
+  it('round-trips the search continuation token and exposes the terminal page', async () => {
+    const query = "status:'active'"
+    const nextPage = 'opaque/search+cursor=='
+    mockSecureFetchWithPinnedIP.mockImplementation(async (url) => {
+      const request = new URL(url)
+      if (
+        request.pathname !== '/v1/subscriptions/search' ||
+        request.searchParams.get('query') !== query ||
+        request.searchParams.get('limit') !== '100'
+      ) {
+        return toSecureFetchResponse(
+          Response.json({ error: { message: 'Search filters changed' } }, { status: 400 })
+        )
+      }
+      const page = request.searchParams.get('page')
+      if (page === null) {
+        return toSecureFetchResponse(
+          Response.json({
+            object: 'search_result',
+            data: [{ id: 'sub_first' }],
+            has_more: true,
+            next_page: nextPage,
+          })
+        )
+      }
+      return toSecureFetchResponse(
+        page === nextPage
+          ? Response.json({ object: 'search_result', data: [{ id: 'sub_last' }], has_more: false })
+          : Response.json({ error: { message: 'Invalid search page' } }, { status: 400 })
+      )
+    })
+
+    const first = await executeTool('stripe_search_subscriptions', {
+      apiKey: 'sk_test_pagination',
+      query,
+      limit: 100,
+    })
+    expect(first).toMatchObject({
+      success: true,
+      output: {
+        subscriptions: [{ id: 'sub_first' }],
+        metadata: { count: 1, has_more: true, next_page: nextPage },
+      },
+    })
+    expect(mockSecureFetchWithPinnedIP).toHaveBeenCalledOnce()
+
+    const last = await executeTool('stripe_search_subscriptions', {
+      apiKey: 'sk_test_pagination',
+      query,
+      limit: 100,
+      page: first.output.metadata.next_page,
+    })
+    expect(last).toMatchObject({
+      success: true,
+      output: {
+        subscriptions: [{ id: 'sub_last' }],
+        metadata: { count: 1, has_more: false, next_page: null },
+      },
+    })
+    expect(mockSecureFetchWithPinnedIP).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -3140,6 +3468,61 @@ describe('Internal Route Trust', () => {
     } finally {
       Reflect.deleteProperty(tools, toolId)
     }
+  })
+
+  it.each(['oauth', 'managed_oauth', undefined])(
+    'rejects %s credentials for Slack Lists before calling Slack',
+    async (credentialType) => {
+      mockResolveExecutorCredentialToken.mockResolvedValue({
+        accessToken: 'native-token',
+        credentialType,
+      })
+
+      const result = await executeTool('slack_lists_items_list', {
+        credential: 'native-credential',
+        credentialType: 'service_account',
+        listId: 'F123',
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining('requires a service-account credential'),
+      })
+      expect(mockSecureFetchWithPinnedIP).not.toHaveBeenCalled()
+    }
+  )
+
+  it('executes Slack Lists with a resolved custom bot credential', async () => {
+    mockResolveExecutorCredentialToken.mockResolvedValue({
+      accessToken: 'custom-bot-token',
+      credentialType: 'service_account',
+    })
+    mockSecureFetchWithPinnedIP.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        get: () => 'application/json',
+        toRecord: () => ({ 'content-type': 'application/json' }),
+      },
+      text: async () => JSON.stringify({ ok: true, items: [] }),
+      json: async () => ({ ok: true, items: [] }),
+    })
+
+    const result = await executeTool('slack_lists_items_list', {
+      credential: 'custom-bot-credential',
+      listId: 'F123',
+    })
+
+    expect(result).toMatchObject({
+      success: true,
+      output: { items: [], list: null, nextCursor: '' },
+    })
+    expect(mockSecureFetchWithPinnedIP).toHaveBeenCalledWith(
+      'https://slack.com/api/slackLists.items.list',
+      '93.184.216.34',
+      expect.anything()
+    )
   })
 
   it('accepts credential-group provenance only from credential resolution', async () => {
@@ -4390,7 +4773,7 @@ describe('Internal Route Trust', () => {
 
     // The actual external fetch uses secureFetchWithPinnedIP which uses Node's http/https
     // This will fail with a network error in tests, which is expected
-    const result = await executeTool('test_external_tool', {})
+    await executeTool('test_external_tool', {})
 
     // We expect it to attempt direct fetch (which will fail in test env due to network)
     // The key point is it should NOT try to call /api/proxy
@@ -4575,7 +4958,7 @@ describe('Internal Route Trust', () => {
 
     // External URLs are now called directly with SSRF protection
     // The test verifies proxy is NOT called
-    const result = await executeTool('test_dynamic_external', { endpoint: 'users' })
+    await executeTool('test_dynamic_external', { endpoint: 'users' })
 
     // Verify proxy was not called
     expect(global.fetch).not.toHaveBeenCalledWith(
@@ -4649,6 +5032,87 @@ describe('File Parameter Normalization', () => {
     vi.resetAllMocks()
     cleanupEnvVars()
   })
+
+  it.each(['execution', 'workspace', 'missing'] as const)(
+    'preserves an Agent file ID through the real video mapper and scoped hydration (%s)',
+    async (source) => {
+      const file = {
+        id: source === 'execution' ? 'file_1700000000_abc' : 'wf_reference',
+        name: 'reference.png',
+        url: '/api/files/reference.png',
+        size: 512,
+        type: 'image/png',
+        key: `${source}/workspace-456/reference.png`,
+        context: source === 'execution' ? 'execution' : 'workspace',
+      }
+      const context = createToolExecutionContext({ userId: 'user-1' })
+      if (source === 'execution') context.executionFilesById = new Map([[file.id, file]])
+      mockResolveWorkspaceFileReference.mockResolvedValue(
+        source === 'workspace' ? { ...file, path: file.url } : null
+      )
+      const originalTool = tools.video_runway
+      tools.video_runway = runwayVideoTool
+
+      try {
+        const providerTool = await transformBlockTool(
+          {
+            type: 'video_generator_v3',
+            params: { provider: 'runway', apiKey: 'test-runway-key' },
+          },
+          {
+            getAllBlocks: () => [VideoGeneratorV3Block],
+            getTool: () => runwayVideoTool,
+          }
+        )
+        expect(providerTool?.parameters?.properties?.visualReference).toMatchObject({
+          type: 'string',
+        })
+        expect(providerTool?.parameters?.required).toContain('visualReference')
+        const prepared = prepareToolExecution(
+          providerTool!,
+          {
+            prompt: 'Animate the boat',
+            visualReference: file.id,
+            provider: 'falai',
+            apiKey: 'model-invented-key',
+          },
+          {},
+          'call-video-reference'
+        )
+        expect(prepared.toolParams).toMatchObject({
+          visualReference: { id: file.id },
+          provider: 'runway',
+          apiKey: 'test-runway-key',
+        })
+
+        const result = await executeTool('video_runway', prepared.toolParams, {
+          executionContext: context,
+          skipPostProcess: true,
+        })
+
+        if (source === 'missing') {
+          expect(result.success).toBe(false)
+          expect(result.error).toContain(`Could not resolve file reference "${file.id}"`)
+          expect(mockExecuteInternalToolOperation).not.toHaveBeenCalled()
+        } else {
+          expect(mockExecuteInternalToolOperation.mock.calls[0]?.[0].input).toMatchObject({
+            provider: 'runway',
+            apiKey: 'test-runway-key',
+            prompt: 'Animate the boat',
+            visualReference: file,
+          })
+        }
+        if (source === 'execution') {
+          expect(mockResolveWorkspaceFileReference).not.toHaveBeenCalled()
+        } else {
+          expect(mockResolveWorkspaceFileReference).toHaveBeenCalledWith('workspace-456', file.id)
+        }
+        expect(global.fetch).not.toHaveBeenCalled()
+      } finally {
+        tools.video_runway = originalTool
+      }
+    }
+  )
 
   it('resolves canonical file IDs for single-file params during copilot execution', async () => {
     mockResolveWorkspaceFileReference.mockResolvedValue({
@@ -4888,7 +5352,7 @@ describe('Copilot OAuth Credential Enforcement', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('credentialId')
-    expect(result.error).toContain('environment/credentials.json')
+    expect(result.error).toContain('credentials list')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
@@ -5315,7 +5779,7 @@ describe('Centralized Error Handling', () => {
     cleanupEnvVars()
   })
 
-  const testErrorFormat = async (name: string, errorResponse: any, expectedError: string) => {
+  const testErrorFormat = async (errorResponse: any, expectedError: string) => {
     mockValidateUrlWithDNS.mockResolvedValue({ isValid: true, resolvedIP: '93.184.216.34' })
     mockSecureFetchWithPinnedIP.mockResolvedValue(
       toSecureFetchResponse(
@@ -5337,87 +5801,15 @@ describe('Centralized Error Handling', () => {
     expect(result.error).toBe(expectedError)
   }
 
-  it('should extract GraphQL error format (Linear API)', async () => {
-    await testErrorFormat(
-      'GraphQL',
-      { errors: [{ message: 'Invalid query field' }] },
-      'Invalid query field'
-    )
-  })
-
-  it('should extract X/Twitter API error format', async () => {
-    await testErrorFormat(
-      'X/Twitter',
-      { errors: [{ detail: 'Rate limit exceeded' }] },
-      'Rate limit exceeded'
-    )
-  })
-
   it('uses a tool-specific Prospeo extractor before flattening a failed response', async () => {
     const originalExtractor = tools.http_request.errorExtractor
     tools.http_request.errorExtractor = ErrorExtractorId.PROSPEO_ERRORS
 
     try {
-      await testErrorFormat('Prospeo', { error: true, error_code: 'NO_MATCH' }, 'NO_MATCH')
+      await testErrorFormat({ error: true, error_code: 'NO_MATCH' }, 'NO_MATCH')
     } finally {
       tools.http_request.errorExtractor = originalExtractor
     }
-  })
-
-  it('should extract Hunter API error format', async () => {
-    await testErrorFormat('Hunter', { errors: [{ details: 'Invalid API key' }] }, 'Invalid API key')
-  })
-
-  it('should extract direct errors array (string)', async () => {
-    await testErrorFormat('Direct string array', { errors: ['Network timeout'] }, 'Network timeout')
-  })
-
-  it('should extract direct errors array (object)', async () => {
-    await testErrorFormat(
-      'Direct object array',
-      { errors: [{ message: 'Validation failed' }] },
-      'Validation failed'
-    )
-  })
-
-  it('should extract OAuth error description', async () => {
-    await testErrorFormat('OAuth', { error_description: 'Invalid grant' }, 'Invalid grant')
-  })
-
-  it('should extract SOAP fault error', async () => {
-    await testErrorFormat(
-      'SOAP fault',
-      { fault: { faultstring: 'Server unavailable' } },
-      'Server unavailable'
-    )
-  })
-
-  it('should extract simple SOAP faultstring', async () => {
-    await testErrorFormat(
-      'Simple SOAP',
-      { faultstring: 'Authentication failed' },
-      'Authentication failed'
-    )
-  })
-
-  it('should extract Notion/Discord message format', async () => {
-    await testErrorFormat('Notion/Discord', { message: 'Page not found' }, 'Page not found')
-  })
-
-  it('should extract Airtable error object format', async () => {
-    await testErrorFormat(
-      'Airtable',
-      { error: { message: 'Invalid table ID' } },
-      'Invalid table ID'
-    )
-  })
-
-  it('should extract simple error string format', async () => {
-    await testErrorFormat(
-      'Simple string',
-      { error: 'Simple error message' },
-      'Simple error message'
-    )
   })
 
   it('should fall back to text when JSON parsing fails and extract error message', async () => {
@@ -5496,29 +5888,66 @@ describe('Centralized Error Handling', () => {
     expect(result.error).toBe('Internal Server Error')
   })
 
-  it('should handle complex nested error objects', async () => {
-    await testErrorFormat(
-      'Complex nested',
-      { error: { code: 400, message: 'Complex validation error', details: 'Field X is invalid' } },
-      'Complex validation error'
-    )
-  })
+  describe('failure attribution across the block boundary', () => {
+    const apiBlock: SerializedBlock = {
+      id: 'api-1',
+      position: { x: 0, y: 0 },
+      config: { tool: 'http_request', params: {} },
+      inputs: {},
+      outputs: {},
+      metadata: { id: 'api', name: 'Call' },
+      enabled: true,
+    }
 
-  it('should handle error arrays with multiple entries (take first)', async () => {
-    await testErrorFormat(
-      'Multiple errors',
-      { errors: [{ message: 'First error' }, { message: 'Second error' }] },
-      'First error'
-    )
-  })
+    /** Runs the real API block handler over the real `executeTool`, wrapped as the block executor wraps it. */
+    async function failApiBlock(response: Response): Promise<Error> {
+      mockValidateUrlWithDNS.mockResolvedValue({ isValid: true, resolvedIP: '93.184.216.34' })
+      mockSecureFetchWithPinnedIP.mockResolvedValue(toSecureFetchResponse(response))
+      const thrown = await new ApiBlockHandler()
+        .execute(createToolExecutionContext(), apiBlock, {
+          url: 'https://example.com/test',
+          method: 'GET',
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        )
+      expect(thrown).toBeInstanceOf(Error)
+      return buildBlockExecutionError({ block: apiBlock, error: thrown as Error })
+    }
 
-  it('should stringify complex error objects when no message found', async () => {
-    const complexError = { code: 500, type: 'ServerError', context: { requestId: '123' } }
-    await testErrorFormat(
-      'Complex object stringify',
-      { error: complexError },
-      JSON.stringify(complexError)
+    it.each([
+      [404, 'third_party_client'],
+      [503, 'third_party_server'],
+    ] as const)(
+      'attributes an upstream %i to the third party, logged once by the tool layer',
+      async (status, kind) => {
+        const blockError = await failApiBlock(jsonResponse({ error: 'rejected' }, status))
+        expect(classifyFailure(blockError)).toBe(kind)
+        expect(logFailureOnce(createLogger('OuterBoundary'), 'probe', blockError)).toBeUndefined()
+      }
     )
+
+    it.each([
+      [
+        'a provider rejection a transform reports as a plain Error',
+        new Error('channel_not_found'),
+        'third_party_client',
+      ],
+      ['a bug in the transform itself', new TypeError('data.channel is undefined'), 'internal'],
+    ] as const)('attributes %s', async (_name, transformError, kind) => {
+      const originalTransform = tools.http_request.transformResponse
+      tools.http_request.transformResponse = async () => {
+        throw transformError
+      }
+      try {
+        const blockError = await failApiBlock(jsonResponse({ ok: false }))
+        expect(classifyFailure(blockError)).toBe(kind)
+        expect(logFailureOnce(createLogger('OuterBoundary'), 'probe', blockError)).toBeUndefined()
+      } finally {
+        tools.http_request.transformResponse = originalTransform
+      }
+    })
   })
 })
 
@@ -6631,18 +7060,22 @@ describe('Cost Field Handling', () => {
       { preconnect: vi.fn() }
     ) as typeof fetch
 
-    const result = await executeTool(
-      'test_copilot_hosted_cost',
-      {},
-      {
-        executionContext: createToolExecutionContext({
-          userId: 'user-123',
-          workspaceId: 'workspace-456',
-          copilotToolExecution: true,
-        }),
-      }
+    const metered = vi.fn().mockResolvedValue(undefined)
+    const result = await observeServiceCosts(metered, () =>
+      executeTool(
+        'test_copilot_hosted_cost',
+        {},
+        {
+          executionContext: createToolExecutionContext({
+            userId: 'user-123',
+            workspaceId: 'workspace-456',
+            copilotToolExecution: true,
+          }),
+        }
+      )
     )
 
+    expect(metered).toHaveBeenCalledExactlyOnceWith('exa', 0.005)
     expect(result.success).toBe(true)
     expect(mockRateLimiterFns.acquireKey).toHaveBeenCalled()
     expect(result.output.cost).toEqual({ total: 0.005 })
@@ -7032,5 +7465,436 @@ describe('Tool version resolution', () => {
     expect(v1Tool.transformResponse).not.toHaveBeenCalled()
 
     Object.assign(tools, originalTools)
+  })
+})
+
+describe('organization scratch internal entrance', () => {
+  it.each(['agent', 'plan'] as const)(
+    'admits the real function operation with trusted %s scope and no fake workspace',
+    async (requestMode) => {
+      mockExecuteChatFunction.mockResolvedValueOnce(
+        Response.json(
+          { success: true, output: { result: 'waited' }, __resolvedSecretNames: [] },
+          { headers: { 'x-sim-private-tool-metadata': 'resolved-secret-names-durable-files-v2' } }
+        )
+      )
+      const registry = new ResolvedSecretTraceRegistry([
+        { name: 'TOKEN', plaintext: 'test-org-token', encryptedValue: 'test-cipher' },
+      ])
+      const result = await executeTool(
+        'function_execute',
+        {
+          code: 'return "waited"',
+          secretScope: 'selected',
+          mountedSecrets: ['TOKEN'],
+          envVars: { TOKEN: 'test-org-token' },
+          sandboxSessionKey: 'mothership-chat:org-chat',
+        },
+        {
+          operationContext: {
+            userId: 'actor',
+            organizationId: 'org',
+            chatId: 'org-chat',
+            requestMode,
+            copilotToolExecution: true,
+          },
+          internalSandboxProfile: 'mothership',
+          resolvedSecretTraceRegistry: registry,
+        }
+      )
+      expect(result).toMatchObject({
+        success: true,
+        output: { success: true, output: { result: 'waited' } },
+      })
+      expect(mockExecuteChatFunction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          principal: expect.objectContaining({
+            kind: 'organization_delegated',
+            organizationId: 'org',
+            subjectUserId: 'actor',
+          }),
+          input: expect.objectContaining({
+            chatId: 'org-chat',
+            body: expect.objectContaining({
+              mountedSecrets: ['TOKEN'],
+              envVars: { TOKEN: 'test-org-token' },
+            }),
+            resolvedSecretTraceRegistry: registry,
+          }),
+        })
+      )
+    }
+  )
+})
+
+describe('Live Search Assistant GitHub OAuth binding', () => {
+  beforeEach(async () => {
+    const metadata = await import('@/tools/metadata')
+    const actual = await vi.importActual<typeof import('@/tools/metadata')>('@/tools/metadata')
+    vi.mocked(metadata.getToolMetadata).mockImplementation(actual.getToolMetadata)
+    encryptionMockFns.mockEncryptSecret.mockResolvedValue({
+      encrypted: 'protected-github-oauth',
+      iv: 'test-iv',
+    })
+    encryptionMockFns.mockDecryptSecret.mockResolvedValue({ decrypted: 'personal-github-oauth' })
+    mockResolveExecutorCredentialToken.mockResolvedValue({
+      accessToken: 'personal-github-oauth',
+      credentialType: 'managed_oauth',
+    })
+    mockValidateUrlWithDNS.mockResolvedValue({ isValid: true, resolvedIP: '93.184.216.34' })
+    mockSecureFetchWithPinnedIP.mockImplementation(async () =>
+      toSecureFetchResponse(
+        Response.json({ total_count: 137, incomplete_results: false, items: [] })
+      )
+    )
+    setupFetchMock({ body: { total_count: 137, incomplete_results: false, items: [] } })
+  })
+  afterEach(resetEnvFlagsMock)
+  const options = () => ({
+    skipPostProcess: true,
+    resolvedSecretTraceRegistry: new ResolvedSecretTraceRegistry([]),
+    operationContext: {
+      userId: 'person',
+      organizationId: 'org',
+      chatId: 'chat',
+      toolCallId: 'call',
+      copilotToolExecution: true,
+      requestMode: 'assistant' as const,
+    },
+  })
+  it('executes the existing issue/PR counting tool using the selected personal OAuth account', async () => {
+    const { getToolMetadata } = await import('@/tools/metadata')
+    expect(getToolMetadata('github_search_issues_v2')).toMatchObject({
+      id: 'github_search_issues_v2',
+      params: { apiKey: { required: true } },
+    })
+    const params = {
+      credentialId: 'own-account',
+      q: 'repo:simstudioai/sim is:pr author:icecrasher321',
+    }
+    const result = await executeTool('github_search_issues_v2', params, options())
+    expect(result.success, result.error).toBe(true)
+    expect(result.output).toMatchObject({ total_count: 137, incomplete_results: false })
+    expect(mockResolveExecutorCredentialToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialId: 'own-account',
+        userId: 'person',
+        toolId: 'github_search_issues_v2',
+        copilotExecutionContext: expect.objectContaining({ organizationId: 'org' }),
+      })
+    )
+    expect(params).not.toHaveProperty('apiKey')
+    const requests = [
+      ...mockSecureFetchWithPinnedIP.mock.calls,
+      ...vi.mocked(global.fetch).mock.calls,
+    ]
+    expect(
+      requests.some((call) => JSON.stringify(call).includes('Bearer personal-github-oauth'))
+    ).toBe(true)
+    expect(JSON.stringify(result)).not.toContain('personal-github-oauth')
+  })
+  it('rejects model-supplied credentials before resolving any account or requesting GitHub', async () => {
+    const result = await executeTool(
+      'github_search_issues_v2',
+      { credentialId: 'own-account', q: 'is:pr', apiKey: 'injected-admin-token' },
+      options()
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('cannot supply the apiKey')
+    expect(mockResolveExecutorCredentialToken).not.toHaveBeenCalled()
+    expect(mockSecureFetchWithPinnedIP).not.toHaveBeenCalled()
+  })
+})
+
+describe('Vanta saved credential rejection recovery', () => {
+  const credentialId = 'vanta-saved-credential'
+  const apiDomain = 'https://api.vanta.com'
+  const context = () => createToolExecutionContext({ userId: 'user-1' })
+  let resolutions: number
+
+  beforeEach(() => {
+    Object.assign(tools, {
+      vanta_list_frameworks: vantaListFrameworksTool,
+      vanta_submit_document: vantaSubmitDocumentTool,
+      vanta_upload_document_file: vantaUploadDocumentFileTool,
+    })
+    mockGetInternalToolOperationHandler.mockResolvedValue(executeVantaTool)
+    resolutions = 0
+    mockResolveExecutorCredentialToken.mockImplementation(async (input) => {
+      if (input.credentialId !== credentialId || input.userId !== 'user-1') {
+        throw new Error('Credential authority changed')
+      }
+      resolutions++
+      return {
+        credentialType: 'service_account',
+        accessToken: resolutions === 1 ? 'old-token' : 'fresh-token',
+        apiDomain,
+      }
+    })
+  })
+
+  afterEach(() => {
+    Reflect.deleteProperty(tools, 'vanta_list_frameworks')
+    Reflect.deleteProperty(tools, 'vanta_submit_document')
+    Reflect.deleteProperty(tools, 'vanta_upload_document_file')
+  })
+
+  it('re-authorizes the same saved credential and retries a rejected token at its trusted origin', async () => {
+    const requests: Array<{ url: string; authorization: string | null }> = []
+    mockResolveExecutorCredentialToken.mockImplementation(async (input) => {
+      if (input.credentialId !== credentialId || input.userId !== 'user-1') {
+        throw new Error('Credential authority changed')
+      }
+      resolutions++
+      return {
+        credentialType: 'service_account',
+        accessToken: resolutions === 1 ? 'old-token' : 'fresh-token',
+        apiDomain: resolutions === 1 ? apiDomain : 'https://api.vanta-gov.com',
+      }
+    })
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get('authorization'),
+      })
+      return requests.length === 1
+        ? Response.json({ error: 'Token expired' }, { status: 401 })
+        : Response.json({ results: { data: [{ id: 'soc2', displayName: 'SOC 2' }] } })
+    })
+
+    const result = await executeTool(
+      'vanta_list_frameworks',
+      { oauthCredential: credentialId, apiDomain: 'https://attacker.example' },
+      { executionContext: context() }
+    )
+
+    expect(result).toMatchObject({ success: true, output: { frameworks: [{ id: 'soc2' }] } })
+    expect(requests).toEqual([
+      { url: `${apiDomain}/v1/frameworks`, authorization: 'Bearer old-token' },
+      { url: 'https://api.vanta-gov.com/v1/frameworks', authorization: 'Bearer fresh-token' },
+    ])
+  })
+
+  it('rebuilds the complete multipart evidence upload after authentication rejection', async () => {
+    const uploads: Array<{
+      token: string | null
+      name: string
+      body: string
+      description: FormDataEntryValue | null
+    }> = []
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(String(url), init)
+      const form = await request.formData()
+      const file = form.get('file')
+      if (!(file instanceof File)) throw new Error('Evidence file missing')
+      uploads.push({
+        token: request.headers.get('authorization'),
+        name: file.name,
+        body: await file.text(),
+        description: form.get('description'),
+      })
+      return uploads.length === 1
+        ? Response.json({ error: 'Token expired' }, { status: 401 })
+        : Response.json({ id: 'uploaded-evidence', fileName: file.name })
+    })
+
+    const result = await executeTool(
+      'vanta_upload_document_file',
+      {
+        oauthCredential: credentialId,
+        documentId: 'document-1',
+        fileContent: Buffer.from('audit evidence').toString('base64'),
+        fileName: 'evidence.txt',
+        description: 'Quarterly access review',
+      },
+      { executionContext: context() }
+    )
+
+    expect(result).toMatchObject({ success: true, output: { upload: { id: 'uploaded-evidence' } } })
+    expect(uploads).toEqual([
+      {
+        token: 'Bearer old-token',
+        name: 'evidence.txt',
+        body: 'audit evidence',
+        description: 'Quarterly access review',
+      },
+      {
+        token: 'Bearer fresh-token',
+        name: 'evidence.txt',
+        body: 'audit evidence',
+        description: 'Quarterly access review',
+      },
+    ])
+  })
+
+  it('stops after a second authentication rejection', async () => {
+    const tokens: Array<string | null> = []
+    vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+      tokens.push(new Headers(init?.headers).get('authorization'))
+      return Response.json({ error: 'Token rejected' }, { status: tokens.length > 2 ? 503 : 401 })
+    })
+    const result = await executeTool(
+      'vanta_submit_document',
+      { oauthCredential: credentialId, documentId: 'document-1' },
+      { executionContext: context() }
+    )
+    expect(result.success).toBe(false)
+    expect(tokens).toEqual(['Bearer old-token', 'Bearer fresh-token'])
+  })
+
+  it.each([403, 429, 503])(
+    'does not replay a document submission after status %s',
+    async (status) => {
+      const methods: Array<string | undefined> = []
+      vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+        methods.push(init?.method)
+        return Response.json({ error: 'Provider rejected the request' }, { status })
+      })
+      const result = await executeTool(
+        'vanta_submit_document',
+        { oauthCredential: credentialId, documentId: 'document-1' },
+        { executionContext: context() }
+      )
+      expect(result.success).toBe(false)
+      expect(methods).toEqual(['POST'])
+    }
+  )
+
+  it('does not replay a document submission after a network failure', async () => {
+    const methods: Array<string | undefined> = []
+    vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+      methods.push(init?.method)
+      throw new Error('Connection reset')
+    })
+    const result = await executeTool(
+      'vanta_submit_document',
+      { oauthCredential: credentialId, documentId: 'document-1' },
+      { executionContext: context() }
+    )
+    expect(result.success).toBe(false)
+    expect(methods).toEqual(['POST'])
+  })
+
+  it('stops without another provider request when credential authorization is revoked', async () => {
+    const tokens: Array<string | null> = []
+    mockResolveExecutorCredentialToken.mockImplementation(async () => {
+      resolutions++
+      if (resolutions > 1) throw new Error('Credential access denied')
+      return { credentialType: 'service_account', accessToken: 'old-token', apiDomain }
+    })
+    vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+      tokens.push(new Headers(init?.headers).get('authorization'))
+      return Response.json({ error: 'Token expired' }, { status: 401 })
+    })
+    const result = await executeTool(
+      'vanta_list_frameworks',
+      { oauthCredential: credentialId },
+      { executionContext: context() }
+    )
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('Credential access denied'),
+    })
+    expect(tokens).toEqual(['Bearer old-token'])
+  })
+
+  it('does not start another provider request after cancellation', async () => {
+    const controller = new AbortController()
+    const tokens: Array<string | null> = []
+    vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+      tokens.push(new Headers(init?.headers).get('authorization'))
+      controller.abort()
+      return Response.json({ error: 'Token expired' }, { status: 401 })
+    })
+    const result = await executeTool(
+      'vanta_list_frameworks',
+      { oauthCredential: credentialId },
+      { executionContext: context(), signal: controller.signal }
+    )
+    expect(result.success).toBe(false)
+    expect(tokens).toEqual(['Bearer old-token'])
+  })
+
+  it.each([
+    { label: 'initial resolution cancellation', retry: false, timeout: false },
+    { label: 'retry resolution cancellation', retry: true, timeout: false },
+    { label: 'retry resolution timeout', retry: true, timeout: true },
+  ])(
+    'settles $label while the authorized resolver is still pending',
+    async ({ retry, timeout }) => {
+      vi.useFakeTimers()
+      const controller = new AbortController()
+      const entered = createDeferred<void>()
+      const released = createDeferred<void>()
+      const tokens: Array<string | null> = []
+      let settled: ToolResponse | undefined
+      mockResolveExecutorCredentialToken.mockImplementation(async () => {
+        resolutions++
+        if (!retry || resolutions > 1) {
+          entered.resolve()
+          await released.promise
+        }
+        return {
+          credentialType: 'service_account',
+          accessToken: resolutions === 1 ? 'old-token' : 'fresh-token',
+          apiDomain,
+        }
+      })
+      vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+        tokens.push(new Headers(init?.headers).get('authorization'))
+        return Response.json({ error: 'Token expired' }, { status: 401 })
+      })
+      const execution = executeTool(
+        'vanta_list_frameworks',
+        { oauthCredential: credentialId, timeout: 100 },
+        { executionContext: context(), signal: controller.signal }
+      ).then((result) => {
+        settled = result
+        return result
+      })
+      try {
+        await entered.promise
+        if (timeout) await vi.advanceTimersByTimeAsync(100)
+        else controller.abort(new Error('Caller cancelled credential wait'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(settled).toMatchObject({
+          success: false,
+          error: expect.stringMatching(/cancel|abort|timed? ?out/i),
+        })
+        expect(tokens).toEqual(retry ? ['Bearer old-token'] : [])
+      } finally {
+        released.resolve()
+        await execution
+        await vi.advanceTimersByTimeAsync(0)
+        vi.useRealTimers()
+      }
+      expect(tokens).toEqual(retry ? ['Bearer old-token'] : [])
+    }
+  )
+
+  it('keeps the original operation deadline across the retried provider request', async () => {
+    vi.useFakeTimers()
+    try {
+      const tokens: Array<string | null> = []
+      vi.stubGlobal('fetch', async (_url: string | URL | Request, init?: RequestInit) => {
+        tokens.push(new Headers(init?.headers).get('authorization'))
+        await vi.advanceTimersByTimeAsync(60)
+        return tokens.length === 1
+          ? Response.json({ error: 'Token expired' }, { status: 401 })
+          : Response.json({ results: { data: [] } })
+      })
+      const result = await executeTool(
+        'vanta_list_frameworks',
+        { oauthCredential: credentialId, timeout: 100 },
+        { executionContext: context() }
+      )
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringMatching(/abort|timed? ?out/i),
+      })
+      expect(tokens).toEqual(['Bearer old-token', 'Bearer fresh-token'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

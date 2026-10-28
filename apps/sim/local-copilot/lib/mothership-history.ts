@@ -5,11 +5,11 @@ import {
   type PersistedContentBlock,
   type PersistedMessage,
   stripToolResultOutput,
-} from '@/lib/copilot/chat/persisted-message'
+} from '@/lib/mothership/chat/persisted-message'
 import {
   MothershipStreamV1EventType,
   MothershipStreamV1TextChannel,
-} from '@/lib/copilot/generated/mothership-stream-v1'
+} from '@/lib/mothership/generated/mothership-stream-v1'
 import { formatAttachmentHistoryStubs } from '@/local-copilot/lib/context/chat-uploads'
 import { LOCAL_COPILOT_MAX_HISTORY_MESSAGES } from '@/local-copilot/lib/context/context-budget'
 import type { SessionMemoryTurn } from '@/local-copilot/lib/context/session-memory'
@@ -118,7 +118,6 @@ function isAssistantProseBlock(block: PersistedContentBlock): boolean {
 
 function isMainThinkingBlock(block: PersistedContentBlock): boolean {
   if (block.lane === 'subagent') return false
-  if (block.type === 'thinking') return Boolean(block.content?.trim())
   return (
     block.type === MothershipStreamV1EventType.text &&
     block.channel === MothershipStreamV1TextChannel.thinking &&

@@ -46,10 +46,42 @@ interface FeatureFlagDefinition {
 
 /** The single registry of known flags. To add a flag, add one entry here. */
 const FEATURE_FLAGS = {
-  'permission-access-requests': {
+  dashboards: {
     description:
-      'Enable permission and member usage-cap requests globally. Organizations can opt out in access control settings.',
-    fallback: 'PERMISSION_ACCESS_REQUESTS_ENABLED',
+      'Enable dashboard resources, rendering, analytics, and Mothership authoring. Supports global and organization rollout; disabled by default.',
+    fallback: 'DASHBOARDS',
+  },
+  'workflow-tests': {
+    description:
+      'Enable workflow tests: the workspace Tests page, tests/<name>.test.js files, and the Sim tests tool. Supports global and organization rollout; disabled by default.',
+    fallback: 'WORKFLOW_TESTS',
+  },
+  changelog: {
+    description:
+      'Enable the workspace Changelog: the Changelog page, changelog/<id>.md release bodies, and the Sim changelog tool. Supports global and organization rollout; disabled by default.',
+    fallback: 'CHANGELOG',
+  },
+  'mothership-model-selector': {
+    description:
+      'Show the Mothership model selector, model-specific effort levels, and Fast for supported ' +
+      'models. Global on/off only; disabled uses Astra with simplified effort labels.',
+    fallback: 'MSHIP_MODEL_SELECTOR',
+  },
+  'mothership-plan-mode': {
+    description:
+      'Show and admit Mothership Plan conversations. Global on/off only, shared by organization ' +
+      'and workspace surfaces.',
+    fallback: 'MSHIP_PLAN_MODE',
+  },
+  'agent-memory-history': {
+    description:
+      'Capture durable Workflow Agent tool history and continue existing retries. Supports workspace rollout targeting; version-aware memory storage remains active when capture is disabled.',
+    fallback: 'AGENT_MEMORY_HISTORY',
+  },
+  'zoom-search': {
+    description:
+      'Enable Zoom Search setup, personal authorization and retrieval. Organization targeting only; disabled by default. Standard workflow Zoom OAuth is unchanged.',
+    fallback: 'ZOOM_SEARCH',
   },
   'slack-search-shared-app': {
     description:
@@ -65,37 +97,22 @@ const FEATURE_FLAGS = {
       'resolveTriggerRegion, so the whole deployment switches regions together.',
     fallback: 'TRIGGER_EU_REGION',
   },
-  'tables-v2-api': {
+  projects: {
     description:
-      'Gate the internal predicate-grammar table query route (POST /api/table/[tableId]/query), ' +
-      'its only caller. When off, that route returns 403 naming the gate (post-authz, so the ' +
-      'masquerade 404 served nobody and broke the table_v2 block confusingly). Despite the ' +
-      'name it does NOT gate any /api/v2/tables route. Gated by userId/orgId/admins via ' +
-      'AppConfig; off-AppConfig falls back to TABLES_V2_API.',
-    fallback: 'TABLES_V2_API',
-  },
-  'table-row-ttl': {
-    description:
-      'Enable TTL columns and the scheduled cleanup that removes expired table rows. ' +
-      'Global on/off only; existing TTL data remains readable when disabled.',
-    fallback: 'TABLE_ROW_TTL',
-  },
-  'credential-groups': {
-    description:
-      'Managed connected accounts, including organization account pools and their settings UI. ' +
-      'Uses orgId targeting only; workspace callers resolve their canonical organization. Hosted ' +
-      'owners also require an active Enterprise subscription. Organization Search additionally ' +
-      'requires knowledge-member-access. Off-AppConfig falls back to CREDENTIAL_GROUPS.',
-    fallback: 'CREDENTIAL_GROUPS',
+      'Expose the Project APIs once the membership backfill has validated. Global on/off only; ' +
+      'workspace creation assigns Projects and lifecycle protections apply either way. ' +
+      'Off-AppConfig falls back to PROJECT_API_ENABLED.',
+    fallback: 'PROJECT_API_ENABLED',
   },
   'knowledge-member-access': {
     description:
-      'Permission-aware indexing and retrieval. Organization Search UI, MCP, and search APIs ' +
-      'require this flag and credential-groups for the canonical orgId; user/admin/workspace ' +
-      'targeting cannot enable another organization. Workspace member sync uses workspaceId; ' +
-      'workspace retrieval defaults may additionally use user/admin targeting. Source ACL ' +
-      'mirroring remains independent of managed identities. Off-AppConfig falls back to ' +
-      'KNOWLEDGE_MEMBER_ACCESS.',
+      'Organization Search (live) and the permission-aware workspace connector modes: members ' +
+      '(per-member sync, which also requires the Credential Groups entitlement) and admin (source ACL ' +
+      'mirroring, independent of managed identities). Organization Search UI, MCP, and ' +
+      'search APIs require this flag and the Credential Groups entitlement for the canonical orgId; ' +
+      'user/admin/workspace targeting cannot enable another organization. Workspace connector ' +
+      'modes use workspaceId; workspace retrieval defaults may additionally use user/admin ' +
+      'targeting. Off-AppConfig falls back to KNOWLEDGE_MEMBER_ACCESS.',
     fallback: 'KNOWLEDGE_MEMBER_ACCESS',
   },
 } satisfies Record<string, FeatureFlagDefinition>
@@ -112,7 +129,8 @@ function fallbackFlags(): FeatureFlagsConfig {
   for (const [name, def] of Object.entries(FEATURE_FLAGS) as Array<
     [string, FeatureFlagDefinition]
   >) {
-    flags[name] = { enabled: isTruthy(env[def.fallback]) }
+    const fallback = env[def.fallback]
+    flags[name] = { enabled: isTruthy(Array.isArray(fallback) ? undefined : fallback) }
   }
   return flags
 }

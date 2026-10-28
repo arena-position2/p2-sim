@@ -1,5 +1,6 @@
+import { requirePrincipalSubjectUserId } from '@sim/auth/principal'
 import { defineAuthorizedWorkspaceUseCase } from '@/lib/core/application/authorized-workspace-use-case'
-import { defineWorkspaceOperation } from '@/lib/core/application/workspace-operation'
+import { permissionGroupWorkspaceOperations } from '@/lib/permission-groups/application/operations'
 import {
   isOrganizationPermissionRegimeActive,
   resolveWorkspaceGroup,
@@ -7,33 +8,23 @@ import {
 import { resolveActiveWorkspaceApplicationContext } from '@/lib/workspaces/application/workspace-context'
 import { isOrganizationAdminOrOwner } from '@/lib/workspaces/permissions/utils'
 
-/**
- * permission-group-exempt: Members must be able to read their own restrictions.
- */
-export const readUserPermissionConfigOperation = defineWorkspaceOperation({
-  id: 'permission_groups.read_user_config',
-  minimumRole: 'read',
-  workspaceApiKey: 'deny',
-  principalKinds: ['session'],
-  capability: 'none',
-})
-
 export const readUserPermissionConfig = defineAuthorizedWorkspaceUseCase({
-  operation: readUserPermissionConfigOperation,
+  operation: permissionGroupWorkspaceOperations.readUserConfig,
   resolveContext: ({ input }: { input: { workspaceId: string } }) =>
     resolveActiveWorkspaceApplicationContext(input.workspaceId),
-  authorizationOptions: {},
+  authorizationOptions: { delegation: { audience: 'sim:settings', isWithinScope: () => true } },
   execute: async ({ principal, context }) => {
+    const userId = requirePrincipalSubjectUserId(principal)
     const organizationId = context.workspaceOrganizationId
     const [isOrgAdmin, entitled] = organizationId
       ? await Promise.all([
-          isOrganizationAdminOrOwner(principal.userId, organizationId),
+          isOrganizationAdminOrOwner(userId, organizationId),
           isOrganizationPermissionRegimeActive(organizationId),
         ])
       : [false, false]
     const resolved =
       organizationId && entitled
-        ? await resolveWorkspaceGroup(principal.userId, organizationId, context.workspaceId)
+        ? await resolveWorkspaceGroup(userId, organizationId, context.workspaceId)
         : null
 
     return {

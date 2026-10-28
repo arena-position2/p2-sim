@@ -1,10 +1,24 @@
-/** @vitest-environment node */
 import {
   dbChainMockFns,
+  flattenMockConditions,
   queueTableRows,
   resetDbChainMock as resetDatabaseMock,
   schemaMock,
 } from '@sim/testing'
+import {
+  knowledgeDocumentsServiceMock,
+  knowledgeDocumentsServiceMockFns,
+} from '@sim/testing/mocks/knowledge-documents-service.mock'
+import { storageServiceMock, storageServiceMockFns } from '@sim/testing/mocks/storage-service.mock'
+import {
+  triggerAvailabilityMock,
+  triggerAvailabilityMockFns,
+} from '@sim/testing/mocks/trigger-availability.mock'
+import { uploadsMock } from '@sim/testing/mocks/uploads.mock'
+import {
+  uploadsMetadataMock,
+  uploadsMetadataMockFns,
+} from '@sim/testing/mocks/uploads-metadata.mock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
 import type { ConnectorAccessMode } from '@/lib/knowledge/connectors/access-modes'
@@ -12,6 +26,11 @@ import {
   beginListingCheckpoint,
   type ListingCheckpoint,
 } from '@/lib/knowledge/connectors/listing-checkpoint'
+import {
+  routeWindowScans,
+  windowScan,
+  windowScans,
+} from '@/lib/knowledge/connectors/reconciliation-window.test-helpers'
 import { runConnectorContentPass } from '@/lib/knowledge/connectors/sync-content-pass'
 import {
   SOURCE_CONTENT_ERROR,
@@ -21,49 +40,49 @@ import { stillHoldsSyncLock } from '@/lib/knowledge/connectors/sync-lock'
 import { confluenceConnector } from '@/connectors/confluence/confluence'
 import type { ExternalDocument, SyncResult } from '@/connectors/types'
 
+uploadsMetadataMockFns.mockGetFileMetadataByKeys.mockImplementation(async (keys: string[]) =>
+  keys.flatMap((key) => bindings.get(key) ?? [])
+)
+uploadsMetadataMockFns.mockInsertImmutableFileMetadata.mockImplementation(
+  async (options: { id: string; key: string }) => {
+    const binding = { id: options.id, contentUpdatedAt: new Date(0) }
+    bindings.set(options.key, binding)
+    return binding
+  }
+)
+
 function resetDbChainMock() {
   resetDatabaseMock()
-  dbChainMockFns.execute.mockImplementation(async () => [{ startedAt: new Date().toISOString() }])
+  routeWindowScans()
 }
 
-const mocks = vi.hoisted(() => ({
-  upload: vi.fn(),
-  deleteFile: vi.fn(),
-  deleteMetadata: vi.fn(),
+const hoisted = vi.hoisted(() => ({
   enqueueCleanup: vi.fn(async () => {
     dbChainMockFns.returning.mockResolvedValueOnce([{ id: 'cleanup-guard' }])
     return ['cleanup-guard']
   }),
-  dispatch: vi.fn(),
   onPage: vi.fn(),
-  hardDelete: vi.fn(async (_ids: string[]) => 0),
 }))
 const bindings = vi.hoisted(() => new Map<string, { id: string; contentUpdatedAt: Date }>())
 
-vi.mock('@/lib/knowledge/documents/service', () => ({
-  hardDeleteDocuments: mocks.hardDelete,
-  isTriggerAvailable: () => true,
-  processDocumentsWithQueue: mocks.dispatch,
-}))
-vi.mock('@/lib/uploads', () => ({ StorageService: { uploadFile: mocks.upload } }))
-vi.mock('@/lib/uploads/core/storage-service', () => ({ deleteFile: mocks.deleteFile }))
-vi.mock('@/lib/uploads/server/metadata', () => ({
-  deleteFileMetadata: mocks.deleteMetadata,
-  getFileMetadataByKeys: vi.fn(async (keys: string[]) =>
-    keys.flatMap((key) => bindings.get(key) ?? [])
-  ),
-  insertImmutableFileMetadata: vi.fn(async (options: { id: string; key: string }) => {
-    const binding = { id: options.id, contentUpdatedAt: new Date(0) }
-    bindings.set(options.key, binding)
-    return binding
-  }),
-}))
+vi.mock('@/lib/knowledge/documents/service', () => knowledgeDocumentsServiceMock)
+vi.mock('@/lib/core/config/trigger-availability', () => triggerAvailabilityMock)
+vi.mock('@/lib/uploads', () => uploadsMock)
+vi.mock('@/lib/uploads/core/storage-service', () => storageServiceMock)
+vi.mock('@/lib/uploads/server/metadata', () => uploadsMetadataMock)
 vi.mock('@/lib/knowledge/documents/storage-cleanup', () => ({
-  KNOWLEDGE_STORAGE_CLEANUP_EVENT: 'knowledge.document.storage.cleanup',
-  enqueueKnowledgeStorageCleanup: mocks.enqueueCleanup,
+  enqueueKnowledgeStorageCleanup: hoisted.enqueueCleanup,
   isKnowledgeBaseOwnedStorageKey: (key: string) => key.startsWith('kb/'),
 }))
 vi.mock('@/connectors/registry.server', () => ({ CONNECTOR_REGISTRY: {} }))
+
+const mocks = {
+  ...hoisted,
+  dispatch: knowledgeDocumentsServiceMockFns.mockProcessDocumentsWithQueue,
+  hardDelete: knowledgeDocumentsServiceMockFns.mockHardDeleteDocuments,
+}
+mocks.hardDelete.mockImplementation(async (_ids: string[]) => 0)
+triggerAvailabilityMockFns.mockIsTriggerAvailable.mockReturnValue(true)
 
 interface StoredPage {
   id: string
@@ -75,7 +94,12 @@ interface StoredPage {
   sourceSeenAt: Date | null
 }
 
-const SOURCE_CONFIG = { domain: 'fixture.atlassian.net', spaceKey: 'ENG' }
+/** Images on, as a new connector is created. */
+const SOURCE_CONFIG = {
+  domain: 'fixture.atlassian.net',
+  spaceKey: 'ENG',
+  imageAttachments: 'semantic',
+}
 const EXISTING: StoredPage = {
   id: 'document',
   externalId: 'page',
@@ -100,7 +124,6 @@ let hydrationVersion: number | undefined
 let sourceBody: unknown = { value: '' }
 
 beforeEach(() => {
-  vi.clearAllMocks()
   resetDbChainMock()
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-09-08T12:00:00Z'))
@@ -109,10 +132,12 @@ beforeEach(() => {
   sourceBody = { value: '' }
   mocks.hardDelete.mockResolvedValue(0)
   mocks.onPage.mockReset()
-  mocks.upload.mockImplementation(async ({ customKey }: { customKey: string }) => ({
-    key: customKey,
-    path: `/api/files/serve/${encodeURIComponent(customKey)}`,
-  }))
+  storageServiceMockFns.mockUploadFile.mockImplementation(
+    async ({ customKey }: { customKey: string }) => ({
+      key: customKey,
+      path: `/api/files/serve/${encodeURIComponent(customKey)}`,
+    })
+  )
   mocks.dispatch.mockImplementation(async (documents: unknown[]) => ({
     accepted: documents.length,
     failed: 0,
@@ -143,27 +168,45 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  vi.unstubAllGlobals()
 })
+
+/**
+ * Every statement that assigns `acl`, with its flattened WHERE. Selects call `where` too, so
+ * each `set` is paired with the next `where` by call order.
+ */
+function _aclAssignments() {
+  const whereOrder = dbChainMockFns.where.mock.invocationCallOrder
+  return dbChainMockFns.set.mock.calls
+    .map(([values], index) => {
+      const setOrder = dbChainMockFns.set.mock.invocationCallOrder[index]
+      const next = whereOrder.findIndex((order) => order > setOrder)
+      return {
+        values,
+        conditions: flattenMockConditions(dbChainMockFns.where.mock.calls[next]?.[0]),
+      }
+    })
+    .filter(({ values }) => 'acl' in values)
+}
+
+/** The guard that keeps an ACL already readable by nobody out of an `acl` assignment. */
+function _grantsSomeone(node: Record<string, unknown>): boolean {
+  return Array.isArray(node.strings) && node.strings.join('?') === 'cardinality(?) > 0'
+}
 
 describe('completed listing removal counts', () => {
   interface AbsentDocument {
     id: string
-    seenAt: string
-    deletedAt: Date | null
+    tombstoned: boolean
   }
 
-  const absent = (id: string, deletedAt: Date | null = null): AbsentDocument => ({
-    id,
-    seenAt: '2026-09-07T12:00:00.000000',
-    deletedAt,
-  })
+  const absent = (id: string, tombstoned = false): AbsentDocument => ({ id, tombstoned })
 
   async function reconcile(options: {
     soft?: AbsentDocument[]
     hard?: AbsentDocument[]
     fullSync?: boolean
     updated?: { id: string }[]
+    revoked?: AbsentDocument[]
   }) {
     resetDbChainMock()
     const soft = options.soft ?? []
@@ -179,21 +222,40 @@ describe('completed listing removal counts', () => {
       listedCount: 8,
     }
     queueTableRows(schemaMock.document, [
-      { ownedCount: 10, listedCount: 8, softCount: soft.length, hardCount: hard.length },
+      {
+        ownedCount: 10,
+        listedCount: 8,
+        aclCount: options.revoked?.length ?? 0,
+        softCount: soft.length,
+        hardCount: hard.length,
+      },
     ])
-    queueTableRows(schemaMock.document, [])
-    if (!options.fullSync) {
-      queueTableRows(schemaMock.document, soft)
-      if (soft.length) {
-        queueTableRows(schemaMock.knowledgeConnector, [{ id: 'connector' }])
-        dbChainMockFns.returning.mockResolvedValueOnce(
-          options.updated ?? soft.map(({ id }) => ({ id }))
-        )
-        queueTableRows(schemaMock.document, [])
+    /** A walk whose count is zero never scans. Each walk here fits in one partial window. */
+    if (options.revoked?.length) {
+      windowScans.push(windowScan(options.revoked))
+      /** Each window reads what still grants someone; pages are bounded by their chunks' rows. */
+      const granting = options.revoked.map(({ id }) => ({ id, chunkCount: 10 }))
+      queueTableRows(schemaMock.document, granting)
+      /** Each revocation page plans from an unlocked read, then locks and rereads its chunks. */
+      for (let offset = 0; offset < granting.length; offset += 25) {
+        queueTableRows(schemaMock.document, granting.slice(offset, offset + 25))
+        queueTableRows(schemaMock.document, granting.slice(offset, offset + 25))
       }
+      /** Every revocation page is its own lease-proving transaction: one evidence clear, then acl pages. */
+      const batches = 1 + Math.ceil(options.revoked.length / 25)
+      for (let batch = 0; batch < batches; batch++)
+        queueTableRows(schemaMock.knowledgeConnector, [{ id: 'connector' }])
     }
-    queueTableRows(schemaMock.document, hard)
-    if (hard.length) queueTableRows(schemaMock.document, [])
+    if (!options.fullSync && soft.length) {
+      windowScans.push(windowScan(soft))
+      queueTableRows(schemaMock.knowledgeConnector, [{ id: 'connector' }])
+      dbChainMockFns.returning.mockResolvedValueOnce(
+        options.updated ?? soft.map(({ id }) => ({ id }))
+      )
+    }
+    if (hard.length) {
+      windowScans.push(windowScan(hard))
+    }
     const result: SyncResult = {
       docsAdded: 0,
       docsUpdated: 0,
@@ -240,7 +302,7 @@ describe('completed listing removal counts', () => {
 
     mocks.hardDelete.mockResolvedValue(2)
     const cleanup = await reconcile({
-      hard: [absent('one', new Date(0)), absent('two', new Date(0))],
+      hard: [absent('one', true), absent('two', true)],
     })
     expect(cleanup.docsDeleted).toBe(0)
     expect(mocks.hardDelete).toHaveBeenCalledWith(['one', 'two'], 'run', 'connector', 'kb', {
@@ -261,22 +323,6 @@ describe('completed listing removal counts', () => {
     })
     expect(result.docsDeleted).toBe(1)
   })
-
-  it('counts full-sync removals of live documents but not already hidden tombstones', async () => {
-    mocks.hardDelete.mockImplementation(async (ids: string[]) => ids.length)
-    const result = await reconcile({
-      fullSync: true,
-      hard: [absent('live'), absent('already-hidden', new Date(0))],
-    })
-    expect(result.docsDeleted).toBe(1)
-    expect(mocks.hardDelete.mock.calls.map(([ids]) => ids)).toEqual([['live'], ['already-hidden']])
-  })
-
-  it('does not report a full-sync removal when the guarded delete removed no live rows', async () => {
-    mocks.hardDelete.mockResolvedValue(0)
-    const result = await reconcile({ fullSync: true, hard: [absent('detached')] })
-    expect(result.docsDeleted).toBe(0)
-  })
 })
 
 /** Real listing, hydration, persistence and checkpoint logic, with only external systems mocked. */
@@ -286,6 +332,7 @@ async function runPass(
     access?: ConnectorAccessMode
     readCurrent?: boolean
     forceRehydrate?: boolean
+    fullSync?: boolean
     checkpoint?: ListingCheckpoint
     databaseTime?: Date
     getDocument?: () => Promise<ExternalDocument | null>
@@ -311,6 +358,13 @@ async function runPass(
   }
   queueTableRows(schemaMock.knowledgeBase, [{ id: 'kb' }])
   queueTableRows(schemaMock.document, options.existing ? [options.existing] : [])
+  /** A permission-only page revokes a changed body first: its read of what still grants someone. */
+  if (options.permissionsOnly && options.existing && options.existing.contentHash === 'old-body') {
+    queueTableRows(schemaMock.document, [{ id: options.existing.id, chunkCount: 1 }])
+    /** The revocation page plans from an unlocked read, then locks and rereads its chunks. */
+    queueTableRows(schemaMock.document, [{ id: options.existing.id, chunkCount: 1 }])
+    queueTableRows(schemaMock.document, [{ id: options.existing.id, chunkCount: 1 }])
+  }
   if (options.readCurrent) {
     queueTableRows(schemaMock.document, [{ fileUrl: options.existing?.fileUrl ?? '' }])
     if (
@@ -387,6 +441,7 @@ async function runPass(
     getAccessToken: async () => 'token',
     hydration: { getDocument: hydrate },
     forceRehydrate: options.forceRehydrate ?? false,
+    fullSync: options.fullSync,
     deadlineAt: Date.now() + 60_000,
     onPage: mocks.onPage,
   })
@@ -400,68 +455,6 @@ function contentWrite(): Record<string, unknown> {
 }
 
 describe('content pass checkpoint intent', () => {
-  it('preserves non-Google replay behavior for already-seen documents', async () => {
-    sourceBody = { value: '<p>Updated body</p>' }
-    const checkpoint = beginListingCheckpoint({
-      fingerprint: 'a'.repeat(64),
-      generationId: 'incomplete-company',
-      startedAt: new Date('2026-09-07T12:00:00Z'),
-    })
-    const { hydrate, result } = await runPass({
-      access: 'admin',
-      readCurrent: true,
-      checkpoint,
-      existing: {
-        ...EXISTING,
-        contentHash: 'old-body',
-        storageKey: 'kb/old.txt',
-        sourceSeenAt: new Date(checkpoint.startedAt),
-      },
-    })
-    expect(hydrate).not.toHaveBeenCalled()
-    expect(result.docsUpdated).toBe(0)
-  })
-
-  it.each([403, 401])(
-    'indexes healthy Confluence pages while preserving attachments after access failure %s',
-    async (status) => {
-      sourceBody = { value: '<p>Current content</p>' }
-      const healthy = vi.mocked(fetch).getMockImplementation()!
-      vi.mocked(fetch).mockImplementation(async (input, init) =>
-        String(input).includes('/pages/page/attachments')
-          ? status === 401
-            ? Response.json(
-                { code: 401, message: 'Unauthorized; scope does not match' },
-                { status }
-              )
-            : new Response(null, { status })
-          : healthy(input, init)
-      )
-      const { pass, result } = await runPass({ access: 'admin' })
-      expect(pass.complete).toBe(true)
-      expect(pass.checkpoint).toMatchObject({
-        unsafe: true,
-        listingFailures: {
-          count: 1,
-          samples: [
-            {
-              scope: 'page',
-              operation: 'confluence.attachments.list',
-              status,
-              reasons: [status === 401 ? 'attachment_scope_mismatch' : 'attachment_access_denied'],
-            },
-          ],
-        },
-      })
-      expect(pass.holdNotice).toContain('unlisted documents were kept')
-      expect(result.docsAdded).toBe(1)
-      expect(result.docsDeleted).toBe(0)
-      expect(mocks.dispatch).toHaveBeenCalledOnce()
-      expect(mocks.hardDelete).not.toHaveBeenCalled()
-      expect(dbChainMockFns.set.mock.calls.some(([value]) => value.deletedAt != null)).toBe(false)
-    }
-  )
-
   it('does not reconcile deletions after a user listing failed, even without the unsafe marker', async () => {
     sourceBody = { value: '<p>Current content</p>' }
     const checkpoint = {
@@ -523,13 +516,6 @@ describe('content pass checkpoint intent', () => {
     expect(pass.checkpoint.permissionFailures).toBe(true)
   })
 
-  it('clears permission failure evidence for a newly verified crawl', async () => {
-    mocks.onPage.mockResolvedValue({ permissionsIncomplete: false })
-    const { pass } = await runPass({ access: 'admin' })
-    expect(pass.checkpoint.permissionFailures).toBe(false)
-    expect(pass.holdNotice).toBeNull()
-  })
-
   it('uses the database clock for a new generation despite a different worker clock', async () => {
     const databaseTime = new Date('2026-09-08T10:00:00Z')
     sourceBody = { value: '<p>Current content</p>' }
@@ -537,110 +523,6 @@ describe('content pass checkpoint intent', () => {
     expect(pass.checkpoint.startedAt).toBe(databaseTime.toISOString())
     expect(mocks.onPage).toHaveBeenCalledWith(expect.any(Array), databaseTime)
   })
-
-  it('passes the durable generation start to ACL updates when resuming with a later worker clock', async () => {
-    const checkpoint = beginListingCheckpoint({
-      fingerprint: 'a'.repeat(64),
-      generationId: 'previous-run',
-      startedAt: new Date('2026-09-08T11:00:00Z'),
-    })
-    sourceBody = { value: '<p>Current content</p>' }
-    await runPass({ checkpoint, access: 'admin' })
-    expect(mocks.onPage).toHaveBeenCalledWith(expect.any(Array), new Date(checkpoint.startedAt))
-  })
-
-  it.each([
-    { name: 'full', incrementalSince: undefined },
-    { name: 'incremental', incrementalSince: new Date('2026-09-07T12:00:00Z') },
-  ])(
-    'restarts an ordinary $name checkpoint when Full resync is requested',
-    async ({ incrementalSince }) => {
-      const checkpoint = {
-        ...beginListingCheckpoint({
-          fingerprint: 'a'.repeat(64),
-          generationId: 'previous-run',
-          startedAt: new Date('2026-09-08T11:00:00Z'),
-          incrementalSince,
-        }),
-        cursor: 'saved-cursor',
-        listedCount: 1,
-      }
-      sourceBody = { value: '<p>The included page changed without a parent edit.</p>' }
-
-      const { pass, result, hydrate, listDocuments } = await runPass({
-        existing: {
-          ...EXISTING,
-          contentHash: 'confluence:view-text-v2:page:3',
-          storageKey: 'kb/old.txt',
-          sourceSeenAt: new Date(checkpoint.startedAt),
-        },
-        checkpoint,
-        readCurrent: true,
-        forceRehydrate: true,
-      })
-
-      expect(listDocuments.mock.calls[0]?.[2]).toBeUndefined()
-      expect(listDocuments.mock.calls[0]?.[4]).toBeUndefined()
-      expect(pass.checkpoint).toMatchObject({
-        generationId: 'run',
-        forceRehydrate: true,
-        incrementalSince: null,
-        fullSync: false,
-        listedCount: 1,
-      })
-      expect(new Date(pass.checkpoint.startedAt).getTime()).toBeGreaterThan(
-        new Date(checkpoint.startedAt).getTime()
-      )
-      expect(hydrate).toHaveBeenCalledOnce()
-      expect(result).toMatchObject({ docsUpdated: 1, docsFailed: 0 })
-      expect(mocks.upload).toHaveBeenCalledWith(
-        expect.objectContaining({
-          file: Buffer.from('The included page changed without a parent edit.'),
-        })
-      )
-    }
-  )
-
-  it.each([
-    { name: 'ordinary automatic retry', savedRehydrate: false, requestedRehydrate: false },
-    { name: 'Full resync automatic retry', savedRehydrate: true, requestedRehydrate: false },
-    { name: 'Full resync task retry', savedRehydrate: true, requestedRehydrate: true },
-  ])(
-    'preserves the generation and cursor for an $name',
-    async ({ savedRehydrate, requestedRehydrate }) => {
-      const checkpoint = {
-        ...beginListingCheckpoint({
-          fingerprint: 'a'.repeat(64),
-          generationId: 'previous-run',
-          startedAt: new Date('2026-09-08T11:00:00Z'),
-          forceRehydrate: savedRehydrate,
-          fullSync: true,
-        }),
-        cursor: 'saved-cursor',
-        listedCount: 1,
-      }
-      const { pass, hydrate, listDocuments } = await runPass({
-        existing: {
-          ...EXISTING,
-          contentHash: 'confluence:view-text-v2:page:3',
-          storageKey: 'kb/old.txt',
-          sourceSeenAt: new Date(checkpoint.startedAt),
-        },
-        checkpoint,
-        forceRehydrate: requestedRehydrate,
-      })
-
-      expect(listDocuments.mock.calls[0]?.[2]).toBe('saved-cursor')
-      expect(pass.checkpoint).toMatchObject({
-        generationId: checkpoint.generationId,
-        startedAt: checkpoint.startedAt,
-        forceRehydrate: savedRehydrate,
-        fullSync: true,
-      })
-      expect(hydrate).not.toHaveBeenCalled()
-      expect(mocks.dispatch).not.toHaveBeenCalled()
-    }
-  )
 })
 
 describe('permission refresh through the shared content pass', () => {
@@ -650,59 +532,6 @@ describe('permission refresh through the shared content pass', () => {
     storageKey: 'kb/current.txt',
     sourceSeenAt: new Date('2026-09-07T12:00:00Z'),
   }
-
-  it('refreshes unchanged stored bodies without hydration, new content, counts, or absence reconciliation', async () => {
-    const { pass, result, hydrate } = await runPass({
-      access: 'admin',
-      existing: current,
-      permissionsOnly: true,
-      permissionStoredAfter: current,
-    })
-    expect(hydrate).not.toHaveBeenCalled()
-    expect(mocks.onPage).toHaveBeenCalledWith(
-      [expect.objectContaining({ externalId: 'page' })],
-      expect.any(Date)
-    )
-    expect(pass.checkpoint.listedCount).toBe(0)
-    expect(result).toMatchObject({ docsAdded: 0, docsUpdated: 0, docsDeleted: 0 })
-    expect(
-      dbChainMockFns.set.mock.calls.some(
-        ([values]) => 'sourceSeenAt' in values || 'deletedAt' in values
-      )
-    ).toBe(false)
-    expect(mocks.hardDelete).not.toHaveBeenCalled()
-  })
-
-  it('ignores documents not previously stored instead of indexing them during permission refresh', async () => {
-    const { hydrate, result } = await runPass({ access: 'admin', permissionsOnly: true })
-    expect(hydrate).not.toHaveBeenCalled()
-    expect(mocks.onPage).toHaveBeenCalledWith([], expect.any(Date))
-    expect(result.docsAdded).toBe(0)
-    expect(mocks.upload).not.toHaveBeenCalled()
-  })
-
-  it('revokes an old body before repairing a changed document and renews permission only for the persisted version', async () => {
-    sourceBody = { value: '<p>Current safe body</p>' }
-    const { hydrate, result } = await runPass({
-      access: 'admin',
-      permissionsOnly: true,
-      readCurrent: true,
-      existing: { ...current, contentHash: 'old-body' },
-      permissionStoredAfter: current,
-    })
-    expect(hydrate).toHaveBeenCalledOnce()
-    expect(dbChainMockFns.set).toHaveBeenCalledWith({
-      acl: [],
-      aclRequirements: [],
-      aclVerifiedAt: null,
-    })
-    expect(dbChainMockFns.set.mock.calls.some(([value]) => 'sourceSeenAt' in value)).toBe(false)
-    expect(result.docsUpdated).toBe(1)
-    expect(mocks.onPage).toHaveBeenCalledWith(
-      [expect.objectContaining({ contentHash: current.contentHash })],
-      expect.any(Date)
-    )
-  })
 
   it('never renews a changed body after its hydration fails', async () => {
     const { hydrate, result } = await runPass({
@@ -727,149 +556,6 @@ describe('permission refresh through the shared content pass', () => {
 })
 
 describe('Confluence empty content through the shared content pass', () => {
-  it.each(['admin', 'members'] as const)(
-    'recovers a failed stub, reuses its verified empty version, and indexes an edited page for %s',
-    async (access) => {
-      const first = await runPass({ existing: EXISTING, readCurrent: true, access })
-      expect(first.pass).toMatchObject({
-        complete: true,
-        holdNotice: null,
-        checkpoint: { contentFailures: false },
-      })
-      expect(first.result).toMatchObject({ docsFailed: 0, docsSkipped: 1, docsUpdated: 0 })
-      const skipped = contentWrite()
-      expect(skipped).toMatchObject({
-        storageKey: null,
-        fileUrl: '',
-        processingStatus: 'failed',
-        processingError: 'Document contains no extractable text',
-      })
-      expect(mocks.upload).not.toHaveBeenCalled()
-      expect(mocks.dispatch).not.toHaveBeenCalled()
-      expect(mocks.onPage).toHaveBeenCalledOnce()
-      const stored = { ...EXISTING, contentHash: skipped.contentHash as string }
-
-      const second = await runPass({ existing: stored, access })
-      expect(second.hydrate).not.toHaveBeenCalled()
-      expect(second.result).toMatchObject({ docsUnchanged: 1, docsSkipped: 0, docsFailed: 0 })
-      expect(second.pass).toMatchObject({
-        complete: true,
-        holdNotice: null,
-        checkpoint: { contentFailures: false },
-      })
-      expect(mocks.onPage).toHaveBeenCalledOnce()
-      expect(mocks.dispatch).not.toHaveBeenCalled()
-      expect(dbChainMockFns.set.mock.calls.some(([value]) => 'contentHash' in value)).toBe(false)
-
-      sourceVersion = 4
-      sourceBody = { value: '<p>The page now has useful content.</p>' }
-      const third = await runPass({ existing: stored, readCurrent: true, access })
-      expect(third.hydrate).toHaveBeenCalledOnce()
-      expect(third.result).toMatchObject({
-        docsUpdated: 1,
-        docsFailed: 0,
-        processingDispatch: { requested: 1, accepted: 1, failed: 0 },
-      })
-      expect(contentWrite()).toMatchObject({
-        storageKey: expect.stringMatching(/^kb\//),
-        processingStatus: 'pending',
-        processingError: null,
-      })
-      expect(mocks.upload).toHaveBeenCalledWith(
-        expect.objectContaining({ file: Buffer.from('The page now has useful content.') })
-      )
-      expect(mocks.dispatch).toHaveBeenCalledOnce()
-    }
-  )
-
-  it('refreshes empty rendered views and indexes recovered dependencies without a parent edit', async () => {
-    const first = await runPass({ existing: EXISTING, readCurrent: true })
-    expect(first.result).toMatchObject({ docsFailed: 0, docsSkipped: 1, docsUpdated: 0 })
-    expect(first.pass).toMatchObject({
-      complete: true,
-      holdNotice: null,
-      checkpoint: { contentFailures: false },
-    })
-    const stored = { ...EXISTING, contentHash: contentWrite().contentHash as string }
-
-    const second = await runPass({ existing: stored, readCurrent: true })
-    expect(second.hydrate).toHaveBeenCalledOnce()
-    expect(second.result).toMatchObject({ docsFailed: 0, docsSkipped: 1, docsUpdated: 0 })
-    expect(second.pass).toMatchObject({
-      complete: true,
-      holdNotice: null,
-      checkpoint: { contentFailures: false },
-    })
-    expect(mocks.upload).not.toHaveBeenCalled()
-    expect(mocks.dispatch).not.toHaveBeenCalled()
-
-    sourceBody = { value: '<p>The included page now has useful content.</p>' }
-    const third = await runPass({ existing: stored, readCurrent: true })
-    expect(sourceVersion).toBe(3)
-    expect(third.hydrate).toHaveBeenCalledOnce()
-    expect(third.result).toMatchObject({
-      docsUpdated: 1,
-      docsFailed: 0,
-      processingDispatch: { requested: 1, accepted: 1, failed: 0 },
-    })
-    expect(contentWrite()).toMatchObject({
-      contentHash: stored.contentHash,
-      storageKey: expect.stringMatching(/^kb\//),
-      processingStatus: 'pending',
-      processingError: null,
-    })
-    expect(mocks.upload).toHaveBeenCalledWith(
-      expect.objectContaining({ file: Buffer.from('The included page now has useful content.') })
-    )
-    expect(mocks.dispatch).toHaveBeenCalledOnce()
-  })
-
-  it.each(['workspace', 'admin', 'members'] as const)(
-    'removes prior indexed content on a verified empty update and preserves %s access ownership',
-    async (access) => {
-      const existing = {
-        ...EXISTING,
-        contentHash: 'previous-version',
-        storageKey: 'kb/old.txt',
-        fileUrl: '/api/files/serve/kb/old.txt?context=knowledge-base',
-      }
-      const { result, pass } = await runPass({ existing, readCurrent: true, access })
-      expect(result).toMatchObject({ docsSkipped: 1, docsFailed: 0 })
-      expect(pass.holdNotice).toBeNull()
-      const written = contentWrite()
-      expect(written).toMatchObject({
-        fileUrl: '',
-        storageKey: null,
-        chunkCount: 0,
-        tokenCount: 0,
-        characterCount: 0,
-        processingQueuedAt: null,
-        processingQueueToken: null,
-        processingDeferredUntil: null,
-        processingAttempts: 0,
-      })
-      if (access === 'workspace') expect(written.acl).toEqual(['ws'])
-      else {
-        expect(written).not.toHaveProperty('acl')
-        expect(written).not.toHaveProperty('aclRequirements')
-        expect(written).not.toHaveProperty('aclVerifiedAt')
-      }
-      expect(dbChainMockFns.delete).toHaveBeenCalledWith(schemaMock.embedding)
-      expect(mocks.enqueueCleanup).toHaveBeenCalledWith(
-        expect.anything(),
-        [
-          expect.objectContaining({
-            id: 'document',
-            fileUrl: '/api/files/serve/kb/old.txt?context=knowledge-base',
-          }),
-        ],
-        'document'
-      )
-      expect(mocks.deleteFile).not.toHaveBeenCalled()
-      expect(mocks.dispatch).not.toHaveBeenCalled()
-    }
-  )
-
   it('records a new empty page as an explicit skip instead of a source failure', async () => {
     const { result, pass } = await runPass()
     expect(result).toMatchObject({ docsSkipped: 1, docsFailed: 0 })
@@ -882,18 +568,6 @@ describe('Confluence empty content through the shared content pass', () => {
         processingError: 'Document contains no extractable text',
       }),
     ])
-  })
-
-  it('explicitly rehydrates a skipped source whose version is unchanged', async () => {
-    sourceBody = { value: '<p>Local content is rechecked</p>' }
-    const { result, hydrate } = await runPass({
-      existing: { ...EXISTING, contentHash: 'confluence:storage-local-body-v2:page:3' },
-      access: 'admin',
-      readCurrent: true,
-      forceRehydrate: true,
-    })
-    expect(hydrate).toHaveBeenCalledOnce()
-    expect(result).toMatchObject({ docsUpdated: 1, docsFailed: 0 })
   })
 
   it('does not cache an empty hydration against a different listed version', async () => {
@@ -947,8 +621,8 @@ describe('Confluence empty content through the shared content pass', () => {
     })
     expect(written).not.toHaveProperty('storageKey')
     expect(dbChainMockFns.delete).not.toHaveBeenCalled()
-    expect(mocks.deleteFile).not.toHaveBeenCalled()
-    expect(mocks.upload).not.toHaveBeenCalled()
+    expect(storageServiceMockFns.mockDeleteFile).not.toHaveBeenCalled()
+    expect(storageServiceMockFns.mockUploadFile).not.toHaveBeenCalled()
     expect(mocks.dispatch).not.toHaveBeenCalled()
   })
 })

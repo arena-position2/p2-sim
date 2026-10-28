@@ -1,6 +1,9 @@
 import { createLogger } from '@sim/logger'
-import type { ToolConfig, ToolResponse } from '@/tools/types'
-import type { ZoomListRecordingsParams, ZoomListRecordingsResponse } from '@/tools/zoom/types'
+import type { ToolConfig } from '@/tools/types'
+import type {
+  ZoomListAccountRecordingsParams,
+  ZoomListAccountRecordingsResponse,
+} from '@/tools/zoom/types'
 
 const logger = createLogger('zoom:list_account_recordings')
 
@@ -50,7 +53,7 @@ export function splitDateRange(from: string, to: string): Array<{ from: string; 
  * Make a single API call to Zoom for a date range, handling pagination
  */
 export async function fetchZoomRecordings(
-  params: ZoomListRecordingsParams,
+  params: ZoomListAccountRecordingsParams,
   chunkFrom?: string,
   chunkTo?: string
 ): Promise<{ recordings: any[]; pageInfo: any }> {
@@ -139,9 +142,26 @@ export async function fetchZoomRecordings(
   }
 }
 
+function mapRecordings(recordings: any[]) {
+  return recordings.map((recording: any) => ({
+    uuid: recording.uuid,
+    id: recording.id,
+    account_id: recording.account_id,
+    host_id: recording.host_id,
+    topic: recording.topic,
+    type: recording.type,
+    start_time: recording.start_time,
+    duration: recording.duration,
+    total_size: recording.total_size,
+    recording_count: recording.recording_count,
+    share_url: recording.share_url,
+    recording_files: recording.recording_files || [],
+  }))
+}
+
 export const zoomListAccountRecordingsTool: ToolConfig<
-  ZoomListRecordingsParams,
-  ZoomListRecordingsResponse
+  ZoomListAccountRecordingsParams,
+  ZoomListAccountRecordingsResponse
 > = {
   id: 'zoom_list_account_recordings',
   name: 'Zoom List Account Recordings',
@@ -216,80 +236,49 @@ export const zoomListAccountRecordingsTool: ToolConfig<
     },
   },
 
-  directExecution: async (params: ZoomListRecordingsParams): Promise<ToolResponse> => {
-    // If no date range provided, make a single API call without date filters
-    if (!params.from || !params.to) {
-      logger.info('No date range provided, making single API call without date filters')
-      try {
+  transformResponse: async (_response, params?) => {
+    if (!params) {
+      throw new Error('Missing parameters')
+    }
+
+    const emptyFailure = (error: unknown) => ({
+      success: false as const,
+      error: error instanceof Error ? error.message : String(error),
+      output: {
+        recordings: [],
+        pageInfo: {
+          from: params.from || '',
+          to: params.to || '',
+          pageSize: 0,
+          totalRecords: 0,
+        },
+      },
+    })
+
+    try {
+      // Account recordings may span >30 days; fetchZoomRecordings handles pagination
+      // and we chunk long ranges here (replaces the former directExecution path).
+      if (!params.from || !params.to) {
         const result = await fetchZoomRecordings(params)
         return {
           success: true,
           output: {
-            recordings: result.recordings.map((recording: any) => ({
-              uuid: recording.uuid,
-              id: recording.id,
-              account_id: recording.account_id,
-              host_id: recording.host_id,
-              topic: recording.topic,
-              type: recording.type,
-              start_time: recording.start_time,
-              duration: recording.duration,
-              total_size: recording.total_size,
-              recording_count: recording.recording_count,
-              share_url: recording.share_url,
-              recording_files: recording.recording_files || [],
-            })),
+            recordings: mapRecordings(result.recordings),
             pageInfo: result.pageInfo,
           },
         }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-          output: {
-            recordings: [],
-            pageInfo: {
-              from: params.from || '',
-              to: params.to || '',
-              pageSize: 0,
-              totalRecords: 0,
-            },
-          },
-        }
       }
-    }
 
-    const fromDate = new Date(params.from)
-    const toDate = new Date(params.to)
-    const daysDiff = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24))
+      const fromDate = new Date(params.from)
+      const toDate = new Date(params.to)
+      const daysDiff = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24))
 
-    // If range is 30 days or less, make a single API call
-    if (daysDiff <= 30) {
-      logger.info('Date range is 30 days or less, making single API call', {
-        from: params.from,
-        to: params.to,
-        daysDiff,
-      })
-
-      try {
+      if (daysDiff <= 30) {
         const result = await fetchZoomRecordings(params, params.from, params.to)
         return {
           success: true,
           output: {
-            recordings: result.recordings.map((recording: any) => ({
-              uuid: recording.uuid,
-              id: recording.id,
-              account_id: recording.account_id,
-              host_id: recording.host_id,
-              topic: recording.topic,
-              type: recording.type,
-              start_time: recording.start_time,
-              duration: recording.duration,
-              total_size: recording.total_size,
-              recording_count: recording.recording_count,
-              share_url: recording.share_url,
-              recording_files: recording.recording_files || [],
-            })),
+            recordings: mapRecordings(result.recordings),
             pageInfo: {
               ...result.pageInfo,
               from: params.from,
@@ -297,148 +286,43 @@ export const zoomListAccountRecordingsTool: ToolConfig<
             },
           },
         }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-          output: {
-            recordings: [],
-            pageInfo: {
-              from: params.from,
-              to: params.to,
-              pageSize: 0,
-              totalRecords: 0,
-            },
-          },
+      }
+
+      const chunks = splitDateRange(params.from, params.to)
+      const allRecordings: any[] = []
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i]
+        try {
+          const chunkResult = await fetchZoomRecordings(params, chunk.from, chunk.to)
+          allRecordings.push(...chunkResult.recordings)
+        } catch (error) {
+          logger.error(`Error fetching recordings for chunk ${i + 1}`, {
+            error: error instanceof Error ? error.message : String(error),
+            chunkFrom: chunk.from,
+            chunkTo: chunk.to,
+          })
         }
       }
-    }
 
-    // Range exceeds 30 days - split into chunks and fetch all
-    logger.info('Date range exceeds 30 days, splitting into chunks', {
-      from: params.from,
-      to: params.to,
-      daysDiff,
-    })
+      const uniqueRecordings = Array.from(
+        new Map(allRecordings.map((recording) => [recording.uuid, recording])).values()
+      )
 
-    const chunks = splitDateRange(params.from, params.to)
-    logger.info(`Split date range into ${chunks.length} chunks`, {
-      chunks: chunks.map((c) => `${c.from} to ${c.to}`),
-    })
-
-    const allRecordings: any[] = []
-
-    // Fetch recordings for each chunk
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
-      logger.info(`Fetching recordings for chunk ${i + 1}/${chunks.length}`, {
-        from: chunk.from,
-        to: chunk.to,
-      })
-
-      try {
-        const chunkResult = await fetchZoomRecordings(params, chunk.from, chunk.to)
-        allRecordings.push(...chunkResult.recordings)
-        logger.info(`Fetched ${chunkResult.recordings.length} recordings from chunk ${i + 1}`, {
-          chunkFrom: chunk.from,
-          chunkTo: chunk.to,
-        })
-      } catch (error) {
-        logger.error(`Error fetching recordings for chunk ${i + 1}`, {
-          error: error instanceof Error ? error.message : String(error),
-          chunkFrom: chunk.from,
-          chunkTo: chunk.to,
-        })
-        // Continue with other chunks even if one fails
-      }
-    }
-
-    // Remove duplicates based on UUID (in case of overlapping dates at chunk boundaries)
-    const uniqueRecordings = Array.from(
-      new Map(allRecordings.map((recording) => [recording.uuid, recording])).values()
-    )
-
-    logger.info('Combined all recordings', {
-      totalChunks: chunks.length,
-      totalRecordings: allRecordings.length,
-      uniqueRecordings: uniqueRecordings.length,
-      from: params.from,
-      to: params.to,
-    })
-
-    return {
-      success: true,
-      output: {
-        recordings: uniqueRecordings.map((recording: any) => ({
-          uuid: recording.uuid,
-          id: recording.id,
-          account_id: recording.account_id,
-          host_id: recording.host_id,
-          topic: recording.topic,
-          type: recording.type,
-          start_time: recording.start_time,
-          duration: recording.duration,
-          total_size: recording.total_size,
-          recording_count: recording.recording_count,
-          share_url: recording.share_url,
-          recording_files: recording.recording_files || [],
-        })),
-        pageInfo: {
-          from: params.from,
-          to: params.to,
-          pageSize: uniqueRecordings.length,
-          totalRecords: uniqueRecordings.length,
-          // No nextPageToken since we've fetched all chunks
-        },
-      },
-    }
-  },
-
-  transformResponse: async (response) => {
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
       return {
-        success: false,
-        error: errorData.message || `Zoom API error: ${response.status} ${response.statusText}`,
+        success: true,
         output: {
-          recordings: [],
+          recordings: mapRecordings(uniqueRecordings),
           pageInfo: {
-            from: '',
-            to: '',
-            pageSize: 0,
-            totalRecords: 0,
+            from: params.from,
+            to: params.to,
+            pageSize: uniqueRecordings.length,
+            totalRecords: uniqueRecordings.length,
           },
         },
       }
-    }
-
-    const data = await response.json()
-
-    return {
-      success: true,
-      output: {
-        recordings: (data.meetings || []).map((recording: any) => ({
-          uuid: recording.uuid,
-          id: recording.id,
-          account_id: recording.account_id,
-          host_id: recording.host_id,
-          topic: recording.topic,
-          type: recording.type,
-          start_time: recording.start_time,
-          duration: recording.duration,
-          total_size: recording.total_size,
-          recording_count: recording.recording_count,
-          share_url: recording.share_url,
-          recording_files: recording.recording_files || [],
-        })),
-        pageInfo: {
-          from: data.from || '',
-          to: data.to || '',
-          pageSize: data.page_size || 0,
-          totalRecords: data.total_records || 0,
-          nextPageToken: data.next_page_token,
-        },
-      },
+    } catch (error) {
+      return emptyFailure(error)
     }
   },
 

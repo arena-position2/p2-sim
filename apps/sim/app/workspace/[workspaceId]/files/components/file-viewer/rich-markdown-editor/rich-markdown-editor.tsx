@@ -22,10 +22,11 @@ import { useSession } from '@/lib/auth/auth-client'
 import {
   buildFileSelectionLabel,
   truncateSelectionText,
-} from '@/lib/copilot/chat/selection-context'
+} from '@/lib/mothership/chat/selection-context'
 import type { FileDownloadSource } from '@/lib/uploads/client/download'
 import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
-import { FindBar } from '@/app/workspace/[workspaceId]/components'
+import { inter } from '@/app/_styles/fonts/inter/inter'
+import { FindBar } from '@/app/workspace/[workspaceId]/components/find-bar/find-bar'
 import { FileSaveConflict } from '@/app/workspace/[workspaceId]/files/components/file-viewer/file-save-conflict'
 import { PreviewLoadingFrame } from '@/app/workspace/[workspaceId]/files/components/file-viewer/preview-shared'
 import {
@@ -43,7 +44,7 @@ import { isCollabReady } from '@/app/workspace/[workspaceId]/files/components/fi
 import { useFileDocCollaboration } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/collaboration/use-file-doc-collaboration'
 import { createMarkdownEditorExtensions } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/editor-extensions'
 import { useMarkdownFind } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/find'
-import { findHeadingPos } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/heading-anchors'
+import { scrollToHeading } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/heading-anchors'
 import { moveDraggedImageNode } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/image-drag-move'
 import {
   extractImageFiles,
@@ -67,6 +68,7 @@ import {
 } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/markdown-fidelity'
 import { parseMarkdownToDoc } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/markdown-parse'
 import { isPlainTextPaste } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/markdown-paste'
+import { MarkdownStreamingContext } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/markdown-streaming-context'
 import { useEditorMentions } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/mention'
 import { EditorBubbleMenu } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/menus/bubble-menu'
 import { LinkHoverCard } from '@/app/workspace/[workspaceId]/files/components/file-viewer/rich-markdown-editor/menus/link-hover-card'
@@ -118,8 +120,10 @@ function warnRichMarkdownPasteLimit(reason?: 'paste' | 'formatting') {
  * {@link ReadOnlyPlaceholder} render into, so the two are geometrically identical and the placeholder →
  * live swap never reflows. Shared as one constant to keep them in lockstep.
  */
-const EDITOR_SURFACE_CLASS =
-  'mx-auto flex w-full max-w-[48rem] flex-1 flex-col px-8 py-6 selection:bg-[var(--selection-bg)] selection:text-[var(--text-primary)] dark:selection:bg-[var(--selection-dark)] dark:selection:text-white'
+const EDITOR_SURFACE_CLASS = cn(
+  'mx-auto flex w-full max-w-[48rem] flex-1 flex-col px-8 py-6 selection:bg-[var(--selection-bg)] selection:text-[var(--text-primary)] dark:selection:bg-[var(--selection-dark)] dark:selection:text-white',
+  inter.variable
+)
 
 /** ProseMirror block positions do not correspond to markdown source line numbers. */
 function buildEditorSelectionContext(
@@ -176,6 +180,19 @@ function ReadOnlyPlaceholder({ content, file, workspaceId }: ReadOnlyPlaceholder
         'aria-multiline': 'true',
         'aria-readonly': 'true',
       },
+      handleClick: (_view, _pos, event) =>
+        Boolean(
+          (event.target as HTMLElement | null)?.closest('a')?.getAttribute('href')?.startsWith('#')
+        ),
+      handleDOMEvents: {
+        click: (view, event) => {
+          const href = (event.target as HTMLElement | null)?.closest('a')?.getAttribute('href')
+          if (!href?.startsWith('#')) return false
+          event.preventDefault()
+          scrollToHeading(view, href)
+          return true
+        },
+      },
     },
   })
   const buildSelectionContext = useCallback(
@@ -183,7 +200,12 @@ function ReadOnlyPlaceholder({ content, file, workspaceId }: ReadOnlyPlaceholder
     [editor, file.id, file.name]
   )
   useSelectionCopyBridge(containerRef, buildSelectionContext, workspaceId)
-  return <EditorContent ref={containerRef} editor={editor} className={EDITOR_SURFACE_CLASS} />
+  return (
+    <>
+      {editor && <LinkHoverCard editor={editor} />}
+      <EditorContent ref={containerRef} editor={editor} className={EDITOR_SURFACE_CLASS} />
+    </>
+  )
 }
 
 interface RichMarkdownEditorProps {
@@ -300,6 +322,7 @@ function RichMarkdownSurface({
     isStreamInteractionLocked,
     isContentLoading,
     hasContentError,
+    contentError,
     saveImmediately,
     hasConflict,
     isReloading,
@@ -329,7 +352,9 @@ function RichMarkdownSurface({
   if (hasContentError) {
     return (
       <div className='flex flex-1 items-center justify-center'>
-        <p className='text-[var(--text-muted)] text-small'>Failed to load file content</p>
+        <p className='text-[var(--text-muted)] text-small'>
+          {contentError ?? 'Failed to load file content'}
+        </p>
       </div>
     )
   }
@@ -711,31 +736,34 @@ export function LoadedRichMarkdownEditor({
        * read-only follows directly. A same-page anchor (`[x](#slug)`) scrolls to the matching heading; a
        * same-origin in-app path navigates within the SPA (same tab); everything else opens a new tab.
        */
-      handleClick: (view, _pos, event) => {
-        const href = (event.target as HTMLElement | null)?.closest('a')?.getAttribute('href')
-        if (!href) return false
-        if (view.editable && !(event.metaKey || event.ctrlKey)) return false
-        if (href.startsWith('#')) {
-          const pos = findHeadingPos(view.state.doc, href.slice(1))
-          if (pos < 0) return false
-          ;(view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-          })
+      // Preserve the selection on modifier-click; navigation runs on the native click below.
+      handleClick: (view, _pos, event) =>
+        (!view.editable || event.metaKey || event.ctrlKey) &&
+        Boolean((event.target as HTMLElement | null)?.closest('a')?.getAttribute('href')),
+      handleDOMEvents: {
+        click: (view, event) => {
+          const href = (event.target as HTMLElement | null)?.closest('a')?.getAttribute('href')
+          if (!href) return false
+          if (view.editable && !(event.metaKey || event.ctrlKey)) return false
+          if (href.startsWith('#')) {
+            event.preventDefault()
+            scrollToHeading(view, href)
+            return true
+          }
+          const normalized = normalizeLinkHref(href)
+          if (!normalized) return false
+          event.preventDefault()
+          if (
+            !(event.metaKey || event.ctrlKey) &&
+            normalized.startsWith('/') &&
+            !normalized.startsWith('//')
+          ) {
+            routerRef.current.push(normalized)
+            return true
+          }
+          window.open(normalized, '_blank', 'noopener,noreferrer')
           return true
-        }
-        const normalized = normalizeLinkHref(href)
-        if (!normalized) return false
-        if (
-          !(event.metaKey || event.ctrlKey) &&
-          normalized.startsWith('/') &&
-          !normalized.startsWith('//')
-        ) {
-          routerRef.current.push(normalized)
-          return true
-        }
-        window.open(normalized, '_blank', 'noopener,noreferrer')
-        return true
+        },
       },
       transformPasted: (slice, view) =>
         normalizePastedImageSources(slice, view.state.doc, resolveImageSrcRef.current),
@@ -1436,17 +1464,19 @@ export function LoadedRichMarkdownEditor({
             void insertImagesRef.current(images, range)
           }}
         />
-        {showPlaceholder && placeholder && (
-          <ReadOnlyPlaceholder
-            content={placeholder.content}
-            file={file}
-            workspaceId={workspaceId}
+        <MarkdownStreamingContext value={isStreaming}>
+          {showPlaceholder && placeholder && (
+            <ReadOnlyPlaceholder
+              content={placeholder.content}
+              file={file}
+              workspaceId={workspaceId}
+            />
+          )}
+          <EditorContent
+            editor={editor}
+            className={cn(EDITOR_SURFACE_CLASS, showPlaceholder && 'hidden')}
           />
-        )}
-        <EditorContent
-          editor={editor}
-          className={cn(EDITOR_SURFACE_CLASS, showPlaceholder && 'hidden')}
-        />
+        </MarkdownStreamingContext>
       </div>
     </div>
   )

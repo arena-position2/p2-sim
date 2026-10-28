@@ -3,19 +3,20 @@ import type { Principal } from '@sim/auth/principal'
 import { resolvePrincipalSubjectUserId } from '@sim/auth/principal'
 import { db } from '@sim/db'
 import {
-  credentialGroup,
   document,
-  knowledgeBase,
   knowledgeConnector,
   knowledgeConnectorMember,
   knowledgeConnectorMemberSyncLog,
   knowledgeConnectorSyncLog,
 } from '@sim/db/schema'
-import { truncate } from '@sim/utils/string'
+import { toError } from '@sim/utils/errors'
+import { toRecord } from '@sim/utils/object'
+import { escapeLikePattern } from '@sim/utils/string'
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import type { ConnectorDocumentFilter } from '@/lib/api/contracts/knowledge/connectors'
 import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
 import { requireCurrentHumanRole } from '@/lib/core/application'
+import { resolvePrincipalEnvironmentVariable } from '@/lib/core/application/environment-reference'
 import { requireOrganizationMembership } from '@/lib/core/application/organization-authorization'
 import {
   OrchestrationError,
@@ -26,11 +27,14 @@ import {
   resourceScopeFields,
   resourceScopeFromOwner,
 } from '@/lib/core/resource-scope'
+import { redactKnownSensitiveValues } from '@/lib/core/security/redaction'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { resolveCredentialTokenIdentity } from '@/lib/credentials/access'
+import type { DbTransaction } from '@/lib/db/types'
+import { parseExactEnvironmentReference } from '@/lib/environment/reference'
+import { resolveEffectiveEnvironmentVariables } from '@/lib/environment/utils'
 import { requireKnowledgeMemberAccessAvailable } from '@/lib/knowledge/access/availability'
 import { knowledgeAccessCondition } from '@/lib/knowledge/access/predicate'
-import { createKnowledgeAccessProvider } from '@/lib/knowledge/access/scope'
 import { defineAuthorizedKnowledgeUseCase } from '@/lib/knowledge/application/authorized-knowledge-use-case'
 import {
   resolveKnowledgeAttributedUserId,
@@ -41,7 +45,6 @@ import {
   type ActiveKnowledgeResourceBaseContext,
   resolveActiveKnowledgeConnectorContext,
   resolveActiveKnowledgeResourceContext,
-  resolveKnowledgeWorkspaceContext,
 } from '@/lib/knowledge/application/contexts'
 import { rethrowGitHubInstallationSourceError } from '@/lib/knowledge/application/github-installation-error'
 import { prepareGitHubInstallationSource } from '@/lib/knowledge/application/github-installation-source'
@@ -57,6 +60,7 @@ import {
   resolveConnectorAccessToken,
   syncContextForToken,
 } from '@/lib/knowledge/connectors/access-token'
+import { requiresConnectorIndexing } from '@/lib/knowledge/connectors/indexing-policy'
 import {
   provisionKnowledgeConnectorMembersBinding,
   resolveViewerConnectorMemberships,
@@ -74,12 +78,17 @@ import {
   readConnectorPermissionSummary,
 } from '@/lib/knowledge/connectors/permission-config.server'
 import { MEMBER_OBSERVATION_STALE_AFTER_HOURS } from '@/lib/knowledge/connectors/sync-limits'
+import { connectorIsLive } from '@/lib/knowledge/connectors/sync-lock'
 import {
   DEFAULT_KNOWLEDGE_CONNECTOR_DOCUMENT_PAGE_SIZE,
   MAX_KNOWLEDGE_CONNECTOR_DOCUMENT_MUTATION_ITEMS,
   MAX_KNOWLEDGE_CONNECTOR_DOCUMENT_PAGE_SIZE,
   MAX_KNOWLEDGE_CONNECTOR_DOCUMENT_SEARCH_LENGTH,
 } from '@/lib/knowledge/constants'
+import {
+  isImageExtractionEnabled,
+  SEMANTIC_IMAGE_MIME_TYPES,
+} from '@/lib/knowledge/documents/image-extraction-policy'
 import {
   documentProcessingOutcomeSelection,
   failedDocumentCondition,
@@ -97,29 +106,19 @@ import {
   performSyncKnowledgeConnector,
   performUpdateKnowledgeConnector,
   type SourceConfigRejection,
+  withoutSecret,
 } from '@/lib/knowledge/orchestration/connectors'
 import type {
   KnowledgeOperationSource,
   KnowledgeOrchestrationResult,
 } from '@/lib/knowledge/orchestration/shared'
-import { type KnowledgeReadAccess, knowledgeReadAccessBatches } from '@/lib/knowledge/read-access'
-import { requireOrganizationSearchApproval } from '@/lib/knowledge/search/integration-policy'
-import { escapeLikePattern } from '@/lib/knowledge/tags/utils'
-import { isMemberSyncStatus } from '@/lib/knowledge/types'
 import { credentialProviderMatchesService, type ServiceProviderIdentity } from '@/lib/oauth'
 import { ServiceAccountTokenError } from '@/lib/oauth/credential-service'
 import { CAPABILITY_RULES, refuseCapability } from '@/lib/permission-groups/capabilities'
 import { resolvePermissionGroupConfig } from '@/lib/permission-groups/config-scope.server'
 import { getUserPermissionConfigForOrganization } from '@/lib/permission-groups/resolve.server'
-import {
-  canConnectPersonally,
-  personalSourceConfigFieldIds,
-  withSearchSourceDefaults,
-} from '@/lib/sim-search/connectors'
-import { SIM_SEARCH_SYNC_INTERVAL_MINUTES } from '@/lib/sim-search/constants'
-import { describeSearchSource } from '@/lib/sim-search/source-identity'
 import { getConnectorApiKeyConfig, isConnectorCredentialTypeAllowed } from '@/connectors/auth'
-import { CONNECTOR_META_REGISTRY, getConnectorMeta } from '@/connectors/registry'
+import { getConnectorMeta } from '@/connectors/registry'
 import type { ConnectorAuthConfig } from '@/connectors/types'
 import { PER_MEMBER_LISTING_CONTEXT } from '@/connectors/utils'
 
@@ -252,16 +251,10 @@ function connectorTarget(context: ActiveKnowledgeResourceBaseContext) {
   return {
     id: context.knowledgeBaseId,
     name: context.knowledgeBase.name,
+    isSearchIndex: context.knowledgeBase.isSearchIndex,
     workspaceId: context.workspaceId ?? null,
     organizationId: context.organizationId ?? null,
   }
-}
-
-export function requireConnectorWorkspaceId(context: ActiveKnowledgeResourceBaseContext): string {
-  if (!context.workspaceId) {
-    throw new OrchestrationError('conflict', 'Knowledge base is missing workspace billing context')
-  }
-  return context.workspaceId
 }
 
 async function resolveAuthorizedConnectorCredentialIdentity(input: {
@@ -494,14 +487,21 @@ export async function validateConnectorSourceConfig(input: {
       )
     }
   }
-  const validation = await connectorConfig.validateConfig(
-    resolved.accessToken,
-    input.sourceConfig,
-    validationContext
-  )
+  const validation = await connectorConfig
+    .validateConfig(resolved.accessToken, input.sourceConfig, validationContext)
+    .catch((error: unknown) => {
+      const sanitized = toError(error)
+      sanitized.message = redactKnownSensitiveValues(sanitized.message, [resolved.accessToken])
+      throw sanitized
+    })
   return validation.valid
     ? null
-    : { message: validation.error || 'Invalid source configuration', errorCode: 'validation' }
+    : {
+        message: redactKnownSensitiveValues(validation.error || 'Invalid source configuration', [
+          resolved.accessToken,
+        ]),
+        errorCode: 'validation',
+      }
 }
 
 export const listKnowledgeConnectors = defineAuthorizedKnowledgeUseCase({
@@ -525,11 +525,7 @@ export const listKnowledgeConnectors = defineAuthorizedKnowledgeUseCase({
       .select()
       .from(knowledgeConnector)
       .where(
-        and(
-          eq(knowledgeConnector.knowledgeBaseId, context.knowledgeBaseId),
-          isNull(knowledgeConnector.archivedAt),
-          isNull(knowledgeConnector.deletedAt)
-        )
+        and(eq(knowledgeConnector.knowledgeBaseId, context.knowledgeBaseId), connectorIsLive())
       )
       .orderBy(sortOrder(sortColumn), sortOrder(knowledgeConnector.id))
     const offset = input.offset ?? 0
@@ -551,134 +547,17 @@ export const listKnowledgeConnectors = defineAuthorizedKnowledgeUseCase({
           })
         : new Map<string, ViewerConnectorMembership>()
     return {
-      connectors: page.map(({ encryptedApiKey: _encryptedApiKey, ...rest }) => ({
-        ...rest,
-        permissionConfig: permissionSummaries.get(rest.id),
-        viewerMembership: memberships.get(rest.id) ?? null,
-      })),
+      connectors: page.map((row) => {
+        const rest = withoutSecret(row)
+        return {
+          ...rest,
+          permissionConfig: permissionSummaries.get(rest.id),
+          viewerMembership: memberships.get(rest.id) ?? null,
+        }
+      }),
       hasMore,
       offset,
       limit: input.limit ?? page.length,
-    }
-  },
-})
-
-export interface ListWorkspaceMemberConnectorsInput {
-  workspaceId: string
-}
-
-/** Live documents per connector that the viewer's tokens match, for the Search tab's counts. */
-async function countViewerDocuments(
-  connectorIds: readonly string[],
-  access: KnowledgeReadAccess
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>()
-  if (connectorIds.length === 0) return counts
-  const conditions = [
-    inArray(document.connectorId, [...connectorIds]),
-    eq(document.userExcluded, false),
-    isNull(document.archivedAt),
-    isNull(document.deletedAt),
-  ]
-  for await (const accessCondition of knowledgeReadAccessBatches(access, conditions)) {
-    const rows = await db
-      .select({ connectorId: document.connectorId, count: sql<number>`count(*)::int` })
-      .from(document)
-      .where(and(...conditions, accessCondition))
-      .groupBy(document.connectorId)
-    for (const row of rows) {
-      if (row.connectorId)
-        counts.set(row.connectorId, (counts.get(row.connectorId) ?? 0) + row.count)
-    }
-  }
-  return counts
-}
-
-/** Live workspace sources that let the viewer connect a crawl account or a mirrored-ACL identity. */
-export const listWorkspaceMemberConnectors = defineAuthorizedKnowledgeUseCase({
-  operation: knowledgeOperations.listWorkspaceMemberConnectors,
-  resolveContext: ({ input }: { input: ListWorkspaceMemberConnectorsInput }) =>
-    resolveKnowledgeWorkspaceContext(input),
-  async execute({ principal, context }) {
-    const viewerUserId = resolvePrincipalSubjectUserId(principal)
-    if (!viewerUserId) return { connectors: [] }
-    const rows = await db
-      .select({
-        knowledgeBaseId: knowledgeConnector.knowledgeBaseId,
-        knowledgeBaseName: knowledgeBase.name,
-        knowledgeBaseIsSearchIndex: knowledgeBase.isSearchIndex,
-        id: knowledgeConnector.id,
-        connectorType: knowledgeConnector.connectorType,
-        accessMode: knowledgeConnector.accessMode,
-        sourceConfig: knowledgeConnector.sourceConfig,
-        credentialGroupName: credentialGroup.name,
-        memberSyncStatus: knowledgeConnector.memberSyncStatus,
-        credentialGroupId: knowledgeConnector.credentialGroupId,
-        credentialGroupOptionId: knowledgeConnector.credentialGroupOptionId,
-      })
-      .from(knowledgeConnector)
-      .innerJoin(knowledgeBase, eq(knowledgeBase.id, knowledgeConnector.knowledgeBaseId))
-      .leftJoin(credentialGroup, eq(credentialGroup.id, knowledgeConnector.credentialGroupId))
-      .where(
-        and(
-          eq(knowledgeBase.workspaceId, context.workspaceId),
-          isNull(knowledgeBase.deletedAt),
-          or(
-            eq(knowledgeConnector.accessMode, 'members'),
-            and(
-              eq(knowledgeConnector.accessMode, 'admin'),
-              inArray(
-                knowledgeConnector.connectorType,
-                Object.values(CONNECTOR_META_REGISTRY)
-                  .filter((meta) => meta.mirrorsSourceAcls && meta.requiresMemberIdentity)
-                  .map((meta) => meta.id)
-              )
-            )
-          ),
-          isNull(knowledgeConnector.archivedAt),
-          isNull(knowledgeConnector.deletedAt)
-        )
-      )
-      .orderBy(asc(knowledgeBase.name), asc(knowledgeConnector.createdAt))
-    const [memberships, documentCounts] = await Promise.all([
-      resolveViewerConnectorMemberships({
-        userId: viewerUserId,
-        workspaceId: context.workspaceId,
-        connectors: rows,
-      }),
-      countViewerDocuments(
-        rows.map((row) => row.id),
-        createKnowledgeAccessProvider(principal, { workspaceId: context.workspaceId })
-      ),
-    ])
-    return {
-      connectors: rows.flatMap((row) => {
-        const viewerMembership = memberships.get(row.id)
-        if (!isMemberSyncStatus(row.memberSyncStatus)) {
-          throw new OrchestrationError(
-            'conflict',
-            `Unexpected member sync status ${row.memberSyncStatus}`
-          )
-        }
-        return viewerMembership
-          ? [
-              {
-                knowledgeBaseId: row.knowledgeBaseId,
-                knowledgeBaseName: row.knowledgeBaseName,
-                knowledgeBaseIsSearchIndex: row.knowledgeBaseIsSearchIndex,
-                connectorId: row.id,
-                connectorType: row.connectorType,
-                sourceDescription:
-                  (getConnectorMeta(row.connectorType)
-                    ? describeSearchSource(getConnectorMeta(row.connectorType)!, row.sourceConfig)
-                    : '') || truncate(row.credentialGroupName ?? '', 237),
-                memberSyncStatus: row.accessMode === 'members' ? row.memberSyncStatus : 'idle',
-                viewerMembership,
-                viewerDocumentCount: documentCounts.get(row.id) ?? 0,
-              },
-            ]
-          : []
-      }),
     }
   },
 })
@@ -695,24 +574,31 @@ export const readKnowledgeConnector = defineAuthorizedKnowledgeUseCase({
   async execute({ principal, context }) {
     const connector = await getKnowledgeConnector(context.knowledgeBaseId, context.connectorId)
     if (!connector) throw new OrchestrationError('not_found', 'Connector not found')
+    const dormantSearchIndexConnector = !requiresConnectorIndexing(
+      context.knowledgeBase.isSearchIndex
+    )
     const [syncLogs, memberSyncLogs, members] = await Promise.all([
-      db
-        .select()
-        .from(knowledgeConnectorSyncLog)
-        .where(eq(knowledgeConnectorSyncLog.connectorId, context.connectorId))
-        .orderBy(desc(knowledgeConnectorSyncLog.startedAt))
-        .limit(10),
-      db
-        .select()
-        .from(knowledgeConnectorMemberSyncLog)
-        .where(eq(knowledgeConnectorMemberSyncLog.connectorId, context.connectorId))
-        .orderBy(desc(knowledgeConnectorMemberSyncLog.startedAt))
-        .limit(10),
-      connector.accessMode === 'members'
+      dormantSearchIndexConnector
+        ? []
+        : db
+            .select()
+            .from(knowledgeConnectorSyncLog)
+            .where(eq(knowledgeConnectorSyncLog.connectorId, context.connectorId))
+            .orderBy(desc(knowledgeConnectorSyncLog.startedAt))
+            .limit(10),
+      dormantSearchIndexConnector
+        ? []
+        : db
+            .select()
+            .from(knowledgeConnectorMemberSyncLog)
+            .where(eq(knowledgeConnectorMemberSyncLog.connectorId, context.connectorId))
+            .orderBy(desc(knowledgeConnectorMemberSyncLog.startedAt))
+            .limit(10),
+      !dormantSearchIndexConnector && connector.accessMode === 'members'
         ? summarizeConnectorMembers(context.connectorId, connector.syncIntervalMinutes)
         : { active: 0, suspended: 0, stale: 0 },
     ])
-    const { encryptedApiKey: _encryptedApiKey, ...connectorData } = connector
+    const connectorData = withoutSecret(connector)
     const viewerUserId = principal.kind === 'session' ? principal.userId : null
     const memberships =
       viewerUserId && (context.workspaceId || context.organizationId)
@@ -767,20 +653,61 @@ async function summarizeConnectorMembers(
   return { active: row?.active ?? 0, suspended: row?.suspended ?? 0, stale: row?.stale ?? 0 }
 }
 
-async function executeCreateKnowledgeConnector(
-  {
-    principal,
-    input,
-    context,
-    request,
-  }: {
-    principal: Principal
-    input: CreateKnowledgeConnectorInput
-    context: ActiveKnowledgeResourceBaseContext
-    request?: OrchestrationRequestContext
-  },
-  approvedMemberSetup = false
-) {
+/** Whole-value `$NAME`, the shell-style spelling of a secret reference that is never resolved. */
+const SHELL_STYLE_SECRET_PATTERN = /^\$([A-Za-z_][A-Za-z0-9_]*)$/
+
+/**
+ * Rejects an API key spelled `$NAME` when the caller has a secret named `NAME`, so the literal
+ * reference is not sent to the provider and stored as the key. A `$`-prefixed value that names no
+ * secret passes through, since password-style keys (SFTP, ServiceNow) can legitimately look alike.
+ */
+async function rejectShellStyleSecretReference(
+  apiKey: string,
+  principal: Principal,
+  workspaceId: string | undefined
+): Promise<void> {
+  const name = apiKey.trim().match(SHELL_STYLE_SECRET_PATTERN)?.[1]
+  if (!name) return
+  const userId = resolvePrincipalSubjectUserId(principal)
+  if (!userId) return
+  const variables = await resolveEffectiveEnvironmentVariables(userId, workspaceId, [name])
+  if (!Object.hasOwn(variables, name)) return
+  throw new OrchestrationError(
+    'validation',
+    `Secret references use {{${name}}}, not $${name}. Pass apiKey as "{{${name}}}" to use the secret.`
+  )
+}
+
+/** Resolves a secret reference at setup time; the connector stores an encrypted token snapshot. */
+async function resolveConnectorApiKey(
+  apiKey: string | undefined,
+  principal: Principal,
+  workspaceId: string | undefined
+): Promise<string | undefined> {
+  if (apiKey === undefined) return undefined
+  const name = parseExactEnvironmentReference(apiKey.trim())
+  if (!name) {
+    await rejectShellStyleSecretReference(apiKey, principal, workspaceId)
+    return apiKey
+  }
+  const value = await resolvePrincipalEnvironmentVariable(principal, workspaceId, name)
+  if (!value) {
+    throw new OrchestrationError('validation', `Secret "${name}" is unavailable or empty`)
+  }
+  return value
+}
+
+async function executeCreateKnowledgeConnector({
+  principal,
+  input,
+  context,
+  request,
+}: {
+  principal: Principal
+  input: CreateKnowledgeConnectorInput
+  context: ActiveKnowledgeResourceBaseContext
+  request?: OrchestrationRequestContext
+}) {
   const requestId = generateRequestId()
   const scope = resourceScopeFromOwner(context)
   const owner = resourceScopeFields(scope)
@@ -796,6 +723,8 @@ async function executeCreateKnowledgeConnector(
   if (!connectorMeta) {
     throw new OrchestrationError('validation', `Unknown connector type: ${input.connectorType}`)
   }
+  /** Defaults apply only here, at creation, so an existing connector never changes meaning. */
+  const requestedSourceConfig = { ...connectorMeta.defaultSourceConfig, ...input.sourceConfig }
   if (!supportsConnectorAccessMode(connectorMeta, input.accessMode ?? 'workspace')) {
     throw new OrchestrationError(
       'validation',
@@ -838,9 +767,7 @@ async function executeCreateKnowledgeConnector(
     if (!subjectUserId) {
       throw new OrchestrationError('forbidden', 'Permission-scoped access needs a signed-in admin')
     }
-    if (approvedMemberSetup && context.organizationId) {
-      await requireOrganizationSearchApproval(context.organizationId, input.connectorType)
-    } else if (context.organizationId)
+    if (context.organizationId)
       await requireOrganizationMembership(
         principal,
         context.organizationId,
@@ -850,7 +777,7 @@ async function executeCreateKnowledgeConnector(
     else if (context.workspaceId) await requireCurrentHumanRole(subjectUserId, context, 'admin')
 
     if (input.accessMode === 'admin') {
-      await assertConnectorMirrorsSourceAcls(connectorMeta, input.sourceConfig, scope)
+      await assertConnectorMirrorsSourceAcls(connectorMeta, requestedSourceConfig, scope)
       if (connectorMeta.requiresMemberIdentity) {
         await requireKnowledgeMemberAccessAvailable(owner)
         await provisionKnowledgeConnectorMembersBinding({
@@ -864,7 +791,7 @@ async function executeCreateKnowledgeConnector(
         ...owner,
         connectorMeta,
         actingUserId: subjectUserId,
-        sourceConfig: input.sourceConfig,
+        sourceConfig: requestedSourceConfig,
       })
     }
   }
@@ -878,22 +805,23 @@ async function executeCreateKnowledgeConnector(
     isSearchIndex: context.knowledgeBase.isSearchIndex === true,
     accessMode: input.accessMode ?? 'workspace',
     actingUserId,
-    sourceConfig: membersBinding?.sourceConfig ?? input.sourceConfig,
+    sourceConfig: membersBinding?.sourceConfig ?? requestedSourceConfig,
   })
   if (membersBinding) membersBinding = { ...membersBinding, sourceConfig }
+  const apiKey = await resolveConnectorApiKey(input.apiKey, principal, workspaceId)
   const permissionChange = input.permissionConfig
     ? await prepareConnectorPermissions(input.connectorType, {
         accessMode: input.accessMode ?? 'workspace',
         sourceConfig,
         permissionConfig: input.permissionConfig,
-        apiKey: input.apiKey,
+        apiKey,
       })
     : undefined
   const outcome = await performCreateKnowledgeConnector({
     knowledgeBase: connectorTarget(context),
     connectorType: input.connectorType,
     credentialId: input.credentialId,
-    apiKey: input.apiKey,
+    apiKey,
     permissionChange,
     /** Members mode stores the config with its listing caps cleared. */
     sourceConfig,
@@ -967,76 +895,6 @@ export const createKnowledgeConnector = defineAuthorizedKnowledgeUseCase({
         },
 })
 
-/** Members may create only a personal-account source in an approved organization index. */
-export const createApprovedSearchSource = defineAuthorizedKnowledgeUseCase({
-  operation: knowledgeOperations.createApprovedSearchSource,
-  resolveContext: ({
-    principal,
-    input,
-  }: {
-    principal: Principal
-    input: {
-      knowledgeBaseId: string
-      assertedOrganizationId: string
-      connectorType: string
-      sourceConfig: Record<string, string>
-    }
-  }) => resolveActiveKnowledgeResourceContext(input, principal),
-  async execute({ principal, input, context, request }) {
-    const meta = getConnectorMeta(input.connectorType)
-    if (
-      !context.organizationId ||
-      !context.knowledgeBase.isSearchIndex ||
-      !meta ||
-      !canConnectPersonally(meta)
-    ) {
-      throw new OrchestrationError(
-        'forbidden',
-        'Only approved personal Search sources may be connected'
-      )
-    }
-    const allowedFields = personalSourceConfigFieldIds(meta)
-    if (Object.keys(input.sourceConfig).some((field) => !allowedFields.has(field))) {
-      throw new OrchestrationError(
-        'validation',
-        'Only the personal connection settings may be supplied'
-      )
-    }
-    return executeCreateKnowledgeConnector(
-      {
-        principal,
-        context,
-        request,
-        input: {
-          knowledgeBaseId: input.knowledgeBaseId,
-          assertedOrganizationId: input.assertedOrganizationId,
-          connectorType: input.connectorType,
-          sourceConfig: withSearchSourceDefaults(meta, input.sourceConfig),
-          accessMode: 'members',
-          syncIntervalMinutes: SIM_SEARCH_SYNC_INTERVAL_MINUTES,
-          reuseSearchSource: true,
-          source: 'ui',
-        },
-      },
-      true
-    )
-  },
-  projectAudit: ({ result, context }) =>
-    result.reused
-      ? []
-      : {
-          action: AuditAction.CONNECTOR_CREATED,
-          resourceType: AuditResourceType.CONNECTOR,
-          resourceId: result.connector.id,
-          resourceName: result.connector.connectorType,
-          metadata: {
-            knowledgeBaseId: context.knowledgeBaseId,
-            accessMode: 'members',
-            approvedMemberSetup: true,
-          },
-        },
-})
-
 /**
  * Deliberately not gated by `knowledge.connectors`: an update may change the
  * source config, sync interval or status, never the connector type. The
@@ -1088,7 +946,7 @@ export const updateKnowledgeConnector = defineAuthorizedKnowledgeUseCase({
         accessMode: connector.accessMode,
         sourceConfig: updates.sourceConfig ?? (connector.sourceConfig as Record<string, unknown>),
         permissionConfig,
-        apiKey,
+        apiKey: await resolveConnectorApiKey(apiKey, principal, context.workspaceId),
         existing: connector,
       })
       if (permissionChange && !permissionConfig && apiKey === undefined) {
@@ -1418,6 +1276,38 @@ export const listKnowledgeConnectorDocuments = defineAuthorizedKnowledgeUseCase(
   },
 })
 
+/**
+ * An excluded image keeps its indexed text, and turning image attachments off
+ * skips excluded rows so the exclusion survives turning them back on. Restoring
+ * one while images are off would re-enable text the source no longer lists.
+ *
+ * Runs after the restore's document update in the same transaction, matching a
+ * sync's lock order (documents, then a share lock on the connector). The share
+ * lock holds off a concurrent change of the setting until the restore commits,
+ * so that change queues removal of the restored image or this check sees it.
+ */
+async function assertImageRestoreAllowed(
+  tx: DbTransaction,
+  connector: { id: string; connectorType: string },
+  restored: { mimeType: string }[]
+) {
+  const imageExtraction = getConnectorMeta(connector.connectorType)?.imageExtraction
+  if (!imageExtraction || !restored.some((row) => SEMANTIC_IMAGE_MIME_TYPES.has(row.mimeType))) {
+    return
+  }
+  const [stored] = await tx
+    .select({ sourceConfig: knowledgeConnector.sourceConfig })
+    .from(knowledgeConnector)
+    .where(eq(knowledgeConnector.id, connector.id))
+    .for('share')
+  if (stored && !isImageExtractionEnabled(imageExtraction, toRecord(stored.sourceConfig))) {
+    throw new OrchestrationError(
+      'validation',
+      'Turn on image attachments for this connector before restoring an image.'
+    )
+  }
+}
+
 export const updateKnowledgeConnectorDocuments = defineAuthorizedKnowledgeUseCase({
   operation: knowledgeOperations.updateConnectorDocuments,
   resolveContext: ({
@@ -1439,20 +1329,28 @@ export const updateKnowledgeConnectorDocuments = defineAuthorizedKnowledgeUseCas
     }
     const documentIds = [...new Set(input.documentIds)]
     const restoring = input.operation === 'restore'
-    const updated = await db
-      .update(document)
-      .set({ userExcluded: !restoring, enabled: restoring })
-      .where(
-        and(
-          eq(document.connectorId, context.connectorId),
-          inArray(document.id, documentIds),
-          eq(document.userExcluded, restoring),
-          isNull(document.archivedAt),
-          isNull(document.deletedAt),
-          knowledgeAccessCondition(await context.access.get())
+    if (restoring && !requiresConnectorIndexing(context.knowledgeBase.isSearchIndex)) {
+      throw new OrchestrationError('validation', 'This search index is inactive; use Sim Search.')
+    }
+    const access = await context.access.get()
+    const updated = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(document)
+        .set({ userExcluded: !restoring, enabled: restoring })
+        .where(
+          and(
+            eq(document.connectorId, context.connectorId),
+            inArray(document.id, documentIds),
+            eq(document.userExcluded, restoring),
+            isNull(document.archivedAt),
+            isNull(document.deletedAt),
+            knowledgeAccessCondition(access)
+          )
         )
-      )
-      .returning({ id: document.id })
+        .returning({ id: document.id, mimeType: document.mimeType })
+      if (restoring) await assertImageRestoreAllowed(tx, context.connector, rows)
+      return rows
+    })
     return {
       operation: input.operation,
       count: updated.length,

@@ -22,7 +22,6 @@ import {
   Popover,
   PopoverAnchor,
   PopoverContent,
-  RefreshCw,
   toast,
 } from '@sim/emcn'
 import { Download, Workflow } from '@sim/emcn/icons'
@@ -37,6 +36,7 @@ import type {
   WorkflowLogSummary,
 } from '@/lib/api/contracts/logs'
 import { formatCreditCost } from '@/lib/billing/credits/conversion'
+import { getContextMenuPosition } from '@/lib/core/utils/context-menu'
 import { formatDateShort } from '@/lib/core/utils/date-display'
 import {
   getEndDateFromTimeRange,
@@ -59,24 +59,27 @@ import {
   logsPageTabSwitchEvent,
   logsRefreshEvent,
 } from '@/app/arenaMixpanelEvents/mixpanelEvents'
+import { LogsEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state'
+import type { ResourceAction } from '@/app/workspace/[workspaceId]/components/resource/components/resource-header'
 import type {
   FilterTag,
-  ResourceAction,
-  ResourceColumn,
-  ResourceRow,
   SearchConfig,
   SortConfig,
-} from '@/app/workspace/[workspaceId]/components'
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import { isResourceListEmpty } from '@/app/workspace/[workspaceId]/components/resource/is-resource-list-empty'
+import type {
+  ResourceColumn,
+  ResourceRow,
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
 import {
-  isResourceListEmpty,
   Resource,
   type ResourceTableHandle,
-} from '@/app/workspace/[workspaceId]/components'
-import { LogsEmptyState } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state'
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
 import {
   SnapshotBoundary,
   SnapshotModalFallback,
 } from '@/app/workspace/[workspaceId]/logs/components/log-details/components/execution-snapshot/snapshot-boundary'
+import { getLogsRefreshAction } from '@/app/workspace/[workspaceId]/logs/components/log-refresh-action'
 import { useLogFilters } from '@/app/workspace/[workspaceId]/logs/hooks/use-log-filters'
 import { useSearchState } from '@/app/workspace/[workspaceId]/logs/hooks/use-search-state'
 import {
@@ -99,7 +102,9 @@ import {
   useDashboardStats,
   useLogByExecutionId,
   useLogDetail,
-  useLogsList,
+  useLogSnapshotUpdates,
+  useLogsSnapshot,
+  useNewLogCount,
   useRetryExecution,
 } from '@/hooks/queries/logs'
 import { useWorkflowMap, useWorkflows } from '@/hooks/queries/workflows'
@@ -107,7 +112,6 @@ import { useDebounce } from '@/hooks/use-debounce'
 import { useUrlSort } from '@/hooks/use-url-sort'
 import { useFilterStore } from '@/stores/logs/filters/store'
 import { CORE_TRIGGER_TYPES } from '@/stores/logs/filters/types'
-import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { Dashboard, LogDetails, LogRowContextMenu } from './components'
 import {
   formatDate,
@@ -136,7 +140,6 @@ const ExecutionSnapshot = lazy(() =>
 )
 
 const LOGS_PER_PAGE = 50 as const
-const REFRESH_SPINNER_DURATION_MS = 1000 as const
 const LIVE_REFRESH_INTERVAL_MS = 10_000 as const
 const ACTIVE_RUN_DETAIL_REFRESH_MS = 3_000 as const
 
@@ -234,8 +237,11 @@ function getTriggerIcon(
   return TriggerIcon
 }
 
-function SpinningRefreshCw(props: React.SVGProps<SVGSVGElement>) {
-  return <RefreshCw {...props} animate />
+function activeRunRefetchInterval(query: { state: { data?: WorkflowLogDetail } }) {
+  const status = query.state.data?.status
+  return status === 'running' || status === 'pending' || status === 'redacting'
+    ? ACTIVE_RUN_DETAIL_REFRESH_MS
+    : false
 }
 
 /**
@@ -263,7 +269,6 @@ export default function Logs() {
     setFolderIds,
     setTriggers,
     setTimeRange,
-    setDateRange,
     clearDateRange,
   } = useLogFilters()
 
@@ -303,17 +308,14 @@ export default function Logs() {
    */
   const debouncedSearchQuery = useDebounce(urlSearchQuery, SEARCH_DEBOUNCE_MS).trim()
 
-  const isLive = true
-  const [isVisuallyRefreshing, setIsVisuallyRefreshing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
-  const refreshTimersRef = useRef(new Set<number>())
   const logsRef = useRef<WorkflowLogSummary[]>([])
   const selectedLogIndexRef = useRef(-1)
   const selectedLogIdRef = useRef<string | null>(null)
   const isSidebarOpenRef = useRef(false)
   const shouldScrollIntoViewRef = useRef(false)
   const resourceTableRef = useRef<ResourceTableHandle>(null)
-  const activeViewRefetchRef = useRef<() => void>(() => {})
+  const activeViewRefetchRef = useRef<() => Promise<unknown>>(async () => {})
   const activeLogRefetchRef = useRef<() => void>(() => {})
   const activeLogTabRef = useRef<string>('overview')
   const logsQueryRef = useRef({ isFetching: false, hasNextPage: false, fetchNextPage: () => {} })
@@ -331,7 +333,6 @@ export default function Logs() {
     onClear: onClearSort,
   } = useUrlSort(logSortParams, logFilterUrlKeys)
   const userPermissions = useUserPermissionsContext()
-  const workflows = useWorkflowRegistry((state) => state.workflows)
 
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 })
@@ -341,24 +342,13 @@ export default function Logs() {
 
   const queryClient = useQueryClient()
 
-  const refetchInterval = useCallback(
-    (query: { state: { data?: WorkflowLogDetail } }) => {
-      if (!isLive) return false
-      const status = query.state.data?.status
-      return status === 'running' || status === 'pending' || status === 'redacting'
-        ? ACTIVE_RUN_DETAIL_REFRESH_MS
-        : false
-    },
-    [isLive]
-  )
-
   const selectedDetailQuery = useLogDetail(selectedLogId ?? undefined, workspaceId, {
     enabled: isSidebarOpen,
-    refetchInterval,
+    refetchInterval: activeRunRefetchInterval,
   })
 
   const previewDetailQuery = useLogDetail(previewLogId ?? undefined, workspaceId, {
-    refetchInterval,
+    refetchInterval: activeRunRefetchInterval,
   })
 
   const logFilters = useMemo(
@@ -389,10 +379,23 @@ export default function Logs() {
     ]
   )
 
-  const logsQuery = useLogsList(workspaceId, logFilters, {
+  const logsQuery = useLogsSnapshot(workspaceId, logFilters, {
     enabled: !isDashboardView || isSidebarOpen,
-    refetchInterval: isLive ? LIVE_REFRESH_INTERVAL_MS : false,
   })
+  const newLogsQuery = useNewLogCount(
+    workspaceId,
+    logFilters,
+    logsQuery.isPlaceholderData ? undefined : logsQuery.data?.pages[0]?.snapshotAt,
+    { enabled: !isDashboardView }
+  )
+  const newLogCount = newLogsQuery.data ?? 0
+  const hasChangedPage = logsQuery.data?.pages.some((page) => page.snapshotChanged) === true
+  const snapshotUpdatesQuery = useLogSnapshotUpdates(
+    workspaceId,
+    logsQuery.isPlaceholderData ? undefined : logsQuery.data?.pages[0],
+    { enabled: !isDashboardView && newLogCount === 0 && !hasChangedPage }
+  )
+  const hasSnapshotUpdates = snapshotUpdatesQuery.data || hasChangedPage
 
   const dashboardFilters = useMemo(
     () => ({
@@ -410,7 +413,7 @@ export default function Logs() {
 
   const dashboardStatsQuery = useDashboardStats(workspaceId, dashboardFilters, {
     enabled: isDashboardView,
-    refetchInterval: isLive ? LIVE_REFRESH_INTERVAL_MS : false,
+    refetchInterval: LIVE_REFRESH_INTERVAL_MS,
   })
 
   const logs = useMemo(() => {
@@ -434,14 +437,11 @@ export default function Logs() {
   selectedLogIndexRef.current = selectedLogIndex
   selectedLogIdRef.current = selectedLogId
   isSidebarOpenRef.current = isSidebarOpen
-  activeViewRefetchRef.current = () => {
-    if (isDashboardView) {
-      void dashboardStatsQuery.refetch()
-    }
-    if (!isDashboardView || isSidebarOpen) {
-      void logsQuery.refetch()
-    }
-  }
+  activeViewRefetchRef.current = () =>
+    Promise.all([
+      ...(isDashboardView ? [dashboardStatsQuery.refetch({ throwOnError: true })] : []),
+      ...(!isDashboardView || isSidebarOpen ? [logsQuery.refetch({ throwOnError: true })] : []),
+    ])
   activeLogRefetchRef.current = selectedDetailQuery.refetch
   logsQueryRef.current = {
     isFetching: logsQuery.isFetching,
@@ -462,15 +462,6 @@ export default function Logs() {
     }
   }, [pendingExecutionId, deepLinkQuery.data, deepLinkQuery.isError])
 
-  useEffect(() => {
-    const timers = refreshTimersRef.current
-    return () => {
-      timers.forEach((id) => window.clearTimeout(id))
-      timers.clear()
-    }
-  }, [])
-
-  // Track search event when search query is applied (after debounce or enter)
   const prevSearchQueryRef = useRef<string>('')
   const isSearchTrackingInitializedRef = useRef(false)
   useEffect(() => {
@@ -499,7 +490,6 @@ export default function Logs() {
     const hasFilters =
       statusFilter || costFilter || dateFilter || durationFilter || triggerFilter || workflowFilter
 
-    // Only track if there's a search keyword or filters applied
     if (!textSearch.trim() && !hasFilters) return
 
     logsPageSearchEvent({
@@ -516,11 +506,8 @@ export default function Logs() {
           .filter(Boolean)
           .join(', ') || '',
     })
-  }, [debouncedSearchQuery, level, timeRange, triggers, workflowIds, workflows])
+  }, [debouncedSearchQuery, level, timeRange, triggers, workflowIds])
 
-  // const handleLogClick = useCallback((rowId: string) => {
-  //   dispatch({ type: 'TOGGLE_LOG', logId: rowId })
-  // }, [])
   /**
    * The single write path for user-driven `executionId` changes. Cancels any
    * in-flight deep-link resolution first — an explicit interaction supersedes
@@ -610,7 +597,7 @@ export default function Logs() {
     (e: React.MouseEvent, rowId: string) => {
       e.preventDefault()
       const log = logs.find((l) => l.id === rowId) ?? null
-      setContextMenuPosition({ x: e.clientX, y: e.clientY })
+      setContextMenuPosition(getContextMenuPosition(e))
       setContextMenuLog(log)
       setContextMenuOpen(true)
     },
@@ -676,25 +663,20 @@ export default function Logs() {
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to stop run'))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextMenuLog, userPermissions.canEdit])
 
-  const retryLog = useCallback(
-    async (log: WorkflowLogRow | null) => {
-      const workflowId = log?.workflow?.id || log?.workflowId
-      const executionId = log?.executionId
-      if (!workflowId || !executionId) return
+  const retryLog = useCallback(async (log: WorkflowLogRow | null) => {
+    const workflowId = log?.workflow?.id || log?.workflowId
+    const executionId = log?.executionId
+    if (!workflowId || !executionId) return
 
-      try {
-        await retryExecution.mutateAsync({ workflowId, executionId })
-        toast.success('Retry started')
-      } catch {
-        toast.error('Failed to retry execution')
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  )
+    try {
+      await retryExecution.mutateAsync({ workflowId, executionId })
+      toast.success('Retry started')
+    } catch {
+      toast.error('Failed to retry execution')
+    }
+  }, [])
 
   const handleRetryExecution = useCallback(() => {
     retryLog(contextMenuLog)
@@ -728,37 +710,21 @@ export default function Logs() {
   const effectiveSidebarOpen =
     isSidebarOpen && (selectedLogIndex !== -1 || !!selectedDetailQuery.data)
 
-  const triggerVisualRefresh = useCallback(() => {
-    setIsVisuallyRefreshing(true)
-    const timerId = window.setTimeout(() => {
-      setIsVisuallyRefreshing(false)
-      refreshTimersRef.current.delete(timerId)
-    }, REFRESH_SPINNER_DURATION_MS)
-    refreshTimersRef.current.add(timerId)
-  }, [])
-
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     void logsRefreshEvent({})
-    triggerVisualRefresh()
-    activeViewRefetchRef.current()
     if (selectedLogIdRef.current && isSidebarOpenRef.current) {
       activeLogRefetchRef.current()
     }
-  }, [triggerVisualRefresh])
+    try {
+      await activeViewRefetchRef.current()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to refresh logs'))
+    }
+  }, [])
 
-  const activeViewIsFetching = isDashboardView
+  const isVisuallyRefreshing = isDashboardView
     ? dashboardStatsQuery.isFetching || (isSidebarOpen && logsQuery.isFetching)
     : logsQuery.isFetching
-  const prevIsFetchingRef = useRef(activeViewIsFetching)
-  useEffect(() => {
-    const wasFetching = prevIsFetchingRef.current
-    const isFetching = activeViewIsFetching
-    prevIsFetchingRef.current = isFetching
-
-    if (isLive && !wasFetching && isFetching) {
-      triggerVisualRefresh()
-    }
-  }, [activeViewIsFetching, isLive, triggerVisualRefresh])
 
   const handleExport = useCallback(async () => {
     setIsExporting(true)
@@ -1232,7 +1198,6 @@ export default function Logs() {
     ]
   )
 
-  const refreshIcon = isVisuallyRefreshing ? SpinningRefreshCw : RefreshCw
   const hasExportableLogs = isDashboardView
     ? !dashboardStatsQuery.isPlaceholderData && (dashboardStatsQuery.data?.totalRuns ?? 0) > 0
     : !logsQuery.isPlaceholderData && logs.length > 0
@@ -1245,12 +1210,12 @@ export default function Logs() {
         onSelect: handleExport,
         disabled: !userPermissions.canEdit || isExporting || !hasExportableLogs,
       },
-      {
-        text: 'Refresh',
-        icon: refreshIcon,
-        onSelect: handleRefresh,
-        disabled: isVisuallyRefreshing,
-      },
+      getLogsRefreshAction({
+        newLogCount: isDashboardView ? 0 : newLogCount,
+        hasUpdates: !isDashboardView && hasSnapshotUpdates,
+        isRefreshing: isVisuallyRefreshing,
+        onRefresh: handleRefresh,
+      }),
       {
         text: 'Logs',
         onSelect: () => {
@@ -1271,7 +1236,8 @@ export default function Logs() {
     [
       isDashboardView,
       setViewMode,
-      refreshIcon,
+      newLogCount,
+      hasSnapshotUpdates,
       isVisuallyRefreshing,
       handleRefresh,
       handleExport,

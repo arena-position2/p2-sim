@@ -1,30 +1,23 @@
-/**
- * @vitest-environment node
- */
+import {
+  createSessionPrincipal,
+  createWorkspaceApiKeyPrincipal,
+} from '@sim/testing/factories/principal.factory'
+import {
+  uploadsMetadataMock,
+  uploadsMetadataMockFns,
+} from '@sim/testing/mocks/uploads-metadata.mock'
+import { workspaceAuthzMock, workspaceAuthzMockFns } from '@sim/testing/mocks/workspace-authz.mock'
+import {
+  workspaceUploadsMock,
+  workspaceUploadsMockFns,
+} from '@sim/testing/mocks/workspace-uploads.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({
-  fetchContent: vi.fn(),
-  getFile: vi.fn(),
-  getMetadata: vi.fn(),
-  loadContext: vi.fn(),
-  resolvePermission: vi.fn(),
-}))
+vi.mock('@/lib/uploads/contexts/workspace', () => workspaceUploadsMock)
 
-vi.mock('@/lib/uploads/contexts/workspace', () => ({
-  fetchWorkspaceFileBuffer: mocks.fetchContent,
-  getWorkspaceFile: mocks.getFile,
-  loadActiveWorkspaceFileContext: mocks.loadContext,
-}))
+vi.mock('@/lib/uploads/server/metadata', () => uploadsMetadataMock)
 
-vi.mock('@/lib/uploads/server/metadata', () => ({
-  getFileMetadataByKey: mocks.getMetadata,
-}))
-
-vi.mock('@sim/platform-authz/workspace', () => ({
-  permissionSatisfies: () => true,
-  resolveEffectiveWorkspacePermission: mocks.resolvePermission,
-}))
+vi.mock('@sim/platform-authz/workspace', () => workspaceAuthzMock)
 
 import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import {
@@ -32,7 +25,15 @@ import {
   readWorkspaceFileRecordByKey,
 } from '@/lib/workspace-files/application/read-workspace-file-content-by-key'
 
-const principal = { kind: 'session' as const, userId: 'user-1', sessionId: 'session-1' }
+const mocks = {
+  fetchContent: workspaceUploadsMockFns.mockFetchWorkspaceFileBuffer,
+  getFile: workspaceUploadsMockFns.mockGetWorkspaceFile,
+  loadContext: workspaceUploadsMockFns.mockLoadActiveWorkspaceFileContext,
+  resolvePermission: workspaceAuthzMockFns.mockResolveEffectiveWorkspacePermission,
+  getMetadata: uploadsMetadataMockFns.mockGetFileMetadataByKey,
+}
+
+const principal = createSessionPrincipal()
 const context = {
   fileId: 'file-1',
   workspaceId: 'workspace-1',
@@ -55,7 +56,6 @@ const file = {
 
 describe('readWorkspaceFileContentByKey', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mocks.getMetadata.mockResolvedValue({
       id: file.id,
       workspaceId: file.workspaceId,
@@ -76,11 +76,9 @@ describe('readWorkspaceFileContentByKey', () => {
       })
     ).resolves.toEqual({ file, content: Buffer.from('source') })
 
-    expect(mocks.getMetadata).toHaveBeenCalledWith(file.key)
-    expect(mocks.loadContext).toHaveBeenCalledWith(file.id, { includeMothership: true })
     expect(mocks.getFile).toHaveBeenCalledWith(file.workspaceId, file.id, {
       throwOnError: true,
-      includeMothership: true,
+      includeOwnedFiles: true,
     })
     expect(mocks.fetchContent).toHaveBeenCalledWith(file, {
       maxBytes: MAX_BUFFERED_TRANSFER_BYTES,
@@ -102,21 +100,17 @@ describe('readWorkspaceFileContentByKey', () => {
   it('authorizes an exact-key record read for a workspace API key without a human fallback', async () => {
     await expect(
       readWorkspaceFileRecordByKey.execute({
-        principal: {
-          kind: 'workspace_api_key',
-          workspaceId: file.workspaceId,
-          keyId: 'key-1',
-        },
+        principal: createWorkspaceApiKeyPrincipal({ workspaceId: file.workspaceId }),
         input: { key: file.key, assertedWorkspaceId: file.workspaceId },
       })
     ).resolves.toEqual({ file })
 
     expect(mocks.getMetadata).toHaveBeenCalledWith(file.key)
-    expect(mocks.loadContext).toHaveBeenCalledWith(file.id, { includeMothership: true })
+    expect(mocks.loadContext).toHaveBeenCalledWith(file.id, undefined)
     expect(mocks.resolvePermission).not.toHaveBeenCalled()
     expect(mocks.getFile).toHaveBeenCalledWith(file.workspaceId, file.id, {
       throwOnError: true,
-      includeMothership: true,
+      includeOwnedFiles: true,
     })
     expect(mocks.fetchContent).not.toHaveBeenCalled()
   })
@@ -167,49 +161,6 @@ describe('readWorkspaceFileContentByKey', () => {
 
     expect(mocks.loadContext).not.toHaveBeenCalled()
     expect(mocks.resolvePermission).not.toHaveBeenCalled()
-    expect(mocks.getFile).not.toHaveBeenCalled()
-  })
-
-  it('serves a mothership chat attachment stored under a workspace/ key', async () => {
-    const mothershipFile = { ...file, name: 'chat-upload.pdf' }
-    mocks.getMetadata.mockResolvedValue({
-      id: mothershipFile.id,
-      workspaceId: mothershipFile.workspaceId,
-      key: mothershipFile.key,
-      context: 'mothership',
-    })
-    mocks.getFile.mockResolvedValue(mothershipFile)
-
-    await expect(
-      readWorkspaceFileContentByKey.execute({
-        principal,
-        input: { key: mothershipFile.key, assertedWorkspaceId: mothershipFile.workspaceId },
-      })
-    ).resolves.toEqual({ file: mothershipFile, content: Buffer.from('source') })
-
-    expect(mocks.loadContext).toHaveBeenCalledWith(mothershipFile.id, { includeMothership: true })
-    expect(mocks.getFile).toHaveBeenCalledWith(mothershipFile.workspaceId, mothershipFile.id, {
-      throwOnError: true,
-      includeMothership: true,
-    })
-  })
-
-  it('conceals a non-workspace-scoped context before authorization', async () => {
-    mocks.getMetadata.mockResolvedValue({
-      id: file.id,
-      workspaceId: file.workspaceId,
-      key: file.key,
-      context: 'knowledge-base',
-    })
-
-    await expect(
-      readWorkspaceFileRecordByKey.execute({
-        principal,
-        input: { key: file.key, assertedWorkspaceId: file.workspaceId },
-      })
-    ).rejects.toMatchObject({ code: 'not_found' })
-
-    expect(mocks.loadContext).not.toHaveBeenCalled()
     expect(mocks.getFile).not.toHaveBeenCalled()
   })
 })

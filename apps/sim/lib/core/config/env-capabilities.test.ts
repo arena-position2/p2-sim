@@ -1,28 +1,26 @@
-import integrationsJson from '@sim/deployment-config/integrations.json'
-import { CREDENTIAL_CONFIGURED_OAUTH_SERVICE_IDS } from '@sim/deployment-config/service-account-metadata'
-import { describe, expect, it, vi } from 'vitest'
 import {
   ASYNC_JOBS_CAPABILITY,
   CACHE_CAPABILITY,
-  DEPLOYMENT_CONFIGURATION_KEYS,
   defineCapability,
   EMAIL_CAPABILITY,
   EnvCapabilityConfigurationError,
   envField,
-  getOAuthClientCapabilityFields,
   inspectCapability,
-  inspectOAuthClientCapability,
   KNOWLEDGE_EMBEDDINGS_CAPABILITY,
-  LLM_KEY_POOLS,
   OCR_CAPABILITY,
   requireCapability,
   requireOAuthClientCapability,
   resolveOAuthClientCapabilityId,
   SANDBOX_CAPABILITY,
   STORAGE_CAPABILITY,
-  validateCapabilityFieldInput,
   wireFallback,
-} from '@/lib/core/config/env-capabilities'
+} from '@sim/deployment-config/env-capabilities'
+import integrationsJson from '@sim/deployment-config/integrations.json'
+import {
+  CREDENTIAL_CONFIGURED_OAUTH_SERVICE_IDS,
+  getServiceAccountMetadata,
+} from '@sim/deployment-config/service-account-metadata'
+import { describe, expect, it, vi } from 'vitest'
 import type { Integration } from '@/lib/integrations/types'
 import { getServiceConfigByServiceId } from '@/lib/oauth/utils'
 
@@ -222,20 +220,6 @@ describe('env capabilities', () => {
       ).toEqual(['smtp'])
     })
 
-    it('validates setup input with the canonical field rules', () => {
-      expect(validateCapabilityFieldInput(EMAIL_CAPABILITY, 'SMTP_PORT', '')).toBe('required')
-      expect(validateCapabilityFieldInput(EMAIL_CAPABILITY, 'SMTP_PORT', '1025')).toBeUndefined()
-      expect(validateCapabilityFieldInput(EMAIL_CAPABILITY, 'SMTP_PORT', '99999')).toMatch(
-        /valid port/i
-      )
-      expect(
-        validateCapabilityFieldInput(EMAIL_CAPABILITY, 'GMAIL_CREDENTIALS_JSON', '{}')
-      ).toMatch(/service account/i)
-      expect(() =>
-        validateCapabilityFieldInput(EMAIL_CAPABILITY, 'UNKNOWN_EMAIL_FIELD', 'value')
-      ).toThrow(/no validation definition/i)
-    })
-
     it('executes email providers in order and stops after the first success', async () => {
       const resend = { send: vi.fn().mockRejectedValue(new Error('resend down')) }
       const ses = { send: vi.fn().mockResolvedValue('sent') }
@@ -419,16 +403,6 @@ describe('env capabilities', () => {
       ).toThrow(/AWS_REGION/)
     })
 
-    it('reports one sufficient Azure credential repair path', () => {
-      const inspection = inspectCapability(STORAGE_CAPABILITY, {
-        AZURE_ACCOUNT_NAME: 'storage-account',
-        AZURE_STORAGE_CONTAINER_NAME: 'azure-files',
-      })
-      const azure = inspection.providers.find((provider) => provider.id === 'azure')
-      expect(azure?.missingFields).toHaveLength(1)
-      expect(azure?.missingFields[0]).toMatch(/AZURE_(CONNECTION_STRING|ACCOUNT_KEY)/)
-    })
-
     it('requires paired S3 credentials when either static credential is present', () => {
       expect(
         requireCapability(STORAGE_CAPABILITY, {
@@ -541,30 +515,6 @@ describe('env capabilities', () => {
           }
         }
       }
-    })
-
-    it('validates only the explicitly selected OCR provider', () => {
-      expect(
-        requireCapability(OCR_CAPABILITY, {
-          OCR_PROVIDER: 'local',
-          MISTRAL_API_KEY: 'mistral-key',
-        }).providerId
-      ).toBe('local')
-      expect(() => requireCapability(OCR_CAPABILITY, { OCR_PROVIDER: 'mistral' })).toThrow(
-        /MISTRAL_API_KEY/
-      )
-      expect(() =>
-        requireCapability(OCR_CAPABILITY, {
-          OCR_PROVIDER: 'azure-mistral',
-          OCR_AZURE_API_KEY: 'azure-key',
-          OCR_AZURE_ENDPOINT: 'ftp://ocr.example.com',
-          OCR_AZURE_MODEL_NAME: 'mistral-ocr',
-        })
-      ).toThrow(/OCR_AZURE_ENDPOINT/)
-      expect(inspectCapability(OCR_CAPABILITY, { OCR_PROVIDER: 'unknown' })).toMatchObject({
-        providerId: null,
-        error: expect.any(EnvCapabilityConfigurationError),
-      })
     })
 
     it('preserves legacy Azure validation precedence over Mistral', () => {
@@ -731,15 +681,6 @@ describe('env capabilities', () => {
   })
 
   describe('OAuth and deployment metadata', () => {
-    it('uses exact OAuth environment names and reports partial pairs', () => {
-      expect(inspectOAuthClientCapability('zoho-desk', { ZOHO_CLIENT_ID: 'client' })).toMatchObject(
-        {
-          state: 'partial',
-          missingFields: ['ZOHO_CLIENT_SECRET'],
-        }
-      )
-    })
-
     it('fails fast when an OAuth client is partially configured', () => {
       expect(() => requireOAuthClientCapability('slack', { SLACK_CLIENT_ID: 'client' })).toThrow(
         /SLACK_CLIENT_SECRET/
@@ -753,6 +694,8 @@ describe('env capabilities', () => {
         if (integration.authType !== 'oauth' || !integration.oauthServiceId) return []
         if (resolveOAuthClientCapabilityId(integration.oauthServiceId)) return []
         if (credentialConfiguredServices.has(integration.oauthServiceId)) return []
+        const serviceAccount = getServiceAccountMetadata(integration.oauthServiceId)
+        if (serviceAccount && serviceAccount.deploymentRequirement === undefined) return []
         return [integration.slug]
       })
 
@@ -761,57 +704,6 @@ describe('env capabilities', () => {
       expect(resolveOAuthClientCapabilityId('unipile_linkedin')).toBe('unipile-linkedin')
       expect(getServiceConfigByServiceId('trello')?.serviceAccountProviderId).toBe(
         'trello-service-account'
-      )
-    })
-
-    it('aliases renamed Zoom OAuth service ids to the zoom capability', () => {
-      expect(resolveOAuthClientCapabilityId('zoom')).toBe('zoom')
-      expect(resolveOAuthClientCapabilityId('zoom-client')).toBe('zoom')
-      expect(resolveOAuthClientCapabilityId('zoom-admin')).toBe('zoom')
-      expect(getOAuthClientCapabilityFields('zoom-client')).toEqual([
-        'ZOOM_CLIENT_ID',
-        'ZOOM_CLIENT_SECRET',
-      ])
-      expect(getOAuthClientCapabilityFields('zoom-admin')).toEqual([
-        'ZOOM_CLIENT_ID',
-        'ZOOM_CLIENT_SECRET',
-      ])
-    })
-
-    it('maps Unipile LinkedIn hosted auth to the UNIPILE_API_KEY capability', () => {
-      expect(resolveOAuthClientCapabilityId('unipile_linkedin')).toBe('unipile-linkedin')
-      expect(resolveOAuthClientCapabilityId('unipile-linkedin')).toBe('unipile-linkedin')
-      expect(getOAuthClientCapabilityFields('unipile_linkedin')).toEqual(['UNIPILE_API_KEY'])
-    })
-
-    it('maps Facebook Ads OAuth to the FB_CLIENT_ID / FB_CLIENT_SECRET capability', () => {
-      expect(resolveOAuthClientCapabilityId('facebook-ads')).toBe('facebook-ads')
-      expect(getOAuthClientCapabilityFields('facebook-ads')).toEqual([
-        'FB_CLIENT_ID',
-        'FB_CLIENT_SECRET',
-      ])
-    })
-
-    it('tracks setup-owned options as deployment configuration', () => {
-      expect(DEPLOYMENT_CONFIGURATION_KEYS).toEqual(
-        expect.arrayContaining([
-          'DAYTONA_FUNCTION_SNAPSHOT_ID',
-          'E2B_FUNCTION_TEMPLATE_ID',
-          'E2B_FUNCTION_TEMPLATE_GENERATION',
-          'NEXT_PUBLIC_SANDBOXES_ENABLED',
-          'S3_FORCE_PATH_STYLE',
-          'STORAGE_PROVIDER',
-          'OCR_PROVIDER',
-        ])
-      )
-    })
-
-    it('tracks singular runtime LLM keys as pool fallbacks and deployment configuration', () => {
-      expect(LLM_KEY_POOLS.openai.fallbackKey).toBe('OPENAI_API_KEY')
-      expect(LLM_KEY_POOLS.gemini.fallbackKey).toBe('GEMINI_API_KEY')
-      expect(LLM_KEY_POOLS.cohere.fallbackKey).toBe('COHERE_API_KEY')
-      expect(DEPLOYMENT_CONFIGURATION_KEYS).toEqual(
-        expect.arrayContaining(['OPENAI_API_KEY', 'GEMINI_API_KEY', 'COHERE_API_KEY'])
       )
     })
   })

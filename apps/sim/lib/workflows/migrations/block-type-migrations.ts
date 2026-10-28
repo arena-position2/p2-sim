@@ -1,5 +1,5 @@
 import { createLogger } from '@sim/logger'
-import type { BlockState } from '@/stores/workflows/workflow/types'
+import type { BlockState, SubBlockState } from '@/stores/workflows/workflow/types'
 
 const logger = createLogger('BlockTypeMigrations')
 
@@ -24,8 +24,8 @@ function setSubBlockValue(block: BlockState, id: string, value: unknown): BlockS
       ...block.subBlocks,
       [id]: {
         id,
-        type: existing?.type ?? getSubBlockType(block, id),
-        value,
+        type: (existing?.type ?? getSubBlockType(block, id)) as SubBlockState['type'],
+        value: value as SubBlockState['value'],
       },
     },
   }

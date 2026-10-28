@@ -14,6 +14,21 @@ export interface ChartValidateResponse extends ToolResponse {
   }
 }
 
+export async function executeChartValidateDirect(
+  params: ChartValidateParams
+): Promise<ChartValidateResponse> {
+  const normalized = normalizeChartOutput(params.content, { allowPlainTextSkip: true })
+  return {
+    success: true,
+    output: {
+      charts: normalized.charts as unknown as Record<string, unknown>[],
+      count: normalized.count,
+      valid: normalized.valid,
+      skipped: normalized.skipped,
+    },
+  }
+}
+
 /**
  * Validate and normalize chart JSON without calling an LLM.
  * Accepts agent text, function block output, or any upstream JSON.
@@ -33,17 +48,10 @@ export const chartValidateTool: ToolConfig<ChartValidateParams, ChartValidateRes
     },
   },
 
-  directExecution: async (params: ChartValidateParams): Promise<ChartValidateResponse> => {
-    const normalized = normalizeChartOutput(params.content, { allowPlainTextSkip: true })
-    return {
-      success: true,
-      output: {
-        charts: normalized.charts as unknown as Record<string, unknown>[],
-        count: normalized.count,
-        valid: normalized.valid,
-        skipped: normalized.skipped,
-      },
-    }
+  request: {
+    url: '/api/tools/chart/validate',
+    method: 'POST',
+    headers: () => ({}),
   },
 
   outputs: {

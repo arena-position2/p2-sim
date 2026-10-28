@@ -38,6 +38,7 @@ interface ChatSurfaceContextValue {
    * before closing a shared slideover tab.
    */
   onContextRemove: (context: ChatContext, remaining: ChatContext[]) => void
+  onViewSources?: (messageId: string, requestId?: string) => void
   /** Opens a workspace resource referenced from rendered message content. */
   onWorkspaceResourceSelect: (resource: WorkspaceResourceRef) => void
   /** When true, show the Local / Cloud copilot switch in the chat input. */
@@ -61,6 +62,7 @@ interface ChatSurfaceProviderProps {
   userId?: string
   onContextAdd?: (context: ChatContext) => void
   onContextRemove?: (context: ChatContext, remaining: ChatContext[]) => void
+  onViewSources?: (messageId: string, requestId?: string) => void
   onWorkspaceResourceSelect?: (resource: WorkspaceResourceRef) => void
   canSwitchCopilotBackend?: boolean
   copilotBackend?: CopilotBackendPreference
@@ -73,8 +75,7 @@ interface ChatSurfaceProviderProps {
 /**
  * Provides the chat-surface identity and interaction callbacks to descendants.
  * Callbacks are latched in refs and exposed as stable wrappers so the memoized
- * context value only changes when `chatId` or `userId` change — consumers do
- * not re-render when a parent re-creates a handler.
+ * callback identities remain stable when a parent re-creates a handler.
  */
 export function ChatSurfaceProvider({
   SearchConnectionComponent,
@@ -83,6 +84,7 @@ export function ChatSurfaceProvider({
   onContextAdd,
   onContextRemove,
   onWorkspaceResourceSelect,
+  onViewSources,
   canSwitchCopilotBackend,
   copilotBackend,
   setCopilotBackend,
@@ -90,11 +92,14 @@ export function ChatSurfaceProvider({
   setLocalCopilotCatalogId,
   children,
 }: ChatSurfaceProviderProps) {
+  const onViewSourcesRef = useRef(onViewSources)
+  const hasSourcePanel = Boolean(onViewSources)
   const onContextAddRef = useRef(onContextAdd)
   const onContextRemoveRef = useRef(onContextRemove)
   const onWorkspaceResourceSelectRef = useRef(onWorkspaceResourceSelect)
 
   useLayoutEffect(() => {
+    onViewSourcesRef.current = onViewSources
     onContextAddRef.current = onContextAdd
     onContextRemoveRef.current = onContextRemove
     onWorkspaceResourceSelectRef.current = onWorkspaceResourceSelect
@@ -110,8 +115,13 @@ export function ChatSurfaceProvider({
     onWorkspaceResourceSelectRef.current?.(resource)
   }, [])
 
+  const stableOnViewSources = useCallback((messageId: string, requestId?: string) => {
+    onViewSourcesRef.current?.(messageId, requestId)
+  }, [])
+
   const value = useMemo<ChatSurfaceContextValue>(
     () => ({
+      onViewSources: hasSourcePanel ? stableOnViewSources : undefined,
       SearchConnectionComponent,
       chatId,
       userId,
@@ -125,6 +135,8 @@ export function ChatSurfaceProvider({
       setLocalCopilotCatalogId,
     }),
     [
+      hasSourcePanel,
+      stableOnViewSources,
       SearchConnectionComponent,
       chatId,
       userId,

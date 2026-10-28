@@ -1,5 +1,6 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
+import { isRecordLike, toRecord } from '@sim/utils/object'
 import type { EgressProfile } from '@/lib/core/security/egress/profiles'
 import {
   secureFetchWithPinnedIP,
@@ -9,6 +10,7 @@ import { BufferOperationError } from '@/lib/internal/buffer/errors'
 import type { BufferCreatePostInput, BufferEditPostInput } from '@/lib/internal/buffer/input'
 import { isInternalFileUrl } from '@/lib/uploads/utils/file-utils'
 import { resolveFileInputToUrl } from '@/lib/uploads/utils/file-utils.server'
+import { parseBufferInput } from '@/tools/buffer/schema'
 import {
   BUFFER_API_URL,
   BUFFER_POST_SELECTION,
@@ -48,10 +50,6 @@ export interface BufferOperationContext {
   userId: string
   requestId: string
   signal?: AbortSignal
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function mediaKindFromExtension(pathOrName: string): 'image' | 'video' | null {
@@ -169,7 +167,7 @@ async function executePostMutation(args: {
     })
     const data = await parseBufferGraphQLResponse(response)
     const candidate = data.createPost ?? data.editPost
-    result = isRecord(candidate) ? candidate : {}
+    result = toRecord(candidate)
   } catch (error) {
     context.signal?.throwIfAborted()
     const message = getErrorMessage(error, 'Buffer API request failed')
@@ -177,7 +175,7 @@ async function executePostMutation(args: {
     throw new BufferOperationError(message, 502)
   }
 
-  if (result.__typename !== 'PostActionSuccess' || !isRecord(result.post)) {
+  if (result.__typename !== 'PostActionSuccess' || !isRecordLike(result.post)) {
     const message = typeof result.message === 'string' ? result.message : 'Buffer rejected the post'
     throw new BufferOperationError(message, 400)
   }
@@ -190,24 +188,37 @@ async function mutatePost(
 ): Promise<BufferPostResponse> {
   context.signal?.throwIfAborted()
   const isEdit = 'postId' in input
-  const mutationInput: Record<string, unknown> = {
-    mode: input.mode,
-    schedulingType: input.schedulingType,
-  }
+  const mutationInput: Record<string, unknown> = {}
+  if (input.mode != null) mutationInput.mode = input.mode
+  if (input.schedulingType != null) mutationInput.schedulingType = input.schedulingType
   if (isEdit) mutationInput.id = input.postId
   else {
     mutationInput.channelId = input.channelId
     mutationInput.assets = []
   }
-  if (input.text != null && input.text !== '') mutationInput.text = input.text
-  if (input.dueAt) mutationInput.dueAt = input.dueAt
+  if (input.text !== undefined) mutationInput.text = input.text
+  if (input.dueAt !== undefined) mutationInput.dueAt = input.dueAt
   if (input.saveToDraft != null) mutationInput.saveToDraft = input.saveToDraft
+  for (const key of [
+    'assets',
+    'metadata',
+    'aiAssisted',
+    'draftId',
+    'ideaId',
+    'source',
+    'tagIds',
+  ] as const) {
+    if (input[key] !== undefined) mutationInput[key] = input[key]
+  }
+  if (isEdit && input.approvalChange !== undefined)
+    mutationInput.approvalChange = input.approvalChange
+  if (!isEdit) mutationInput.needsApproval = input.needsApproval
   const asset = await resolveMediaAsset(input, context)
   if (asset) mutationInput.assets = [asset]
   return executePostMutation({
     apiKey: input.apiKey,
     mutation: isEdit ? EDIT_POST_MUTATION : CREATE_POST_MUTATION,
-    input: mutationInput,
+    input: parseBufferInput(isEdit ? 'EditPostInput' : 'CreatePostInput', mutationInput),
     context,
   })
 }

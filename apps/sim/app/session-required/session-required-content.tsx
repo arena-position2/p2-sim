@@ -1,7 +1,5 @@
 'use client'
 
-import { Button } from '@/components/ui/button'
-
 type SessionRequiredContentProps = {
   arenaUrl: string | undefined
 }
@@ -16,11 +14,13 @@ export function SessionRequiredContent({ arenaUrl }: SessionRequiredContentProps
         </p>
       </div>
       {arenaUrl ? (
-        <Button asChild variant='default'>
-          <a href={arenaUrl} rel='noopener noreferrer'>
-            Back to Arena
-          </a>
-        </Button>
+        <a
+          href={arenaUrl}
+          rel='noopener noreferrer'
+          className='inline-flex items-center justify-center rounded-[5px] bg-[var(--text-primary)] px-2 py-1.5 text-[12px] text-[var(--text-inverse)]'
+        >
+          Back to Arena
+        </a>
       ) : (
         <p className='text-muted-foreground text-xs'>
           Configure{' '}

@@ -92,11 +92,13 @@ export async function runChartGenerate(
   const providerId = getProviderFromModel(model)
   let apiKey = inputs.apiKey as string | undefined
   if (providerId === 'vertex' && inputs.vertexCredential) {
-    apiKey = await resolveVertexCredential(
-      String(inputs.vertexCredential),
-      ctx.userId,
-      'vertex-chart-generator'
-    )
+    apiKey = await resolveVertexCredential({
+      credentialId: String(inputs.vertexCredential),
+      actingUserId: ctx.userId,
+      workspaceId: ctx.workspaceId,
+      workflowId: ctx.workflowId,
+      callerLabel: 'vertex-chart-generator',
+    })
   }
 
   const userRequest = String(inputs.userRequest || '')

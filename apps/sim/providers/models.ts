@@ -18,6 +18,7 @@ import {
   FireworksIcon,
   GeminiIcon,
   GroqIcon,
+  KieIcon,
   KimiIcon,
   LitellmIcon,
   MetaIcon,
@@ -29,11 +30,13 @@ import {
   SakanaIcon,
   SambaNovaIcon,
   TogetherIcon,
+  TypeSafeIcon,
   VertexIcon,
   VllmIcon,
   xAIIcon,
   ZaiIcon,
 } from '@/components/icons'
+import { NebiusIcon } from '@/components/icons/nebius'
 import { LARGE_VALUE_THRESHOLD_BYTES } from '@/lib/execution/payloads/large-value-ref'
 import type { ModelPricing, ProviderId } from '@/providers/types'
 
@@ -54,6 +57,8 @@ export interface ModelCapabilities {
   maxOutputTokens?: number
   reasoningEffort?: {
     values: string[]
+    /** Overrides the provider's default visibility for streamed reasoning. */
+    streamed?: ThinkingStreamVisibility
   }
   verbosity?: {
     values: string[]
@@ -79,11 +84,20 @@ export interface ModelCapabilities {
      * provider withholds thinking text entirely, e.g. the newest Claude
      * models default to omitted thinking display). Anthropic-family models
      * must set this explicitly since visibility varies per model generation —
-     * `bun run agent-stream-docs:check` enforces it. Other families fall back
+     * `bun run check:agent-stream-docs` enforces it. Other families fall back
      * to the per-provider defaults in {@link getThinkingStreamVisibility}.
      */
     streamed?: ThinkingStreamVisibility
+    /**
+     * Explicit API mode for the pickers' `none` level on models that think by
+     * default. Omitted, `none` sends no thinking config.
+     */
+    noneMode?: 'between_tools' | 'disabled'
+    /** Whether forced tool choice can be combined with configured thinking. */
+    forcedToolUse?: boolean
   }
+  /** Uses native state and questions instead of a conversational prompt. */
+  evaluation?: boolean
   deepResearch?: boolean
   /** Whether this model supports conversation memory. Defaults to true if omitted. */
   memory?: boolean
@@ -168,6 +182,34 @@ export function getProviderFileAttachment(providerId: string): ProviderFileAttac
 }
 
 export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
+  typesafe: {
+    id: 'typesafe',
+    name: 'TypeSafe',
+    description: 'Jev evaluation models for classification, scoring, and agent decisions',
+    icon: TypeSafeIcon,
+    color: '#F386A1',
+    models: [
+      {
+        id: 'jev-latest',
+        pricing: { input: 0.042, output: 0, updatedAt: '2026-09-22' },
+        capabilities: { evaluation: true, memory: false },
+        contextWindow: 64000,
+      },
+      {
+        id: 'jev-1.13.0',
+        pricing: { input: 0.042, output: 0, updatedAt: '2026-09-22' },
+        capabilities: { evaluation: true, memory: false },
+        contextWindow: 64000,
+      },
+      {
+        id: 'jev-preview',
+        pricing: { input: 0.042, output: 0, updatedAt: '2026-09-22' },
+        capabilities: { evaluation: true, memory: false },
+        contextWindow: 64000,
+      },
+    ],
+    defaultModel: 'jev-latest',
+  },
   fireworks: {
     id: 'fireworks',
     name: 'Fireworks',
@@ -190,6 +232,21 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
      * `fireworks/<anything-else>` ids remain dynamic/BYO-key as before.
      */
     models: [
+      {
+        id: 'fireworks/glm-5.3',
+        pricing: {
+          input: 1.4,
+          cachedInput: 0.26,
+          output: 4.4,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          toolUsageControl: true,
+          maxOutputTokens: 1040000,
+        },
+        contextWindow: 1040000,
+        releaseDate: '2026-08-18',
+      },
       {
         id: 'fireworks/glm-5.2',
         pricing: {
@@ -221,6 +278,166 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         contextWindow: 1048576,
         releaseDate: '2026-07-16',
         recommended: true,
+      },
+    ],
+  },
+  nebius: {
+    id: 'nebius',
+    name: 'Nebius',
+    description: 'Open models via Nebius Token Factory',
+    defaultModel: 'nebius/Qwen/Qwen3.5-397B-A17B',
+    modelPatterns: [/^nebius\//],
+    icon: NebiusIcon,
+    color: '#052B42',
+    isReseller: true,
+    capabilities: {
+      temperature: { min: 0, max: 2 },
+      toolUsageControl: true,
+    },
+    models: [
+      {
+        id: 'nebius/deepseek-ai/DeepSeek-V4.1-Flash',
+        pricing: { input: 0.3, output: 1.2, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: false, nativeStructuredOutputs: false },
+        contextWindow: 1048000,
+      },
+      {
+        id: 'nebius/deepseek-ai/DeepSeek-V4-Flash-0731',
+        pricing: { input: 0.14, output: 0.28, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 1024000,
+      },
+      {
+        id: 'nebius/deepseek-ai/DeepSeek-V4-Pro',
+        pricing: { input: 1.75, output: 3.5, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'nebius/deepseek-ai/DeepSeek-V4-Pro-0813',
+        pricing: { input: 1.32, output: 3.96, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 979000,
+      },
+      {
+        id: 'nebius/google/gemma-3-27b-it',
+        pricing: { input: 0.1, output: 0.3, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 110000,
+      },
+      {
+        id: 'nebius/MiniMaxAI/MiniMax-M3',
+        pricing: { input: 0.3, output: 1.2, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'nebius/moonshotai/Kimi-K2.6',
+        pricing: { input: 0.95, output: 4, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/moonshotai/Kimi-K2.7-Code',
+        pricing: { input: 0.95, output: 4, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/moonshotai/Kimi-K3',
+        pricing: { input: 3, output: 15, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1024000,
+      },
+      {
+        id: 'nebius/NousResearch/Hermes-4-405B',
+        pricing: { input: 1, output: 3, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 131072,
+      },
+      {
+        id: 'nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
+        pricing: { input: 0.06, output: 0.24, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/nvidia/nemotron-3-super-120b-a12b',
+        pricing: { input: 0.3, output: 0.9, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/nvidia/Nemotron-3-Ultra-550b-a55b',
+        pricing: { input: 1, output: 3, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'nebius/nvidia/Nemotron-3_5-Lightning',
+        pricing: { input: 0.06, output: 0.24, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'nebius/openai/gpt-oss-120b',
+        pricing: { input: 0.15, output: 0.6, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 131072,
+      },
+      {
+        id: 'nebius/openbmb/MiniCPM-V-4_5',
+        pricing: { input: 0.658, output: 1.11, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: false, nativeStructuredOutputs: true },
+        contextWindow: 32000,
+      },
+      {
+        id: 'nebius/Qwen/Qwen3-235B-A22B-Instruct-2507',
+        pricing: { input: 0.2, output: 0.6, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/Qwen/Qwen3-30B-A3B-Instruct-2507',
+        pricing: { input: 0.1, output: 0.3, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/Qwen/Qwen3.5-397B-A17B',
+        pricing: { input: 0.6, output: 3.6, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/Qwen/Qwen3.8-27B',
+        pricing: { input: 0.45, output: 3, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 262144,
+      },
+      {
+        id: 'nebius/zai-org/GLM-5.1',
+        pricing: { input: 1.4, output: 4.4, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: true },
+        contextWindow: 202752,
+      },
+      {
+        id: 'nebius/zai-org/GLM-5.2',
+        pricing: { input: 1.4, output: 4.4, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'nebius/zai-org/GLM-5.3',
+        pricing: { input: 1.4, output: 4.4, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1024000,
+      },
+      {
+        id: 'nebius/zai-org/GLM-5.3-Flash',
+        pricing: { input: 0.15, output: 0.5, updatedAt: '2026-10-07' },
+        capabilities: { toolUsageControl: true, nativeStructuredOutputs: false },
+        contextWindow: 1024000,
       },
     ],
   },
@@ -357,6 +574,91 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         releaseDate: '2026-09-03',
         featured: true,
         recommended: true,
+      },
+      {
+        id: 'gpt-6.1-sol',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.1,
+          output: 10.0,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 4.0,
+              cachedInput: 0.2,
+              output: 15.0,
+            },
+          ],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-29',
+      },
+      {
+        id: 'gpt-6-sol',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.2,
+          output: 10.0,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 4.0,
+              cachedInput: 0.4,
+              output: 15.0,
+            },
+          ],
+          updatedAt: '2026-09-22',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-22',
+      },
+      {
+        id: 'gpt-6-luna',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.01,
+          output: 0.5,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 0.2,
+              cachedInput: 0.02,
+              output: 0.75,
+            },
+          ],
+          updatedAt: '2026-09-22',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-22',
+        speedOptimized: true,
       },
       // GPT-4.1 family
       {
@@ -956,14 +1258,13 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     fileAttachment: { maxBytes: 50 * 1024 * 1024, strategy: 'remote-url' },
     name: 'Anthropic',
     description: "Anthropic's Claude models",
-    defaultModel: 'claude-sonnet-5',
+    defaultModel: 'claude-sonnet-5-5',
     modelPatterns: [/^claude/],
     icon: AnthropicIcon,
     color: '#D97757',
     capabilities: {
       toolUsageControl: true,
-      // Every Claude model accepts cache_control breakpoints; Haiku raises the
-      // minimum prefix and overrides this per-model.
+      // Models with a different minimum cacheable prefix override it below.
       promptCaching: { minimumCacheableTokens: 1024 },
     },
     models: [
@@ -1013,6 +1314,30 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         sunset: { status: 'legacy' },
       },
       {
+        id: 'claude-sonnet-5-5',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.1,
+          output: 10.0,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          nativeStructuredOutputs: true,
+          maxOutputTokens: 128000,
+          promptCaching: { minimumCacheableTokens: 512 },
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+            noneMode: 'between_tools',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-28',
+        recommended: true,
+      },
+      {
         id: 'claude-sonnet-5',
         pricing: {
           input: 2.0,
@@ -1031,6 +1356,29 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         contextWindow: 1000000,
         releaseDate: '2026-06-30',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'claude-opus-5-5',
+        pricing: {
+          input: 4.0,
+          cachedInput: 0.2,
+          output: 20.0,
+          updatedAt: '2026-09-22',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          nativeStructuredOutputs: true,
+          maxOutputTokens: 128000,
+          promptCaching: { minimumCacheableTokens: 512 },
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'medium',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-22',
         recommended: true,
       },
       {
@@ -1053,7 +1401,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         contextWindow: 1000000,
         releaseDate: '2026-07-24',
-        recommended: true,
+        sunset: { status: 'legacy' },
       },
       {
         id: 'claude-opus-4-8',
@@ -1273,6 +1621,31 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
       //   sunset: { status: 'deprecated' },
       // },
       {
+        id: 'claude-haiku-5-5',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.01,
+          output: 0.5,
+          tiers: [{ aboveInputTokens: 100000, input: 0.5, cachedInput: 0.05, output: 2.5 }],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          nativeStructuredOutputs: true,
+          maxOutputTokens: 128000,
+          promptCaching: { minimumCacheableTokens: 512 },
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'medium',
+            streamed: 'summary',
+            noneMode: 'disabled',
+            forcedToolUse: true,
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-10-07',
+        speedOptimized: true,
+      },
+      {
         id: 'claude-haiku-4-5',
         pricing: {
           input: 1.0,
@@ -1325,308 +1698,519 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     icon: AzureIcon,
     isReseller: true,
     models: [
-      // {
-      //   id: 'azure/gpt-4o',
-      //   pricing: {
-      //     input: 2.5,
-      //     cachedInput: 1.25,
-      //     output: 10.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 2 },
-      //     maxOutputTokens: 16384,
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2024-11-20',
-      //   sunset: { status: 'legacy' },
-      // },
-      // {
-      //   id: 'azure/gpt-5.4',
-      //   pricing: {
-      //     input: 2.5,
-      //     cachedInput: 0.25,
-      //     output: 15.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 1050000,
-      //   releaseDate: '2026-03-05',
-      // },
-      // {
-      //   id: 'azure/gpt-5.4-mini',
-      //   pricing: {
-      //     input: 0.75,
-      //     cachedInput: 0.075,
-      //     output: 4.5,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2026-03-17',
-      // },
-      // {
-      //   id: 'azure/gpt-5.4-nano',
-      //   pricing: {
-      //     input: 0.2,
-      //     cachedInput: 0.02,
-      //     output: 1.25,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2026-03-17',
-      // },
-      // {
-      //   id: 'azure/gpt-5.2',
-      //   pricing: {
-      //     input: 1.75,
-      //     cachedInput: 0.175,
-      //     output: 14.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['none', 'low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2025-12-11',
-      // },
-      // {
-      //   id: 'azure/gpt-5.1',
-      //   pricing: {
-      //     input: 1.25,
-      //     cachedInput: 0.125,
-      //     output: 10.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['none', 'low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2025-11-13',
-      // },
-      // {
-      //   id: 'azure/gpt-5.1-codex',
-      //   pricing: {
-      //     input: 1.25,
-      //     cachedInput: 0.125,
-      //     output: 10.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['none', 'low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2025-11-13',
-      // },
-      // {
-      //   id: 'azure/gpt-5',
-      //   pricing: {
-      //     input: 1.25,
-      //     cachedInput: 0.125,
-      //     output: 10.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['minimal', 'low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2025-08-07',
-      // },
-      // {
-      //   id: 'azure/gpt-5-mini',
-      //   pricing: {
-      //     input: 0.25,
-      //     cachedInput: 0.025,
-      //     output: 2.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['minimal', 'low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2025-08-07',
-      // },
-      // {
-      //   id: 'azure/gpt-5-nano',
-      //   pricing: {
-      //     input: 0.05,
-      //     cachedInput: 0.005,
-      //     output: 0.4,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['minimal', 'low', 'medium', 'high'],
-      //     },
-      //     verbosity: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 128000,
-      //   },
-      //   contextWindow: 400000,
-      //   releaseDate: '2025-08-07',
-      // },
-      // {
-      //   id: 'azure/gpt-5-chat',
-      //   pricing: {
-      //     input: 1.25,
-      //     cachedInput: 0.125,
-      //     output: 10.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 2 },
-      //     maxOutputTokens: 16384,
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-08-07',
-      // },
-      // {
-      //   id: 'azure/o3',
-      //   pricing: {
-      //     input: 2,
-      //     cachedInput: 0.5,
-      //     output: 8,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 100000,
-      //   },
-      //   contextWindow: 200000,
-      //   releaseDate: '2025-04-16',
-      // },
-      // {
-      //   id: 'azure/o4-mini',
-      //   pricing: {
-      //     input: 1.1,
-      //     cachedInput: 0.275,
-      //     output: 4.4,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     reasoningEffort: {
-      //       values: ['low', 'medium', 'high'],
-      //     },
-      //     maxOutputTokens: 100000,
-      //   },
-      //   contextWindow: 200000,
-      //   releaseDate: '2025-04-16',
-      // },
-      // {
-      //   id: 'azure/gpt-4.1',
-      //   pricing: {
-      //     input: 2.0,
-      //     cachedInput: 0.5,
-      //     output: 8.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 2 },
-      //     maxOutputTokens: 32768,
-      //   },
-      //   contextWindow: 1047576,
-      //   releaseDate: '2025-04-14',
-      // },
-      // {
-      //   id: 'azure/gpt-4.1-mini',
-      //   pricing: {
-      //     input: 0.4,
-      //     cachedInput: 0.1,
-      //     output: 1.6,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 2 },
-      //     maxOutputTokens: 32768,
-      //   },
-      //   contextWindow: 1047576,
-      //   releaseDate: '2025-04-14',
-      // },
-      // {
-      //   id: 'azure/gpt-4.1-nano',
-      //   pricing: {
-      //     input: 0.1,
-      //     cachedInput: 0.025,
-      //     output: 0.4,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 2 },
-      //     maxOutputTokens: 32768,
-      //   },
-      //   contextWindow: 1047576,
-      //   releaseDate: '2025-04-14',
-      // },
-      // {
-      //   id: 'azure/model-router',
-      //   pricing: {
-      //     input: 2.0,
-      //     cachedInput: 0.5,
-      //     output: 8.0,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {},
-      //   contextWindow: 200000,
-      //   releaseDate: '2025-05-19',
-      // },
+      {
+        id: 'azure/gpt-6.1-sol',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.1,
+          output: 10.0,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 4.0,
+              cachedInput: 0.2,
+              output: 15.0,
+            },
+          ],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-29',
+      },
+      {
+        id: 'azure/gpt-6-sol',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.2,
+          output: 10.0,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 4.0,
+              cachedInput: 0.4,
+              output: 15.0,
+            },
+          ],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-22',
+      },
+      {
+        id: 'azure/gpt-6-luna',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.01,
+          output: 0.5,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 0.2,
+              cachedInput: 0.02,
+              output: 0.75,
+            },
+          ],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-22',
+        speedOptimized: true,
+      },
+      {
+        id: 'azure/gpt-6-astra',
+        pricing: {
+          input: 10,
+          cachedInput: 1,
+          output: 50,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-03',
+      },
+      {
+        id: 'azure/gpt-5.6-sol',
+        pricing: {
+          input: 4,
+          cachedInput: 0.5,
+          output: 20,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-07-09',
+      },
+      {
+        id: 'azure/gpt-5.6-terra',
+        pricing: {
+          input: 2,
+          cachedInput: 0.2,
+          output: 12,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-07-09',
+      },
+      {
+        id: 'azure/gpt-5.6-luna',
+        pricing: {
+          input: 0.2,
+          cachedInput: 0.02,
+          output: 1.2,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-07-09',
+      },
+      {
+        id: 'azure/gpt-5.5',
+        pricing: {
+          input: 5,
+          cachedInput: 0.5,
+          output: 30,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-04-24',
+      },
+      {
+        id: 'azure/gpt-5.4-pro',
+        pricing: {
+          input: 30,
+          output: 180,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 60,
+              output: 270,
+            },
+          ],
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['medium', 'high', 'xhigh'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-03-05',
+      },
+      {
+        id: 'azure/gpt-4o',
+        pricing: {
+          input: 2.5,
+          cachedInput: 1.25,
+          output: 10.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          maxOutputTokens: 16384,
+        },
+        contextWindow: 128000,
+        releaseDate: '2024-11-20',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'azure/gpt-5.4',
+        pricing: {
+          input: 2.5,
+          cachedInput: 0.25,
+          output: 15.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-03-05',
+      },
+      {
+        id: 'azure/gpt-5.4-mini',
+        pricing: {
+          input: 0.75,
+          cachedInput: 0.075,
+          output: 4.5,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2026-03-17',
+      },
+      {
+        id: 'azure/gpt-5.4-nano',
+        pricing: {
+          input: 0.2,
+          cachedInput: 0.02,
+          output: 1.25,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2026-03-17',
+      },
+      {
+        id: 'azure/gpt-5.2',
+        pricing: {
+          input: 1.75,
+          cachedInput: 0.175,
+          output: 14.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2025-12-11',
+      },
+      {
+        id: 'azure/gpt-5.1',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2025-11-13',
+      },
+      {
+        id: 'azure/gpt-5.1-codex',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2025-11-13',
+      },
+      {
+        id: 'azure/gpt-5',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['minimal', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2025-08-07',
+      },
+      {
+        id: 'azure/gpt-5-mini',
+        pricing: {
+          input: 0.25,
+          cachedInput: 0.025,
+          output: 2.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['minimal', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2025-08-07',
+      },
+      {
+        id: 'azure/gpt-5-nano',
+        pricing: {
+          input: 0.05,
+          cachedInput: 0.005,
+          output: 0.4,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['minimal', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 400000,
+        releaseDate: '2025-08-07',
+      },
+      {
+        id: 'azure/gpt-5-chat',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          maxOutputTokens: 16384,
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-08-07',
+      },
+      {
+        id: 'azure/o3',
+        pricing: {
+          input: 2,
+          cachedInput: 0.5,
+          output: 8,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 100000,
+        },
+        contextWindow: 200000,
+        releaseDate: '2025-04-16',
+      },
+      {
+        id: 'azure/o4-mini',
+        pricing: {
+          input: 1.1,
+          cachedInput: 0.275,
+          output: 4.4,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 100000,
+        },
+        contextWindow: 200000,
+        releaseDate: '2025-04-16',
+      },
+      {
+        id: 'azure/gpt-4.1',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.5,
+          output: 8.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          maxOutputTokens: 32768,
+        },
+        contextWindow: 1047576,
+        releaseDate: '2025-04-14',
+      },
+      {
+        id: 'azure/gpt-4.1-mini',
+        pricing: {
+          input: 0.4,
+          cachedInput: 0.1,
+          output: 1.6,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          maxOutputTokens: 32768,
+        },
+        contextWindow: 1047576,
+        releaseDate: '2025-04-14',
+      },
+      {
+        id: 'azure/gpt-4.1-nano',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.025,
+          output: 0.4,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          maxOutputTokens: 32768,
+        },
+        contextWindow: 1047576,
+        releaseDate: '2025-04-14',
+      },
+      {
+        id: 'azure/model-router',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.5,
+          output: 8.0,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {},
+        contextWindow: 200000,
+        releaseDate: '2025-05-19',
+      },
     ],
   },
   'azure-anthropic': {
@@ -1664,6 +2248,76 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         contextWindow: 1000000,
         releaseDate: '2026-09-01',
+      },
+      {
+        id: 'azure-anthropic/claude-opus-5-5',
+        pricing: {
+          input: 4.0,
+          cachedInput: 0.2,
+          output: 20.0,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          nativeStructuredOutputs: true,
+          maxOutputTokens: 128000,
+          promptCaching: { minimumCacheableTokens: 512 },
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'medium',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-22',
+      },
+      {
+        id: 'azure-anthropic/claude-sonnet-5-5',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.1,
+          output: 10.0,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          nativeStructuredOutputs: true,
+          maxOutputTokens: 128000,
+          promptCaching: { minimumCacheableTokens: 512 },
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+            noneMode: 'between_tools',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-28',
+      },
+      {
+        id: 'azure-anthropic/claude-haiku-5-5',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.01,
+          output: 0.5,
+          tiers: [{ aboveInputTokens: 100000, input: 0.5, cachedInput: 0.05, output: 2.5 }],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          nativeStructuredOutputs: true,
+          maxOutputTokens: 128000,
+          promptCaching: { minimumCacheableTokens: 512 },
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'medium',
+            streamed: 'summary',
+            noneMode: 'disabled',
+            forcedToolUse: true,
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-10-07',
+        speedOptimized: true,
       },
       {
         id: 'azure-anthropic/claude-opus-5',
@@ -1891,6 +2545,25 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     icon: GeminiIcon,
     color: '#4285F4',
     models: [
+      {
+        id: 'gemini-4-argon',
+        pricing: {
+          input: 2,
+          cachedInput: 0.1,
+          output: 10,
+          updatedAt: '2026-10-13',
+        },
+        capabilities: {
+          thinking: {
+            levels: ['low', 'medium', 'high'],
+            default: 'medium',
+          },
+          maxOutputTokens: 65536,
+        },
+        contextWindow: 1048576,
+        releaseDate: '2026-09-30',
+        recommended: true,
+      },
       {
         id: 'gemini-3.8-flash',
         pricing: {
@@ -2596,6 +3269,32 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
       toolUsageControl: true,
     },
     models: [
+      {
+        id: 'grok-4.7',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.5,
+          output: 6.0,
+          tiers: [
+            {
+              aboveInputTokens: 199999,
+              input: 4.0,
+              cachedInput: 1.0,
+              output: 12.0,
+            },
+          ],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 500000,
+        releaseDate: '2026-09-21',
+      },
       {
         id: 'grok-4.6',
         pricing: {
@@ -3437,6 +4136,470 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
       },
     ],
   },
+  kie: {
+    id: 'kie',
+    name: 'Kie',
+    description: 'Claude, GPT, Grok, and Kimi models through the Kie.ai API',
+    defaultModel: 'kie/claude-opus-5-5',
+    modelPatterns: [/^kie\//],
+    icon: KieIcon,
+    color: '#1D4ED8',
+    isReseller: true,
+    capabilities: {
+      toolUsageControl: true,
+    },
+    models: [
+      {
+        id: 'kie/claude-sonnet-5-5',
+        pricing: {
+          input: 0.8,
+          output: 4,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          thinking: {
+            levels: ['enabled'],
+            default: 'enabled',
+            noneMode: 'between_tools',
+          },
+        },
+        releaseDate: '2026-09-28',
+      },
+      {
+        id: 'kie/claude-opus-5-5',
+        pricing: {
+          input: 1.6,
+          output: 8.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'medium',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-22',
+        recommended: true,
+      },
+      {
+        id: 'kie/claude-opus-5',
+        pricing: {
+          input: 2.0,
+          output: 10.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-07-24',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-fable-5',
+        pricing: {
+          input: 4.0,
+          output: 20.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-06-09',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-sonnet-5',
+        pricing: {
+          input: 0.85,
+          output: 4.275,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-06-30',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-opus-4-8',
+        pricing: {
+          input: 2.0,
+          output: 10.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-05-28',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-opus-4-7',
+        pricing: {
+          input: 1.425,
+          output: 7.15,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-04-16',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-opus-4-6',
+        pricing: {
+          input: 1.425,
+          output: 7.15,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          temperature: {
+            min: 0,
+            max: 1,
+          },
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-02-05',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-sonnet-4-6',
+        pricing: {
+          input: 0.85,
+          output: 4.275,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          temperature: {
+            min: 0,
+            max: 1,
+          },
+          maxOutputTokens: 128000,
+          thinking: {
+            levels: ['low', 'medium', 'high', 'max'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-02-17',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-opus-4-5',
+        pricing: {
+          input: 1.425,
+          output: 7.15,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          temperature: {
+            min: 0,
+            max: 1,
+          },
+          maxOutputTokens: 64000,
+          thinking: {
+            levels: ['low', 'medium', 'high'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 200000,
+        releaseDate: '2025-11-24',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-sonnet-4-5',
+        pricing: {
+          input: 0.85,
+          output: 4.275,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          temperature: {
+            min: 0,
+            max: 1,
+          },
+          maxOutputTokens: 64000,
+          thinking: {
+            levels: ['low', 'medium', 'high'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 200000,
+        releaseDate: '2025-09-29',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'kie/claude-haiku-4-5',
+        pricing: {
+          input: 0.275,
+          output: 1.425,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          temperature: {
+            min: 0,
+            max: 1,
+          },
+          maxOutputTokens: 64000,
+          thinking: {
+            levels: ['low', 'medium', 'high'],
+            default: 'high',
+            streamed: 'summary',
+          },
+        },
+        contextWindow: 200000,
+        releaseDate: '2025-10-15',
+      },
+      {
+        id: 'kie/gpt-6-1-sol',
+        pricing: {
+          input: 0.6,
+          cachedInput: 0.03,
+          output: 3,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          maxOutputTokens: 128000,
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh', 'max'],
+          },
+        },
+        contextWindow: 272000,
+        releaseDate: '2026-09-29',
+      },
+      {
+        id: 'kie/gpt-6-astra',
+        pricing: {
+          input: 2.8,
+          cachedInput: 0.28,
+          output: 14.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-03',
+        recommended: true,
+      },
+      {
+        id: 'kie/gpt-6-sol',
+        pricing: {
+          input: 0.6,
+          cachedInput: 0.06,
+          output: 3.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-22',
+      },
+      {
+        id: 'kie/gpt-6-luna',
+        pricing: {
+          input: 0.03,
+          cachedInput: 0.003,
+          output: 0.15,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-09-22',
+      },
+      {
+        id: 'kie/gpt-5-6-sol',
+        pricing: {
+          input: 1.4,
+          cachedInput: 0.14,
+          output: 8.4,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-07-09',
+      },
+      {
+        id: 'kie/gpt-5-6-terra',
+        pricing: {
+          input: 0.56,
+          cachedInput: 0.056,
+          output: 3.36,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-07-09',
+      },
+      {
+        id: 'kie/gpt-5-6-luna',
+        pricing: {
+          input: 0.056,
+          cachedInput: 0.0056,
+          output: 0.336,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-07-09',
+      },
+      {
+        id: 'kie/gpt-5-5',
+        pricing: {
+          input: 1.4,
+          cachedInput: 0.14,
+          output: 8.4,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-04-23',
+      },
+      {
+        id: 'kie/grok-4-6',
+        pricing: {
+          input: 0.8,
+          cachedInput: 0.2,
+          output: 2.4,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+        },
+        contextWindow: 500000,
+        releaseDate: '2026-08-12',
+      },
+      {
+        id: 'kie/grok-4-5',
+        pricing: {
+          input: 0.8,
+          cachedInput: 0.12,
+          output: 2.4,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+        },
+        contextWindow: 500000,
+        releaseDate: '2026-07-08',
+      },
+      {
+        id: 'kie/grok-4-3',
+        pricing: {
+          input: 0.5,
+          cachedInput: 0.08,
+          output: 1.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high', 'xhigh'],
+          },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-04-30',
+      },
+      {
+        id: 'kie/kimi-k3',
+        pricing: {
+          input: 2.4,
+          cachedInput: 0.24,
+          output: 12.0,
+          updatedAt: '2026-09-28',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 1048576,
+        },
+        contextWindow: 1048576,
+        releaseDate: '2026-07-16',
+      },
+    ],
+  },
   zai: {
     id: 'zai',
     name: 'Z.ai',
@@ -3457,19 +4620,40 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           input: 1.4,
           cachedInput: 0.26,
           output: 4.4,
-          updatedAt: '2026-09-14',
+          updatedAt: '2026-10-07',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
           toolUsageControl: true,
+          forcedToolUse: false,
           maxOutputTokens: 131072,
           reasoningEffort: {
             values: ['low', 'high', 'max'],
           },
         },
         contextWindow: 1000000,
-        releaseDate: '2026-08-14',
+        releaseDate: '2026-08-18',
         recommended: true,
+      },
+      {
+        id: 'glm-5.3-flashx',
+        pricing: {
+          input: 0.37,
+          cachedInput: 0.075,
+          output: 1.25,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+          toolUsageControl: true,
+          forcedToolUse: false,
+          maxOutputTokens: 131072,
+          reasoningEffort: {
+            values: ['low', 'high', 'max'],
+          },
+        },
+        contextWindow: 1000000,
+        speedOptimized: true,
       },
       {
         id: 'glm-5.3-flash',
@@ -3477,11 +4661,12 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           input: 0.15,
           cachedInput: 0.03,
           output: 0.5,
-          updatedAt: '2026-09-14',
+          updatedAt: '2026-10-07',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
           toolUsageControl: true,
+          forcedToolUse: false,
           maxOutputTokens: 131072,
           reasoningEffort: {
             values: ['low', 'high', 'max'],
@@ -3723,384 +4908,473 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
       toolUsageControl: true,
     },
     models: [
-      // {
-      //   id: 'mistral-large-latest',
-      //   pricing: {
-      //     input: 0.5,
-      //     output: 1.5,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   recommended: true,
-      // },
-      // {
-      //   id: 'mistral-large-2512',
-      //   pricing: {
-      //     input: 0.5,
-      //     output: 1.5,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      // },
-      // {
-      //   id: 'mistral-small-2603',
-      //   pricing: {
-      //     input: 0.15,
-      //     output: 0.6,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2026-03-16',
-      // },
-      // {
-      //   id: 'devstral-2512',
-      //   pricing: {
-      //     input: 0.4,
-      //     output: 2.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-09',
-      // },
-      // {
-      //   id: 'mistral-large-2411',
-      //   pricing: {
-      //     input: 2.0,
-      //     output: 6.0,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2024-11-18',
-      //   sunset: { status: 'deprecated' },
-      // },
-      // {
-      //   id: 'magistral-medium-latest',
-      //   pricing: {
-      //     input: 2.0,
-      //     output: 5.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-09-18',
-      // },
-      // {
-      //   id: 'magistral-medium-2509',
-      //   pricing: {
-      //     input: 2.0,
-      //     output: 5.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-09-18',
-      // },
-      // {
-      //   id: 'magistral-small-latest',
-      //   pricing: {
-      //     input: 0.5,
-      //     output: 1.5,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-09-18',
-      //   sunset: { status: 'legacy' },
-      // },
-      // {
-      //   id: 'magistral-small-2509',
-      //   pricing: {
-      //     input: 0.5,
-      //     output: 1.5,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-09-18',
-      //   sunset: { status: 'legacy' },
-      // },
-      // {
-      //   id: 'mistral-medium-latest',
-      //   pricing: {
-      //     input: 0.4,
-      //     output: 2.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-08-12',
-      // },
-      // {
-      //   id: 'mistral-medium-2604',
-      //   pricing: {
-      //     input: 1.5,
-      //     output: 7.5,
-      //     updatedAt: '2026-06-16',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2026-04-29',
-      // },
-      // {
-      //   id: 'mistral-medium-2508',
-      //   pricing: {
-      //     input: 0.4,
-      //     output: 2.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-08-12',
-      // },
-      // {
-      //   id: 'mistral-medium-2505',
-      //   pricing: {
-      //     input: 0.4,
-      //     output: 2.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-05-07',
-      // },
-      // {
-      //   id: 'mistral-small-latest',
-      //   pricing: {
-      //     input: 0.15,
-      //     output: 0.6,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2026-03-16',
-      // },
-      // {
-      //   id: 'mistral-small-2506',
-      //   pricing: {
-      //     input: 0.1,
-      //     output: 0.3,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-06-20',
-      //   sunset: { status: 'legacy' },
-      // },
-      // {
-      //   id: 'open-mistral-nemo',
-      //   pricing: {
-      //     input: 0.15,
-      //     output: 0.15,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2024-07-18',
-      // },
-      // {
-      //   id: 'codestral-latest',
-      //   pricing: {
-      //     input: 0.3,
-      //     output: 0.9,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-07-30',
-      // },
-      // {
-      //   id: 'codestral-2508',
-      //   pricing: {
-      //     input: 0.3,
-      //     output: 0.9,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-07-30',
-      // },
-      // {
-      //   id: 'devstral-latest',
-      //   pricing: {
-      //     input: 0.4,
-      //     output: 2.0,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-09',
-      // },
-      // {
-      //   id: 'devstral-small-latest',
-      //   pricing: {
-      //     input: 0.1,
-      //     output: 0.3,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-09',
-      //   sunset: { status: 'legacy' },
-      // },
-      // {
-      //   id: 'devstral-small-2507',
-      //   pricing: {
-      //     input: 0.1,
-      //     output: 0.3,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-07-10',
-      //   sunset: { status: 'deprecated' },
-      // },
-      // {
-      //   id: 'devstral-medium-2507',
-      //   pricing: {
-      //     input: 0.4,
-      //     output: 2.0,
-      //     updatedAt: '2026-04-01',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 128000,
-      //   releaseDate: '2025-07-10',
-      //   sunset: { status: 'deprecated' },
-      // },
-      // {
-      //   id: 'ministral-14b-latest',
-      //   pricing: {
-      //     input: 0.2,
-      //     output: 0.2,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   speedOptimized: true,
-      // },
-      // {
-      //   id: 'ministral-14b-2512',
-      //   pricing: {
-      //     input: 0.2,
-      //     output: 0.2,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   speedOptimized: true,
-      // },
-      // {
-      //   id: 'ministral-8b-latest',
-      //   pricing: {
-      //     input: 0.15,
-      //     output: 0.15,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   speedOptimized: true,
-      // },
-      // {
-      //   id: 'ministral-8b-2512',
-      //   pricing: {
-      //     input: 0.15,
-      //     output: 0.15,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   speedOptimized: true,
-      // },
-      // {
-      //   id: 'ministral-3b-latest',
-      //   pricing: {
-      //     input: 0.1,
-      //     output: 0.1,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   speedOptimized: true,
-      // },
-      // {
-      //   id: 'ministral-3b-2512',
-      //   pricing: {
-      //     input: 0.1,
-      //     output: 0.1,
-      //     updatedAt: '2026-06-11',
-      //   },
-      //   capabilities: {
-      //     temperature: { min: 0, max: 1.5 },
-      //   },
-      //   contextWindow: 256000,
-      //   releaseDate: '2025-12-02',
-      //   speedOptimized: true,
-      // },
+      {
+        id: 'mistral-large-4',
+        pricing: {
+          input: 0.68,
+          cachedInput: 0.07,
+          output: 2.09,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-10-06',
+      },
+      {
+        id: 'mistral-medium-3-5',
+        pricing: {
+          input: 1.5,
+          cachedInput: 0.15,
+          output: 7.5,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-04-28',
+      },
+      {
+        id: 'mistral-medium-3',
+        pricing: {
+          input: 1.5,
+          cachedInput: 0.15,
+          output: 7.5,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-04-28',
+      },
+      {
+        id: 'zai-glm-5-3',
+        pricing: {
+          input: 1.4,
+          cachedInput: 0.14,
+          output: 4.4,
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-15',
+      },
+      {
+        id: 'zai-glm-5-2',
+        pricing: {
+          input: 1.4,
+          cachedInput: 0.14,
+          output: 4.4,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-08-06',
+      },
+      {
+        /** Free preview retires September 30, 2026: https://docs.mistral.ai/resources/changelogs */
+        id: 'labs-leanstral-1-5',
+        pricing: {
+          input: 0,
+          cachedInput: 0,
+          output: 0,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-06-30',
+      },
+      {
+        id: 'mistral-large-latest',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        recommended: true,
+      },
+      {
+        id: 'mistral-large-2512',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+      },
+      {
+        id: 'mistral-small-2603',
+        pricing: {
+          input: 0.15,
+          output: 0.6,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-03-16',
+      },
+      {
+        id: 'devstral-2512',
+        pricing: {
+          input: 0.4,
+          output: 2.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-09',
+      },
+      {
+        id: 'mistral-large-2411',
+        pricing: {
+          input: 2.0,
+          output: 6.0,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2024-11-18',
+        sunset: { status: 'deprecated' },
+      },
+      {
+        id: 'magistral-medium-latest',
+        pricing: {
+          input: 2.0,
+          output: 5.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-09-18',
+      },
+      {
+        id: 'magistral-medium-2509',
+        pricing: {
+          input: 2.0,
+          output: 5.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-09-18',
+      },
+      {
+        id: 'magistral-small-latest',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-09-18',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'magistral-small-2509',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-09-18',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'mistral-medium-latest',
+        pricing: {
+          input: 1.5,
+          cachedInput: 0.15,
+          output: 7.5,
+          updatedAt: '2026-09-14',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-04-28',
+      },
+      {
+        id: 'mistral-medium-2604',
+        pricing: {
+          input: 1.5,
+          output: 7.5,
+          updatedAt: '2026-06-16',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-04-29',
+      },
+      {
+        id: 'mistral-medium-2508',
+        pricing: {
+          input: 0.4,
+          output: 2.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-08-12',
+      },
+      {
+        id: 'mistral-medium-2505',
+        pricing: {
+          input: 0.4,
+          output: 2.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-05-07',
+      },
+      {
+        id: 'mistral-small-latest',
+        pricing: {
+          input: 0.15,
+          output: 0.6,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2026-03-16',
+      },
+      {
+        id: 'mistral-small-2506',
+        pricing: {
+          input: 0.1,
+          output: 0.3,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-06-20',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'open-mistral-nemo',
+        pricing: {
+          input: 0.15,
+          output: 0.15,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2024-07-18',
+      },
+      {
+        id: 'codestral-latest',
+        pricing: {
+          input: 0.3,
+          output: 0.9,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-07-30',
+      },
+      {
+        id: 'codestral-2508',
+        pricing: {
+          input: 0.3,
+          output: 0.9,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-07-30',
+      },
+      {
+        id: 'devstral-latest',
+        pricing: {
+          input: 0.4,
+          output: 2.0,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-09',
+      },
+      {
+        id: 'devstral-small-latest',
+        pricing: {
+          input: 0.1,
+          output: 0.3,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-09',
+        sunset: { status: 'legacy' },
+      },
+      {
+        id: 'devstral-small-2507',
+        pricing: {
+          input: 0.1,
+          output: 0.3,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-07-10',
+        sunset: { status: 'deprecated' },
+      },
+      {
+        id: 'devstral-medium-2507',
+        pricing: {
+          input: 0.4,
+          output: 2.0,
+          updatedAt: '2026-04-01',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 128000,
+        releaseDate: '2025-07-10',
+        sunset: { status: 'deprecated' },
+      },
+      {
+        id: 'ministral-14b-latest',
+        pricing: {
+          input: 0.2,
+          output: 0.2,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        speedOptimized: true,
+      },
+      {
+        id: 'ministral-14b-2512',
+        pricing: {
+          input: 0.2,
+          output: 0.2,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        speedOptimized: true,
+      },
+      {
+        id: 'ministral-8b-latest',
+        pricing: {
+          input: 0.15,
+          output: 0.15,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        speedOptimized: true,
+      },
+      {
+        id: 'ministral-8b-2512',
+        pricing: {
+          input: 0.15,
+          output: 0.15,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        speedOptimized: true,
+      },
+      {
+        id: 'ministral-3b-latest',
+        pricing: {
+          input: 0.1,
+          output: 0.1,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        speedOptimized: true,
+      },
+      {
+        id: 'ministral-3b-2512',
+        pricing: {
+          input: 0.1,
+          output: 0.1,
+          updatedAt: '2026-06-11',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1.5 },
+        },
+        contextWindow: 256000,
+        releaseDate: '2025-12-02',
+        speedOptimized: true,
+      },
     ],
   },
   ollama: {
@@ -4194,6 +5468,22 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
       toolUsageControl: true,
     },
     models: [
+      {
+        id: 'bedrock/openai.gpt-6.1-sol',
+        pricing: {
+          input: 2.2,
+          cachedInput: 0.11,
+          output: 11,
+          tiers: [{ aboveInputTokens: 272000, input: 4.4, cachedInput: 0.22, output: 16.5 }],
+          updatedAt: '2026-10-07',
+        },
+        capabilities: {
+          forcedToolUse: false,
+          maxOutputTokens: 131072,
+        },
+        contextWindow: 1000000,
+        releaseDate: '2026-09-29',
+      },
       {
         id: 'bedrock/anthropic.claude-opus-5',
         pricing: {
@@ -5168,7 +6458,15 @@ export function getBaseModelProviders(): Record<string, ProviderId> {
     )
 }
 
-/** Resolves catalog entries and provider patterns without guessing a fallback provider. */
+/**
+ * The provider that declares `model`, or `null` when none does. Resolves catalog entries and
+ * provider patterns without guessing a fallback provider.
+ *
+ * The non-guessing half of `getProviderFromModel` in `@/providers/utils`. A caller that *gates*
+ * on the answer needs "unknown" to stay distinct from "ollama": this registry holds chat models
+ * only, so every embedding, speech, image and video model id would otherwise read as an Ollama
+ * model and be judged against an allowlist that was never about it.
+ */
 export function findProviderFromModel(model: string): ProviderId | null {
   const normalizedModel = model.toLowerCase()
 
@@ -5247,30 +6545,6 @@ export function getModelCapabilities(modelId: string): ModelCapabilities | null 
   return null
 }
 
-export function getModelsWithTemperatureSupport(): string[] {
-  const models: string[] = []
-  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
-    for (const model of provider.models) {
-      if (model.capabilities.temperature) {
-        models.push(model.id)
-      }
-    }
-  }
-  return models
-}
-
-export function getModelsWithTemperatureRange(max: number): string[] {
-  const models: string[] = []
-  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
-    for (const model of provider.models) {
-      if (model.capabilities.temperature?.max === max) {
-        models.push(model.id)
-      }
-    }
-  }
-  return models
-}
-
 export function getProvidersWithToolUsageControl(): string[] {
   const providers: string[] = []
   for (const [providerId, provider] of Object.entries(PROVIDER_DEFINITIONS)) {
@@ -5282,8 +6556,8 @@ export function getProvidersWithToolUsageControl(): string[] {
 }
 
 export function getHostedModels(): string[] {
-  // Currently, OpenAI and Anthropic models are hosted
   const hosted = [
+    ...getProviderModels('typesafe'),
     ...getProviderModels('openai'),
     ...getProviderModels('anthropic'),
     ...getProviderModels('sambanova'),
@@ -5626,14 +6900,6 @@ export function getModelsWithPromptCaching(): string[] {
 }
 
 /**
- * Minimum prefix length the model will cache, or `null` when the model does
- * not support caller-placed breakpoints.
- */
-export function getPromptCachingMinimumTokens(modelId: string): number | null {
-  return getModelCapabilities(modelId)?.promptCaching?.minimumCacheableTokens ?? null
-}
-
-/**
  * Get all models that support thinking capability
  */
 export function getModelsWithThinking(): string[] {
@@ -5686,7 +6952,7 @@ export function isKnownModelLevelValue(value: string): boolean {
 
 /**
  * Per-provider defaults for thinking stream visibility, used when a model does
- * not declare `capabilities.thinking.streamed` explicitly. Gemini and OpenAI
+ * not declare thinking or reasoning-effort stream visibility explicitly. Gemini and OpenAI
  * stream summaries only; Bedrock and Meta do not expose reasoning text;
  * OpenAI-compatible vendors that expose reasoning stream the raw chain of
  * thought.
@@ -5696,6 +6962,8 @@ const PROVIDER_THINKING_STREAM_DEFAULTS: Record<string, ThinkingStreamVisibility
   vertex: 'summary',
   openai: 'summary',
   'azure-openai': 'summary',
+  // Kie proxies the Responses and Messages APIs, which return reasoning summaries only.
+  kie: 'summary',
   bedrock: 'none',
   meta: 'none',
 }
@@ -5704,7 +6972,7 @@ const PROVIDER_THINKING_STREAM_DEFAULTS: Record<string, ThinkingStreamVisibility
  * What a reasoning-capable model's thinking looks like on the agent-events
  * stream (canvas terminal, opted-in deployed chat). Returns null for models
  * with no thinking or reasoning-effort capability. Explicit per-model
- * `capabilities.thinking.streamed` wins over the provider default; providers
+ * thinking or reasoning-effort stream visibility wins over the provider default; providers
  * without a default stream the raw chain of thought when the vendor emits it.
  */
 export function getThinkingStreamVisibility(modelId: string): ThinkingStreamVisibility | null {
@@ -5721,12 +6989,24 @@ export function getThinkingStreamVisibility(modelId: string): ThinkingStreamVisi
       }
       return (
         model.capabilities.thinking?.streamed ??
+        model.capabilities.reasoningEffort?.streamed ??
         PROVIDER_THINKING_STREAM_DEFAULTS[provider.id] ??
         'full'
       )
     }
   }
   return null
+}
+
+/** Models that consume native evaluation inputs in the Agent block. */
+export function getEvaluationModels(): string[] {
+  return Object.values(PROVIDER_DEFINITIONS).flatMap((provider) =>
+    provider.models.filter((model) => model.capabilities.evaluation).map((model) => model.id)
+  )
+}
+
+export function isEvaluationModel(modelId: string): boolean {
+  return getModelCapabilities(modelId)?.evaluation === true
 }
 
 /**

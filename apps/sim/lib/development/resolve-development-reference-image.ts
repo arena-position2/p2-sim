@@ -1,5 +1,6 @@
 import type { Logger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
+import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { processSingleFileToUserFile, type RawFileInput } from '@/lib/uploads/utils/file-utils'
 import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
 import { assertToolFileAccess } from '@/app/api/files/authorization'
@@ -59,7 +60,9 @@ export async function resolveDevelopmentReferenceImage(
     if (denied) {
       throw new Error('Not authorized to access the reference PDF')
     }
-    const buffer = await downloadFileFromStorage(userFile, input.requestId, input.logger)
+    const buffer = await downloadFileFromStorage(userFile, input.requestId, input.logger, {
+      maxBytes: MAX_BUFFERED_TRANSFER_BYTES,
+    })
     base64 = buffer.toString('base64')
   }
 

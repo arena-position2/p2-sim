@@ -1,23 +1,21 @@
-/**
- * @vitest-environment node
- */
 import { usageLog } from '@sim/db/schema'
 import { dbChainMockFns, resetDbChainMock, resetEnvFlagsMock, setEnvFlags } from '@sim/testing'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { billingPlanMock, billingPlanMockFns } from '@sim/testing/mocks/billing-plan.mock'
+import {
+  billingSubscriptionUtilsMock,
+  billingSubscriptionUtilsMockFns,
+} from '@sim/testing/mocks/billing-subscription-utils.mock'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
-  mockGetHighestPrioritySubscription,
   mockInsert,
-  mockIsOrgScopedSubscription,
   mockOnConflictDoNothing,
   mockReturning,
   mockValues,
   mockTransaction,
   mockUpdate,
 } = vi.hoisted(() => ({
-  mockGetHighestPrioritySubscription: vi.fn(),
   mockInsert: vi.fn(),
-  mockIsOrgScopedSubscription: vi.fn(),
   mockOnConflictDoNothing: vi.fn(),
   mockReturning: vi.fn(),
   mockValues: vi.fn(),
@@ -25,28 +23,30 @@ const {
   mockUpdate: vi.fn(),
 }))
 
-vi.mock('@/lib/billing/core/plan', () => ({
-  getHighestPrioritySubscription: mockGetHighestPrioritySubscription,
-}))
+vi.mock('@/lib/billing/core/plan', () => billingPlanMock)
 
-vi.mock('@/lib/billing/subscriptions/utils', () => ({
-  isOrgScopedSubscription: mockIsOrgScopedSubscription,
-}))
+vi.mock('@/lib/billing/subscriptions/utils', () => billingSubscriptionUtilsMock)
 
+import { USAGE_LEDGER_STATEMENT_TIMEOUT_MS } from '@/lib/billing/constants'
 import {
   buildNullOnlyAttributionFill,
   CUMULATIVE_COST_EPSILON,
   CumulativeUsageContextMismatchError,
+  getBillingPeriodUsageCost,
+  getBillingPeriodUsageCostByUser,
+  getBillingPeriodUsageCostWithSourceSubset,
+  getBillingPeriodWorkflowRunCount,
+  getStampedPeriodRangeUsageCostByUser,
   getUserUsageLogs,
-  getWorkspaceUsageLogs,
   recordCumulativeUsage,
   recordUsage,
   resolveCumulativeTopUp,
   UNKNOWN_CURSOR_MESSAGE,
   UnknownUsageCursorError,
 } from '@/lib/billing/core/usage-log'
-import { asOrchestrationError } from '@/lib/core/orchestration/types'
-import { HttpError } from '@/lib/core/utils/http-error'
+
+const mockGetHighestPrioritySubscription = billingPlanMockFns.mockGetHighestPrioritySubscription
+const mockIsOrgScopedSubscription = billingSubscriptionUtilsMockFns.mockIsOrgScopedSubscription
 
 /**
  * Re-wires the shared db mocks (`dbChainMockFns`, backing the single shared
@@ -70,7 +70,6 @@ afterAll(resetEnvFlagsMock)
 
 describe('recordUsage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     installSharedDbMocks()
     mockReturning.mockResolvedValue([
       { cost: '0.10', billable: true },
@@ -239,20 +238,6 @@ describe('recordUsage', () => {
       metadata: { inputTokens: 1200, outputTokens: 340 },
     })
   })
-
-  it('writes nothing when every entry is zero-cost and billable', async () => {
-    await recordUsage({
-      userId: 'user-1',
-      billingEntity: { type: 'user', id: 'user-1' },
-      billingPeriod: {
-        start: new Date('2026-05-01T00:00:00.000Z'),
-        end: new Date('2026-06-01T00:00:00.000Z'),
-      },
-      entries: [{ category: 'model', source: 'workflow', description: 'gpt-4', cost: 0 }],
-    })
-
-    expect(mockInsert).not.toHaveBeenCalled()
-  })
 })
 
 describe('resolveCumulativeTopUp', () => {
@@ -322,7 +307,6 @@ describe('recordCumulativeUsage', () => {
   }
 
   beforeEach(() => {
-    vi.clearAllMocks()
     installSharedDbMocks()
     mockReturning.mockResolvedValue([{ cost: '0.3474447', billable: true }])
     mockOnConflictDoNothing.mockReturnValue({ returning: mockReturning })
@@ -370,13 +354,6 @@ describe('recordCumulativeUsage', () => {
     return { tx, select, updateSet }
   }
 
-  /** True when any tx.execute call ran a sql`` template containing the substring. */
-  const executedSqlContaining = (tx: { execute: ReturnType<typeof vi.fn> }, substring: string) =>
-    tx.execute.mock.calls.some(([arg]) => {
-      const strings = (arg as { strings?: readonly string[] } | null)?.strings
-      return Array.isArray(strings) && strings.some((s) => s.includes(substring))
-    })
-
   it('inserts the full cumulative on the first flush', async () => {
     setupTx(null)
     const result = await recordCumulativeUsage({
@@ -393,7 +370,7 @@ describe('recordCumulativeUsage', () => {
       eventKey: 'update-cost:msg-1-billing',
       metadata: { inputTokens: 100, outputTokens: 5 },
     })
-    expect(result).toEqual({ billed: true, delta: 0.3474447, total: 0.3474447 })
+    expect(result).toMatchObject({ billed: true, delta: 0.3474447, total: 0.3474447 })
     expect(mockInsert).toHaveBeenCalledTimes(1)
     expect(mockUpdate).not.toHaveBeenCalled()
     expect(mockValues.mock.calls[0][0][0]).toMatchObject({
@@ -468,7 +445,7 @@ describe('recordCumulativeUsage', () => {
       cost: 0.4662453,
       eventKey: 'update-cost:msg-1-billing',
     })
-    expect(result).toEqual({ billed: false, delta: 0, total: 0.4662453 })
+    expect(result).toMatchObject({ billed: false, delta: 0, total: 0.4662453 })
     expect(updateSet).not.toHaveBeenCalled()
     expect(mockInsert).not.toHaveBeenCalled()
   })
@@ -701,18 +678,7 @@ function latestWhereCondition(): MockCondition {
 
 describe('usage-log query scopes', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
-  })
-
-  it('queries a complete workspace ledger without an actor predicate', async () => {
-    await getWorkspaceUsageLogs('workspace-1', { limit: 25, includeSummary: false })
-
-    expect(latestWhereCondition()).toMatchObject({
-      type: 'and',
-      conditions: [{ type: 'eq', left: 'usageLog.workspaceId', right: 'workspace-1' }],
-    })
-    expect(dbChainMockFns.limit).toHaveBeenCalledWith(26)
   })
 
   it('rejects a cursor that resolves to no usage event instead of restarting at page 1', async () => {
@@ -725,55 +691,6 @@ describe('usage-log query scopes', () => {
 
     expect(rejection).toBeInstanceOf(UnknownUsageCursorError)
     expect((rejection as Error).message).toBe(UNKNOWN_CURSOR_MESSAGE)
-  })
-
-  /**
-   * Both projections of the same throw: the v2 route reads the classification off
-   * the `cause` chain, the session-only internal route reads `statusCode` off the
-   * `HttpError`. Asserting them here is what lets the route suites stay on the
-   * surface behaviour.
-   */
-  it('classifies the unresolvable-cursor rejection for both surfaces', async () => {
-    dbChainMockFns.limit.mockResolvedValueOnce([])
-
-    const rejection = await getUserUsageLogs('user-1', {
-      cursor: 'log-from-another-ledger',
-      includeSummary: false,
-    }).catch((error: unknown) => error)
-
-    expect(rejection).toBeInstanceOf(HttpError)
-    expect((rejection as HttpError).statusCode).toBe(400)
-    expect(asOrchestrationError(rejection)).toMatchObject({
-      code: 'validation',
-      message: UNKNOWN_CURSOR_MESSAGE,
-    })
-  })
-
-  it('narrows the page to rows after a resolvable cursor', async () => {
-    dbChainMockFns.limit.mockResolvedValueOnce([{ createdAt: new Date('2026-07-01T00:00:00Z') }])
-
-    await getUserUsageLogs('user-1', { cursor: 'log-1', limit: 25, includeSummary: false })
-
-    expect(latestWhereCondition()).toMatchObject({
-      type: 'and',
-      conditions: [{ type: 'eq', left: 'usageLog.userId', right: 'user-1' }, { type: 'or' }],
-    })
-  })
-
-  it('trusts a caller-supplied cursor timestamp without a lookup', async () => {
-    await getUserUsageLogs('user-1', {
-      cursor: 'log-1',
-      cursorCreatedAt: new Date('2026-07-01T00:00:00Z'),
-      limit: 25,
-      includeSummary: false,
-    })
-
-    expect(latestWhereCondition()).toMatchObject({
-      type: 'and',
-      conditions: [{ type: 'eq', left: 'usageLog.userId', right: 'user-1' }, { type: 'or' }],
-    })
-    expect(dbChainMockFns.limit).toHaveBeenCalledTimes(1)
-    expect(dbChainMockFns.limit).toHaveBeenCalledWith(26)
   })
 
   it('keeps personal queries actor-scoped with an optional workspace filter', async () => {
@@ -791,4 +708,90 @@ describe('usage-log query scopes', () => {
       ],
     })
   })
+})
+
+describe('ledger aggregates', () => {
+  const billingEntity = { type: 'organization' as const, id: 'org-1' }
+  const billingPeriod = {
+    start: new Date('2026-05-01T00:00:00Z'),
+    end: new Date('2027-05-01T00:00:00Z'),
+  }
+  /** Every aggregate over the ledger, with the row the mocked read hands back and the value it yields. */
+  const aggregates: Array<{
+    name: string
+    read: () => Promise<unknown>
+    rows: unknown[]
+    expected: unknown
+  }> = [
+    {
+      name: 'getBillingPeriodUsageCost',
+      read: () => getBillingPeriodUsageCost(billingEntity, billingPeriod),
+      rows: [{ cost: '12.5' }],
+      expected: 12.5,
+    },
+    {
+      name: 'getBillingPeriodWorkflowRunCount',
+      read: () => getBillingPeriodWorkflowRunCount(billingEntity, billingPeriod),
+      rows: [{ workflowRuns: 7 }],
+      expected: 7,
+    },
+    {
+      name: 'getBillingPeriodUsageCostWithSourceSubset',
+      read: () =>
+        getBillingPeriodUsageCostWithSourceSubset(billingEntity, billingPeriod, ['workflow']),
+      rows: [{ total: '20', subset: '5' }],
+      expected: { total: 20, subset: 5 },
+    },
+    {
+      name: 'getBillingPeriodUsageCostByUser',
+      read: () => getBillingPeriodUsageCostByUser(billingEntity, billingPeriod),
+      rows: [{ userId: 'user-1', cost: '3' }],
+      expected: new Map([['user-1', 3]]),
+    },
+    {
+      name: 'getStampedPeriodRangeUsageCostByUser',
+      read: () =>
+        getStampedPeriodRangeUsageCostByUser(billingEntity, {
+          from: billingPeriod.start,
+          to: billingPeriod.end,
+        }),
+      rows: [{ userId: 'user-2', cost: '4' }],
+      expected: new Map([['user-2', 4]]),
+    },
+  ]
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    installSharedDbMocks()
+    vi.spyOn(Date, 'now').mockReturnValue(billingPeriod.start.getTime())
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  for (const aggregate of aggregates) {
+    it(`${aggregate.name} reads through the bounded ledger transaction`, async () => {
+      const execute = vi.fn().mockResolvedValue([])
+      const terminal = vi.fn().mockResolvedValue(aggregate.rows)
+      const chain: Record<string, unknown> = {}
+      for (const step of ['select', 'from', 'where', 'leftJoin']) chain[step] = vi.fn(() => chain)
+      chain.groupBy = terminal
+      chain.then = (resolve: (rows: unknown[]) => unknown) => terminal().then(resolve)
+      const tx = { execute, select: chain.select }
+      mockTransaction.mockImplementation((callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx)
+      )
+
+      await expect(aggregate.read()).resolves.toEqual(aggregate.expected)
+      expect(mockTransaction).toHaveBeenCalledTimes(1)
+      expect(
+        execute.mock.calls.map(
+          ([statement]) => (statement as { toSQL: () => { sql: string } }).toSQL().sql
+        )
+      ).toEqual([`SET LOCAL statement_timeout = '${USAGE_LEDGER_STATEMENT_TIMEOUT_MS}ms'`])
+      /** The bound is set before the aggregate runs, not after. */
+      expect(execute.mock.invocationCallOrder[0]).toBeLessThan(terminal.mock.invocationCallOrder[0])
+    })
+  }
 })

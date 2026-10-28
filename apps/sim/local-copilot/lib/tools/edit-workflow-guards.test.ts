@@ -11,7 +11,7 @@ vi.mock('@/lib/workflows/sanitization/json-sanitizer', () => ({
   sanitizeForCopilot: mockSanitizeForCopilot,
 }))
 
-vi.mock('@/lib/copilot/chat/document-format-guidance', () => ({
+vi.mock('@/lib/mothership/chat/document-format-guidance', () => ({
   documentLayoutFollowUpHint: (_fileName: string, hint: string) => hint,
 }))
 
@@ -40,6 +40,8 @@ import {
   formatToolResultForLlm,
   isAlreadyCopilotSanitizedWorkflowState,
   type MandatoryFollowUp,
+  PATCH_REPAIR_USER_HINT,
+  resolveMandatoryFollowUps,
 } from '@/local-copilot/lib/tools/format-tool-result'
 
 beforeEach(() => {
@@ -206,7 +208,8 @@ describe('recoverable workspace_file patch failures', () => {
 
     const followUp = detectMandatoryFollowUp('workspace_file', formatted)
     expect(followUp?.id).toBe('workspace_file:patch-repair')
-    expect(followUp?.resolveWith).toEqual(['read', 'grep', 'workspace_file'])
+    expect(followUp?.resolveWith).toEqual(['read', 'grep'])
+    expect(followUp?.userHint).toBe(PATCH_REPAIR_USER_HINT)
   })
 
   it('marks truncated search failures as patch-repair follow-up', () => {
@@ -221,6 +224,85 @@ describe('recoverable workspace_file patch failures', () => {
 
     const followUp = detectMandatoryFollowUp('workspace_file', formatted)
     expect(followUp?.resolveWith).toContain('read')
+    expect(followUp?.resolveWith).not.toContain('workspace_file')
+  })
+
+  it('marks search_too_long as mandatory patch-repair follow-up', () => {
+    const formatted = formatToolResultForLlm('workspace_file', {
+      success: false,
+      errorType: 'search_too_long',
+      recoverable: true,
+      message: 'Patch failed: search string is too long (800 chars, max 600)',
+      data: {
+        operation: 'patch',
+        name: 'page.html',
+        suggestedNextTools: ['read', 'grep'],
+      },
+    })
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    expect(parsed.needsFollowUpPatchRepair).toBe(true)
+    expect(String(parsed.followUpHint)).toMatch(/short unique substring from the live excerpt/i)
+
+    const followUp = detectMandatoryFollowUp('workspace_file', formatted)
+    expect(followUp?.id).toBe('workspace_file:patch-repair')
+    expect(followUp?.resolveWith).toEqual(['read', 'grep'])
+  })
+
+  it('steers html_full_update_too_large toward patch, not another update', () => {
+    const formatted = formatToolResultForLlm('workspace_file', {
+      success: false,
+      errorType: 'html_full_update_too_large',
+      recoverable: true,
+      message: 'Full update blocked for "dashboard.html"',
+      data: {
+        operation: 'update',
+        name: 'dashboard.html',
+        suggestedNextTools: ['grep', 'read', 'workspace_file'],
+      },
+    })
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    expect(parsed.needsFollowUpPatchRepair).toBe(true)
+    expect(String(parsed.followUpHint)).toMatch(/operation=patch/i)
+    expect(String(parsed.followUpHint)).toMatch(/Do not retry operation=update/i)
+  })
+
+  it('steers html_create_too_large toward a lean shell or patch', () => {
+    const formatted = formatToolResultForLlm('create_file', {
+      success: false,
+      errorType: 'html_create_too_large',
+      message: 'create_file HTML body is too large',
+    })
+    const parsed = JSON.parse(formatted) as Record<string, unknown>
+    expect(String(parsed.followUpHint)).toMatch(/lean shell/i)
+    expect(String(parsed.followUpHint)).toMatch(/operation=patch/i)
+  })
+})
+
+describe('workspace_file patch-repair resolution', () => {
+  const pending: MandatoryFollowUp[] = [
+    {
+      id: 'workspace_file:patch-repair',
+      hint: 'Call read or grep, then patch with a new search.',
+      userHint: PATCH_REPAIR_USER_HINT,
+      resolveWith: ['read', 'grep'],
+    },
+  ]
+
+  it('clears patch-repair after a successful read or grep', () => {
+    expect(resolveMandatoryFollowUps(pending, 'read', true, { success: true })).toEqual([])
+    expect(resolveMandatoryFollowUps(pending, 'grep', true, { success: true })).toEqual([])
+  })
+
+  it('keeps patch-repair when the patch fails and clears it when a later patch succeeds', () => {
+    expect(
+      resolveMandatoryFollowUps(pending, 'workspace_file', false, {
+        success: false,
+        errorType: 'search_not_found',
+      })
+    ).toEqual(pending)
+    expect(resolveMandatoryFollowUps(pending, 'workspace_file', true, { success: true })).toEqual(
+      []
+    )
   })
 })
 

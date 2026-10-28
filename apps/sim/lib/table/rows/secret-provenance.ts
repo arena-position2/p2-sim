@@ -1,11 +1,12 @@
 import { db } from '@sim/db'
 import {
   type TableRowSecretProvenanceEntry,
-  userTableDefinitions,
   userTableRowSecretProvenance,
   userTableRows,
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
+import { isRecordLike } from '@sim/utils/object'
+import { compareStrings } from '@sim/utils/string'
 import { and, asc, eq, gt, inArray, type SQL, sql } from 'drizzle-orm'
 import { SecretProvenanceBudget } from '@/lib/execution/provenance-budget'
 import {
@@ -13,6 +14,7 @@ import {
   PROVENANCE_MAX_SERIALIZED_BYTES,
 } from '@/lib/execution/provenance-limits'
 import type { DbExecutor, DbTransaction } from '@/lib/table/planner'
+import { readCurrentRowsVersion } from '@/lib/table/row-changes'
 import type { RowData, TableRowSecretProvenanceWrite } from '@/lib/table/types'
 import {
   isResolvedSecretTraceProvenanceV1,
@@ -121,18 +123,12 @@ function reportUnvouchedTableRowWrite(
   })
 }
 
-function compareStrings(left: string, right: string): number {
-  if (left < right) return -1
-  if (left > right) return 1
-  return 0
-}
-
 function serializedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), 'utf8')
 }
 
 function isStoredEntry(value: unknown): value is StoredTableRowSecretProvenanceEntry {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  if (!isRecordLike(value)) return false
   const record = value as Record<string, unknown>
   if (
     Reflect.ownKeys(record).some((key) => typeof key !== 'string' || !STORED_ENTRY_KEYS.has(key))
@@ -764,17 +760,6 @@ export async function updateTableRowsWithDerivedSecretProvenance(
   return updatedCount
 }
 
-async function readTableRowsVersion(tableId: string, workspaceId: string): Promise<number | null> {
-  const [table] = await db
-    .select({ rowsVersion: userTableDefinitions.rowsVersion })
-    .from(userTableDefinitions)
-    .where(
-      and(eq(userTableDefinitions.id, tableId), eq(userTableDefinitions.workspaceId, workspaceId))
-    )
-    .limit(1)
-  return table?.rowsVersion ?? null
-}
-
 export type TableSnapshotModelMountSafety = 'safe' | 'unsafe-provenance' | 'stale'
 
 /**
@@ -786,7 +771,9 @@ export async function getTableSnapshotModelMountSafety(options: {
   workspaceId: string
   rowsVersion: number
 }): Promise<TableSnapshotModelMountSafety> {
-  if ((await readTableRowsVersion(options.tableId, options.workspaceId)) !== options.rowsVersion) {
+  if (
+    (await readCurrentRowsVersion(options.tableId, options.workspaceId)) !== options.rowsVersion
+  ) {
     return 'stale'
   }
 
@@ -824,7 +811,9 @@ export async function getTableSnapshotModelMountSafety(options: {
       )
     )
 
-  if ((await readTableRowsVersion(options.tableId, options.workspaceId)) !== options.rowsVersion) {
+  if (
+    (await readCurrentRowsVersion(options.tableId, options.workspaceId)) !== options.rowsVersion
+  ) {
     return 'stale'
   }
 
@@ -964,8 +953,10 @@ export async function loadTableRowSecretProvenance(
 
 /**
  * Collects only returned row values while their database snapshot is still valid.
- * Readers use one repeatable-read transaction per bounded batch; writers capture
- * after stamping and before releasing row locks. Nothing is reloaded after commit.
+ * A read captures inside one repeatable-read transaction spanning every batch of
+ * its page, so a row and the sidecar captured for it always come from the same
+ * snapshot; writers capture after stamping and before releasing row locks.
+ * Nothing is reloaded after commit.
  */
 export class TableRowProvenanceReader {
   private readonly accumulator: ResolvedSecretTraceProvenanceAccumulator

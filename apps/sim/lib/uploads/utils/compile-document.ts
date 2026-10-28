@@ -1,6 +1,6 @@
 import { sha256Hex } from '@sim/security/hash'
-import { loadCompiledDocByExt } from '@/lib/copilot/tools/server/files/doc-compile'
 import { runSandboxTask } from '@/lib/execution/sandbox/run-task'
+import { loadCompiledDocByExt } from '@/lib/mothership/tools/server/files/doc-compile'
 import { parseWorkspaceFileKey } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
 import { getContentType } from '@/app/api/files/utils'
 import type { SandboxTaskId } from '@/sandbox-tasks/registry'

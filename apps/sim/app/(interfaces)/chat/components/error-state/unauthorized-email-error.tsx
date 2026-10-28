@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Button } from '@sim/emcn'
 import { X } from 'lucide-react'
 import Image from 'next/image'
-import { Button } from '@/components/ui/button'
 import arenaLogo from '@/app/(interfaces)/chat/components/message/components/ArenaLogo.svg'
 import { useBrandConfig } from '@/ee/whitelabeling/branding'
 

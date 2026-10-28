@@ -6,6 +6,7 @@ import { useTheme } from '@/app/_shell/providers/theme-provider'
 import '@sim/emcn/components/code/code.css'
 import { CSV_PREVIEW_MAX_ROWS } from '@/lib/api/contracts/workspace-file-table'
 import { getFileExtension } from '@/lib/uploads/utils/file-utils'
+import { normalizeMimeType } from '@/lib/uploads/utils/mime'
 import {
   SIM_ARTIFACT_SHELL,
   SIM_ARTIFACT_STYLESHEET,
@@ -51,6 +52,7 @@ const PREVIEWABLE_EXTENSIONS: Record<string, PreviewType> = {
 export const RICH_PREVIEWABLE_EXTENSIONS = new Set(Object.keys(PREVIEWABLE_EXTENSIONS))
 
 export function resolvePreviewType(mimeType: string | null, filename: string): PreviewType {
+  mimeType = normalizeMimeType(mimeType)
   if (mimeType && PREVIEWABLE_MIME_TYPES[mimeType]) return PREVIEWABLE_MIME_TYPES[mimeType]
   const ext = getFileExtension(filename)
   return PREVIEWABLE_EXTENSIONS[ext] ?? null
@@ -130,7 +132,7 @@ const HTML_PREVIEW_CSP = [
 
 const HTML_PREVIEW_BOOTSTRAP = `<script>
 (() => {
-  const allowHref = (href) => href.startsWith('#') || /^\\s*javascript:/i.test(href)
+  const allowHref = (href) => /^\\s*javascript:/i.test(href)
 
   document.addEventListener(
     'click',
@@ -139,6 +141,21 @@ const HTML_PREVIEW_BOOTSTRAP = `<script>
       const anchor = event.target.closest('a[href]')
       if (!(anchor instanceof HTMLAnchorElement)) return
       const href = anchor.getAttribute('href') || ''
+      /** The host's base-uri CSP can reject about:srcdoc; fragments must stay in this document. */
+      if (href.startsWith('#')) {
+        event.preventDefault()
+        location.hash = href
+        let id = href.slice(1)
+        try { id = decodeURIComponent(id) } catch {}
+        const target = document.getElementById(id)
+        if (target) {
+          target.scrollIntoView()
+          target.focus({ preventScroll: true })
+        } else if (!id) {
+          window.scrollTo(0, 0)
+        }
+        return
+      }
       if (allowHref(href)) return
       event.preventDefault()
       // The sandbox can neither navigate nor open windows, so hand the click
@@ -442,7 +459,7 @@ const HtmlPreview = memo(function HtmlPreview({
           sandbox='allow-scripts'
           referrerPolicy='no-referrer'
           title='HTML Preview'
-          className='h-full w-full border-0 bg-[var(--surface-2)]'
+          className='size-full border-0 bg-[var(--surface-2)]'
         />
       )}
     </div>
@@ -472,9 +489,9 @@ function SvgPreview({ content }: { content: string }) {
   }, [content])
 
   return (
-    <ZoomablePreview className='h-full' contentClassName='h-full w-full'>
+    <ZoomablePreview className='min-h-0 flex-1' contentClassName='size-full'>
       {loadFailed ? (
-        <p className='text-[13px] text-[var(--text-muted)]'>Unable to render SVG preview</p>
+        <p className='text-[var(--text-muted)] text-small'>Unable to render SVG preview</p>
       ) : (
         blobUrl && (
           <img
@@ -521,7 +538,7 @@ const CsvPreview = memo(function CsvPreview({
   if (headers.length === 0) {
     return (
       <div className='flex min-h-0 flex-1 items-center justify-center p-6'>
-        <p className='text-[13px] text-[var(--text-muted)]'>No data to display</p>
+        <p className='text-[var(--text-muted)] text-small'>No data to display</p>
       </div>
     )
   }

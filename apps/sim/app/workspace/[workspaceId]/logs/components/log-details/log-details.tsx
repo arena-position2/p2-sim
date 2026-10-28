@@ -9,6 +9,7 @@ import {
   ChipModalTabs,
   Code,
   cn,
+  DetailsPanel,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -145,13 +146,14 @@ export const WorkflowOutputSection = memo(
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
                   <Button
+                    aria-label={copied ? 'Copied' : 'Copy'}
                     type='button'
                     variant='default'
                     onClick={(e) => {
                       e.stopPropagation()
                       handleCopy()
                     }}
-                    className='size-[20px] cursor-pointer border border-[var(--border-1)] bg-transparent p-0 backdrop-blur-sm hover-hover:bg-[var(--surface-3)]'
+                    className='size-[20px] cursor-pointer border-[var(--border-1)] bg-transparent p-0 backdrop-blur-xs hover-hover:bg-[var(--surface-3)]'
                   >
                     {copied ? (
                       <Check className='size-[10px] text-[var(--text-success)]' />
@@ -165,13 +167,14 @@ export const WorkflowOutputSection = memo(
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
                   <Button
+                    aria-label='Search'
                     type='button'
                     variant='default'
                     onClick={(e) => {
                       e.stopPropagation()
                       activateSearch()
                     }}
-                    className='size-[20px] cursor-pointer border border-[var(--border-1)] bg-transparent p-0 backdrop-blur-sm hover-hover:bg-[var(--surface-3)]'
+                    className='size-[20px] cursor-pointer border-[var(--border-1)] bg-transparent p-0 backdrop-blur-xs hover-hover:bg-[var(--surface-3)]'
                   >
                     <Search className='size-[10px]' />
                   </Button>
@@ -207,7 +210,7 @@ export const WorkflowOutputSection = memo(
             </span>
             <Button
               variant='ghost'
-              className='!p-1'
+              iconPadding='sm'
               onClick={goToPreviousMatch}
               disabled={matchCount === 0}
               aria-label='Previous match'
@@ -216,7 +219,7 @@ export const WorkflowOutputSection = memo(
             </Button>
             <Button
               variant='ghost'
-              className='!p-1'
+              iconPadding='sm'
               onClick={goToNextMatch}
               disabled={matchCount === 0}
               aria-label='Next match'
@@ -225,7 +228,7 @@ export const WorkflowOutputSection = memo(
             </Button>
             <Button
               variant='ghost'
-              className='!p-1'
+              iconPadding='sm'
               onClick={closeSearch}
               aria-label='Close search'
             >
@@ -327,7 +330,7 @@ export function LogDetailsContent({ log, onActiveTabChange }: LogDetailsContentP
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = 0
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable nuqs setter; reset tab when switching logs
+    // stable nuqs setter; reset tab when switching logs
   }, [log.id])
 
   const isLikelyExecution = !!log.executionId && log.trigger !== 'mothership'
@@ -460,7 +463,7 @@ export function LogDetailsContent({ log, onActiveTabChange }: LogDetailsContentP
     const message = workflowName
       ? `The "${workflowName}" workflow run failed. Investigate the error in this run and help me fix it.`
       : 'This workflow run failed. Investigate the error in this run and help me fix it.'
-    if (sendMothershipMessage(message, [context])) return
+    if (sendMothershipMessage({ content: message, contexts: [context] })) return
     if (MothershipHandoffStorage.store({ message, contexts: [context] }, workspaceId)) {
       router.push(`/workspace/${workspaceId}/home`)
     }
@@ -653,7 +656,7 @@ export function LogDetailsContent({ log, onActiveTabChange }: LogDetailsContentP
                             {row.label}
                           </span>
                           <span className='flex-shrink-0 font-medium text-[var(--text-secondary)] text-caption tabular-nums'>
-                            {formatApportionedCreditCost(row.credits, row.dollars)}
+                            {formatApportionedCreditCost(row.credits, row.dollars > 0)}
                           </span>
                         </div>
                       ))}
@@ -934,79 +937,64 @@ export const LogDetails = memo(function LogDetails({
   }, [isOpen, onClose, hasPrev, hasNext, onNavigatePrev, onNavigateNext])
 
   return (
-    <>
-      {/* Resize Handle - positioned outside the panel */}
-      {isOpen && (
-        <div
-          className='absolute top-0 bottom-0 z-[var(--z-dropdown)] w-[8px] cursor-ew-resize'
-          style={{ right: `calc(${effectiveWidth} - 4px)` }}
-          onMouseDown={handleMouseDown}
-          role='separator'
-          aria-label='Resize log details panel'
-          aria-orientation='vertical'
-        />
-      )}
-
-      <div
-        className={cn(
-          'absolute top-0 right-0 bottom-0 z-[var(--z-dropdown)] overflow-hidden border-l bg-[var(--bg)] shadow-md transition-transform duration-200 ease-out',
-          isOpen ? 'translate-x-0' : 'translate-x-full'
-        )}
-        style={{ width: effectiveWidth }}
-        aria-label='Log details sidebar'
-      >
-        {log && (
-          <div className='flex h-full flex-col px-3.5 pt-3'>
-            {/* Header */}
-            <div className='flex items-center justify-between'>
-              <h2 className='text-[var(--text-primary)] text-sm'>Log Details</h2>
-              <div className='flex items-center gap-[1px]'>
-                {log.status === 'failed' &&
-                  (log.workflow?.id || log.workflowId) &&
-                  log.trigger !== 'mothership' && (
-                    <Tooltip.Root>
-                      <Tooltip.Trigger asChild>
-                        <Button
-                          variant='ghost'
-                          className='!p-1'
-                          onClick={() => onRetryExecution?.()}
-                          disabled={isRetryPending}
-                          aria-label='Retry execution'
-                        >
-                          <Redo className='size-[14px]' />
-                        </Button>
-                      </Tooltip.Trigger>
-                      <Tooltip.Content side='bottom'>Retry</Tooltip.Content>
-                    </Tooltip.Root>
-                  )}
-                <Button
-                  variant='ghost'
-                  className='!p-1'
-                  onClick={() => hasPrev && onNavigatePrev?.()}
-                  disabled={!hasPrev}
-                  aria-label='Previous log'
-                >
-                  <ChevronUp className='size-[14px]' />
-                </Button>
-                <Button
-                  variant='ghost'
-                  className='!p-1'
-                  onClick={() => hasNext && onNavigateNext?.()}
-                  disabled={!hasNext}
-                  aria-label='Next log'
-                >
-                  <ChevronUp className='size-[14px] rotate-180' />
-                </Button>
-                <Button variant='ghost' className='!p-1' onClick={onClose} aria-label='Close'>
-                  <X className='size-[14px]' />
-                </Button>
-              </div>
+    <DetailsPanel
+      open={isOpen}
+      width={effectiveWidth}
+      onResizeStart={handleMouseDown}
+      resizeLabel='Resize log details panel'
+      aria-label='Log details sidebar'
+    >
+      {log && (
+        <div className='flex h-full flex-col px-3.5 pt-3'>
+          {/* Header */}
+          <div className='flex items-center justify-between'>
+            <h2 className='text-[var(--text-primary)] text-sm'>Log Details</h2>
+            <div className='flex items-center gap-[1px]'>
+              {log.status === 'failed' &&
+                (log.workflow?.id || log.workflowId) &&
+                log.trigger !== 'mothership' && (
+                  <Tooltip.Root>
+                    <Tooltip.Trigger asChild>
+                      <Button
+                        variant='ghost'
+                        iconPadding='sm'
+                        onClick={() => onRetryExecution?.()}
+                        disabled={isRetryPending}
+                        aria-label='Retry execution'
+                      >
+                        <Redo className='size-[14px]' />
+                      </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content side='bottom'>Retry</Tooltip.Content>
+                  </Tooltip.Root>
+                )}
+              <Button
+                variant='ghost'
+                iconPadding='sm'
+                onClick={() => hasPrev && onNavigatePrev?.()}
+                disabled={!hasPrev}
+                aria-label='Previous log'
+              >
+                <ChevronUp className='size-[14px]' />
+              </Button>
+              <Button
+                variant='ghost'
+                iconPadding='sm'
+                onClick={() => hasNext && onNavigateNext?.()}
+                disabled={!hasNext}
+                aria-label='Next log'
+              >
+                <ChevronUp className='size-[14px] rotate-180' />
+              </Button>
+              <Button variant='ghost' iconPadding='sm' onClick={onClose} aria-label='Close'>
+                <X className='size-[14px]' />
+              </Button>
             </div>
-
-            <LogDetailsContent log={log} onActiveTabChange={handleActiveTabChange} />
           </div>
-        )}
-      </div>
-    </>
+
+          <LogDetailsContent log={log} onActiveTabChange={handleActiveTabChange} />
+        </div>
+      )}
+    </DetailsPanel>
   )
 })

@@ -3,6 +3,10 @@ import type {
   OAuthClientInformationMixed,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js'
+
+/** SDK token shape plus the issuer stamp we persist for pin / revocation. */
+export type StoredOAuthTokens = OAuthTokens & { issuer?: string }
+
 import { db } from '@sim/db'
 import { mcpServerOauth } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
@@ -33,14 +37,14 @@ export interface McpOauthRow {
   workspaceId: string | null
   organizationId: string | null
   clientInformation: OAuthClientInformationMixed | null
-  tokens: OAuthTokens | null
+  tokens: StoredOAuthTokens | null
   codeVerifier: string | null
   state: string | null
   stateCreatedAt: Date | null
   updatedAt: Date
 }
 
-async function encryptTokens(tokens: OAuthTokens): Promise<string> {
+async function encryptTokens(tokens: StoredOAuthTokens): Promise<string> {
   const { encrypted } = await encryptSecret(JSON.stringify(tokens))
   return encrypted
 }
@@ -135,7 +139,7 @@ async function mapOauthRow(row: RawOauthRow): Promise<McpOauthRow> {
         )
       : null,
     tokens: row.tokens
-      ? await safeDecrypt(row.id, 'tokens', row.tokens, (d) => JSON.parse(d) as OAuthTokens)
+      ? await safeDecrypt(row.id, 'tokens', row.tokens, (d) => JSON.parse(d) as StoredOAuthTokens)
       : null,
     codeVerifier: row.codeVerifier
       ? await safeDecrypt(row.id, 'codeVerifier', row.codeVerifier, (d) => d)
@@ -191,7 +195,7 @@ export async function saveClientInformation(
   logger.info('Persisted MCP OAuth client information', { rowId })
 }
 
-export async function saveTokens(rowId: string, tokens: OAuthTokens): Promise<void> {
+export async function saveTokens(rowId: string, tokens: StoredOAuthTokens): Promise<void> {
   const encrypted = await encryptTokens(tokens)
   logger.info('Persisting MCP OAuth tokens', { rowId })
   await db

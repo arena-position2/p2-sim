@@ -197,38 +197,6 @@ export async function uploadToBlob(
 }
 
 /**
- * Generate a presigned URL for direct file access
- * @param key Blob name
- * @param expiresIn Time in seconds until URL expires
- * @returns Presigned URL
- */
-export async function getPresignedUrl(key: string, expiresIn = 3600) {
-  const { BlobSASPermissions, generateBlobSASQueryParameters, StorageSharedKeyCredential } =
-    await import('@azure/storage-blob')
-  const defaultConfig = getDefaultBlobConfig()
-  const blobServiceClient = await getBlobServiceClient()
-  const containerClient = blobServiceClient.getContainerClient(defaultConfig.containerName)
-  const blockBlobClient = containerClient.getBlockBlobClient(key)
-
-  const { accountName, accountKey } = getAccountCredentials()
-
-  const sasOptions = {
-    containerName: defaultConfig.containerName,
-    blobName: key,
-    permissions: BlobSASPermissions.parse('r'), // Read permission
-    startsOn: new Date(),
-    expiresOn: new Date(Date.now() + expiresIn * 1000),
-  }
-
-  const sasToken = generateBlobSASQueryParameters(
-    sasOptions,
-    new StorageSharedKeyCredential(accountName, accountKey)
-  ).toString()
-
-  return `${blockBlobClient.url}?${sasToken}`
-}
-
-/**
  * Generate a presigned URL for direct file access with custom container
  * @param key Blob name
  * @param customConfig Custom Blob configuration

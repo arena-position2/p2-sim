@@ -4,6 +4,10 @@
  */
 
 import {
+  MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION,
+  MAX_FILE_EXPLORE_WITHOUT_MUTATION,
+} from '@/local-copilot/lib/agent/limits'
+import {
   editWorkflowNeedsFollowUp,
   isOAuthOnlyEditResult,
 } from '@/local-copilot/lib/tools/format-tool-result'
@@ -11,11 +15,42 @@ import {
 /** Identical fingerprints at or above this count trigger stagnation. */
 export const TOOL_STAGNATION_THRESHOLD = 3
 
+const FILE_EXPLORE_INSPECTION_TOOLS = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
+
+const FILE_EXPLORE_MUTATION_TOOLS = new Set([
+  'create_file',
+  'create_file_folder',
+  'workspace_file',
+  'edit_content',
+  'delete_file',
+  'rename_file',
+  'move_file',
+])
+
 /**
  * Failed office `edit_content` rewrites get a lower bar — syntax retries with
  * different content still waste minutes when Claude only ruminates in Thinking.
  */
 export const EDIT_CONTENT_FAILURE_STAGNATION_THRESHOLD = 2
+
+/**
+ * Failed `workspace_file` patches share one bucket per path and error type.
+ * Two `search_not_found` misses on the same file stop the turn; a repeated
+ * search is a different error type and does not share that count.
+ */
+export const WORKSPACE_FILE_PATCH_FAILURE_STAGNATION_THRESHOLD = 2
+
+const WORKSPACE_FILE_PATCH_FAILURE_TYPES = new Set([
+  'search_not_found',
+  'search_ambiguous',
+  'search_looks_truncated',
+  'search_too_long',
+  'search_repeated',
+  'search_ignores_live_excerpt',
+  'html_full_update_too_large',
+])
+
+const PATCH_REPAIR_FOLLOW_UP_ID = 'workspace_file:patch-repair'
 
 /**
  * Discovery tools get a slightly higher bar so a couple of overlapping
@@ -45,10 +80,31 @@ export function fingerprintToolCall(
   result: unknown
 ): string {
   const normalizedArgs = normalizeArgsForStagnation(toolName, argsJson, success, result)
+  const patchError = !success ? patchFailureErrorType(toolName, result) : null
   const outcome = success
     ? `ok:${successOutcomeSignature(toolName, result)}`
-    : `err:${outcomeSignature(result)}`
+    : `err:${patchError ?? outcomeSignature(result)}`
   return `${toolName}|${normalizedArgs}|${outcome}`
+}
+
+/**
+ * Hard-stop when nothing is pending, or when the stalled tool is a file patch
+ * whose repair follow-up is still open. Other pending follow-ups stay a nudge.
+ */
+export function resolveStagnationAction(
+  hit: ToolStagnationHit,
+  pendingFollowUpIds: readonly string[]
+): { stop: boolean; systemMessage: string } {
+  const stop =
+    pendingFollowUpIds.length === 0 ||
+    (hit.toolName === 'workspace_file' && pendingFollowUpIds.includes(PATCH_REPAIR_FOLLOW_UP_ID))
+  const base = buildStagnationSystemMessage(hit)
+  return {
+    stop,
+    systemMessage: stop
+      ? base
+      : `${base} Required follow-up tools are still pending — call them now instead of retrying the stalled tool.`,
+  }
 }
 
 /**
@@ -79,7 +135,9 @@ export function createToolStagnationTracker(threshold = TOOL_STAGNATION_THRESHOL
           ? DISCOVERY_STAGNATION_THRESHOLD
           : toolName === 'edit_content' && !success
             ? EDIT_CONTENT_FAILURE_STAGNATION_THRESHOLD
-            : threshold
+            : patchFailureErrorType(toolName, result)
+              ? WORKSPACE_FILE_PATCH_FAILURE_STAGNATION_THRESHOLD
+              : threshold
       if (count < limit) return null
       return {
         toolName,
@@ -92,6 +150,158 @@ export function createToolStagnationTracker(threshold = TOOL_STAGNATION_THRESHOL
       counts.clear()
     },
   }
+}
+
+export interface FileExploreStopHit {
+  toolName: string
+  pathKey: string
+  count: number
+  totalInspections: number
+  reason: 'path' | 'total'
+  message: string
+}
+
+/**
+ * Caps endless read/grep/artifact paging on a file when the turn never mutates it.
+ * Offset/limit differences do not reset the path bucket.
+ */
+export function createFileExploreTracker(
+  pathThreshold = MAX_FILE_EXPLORE_WITHOUT_MUTATION,
+  totalThreshold = MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION
+): {
+  record: (toolName: string, argsJson: string, success: boolean) => FileExploreStopHit | null
+  reset: () => void
+} {
+  const countsByPath = new Map<string, number>()
+  let totalInspections = 0
+
+  return {
+    record(toolName, argsJson, success) {
+      if (FILE_EXPLORE_MUTATION_TOOLS.has(toolName) && success) {
+        countsByPath.clear()
+        totalInspections = 0
+        return null
+      }
+      if (!success || !FILE_EXPLORE_INSPECTION_TOOLS.has(toolName)) {
+        return null
+      }
+
+      const pathKey = extractFileExplorePathKey(toolName, argsJson)
+      const pathCount = (countsByPath.get(pathKey) ?? 0) + 1
+      countsByPath.set(pathKey, pathCount)
+      totalInspections += 1
+
+      if (pathCount >= pathThreshold) {
+        return {
+          toolName,
+          pathKey,
+          count: pathCount,
+          totalInspections,
+          reason: 'path',
+          message: buildFileExploreStopMessage({ pathKey, count: pathCount, reason: 'path' }),
+        }
+      }
+      if (totalInspections >= totalThreshold) {
+        return {
+          toolName,
+          pathKey,
+          count: pathCount,
+          totalInspections,
+          reason: 'total',
+          message: buildFileExploreStopMessage({
+            pathKey,
+            count: totalInspections,
+            reason: 'total',
+          }),
+        }
+      }
+      return null
+    },
+    reset() {
+      countsByPath.clear()
+      totalInspections = 0
+    },
+  }
+}
+
+/**
+ * User-facing closer when file explore hard-stops without a write.
+ */
+export function buildFileExploreStopMessage(options: {
+  pathKey: string
+  count: number
+  reason: 'path' | 'total'
+}): string {
+  if (options.reason === 'total') {
+    return (
+      `I inspected the file ${options.count} times but did not finish applying the fix. ` +
+      'The file was left unchanged — tell me what to change, or confirm a different approach.'
+    )
+  }
+  const label =
+    options.pathKey.startsWith('artifact:') || options.pathKey.startsWith('__')
+      ? 'the file'
+      : options.pathKey
+  return (
+    `I kept reading ${label} (${options.count} looks) without applying an edit. ` +
+    'The file was left unchanged — tell me what to change, or confirm a different approach.'
+  )
+}
+
+/**
+ * System nudge so the model does not resume paging after an explore hard-stop.
+ */
+export function buildFileExploreSystemMessage(hit: FileExploreStopHit): string {
+  return (
+    `[System] File-explore hard-stop: ${hit.reason === 'path' ? hit.count : hit.totalInspections} ` +
+    `inspection tool(s) without a successful file write` +
+    (hit.reason === 'path' ? ` on ${hit.pathKey}` : '') +
+    '. Do not call read, grep, glob, or load_copilot_artifact again this turn. ' +
+    'Stop tool use and briefly tell the user the file was left unchanged.'
+  )
+}
+
+/**
+ * Groups content reads with their leaf path so offset/limit paging shares one bucket.
+ */
+export function extractFileExplorePathKey(toolName: string, argsJson: string): string {
+  try {
+    const parsed = JSON.parse(argsJson.trim() || '{}') as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return `__${toolName}__`
+    }
+    const record = parsed as Record<string, unknown>
+    if (toolName === 'load_copilot_artifact') {
+      const artifactId =
+        (typeof record.artifactId === 'string' && record.artifactId.trim()) ||
+        (typeof record.id === 'string' && record.id.trim()) ||
+        ''
+      return artifactId ? `artifact:${artifactId}` : '__load_copilot_artifact__'
+    }
+    const rawPath =
+      (typeof record.path === 'string' && record.path.trim()) ||
+      (typeof record.filePath === 'string' && record.filePath.trim()) ||
+      (typeof record.target === 'string' && record.target.trim()) ||
+      ''
+    if (!rawPath) return `__${toolName}__`
+    return normalizeFileExplorePath(rawPath)
+  } catch {
+    return `__${toolName}__`
+  }
+}
+
+function normalizeFileExplorePath(path: string): string {
+  let normalized = path.trim()
+  try {
+    normalized = decodeURIComponent(normalized)
+  } catch {
+    // Keep the raw path when it is not URI-encoded.
+  }
+  normalized = normalized.replace(/\\/g, '/')
+  if (normalized.endsWith('/content')) {
+    normalized = normalized.slice(0, -'/content'.length)
+  }
+  return normalized.replace(/\/+$/, '') || normalized
 }
 
 /**
@@ -142,10 +352,43 @@ function normalizeArgsForStagnation(
         FINGERPRINT_ARGS_MAX
       )
     }
+    if (toolName === 'workspace_file' && !success) {
+      const errorType = patchFailureErrorType(toolName, result)
+      if (errorType) {
+        return JSON.stringify({
+          path: patchFailurePath(parsed, result),
+          errorType,
+        }).slice(0, FINGERPRINT_ARGS_MAX)
+      }
+    }
     return JSON.stringify(sortJson(parsed)).slice(0, FINGERPRINT_ARGS_MAX)
   } catch {
     return trimmed.slice(0, FINGERPRINT_ARGS_MAX)
   }
+}
+
+function patchFailureErrorType(toolName: string, result: unknown): string | null {
+  if (toolName !== 'workspace_file' || !result || typeof result !== 'object') return null
+  const errorType = (result as Record<string, unknown>).errorType
+  if (typeof errorType !== 'string' || !WORKSPACE_FILE_PATCH_FAILURE_TYPES.has(errorType)) {
+    return null
+  }
+  return errorType
+}
+
+function patchFailurePath(args: unknown, result: unknown): string {
+  const resultRecord =
+    result && typeof result === 'object' ? (result as Record<string, unknown>) : null
+  const data =
+    resultRecord?.data && typeof resultRecord.data === 'object'
+      ? (resultRecord.data as Record<string, unknown>)
+      : null
+  if (typeof data?.vfsPath === 'string' && data.vfsPath.trim()) return data.vfsPath.trim()
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return ''
+  const target = (args as Record<string, unknown>).target
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return ''
+  const path = (target as Record<string, unknown>).path
+  return typeof path === 'string' ? path.trim() : ''
 }
 
 function shouldCoarseEditWorkflowArgs(success: boolean, result: unknown): boolean {

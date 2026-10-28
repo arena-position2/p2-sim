@@ -9,8 +9,9 @@ import {
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import { isTriggerAvailable } from '@/lib/core/config/trigger-availability'
 import { ProviderCapacityDeferredError } from '@/lib/core/rate-limiter/provider-capacity-error'
 import { withDatabaseReadRetry } from '@/lib/db/read-retry'
 import type { ConnectorAccessMode } from '@/lib/knowledge/connectors/access-modes'
@@ -18,19 +19,37 @@ import {
   type ConnectorFailureDiagnostic,
   getConnectorFailureDiagnostic,
 } from '@/lib/knowledge/connectors/connector-error'
+import {
+  admitVisionImage,
+  type ImageAdmissionState,
+  imageExtractionPolicyFor,
+} from '@/lib/knowledge/connectors/image-admission'
 import { SOURCE_CONTENT_ERROR } from '@/lib/knowledge/connectors/sync-limits'
 import { SyncLockLostException, type SyncRunLease } from '@/lib/knowledge/connectors/sync-lock'
 import {
   addDocument,
   type KnowledgeBaseOwner,
+  persistHashOnlyUpdates,
   persistSkippedDocuments,
-  persistSkippedRetryHashes,
+  resolveSourceMetadataFields,
+  type SourceMetadataFields,
   updateDocument,
 } from '@/lib/knowledge/connectors/sync-persistence'
+import { canExtractImages } from '@/lib/knowledge/documents/image-extraction'
+import {
+  type ImageExtractionPolicy,
+  isSemanticImage,
+} from '@/lib/knowledge/documents/image-extraction-policy'
 import { documentProcessingRecoveryCondition } from '@/lib/knowledge/documents/processing-recovery-policy'
+import {
+  DOCUMENT_LIVENESS_BATCH_SIZE,
+  documentProcessingSnapshotCondition,
+  findAbandonedDocumentProcessing,
+  processingSnapshotColumns,
+} from '@/lib/knowledge/documents/processing-recovery-queue'
 import { DOCUMENT_PROCESSING_STALE_THRESHOLD_MS } from '@/lib/knowledge/documents/processing-timeouts.server'
 import type { DocumentData } from '@/lib/knowledge/documents/service'
-import { isTriggerAvailable, processDocumentsWithQueue } from '@/lib/knowledge/documents/service'
+import { processDocumentsWithQueue } from '@/lib/knowledge/documents/service'
 import {
   type DocumentProcessingStatus,
   isDocumentProcessingStatus,
@@ -260,7 +279,8 @@ export function classifyExternalDoc(
     | 'skippedRetryPolicy'
   >,
   existing: { id: string; contentHash: string | null; storageKey?: string | null } | undefined,
-  forceRehydrate = false
+  forceRehydrate = false,
+  matchContentHash?: ContentHashMatcher
 ): DocClassification {
   if (extDoc.skippedReason) {
     if (!existing) return { type: 'skip' }
@@ -281,13 +301,35 @@ export function classifyExternalDoc(
   ) {
     return { type: 'update', existingId: existing.id }
   }
-  if (existing.contentHash === null || existing.contentHash !== extDoc.contentHash) {
+  if (!storedHashIsCurrent(existing.contentHash, extDoc.contentHash, matchContentHash)) {
     return { type: 'update', existingId: existing.id }
   }
   if (forceRehydrate && extDoc.contentDeferred) {
     return { type: 'update', existingId: existing.id }
   }
   return { type: 'unchanged' }
+}
+
+/** A connector's comparison of a new hash against the stored one; see `ConnectorConfig.matchContentHash`. */
+export type ContentHashMatcher = NonNullable<ConnectorConfig['matchContentHash']>
+
+/** Identical hashes always match; otherwise only a connector-owned comparison can match them. */
+export function contentHashMatch(
+  candidate: string,
+  stored: string,
+  matchContentHash?: ContentHashMatcher
+): 'current' | 'equivalent' | 'stale' {
+  if (candidate === stored) return 'current'
+  return matchContentHash?.(candidate, stored) ?? 'stale'
+}
+
+/** Whether stored content still stands for `candidate`; a missing hash never does. */
+export function storedHashIsCurrent(
+  stored: string | null | undefined,
+  candidate: string,
+  matchContentHash?: ContentHashMatcher
+): boolean {
+  return stored ? contentHashMatch(candidate, stored, matchContentHash) !== 'stale' : false
 }
 
 /**
@@ -611,6 +653,38 @@ export function resolvePreviousOwnedCount(
   return Math.max(lastSyncDocCount ?? 0, ownedDocCount)
 }
 
+/** Live documents the connector owns: what the connector list shows as its document count. */
+export async function countLiveConnectorDocuments(connectorId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(document)
+    .where(
+      and(
+        eq(document.connectorId, connectorId),
+        eq(document.userExcluded, false),
+        isNull(document.archivedAt),
+        isNull(document.deletedAt)
+      )
+    )
+  return row?.count ?? 0
+}
+
+/**
+ * Whether a slice keeps the document count the connector holds instead of counting again.
+ *
+ * Once a pass has finished, a slice that leaves the next pass unfinished keeps the count that
+ * finished pass recorded, the same pass `lastSyncAt` still names, so a large connector is not
+ * counted again on every slice of a pass whose count is replaced when it finishes. Unfinished
+ * slices never advance `lastSyncAt`, so until a pass finishes every slice is counted and a first
+ * pass shows its progress.
+ */
+export function keepsRecordedDocCount(
+  passComplete: boolean,
+  connector: { lastSyncAt: Date | null; lastSyncDocCount: number | null } | null
+): boolean {
+  return !passComplete && connector?.lastSyncAt != null && connector.lastSyncDocCount != null
+}
+
 /**
  * Fraction of a connector's owned documents that a single reconciliation pass
  * may remove before the pass is held.
@@ -804,6 +878,14 @@ export async function runChangeFeedPass(input: ChangeFeedPassInput): Promise<Cha
   return result
 }
 
+/**
+ * Documents a listing that started at `startedAt` has not yet stamped seen: the absence test for
+ * EOF reconciliation, and the guard that keeps a stamp from rewriting an already-current row.
+ */
+export function staleSeen(startedAt: Date) {
+  return or(isNull(document.sourceSeenAt), lt(document.sourceSeenAt, startedAt))
+}
+
 interface OwnedDocument {
   id: string
   externalId: string | null
@@ -891,6 +973,12 @@ export function classifyListing(input: {
   corpus: OwnedCorpus
   forceRehydrate: boolean
   state: SyncRunState
+  matchContentHash?: ContentHashMatcher
+  /**
+   * The source's image policy. A vision image's bytes are pinned to its attachment
+   * version, so a forced rehydration would only pay to read the same image again.
+   */
+  imagePolicy?: ImageExtractionPolicy
 }): DocOp[] {
   const { externalDocs, corpus, forceRehydrate } = input
   const { result, seenExternalIds, failedExternalIds } = input.state
@@ -906,7 +994,12 @@ export function classifyListing(input: {
     }
 
     const existing = corpus.priorByExternalId.get(extDoc.externalId)
-    const classification = classifyExternalDoc(extDoc, existing, forceRehydrate)
+    const classification = classifyExternalDoc(
+      extDoc,
+      existing,
+      forceRehydrate && !isSemanticImage(input.imagePolicy, extDoc.mimeType),
+      input.matchContentHash
+    )
 
     switch (classification.type) {
       case 'skip':
@@ -962,12 +1055,22 @@ export interface ProcessDocOpsInput {
   forceRehydrate: boolean
   state: SyncRunState
   hydration: DocOpHydration
+  matchContentHash?: ContentHashMatcher
   lease: Pick<SyncRunLease, 'beatIfDue' | 'beatLive' | 'stillHeld'>
   /** Who may read the documents this pass writes. */
   documentAccess: ConnectorAccessMode
   /** Yield between batches; one batch always advances an already fetched page. */
   deadlineAt?: number
-  onBatchComplete?: (documents: ExternalDocument[]) => Promise<void>
+  /** Counts this sync's vision image reads against the per-sync cap; absent, no cap. */
+  imageAdmission?: ImageAdmissionState
+  /**
+   * Called per batch with the documents it settled, and the existing images it held
+   * back for a later sync: still present at the source, so they must be marked seen.
+   */
+  onBatchComplete?: (
+    documents: ExternalDocument[],
+    heldBackExisting: ExternalDocument[]
+  ) => Promise<void>
 }
 
 /**
@@ -989,6 +1092,8 @@ export async function processDocOps(input: ProcessDocOpsInput): Promise<boolean>
   } = input
   const { priorByExternalId } = input.corpus
   const { result, failedExternalIds, sourceFailures } = input.state
+  const imagePolicy = imageExtractionPolicyFor(connector.connectorType)
+  let extractionAvailable: Promise<boolean> | undefined
 
   const pendingDispatch: DocumentData[] = []
   const bufferDispatch = isTriggerAvailable()
@@ -1047,13 +1152,32 @@ export async function processDocOps(input: ProcessDocOpsInput): Promise<boolean>
       await input.lease.beatIfDue()
 
       const skipOps = rawBatch.filter((op) => op.type === 'skip')
-      const skippedRetryHashUpdates: Array<{
+      /** Skips retried by their own hash, and unchanged content moved to its current hash. */
+      const hashOnlyUpdates: Array<{
         existingId: string
         externalId: string
         contentHash: string
+        sourceMetadata?: SourceMetadataFields
       }> = []
 
-      const contentOps = rawBatch.filter((op) => op.type !== 'skip')
+      /**
+       * Vision images wait, unfetched, when no Gemini key can read them or the per-sync
+       * budget is spent; the next listing offers them again.
+       */
+      const imageOps = rawBatch.filter(
+        (op) => op.type !== 'skip' && isSemanticImage(imagePolicy, op.extDoc.mimeType)
+      )
+      const canRead =
+        imageOps.length > 0 &&
+        (await (extractionAvailable ??= canExtractImages(kbOwner.workspaceId)))
+      const imagesHeldBack = new Set<string>()
+      for (const op of imageOps) {
+        if (!canRead || !admitVisionImage(input.imageAdmission))
+          imagesHeldBack.add(op.extDoc.externalId)
+      }
+      const contentOps = rawBatch
+        .filter((op) => op.type !== 'skip')
+        .filter((op) => !imagesHeldBack.has(op.extDoc.externalId))
       const deferredOps = contentOps.filter((op) => op.extDoc.contentDeferred)
       const readyOps = contentOps.filter((op) => !op.extDoc.contentDeferred)
       let hydrationDeferral: unknown
@@ -1089,7 +1213,7 @@ export async function processDocOps(input: ProcessDocOpsInput): Promise<boolean>
                   })
                 } else {
                   if (fullDoc.skippedRetryContentHash) {
-                    skippedRetryHashUpdates.push({
+                    hashOnlyUpdates.push({
                       existingId: op.existingId,
                       externalId: op.extDoc.externalId,
                       contentHash: fullDoc.skippedRetryContentHash,
@@ -1115,12 +1239,27 @@ export async function processDocOps(input: ProcessDocOpsInput): Promise<boolean>
              * Forced rehydration also refreshes rendered dependencies whose changes
              * are not represented by the parent version hash.
              */
-            if (
+            const match =
               op.type === 'update' &&
               !forceRehydrate &&
               existing?.storageKey !== null &&
-              existing?.contentHash === hydratedHash
-            ) {
+              existing?.contentHash
+                ? contentHashMatch(hydratedHash, existing.contentHash, input.matchContentHash)
+                : 'stale'
+            if (op.type === 'update' && match !== 'stale') {
+              /** The same content under an older hash only advances the hash the next listing compares. */
+              if (match === 'equivalent') {
+                hashOnlyUpdates.push({
+                  existingId: op.existingId,
+                  externalId: op.extDoc.externalId,
+                  contentHash: hydratedHash,
+                  sourceMetadata: resolveSourceMetadataFields(
+                    connector.connectorType,
+                    mergeHydratedDocument(op.extDoc, fullDoc, hydratedHash),
+                    sourceConfig
+                  ),
+                })
+              }
               result.docsUnchanged++
               return null
             }
@@ -1169,24 +1308,24 @@ export async function processDocOps(input: ProcessDocOpsInput): Promise<boolean>
        */
       await input.lease.beatLive()
 
-      if (skippedRetryHashUpdates.length > 0) {
+      if (hashOnlyUpdates.length > 0) {
         try {
-          const missedExternalIds = await persistSkippedRetryHashes(
+          const missedExternalIds = await persistHashOnlyUpdates(
             connector.knowledgeBaseId,
             connectorId,
-            skippedRetryHashUpdates,
+            hashOnlyUpdates,
             input.lease
           )
           if (missedExternalIds.length > 0) {
-            logger.warn('Skipped retry hashes were not persisted for detached documents', {
+            logger.warn('Hash-only updates were not persisted for detached documents', {
               connectorId,
               externalIds: missedExternalIds,
             })
           }
         } catch (error) {
-          logger.error('Failed to persist skipped document retry hashes', {
+          logger.error('Failed to persist hash-only document updates', {
             connectorId,
-            count: skippedRetryHashUpdates.length,
+            count: hashOnlyUpdates.length,
             error: toError(error).message,
           })
           throw error
@@ -1289,9 +1428,17 @@ export async function processDocOps(input: ProcessDocOpsInput): Promise<boolean>
       if (!bufferDispatch) await flushDispatch()
       /** Persist completed siblings before yielding; deferred sources remain on this page for retry. */
       const attempted = rawBatch
-        .filter((op) => !deferredExternalIds.has(op.extDoc.externalId))
+        .filter(
+          (op) =>
+            !deferredExternalIds.has(op.extDoc.externalId) &&
+            !imagesHeldBack.has(op.extDoc.externalId)
+        )
         .map((op) => op.extDoc)
-      if (attempted.length > 0) await input.onBatchComplete?.(attempted)
+      const heldBackExisting = rawBatch
+        .filter((op) => op.type === 'update' && imagesHeldBack.has(op.extDoc.externalId))
+        .map((op) => op.extDoc)
+      if (attempted.length > 0 || heldBackExisting.length > 0)
+        await input.onBatchComplete?.(attempted, heldBackExisting)
       if (hydrationDeferral !== undefined) throw hydrationDeferral
     }
     return true
@@ -1330,17 +1477,11 @@ export async function sweepStuckDocuments(input: SweepStuckDocumentsInput): Prom
   const sweepEvaluatedAt = new Date()
   const sweepCandidates = await db
     .select({
-      id: document.id,
+      ...processingSnapshotColumns,
       fileUrl: document.fileUrl,
       filename: document.filename,
       fileSize: document.fileSize,
       mimeType: document.mimeType,
-      processingStatus: document.processingStatus,
-      processingQueuedAt: document.processingQueuedAt,
-      processingStartedAt: document.processingStartedAt,
-      processingDeferredUntil: document.processingDeferredUntil,
-      processingCompletedAt: document.processingCompletedAt,
-      uploadedAt: document.uploadedAt,
     })
     .from(document)
     .where(
@@ -1360,8 +1501,9 @@ export async function sweepStuckDocuments(input: SweepStuckDocumentsInput): Prom
         END`),
       asc(document.id)
     )
-    .limit(STUCK_RETRY_MAX_CANDIDATES_PER_SYNC)
-  const stuckDocs = sweepCandidates.filter(
+    .limit(Math.min(STUCK_RETRY_MAX_CANDIDATES_PER_SYNC, DOCUMENT_LIVENESS_BATCH_SIZE))
+  const abandonedCandidates = await findAbandonedDocumentProcessing(sweepCandidates)
+  const stuckDocs = abandonedCandidates.filter(
     (row): row is typeof row & { processingStatus: DocumentProcessingStatus } =>
       isDocumentProcessingStatus(row.processingStatus)
   )
@@ -1396,22 +1538,17 @@ export async function sweepStuckDocuments(input: SweepStuckDocumentsInput): Prom
 
       const lockedCandidates = await tx
         .select({
-          id: document.id,
+          ...processingSnapshotColumns,
           fileUrl: document.fileUrl,
           filename: document.filename,
           fileSize: document.fileSize,
           mimeType: document.mimeType,
-          processingStatus: document.processingStatus,
-          processingQueuedAt: document.processingQueuedAt,
-          processingStartedAt: document.processingStartedAt,
-          processingDeferredUntil: document.processingDeferredUntil,
-          processingCompletedAt: document.processingCompletedAt,
-          uploadedAt: document.uploadedAt,
         })
         .from(document)
         .where(
           and(
             inArray(document.id, stuckDocIds),
+            or(...stuckDocs.map(documentProcessingSnapshotCondition)),
             eq(document.connectorId, connectorId),
             documentProcessingRecoveryCondition(sweepEvaluatedAt, retryCutoff),
             lt(document.uploadedAt, syncStartedAt)

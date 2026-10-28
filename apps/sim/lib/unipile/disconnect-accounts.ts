@@ -68,7 +68,7 @@ async function resolveWorkspaceIdForAccountRow(accountRowId: string): Promise<st
     .from(credential)
     .where(eq(credential.accountId, accountRowId))
     .limit(1)
-  return row?.workspaceId
+  return row?.workspaceId ?? undefined
 }
 
 /**

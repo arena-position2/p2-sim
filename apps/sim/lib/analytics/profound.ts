@@ -6,7 +6,6 @@
  * @see https://docs.tryprofound.com/agent-analytics/custom
  */
 import { createLogger } from '@sim/logger'
-import { env } from '@/lib/core/config/env'
 import { isHosted } from '@/lib/core/config/env-flags'
 import { getClientIp } from '@/lib/core/utils/request'
 import { getBaseDomain } from '@/lib/core/utils/urls'
@@ -31,11 +30,19 @@ interface ProfoundLogEntry {
 let buffer: ProfoundLogEntry[] = []
 let flushTimer: NodeJS.Timeout | null = null
 
+function getProfoundApiKey(): string | undefined {
+  return process.env.PROFOUND_API_KEY
+}
+
+function getProfoundEndpoint(): string | undefined {
+  return process.env.PROFOUND_ENDPOINT
+}
+
 /**
  * Returns true if Profound analytics is configured.
  */
 export function isProfoundEnabled(): boolean {
-  return isHosted && Boolean(env.PROFOUND_API_KEY) && Boolean(env.PROFOUND_ENDPOINT)
+  return isHosted && Boolean(getProfoundApiKey()) && Boolean(getProfoundEndpoint())
 }
 
 /**
@@ -44,13 +51,13 @@ export function isProfoundEnabled(): boolean {
 async function flush(): Promise<void> {
   if (buffer.length === 0) return
 
-  const apiKey = env.PROFOUND_API_KEY
+  const apiKey = getProfoundApiKey()
   if (!apiKey) {
     buffer = []
     return
   }
 
-  const endpoint = env.PROFOUND_ENDPOINT
+  const endpoint = getProfoundEndpoint()
   if (!endpoint) {
     buffer = []
     return

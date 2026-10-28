@@ -1,13 +1,7 @@
-import { Button, chipFilledFillTokens, cn, Tooltip } from '@sim/emcn'
+import { BulkActionButton, cn, Tooltip } from '@sim/emcn'
 import { Ban, Circle, Trash } from '@sim/emcn/icons'
 import { domAnimation, LazyMotion, m } from 'framer-motion'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
-
-/** One source of truth for the button chrome, so the three actions read as one control strip. */
-const ACTION_BUTTON_CLASS = cn(
-  chipFilledFillTokens,
-  'hover-hover:text-[var(--text-inverse)]! size-[28px] rounded-lg p-0 text-[var(--text-secondary)] hover-hover:bg-[var(--brand-secondary)]'
-)
 
 interface ActionBarProps {
   selectedCount: number
@@ -57,7 +51,10 @@ export function ActionBar({
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 10 }}
         transition={{ duration: 0.2 }}
-        className={cn('-translate-x-1/2 fixed bottom-6 left-1/2 z-[var(--z-dropdown)]', className)}
+        className={cn(
+          '-translate-x-1/2 fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 z-[var(--z-dropdown)] max-md:max-w-[calc(100%-2rem)]',
+          className
+        )}
       >
         <div className='flex items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1.5'>
           <span className='px-1 text-[var(--text-secondary)] text-small'>
@@ -88,19 +85,13 @@ export function ActionBar({
             )}
           </span>
 
-          <div className='flex items-center gap-[5px]'>
+          <div className='flex shrink-0 items-center gap-[5px]'>
             {showEnableButton && (
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
-                  <Button
-                    variant='ghost'
-                    aria-label='Enable'
-                    onClick={onEnable}
-                    disabled={isLoading}
-                    className={ACTION_BUTTON_CLASS}
-                  >
+                  <BulkActionButton aria-label='Enable' onClick={onEnable} disabled={isLoading}>
                     <Circle className='size-[12px]' />
-                  </Button>
+                  </BulkActionButton>
                 </Tooltip.Trigger>
                 <Tooltip.Content side='top'>Enable</Tooltip.Content>
               </Tooltip.Root>
@@ -109,15 +100,9 @@ export function ActionBar({
             {showDisableButton && (
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
-                  <Button
-                    variant='ghost'
-                    aria-label='Disable'
-                    onClick={onDisable}
-                    disabled={isLoading}
-                    className={ACTION_BUTTON_CLASS}
-                  >
+                  <BulkActionButton aria-label='Disable' onClick={onDisable} disabled={isLoading}>
                     <Ban className='size-[12px]' />
-                  </Button>
+                  </BulkActionButton>
                 </Tooltip.Trigger>
                 <Tooltip.Content side='top'>Disable</Tooltip.Content>
               </Tooltip.Root>
@@ -126,15 +111,9 @@ export function ActionBar({
             {onDelete && canEdit && (
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
-                  <Button
-                    variant='ghost'
-                    aria-label='Delete'
-                    onClick={onDelete}
-                    disabled={isLoading}
-                    className={ACTION_BUTTON_CLASS}
-                  >
+                  <BulkActionButton aria-label='Delete' onClick={onDelete} disabled={isLoading}>
                     <Trash className='size-[12px]' />
-                  </Button>
+                  </BulkActionButton>
                 </Tooltip.Trigger>
                 <Tooltip.Content side='top'>Delete</Tooltip.Content>
               </Tooltip.Root>

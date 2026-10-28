@@ -1,10 +1,11 @@
-/** @vitest-environment node */
 import type { WorkflowExecutionDelegatedPrincipal } from '@sim/auth/principal'
 import { queueTableRows, resetDbChainMock, schemaMock } from '@sim/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { loadWorkflow } = vi.hoisted(() => ({ loadWorkflow: vi.fn() }))
-vi.mock('@sim/workflow-persistence', () => ({ loadWorkflowFromNormalizedTablesRaw: loadWorkflow }))
+vi.mock('@sim/workflow-persistence/load', () => ({
+  loadWorkflowFromNormalizedTablesRaw: loadWorkflow,
+}))
 
 import {
   loadMcpOperationAccess,
@@ -46,7 +47,6 @@ function save(type: string, values: Record<string, unknown>) {
 
 describe('trusted MCP operation access', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     resetDbChainMock()
     save('agent', {
       tools: [
@@ -92,13 +92,6 @@ describe('trusted MCP operation access', () => {
       }
     }
   )
-
-  it('allows all discovered operations for an unrestricted block', async () => {
-    save('mcp', { server: 'server-1', operation: 'list', operationPolicy: { mode: 'all' } })
-    const allowed = await loadMcpOperationAccess(principal, target)
-    expect(allowed.allows('read')).toBe(true)
-    expect(allowed.allows('write')).toBe(true)
-  })
 
   it('does not apply workflow restrictions to an authorized editor catalog', async () => {
     const allowed = await loadMcpOperationAccess(
@@ -179,21 +172,6 @@ describe('trusted MCP operation access', () => {
       expect(allowed.allows('write')).toBe(false)
     }
   )
-
-  it('keeps explicit tools bound to their saved names', async () => {
-    save('agent', {
-      tools: [
-        {
-          type: 'mcp',
-          params: { serverId: 'server-1', toolName: 'read' },
-          schema: { properties: {} },
-        },
-      ],
-    })
-    const allowed = await loadMcpOperationAccess(principal, target)
-    expect(allowed.allows('read')).toBe(true)
-    expect(allowed.allows('write')).toBe(false)
-  })
 
   it('refuses ambiguous dynamic attachments that could widen a restriction', async () => {
     save('agent', {

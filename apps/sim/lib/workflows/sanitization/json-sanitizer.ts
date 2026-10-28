@@ -1,7 +1,11 @@
-import { isRecordLike, sortObjectKeysDeep } from '@sim/utils/object'
+import { isRecordLike, sortObjectKeysDeep, toRecord } from '@sim/utils/object'
+import {
+  generateLoopBlocks,
+  generateParallelBlocks,
+} from '@sim/workflow-persistence/subflow-helpers'
 import { normalizeWorkflowEdgeSourceHandle } from '@sim/workflow-types/workflow'
 import type { Edge } from '@xyflow/react'
-import { getBaseUrl } from '@/lib/core/utils/urls'
+import { buildWebhookTriggerUrl } from '@/lib/webhooks/trigger-url'
 import { sanitizeWorkflowForSharing } from '@/lib/workflows/credentials/credential-extractor'
 import { getBlock } from '@/blocks/registry'
 import type {
@@ -11,7 +15,6 @@ import type {
   Parallel,
   WorkflowState,
 } from '@/stores/workflows/workflow/types'
-import { generateLoopBlocks, generateParallelBlocks } from '@/stores/workflows/workflow/utils'
 import { TRIGGER_ROUTING_FIELD, TRIGGER_WEBHOOK_URL_FIELD } from '@/triggers/constants'
 import { blockAdvertisesWebhookUrl, resolveBlockTriggerId } from '@/triggers/webhook-url'
 
@@ -40,17 +43,6 @@ interface CopilotBlockState {
   errorEnabled?: boolean
   retry?: BlockRetryConfig
   triggerMode?: boolean
-}
-
-/**
- * Edge state for copilot (only semantic connection data)
- */
-interface CopilotEdge {
-  id: string
-  source: string
-  target: string
-  sourceHandle?: string
-  targetHandle?: string
 }
 
 /**
@@ -90,7 +82,7 @@ interface SanitizedCondition {
 }
 
 function toSanitizedCondition(condition: unknown): SanitizedCondition {
-  const record = isRecordLike(condition) ? condition : {}
+  const record = toRecord(condition)
   return {
     id: String(record.id ?? ''),
     title: String(record.title ?? ''),
@@ -362,9 +354,9 @@ function resolveTriggerWebhookUrl(blockId: string, block: BlockState): string | 
   const triggerPath = block.subBlocks?.triggerPath?.value
   const path = typeof triggerPath === 'string' && triggerPath.length > 0 ? triggerPath : blockId
   try {
-    return `${getBaseUrl()}/api/webhooks/trigger/${path}`
+    return buildWebhookTriggerUrl(path)
   } catch {
-    // getBaseUrl throws when NEXT_PUBLIC_APP_URL is unset; omit the field rather
+    // The base URL lookup throws when NEXT_PUBLIC_APP_URL is unset; omit the field rather
     // than fail the whole state read.
     return null
   }
@@ -684,13 +676,23 @@ export function sanitizeForCopilot(
   }
 }
 
+export interface ExportSanitizationOptions {
+  includeReferences?: boolean
+  /**
+   * Keep workspace-scoped resource bindings for a same-workspace round trip.
+   * Secrets and credentials are cleared either way; see
+   * `WorkflowSanitizationOptions.preserveWorkspaceBindings`.
+   */
+  preserveWorkspaceBindings?: boolean
+}
+
 /**
  * Sanitize workflow state for export by removing secrets but keeping positions
  * Users need positions to restore the visual layout when importing
  */
 export function sanitizeForExport(
   state: WorkflowState,
-  options: { includeReferences?: boolean } = {}
+  options: ExportSanitizationOptions = {}
 ): ExportWorkflowState {
   const canonicalLoops = generateLoopBlocks(state.blocks || {})
   const canonicalParallels = generateParallelBlocks(state.blocks || {})
@@ -710,6 +712,7 @@ export function sanitizeForExport(
     preserveEnvVars: true, // Keep {{ENV_VAR}} references in exported workflows
     redactOpaqueCredentialInputs: true,
     preserveReferenceMetadata: options.includeReferences,
+    ...(options.preserveWorkspaceBindings ? { preserveWorkspaceBindings: true } : {}),
   }) as ExportWorkflowState['state']
 
   return {

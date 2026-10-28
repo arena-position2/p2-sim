@@ -1,101 +1,127 @@
-/**
- * @vitest-environment node
- */
-import { describe, expect, it, vi } from 'vitest'
-
-const mocks = vi.hoisted(() => ({
-  defineRoute: vi.fn((definition) => definition),
-  capture: vi.fn(),
-}))
-
-vi.mock('@/lib/api/server/routes', () => ({
-  createInternalResourceConcealmentPolicy: vi.fn(() => ({ kind: 'conceal-internal-resource' })),
-  internalOrchestrationErrorPolicy: { kind: 'internal-plain' },
-  createInternalSessionOrExecutorAuth: vi.fn(() => ({ kind: 'internal-workflow' })),
-  createV2ResourceConcealmentPolicy: vi.fn(() => ({ kind: 'conceal-resource' })),
-  defineV2JsonRoute: mocks.defineRoute,
-  v2ApiKeyAuth: { kind: 'v2-api-key' },
-  v2RateLimits: { publicApi: { kind: 'public-api' } },
-  v2OrchestrationErrorPolicy: { kind: 'orchestration-errors' },
-}))
-vi.mock('@/lib/posthog/server', () => ({ captureServerEvent: mocks.capture }))
-
 import {
-  v2DeployWorkflowContract,
-  v2UndeployWorkflowContract,
-} from '@/lib/api/contracts/v2/workflows'
-import { v2WorkflowErrorPolicies } from '@/lib/workflows/api'
-import { deployWorkflow, undeployWorkflow } from '@/lib/workflows/application/deployments'
-import { workflowOperations } from '@/lib/workflows/application/operations'
-import { DELETE, POST } from '@/app/api/v2/workflows/[workflowId]/deploy/route'
+  V2_OPERATION_RATE_LIMIT_ALLOWED,
+  V2_PREAUTH_RATE_LIMIT_ALLOWED,
+  v2ApiKeyAuthModuleMock,
+  v2RateLimiterModuleMock,
+  v2RouteMocks,
+} from '@sim/testing'
+import { createPersonalApiKeyPrincipal } from '@sim/testing/factories/principal.factory'
+import { createRouteContext } from '@sim/testing/helpers/http'
+import { auditMock } from '@sim/testing/mocks/audit.mock'
+import { createMockRequest } from '@sim/testing/mocks/request.mock'
+import {
+  workflowContextMock,
+  workflowContextMockFns,
+} from '@sim/testing/mocks/workflow-context.mock'
+import {
+  workflowsOrchestrationMock,
+  workflowsOrchestrationMockFns,
+} from '@sim/testing/mocks/workflows-orchestration.mock'
+import {
+  workflowsPersistenceUtilsMock,
+  workflowsPersistenceUtilsMockFns,
+} from '@sim/testing/mocks/workflows-persistence-utils.mock'
+import { workspaceAuthzMock, workspaceAuthzMockFns } from '@sim/testing/mocks/workspace-authz.mock'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-describe('/api/v2/workflows/[workflowId]/deploy route definitions', () => {
-  /**
-   * Both the malformed-body 400 and the oversized-body 413 are v2 builder
-   * defaults, so neither belongs on the route. The envelope they produce is
-   * asserted once against the builder in
-   * `lib/api/server/routes/v2-error-envelope.test.ts`.
-   */
-  it('keeps an omitted deploy body valid and binds the authorized deployment use case', async () => {
-    expect(v2DeployWorkflowContract.body?.parse(undefined)).toEqual({})
-    expect(POST).toMatchObject({
-      operation: workflowOperations.deploy,
-      useCase: deployWorkflow,
-      errorPolicy: v2WorkflowErrorPolicies.concealWorkflowAuthorization,
-      parseOptions: { optionalJsonBody: true },
+const mocks = vi.hoisted(() => ({ buildWorkflowLintReport: vi.fn() }))
+
+vi.mock('@sim/audit', () => auditMock)
+vi.mock('@sim/platform-authz/workspace', () => workspaceAuthzMock)
+vi.mock('@/lib/workflows/application/context', () => workflowContextMock)
+vi.mock('@/lib/workflows/orchestration', () => workflowsOrchestrationMock)
+vi.mock('@/lib/workflows/persistence/utils', () => workflowsPersistenceUtilsMock)
+vi.mock('@/lib/workflows/editing/lint-report', () => ({
+  buildWorkflowLintReport: mocks.buildWorkflowLintReport,
+}))
+vi.mock('@/lib/api/server/routes/v2-api-key-auth', () => v2ApiKeyAuthModuleMock)
+vi.mock('@/lib/core/rate-limiter', () => v2RateLimiterModuleMock)
+
+import { POST } from '@/app/api/v2/workflows/[workflowId]/deploy/route'
+
+const sideEffectWarning =
+  'Deployment activation completed, and post-activation notifications are queued.'
+
+const unquotedRowJson = {
+  sources: [],
+  sinks: [],
+  orphanBlocks: [],
+  emptyOutgoingPorts: [],
+  invalidBranchPorts: [],
+  invalidConnectionTargets: [],
+  fieldIssues: [],
+  unresolvedReferences: [
+    {
+      blockId: 'insert',
+      blockName: 'Insert Order',
+      field: 'data',
+      value: ['<start.order_id>'],
+      kind: 'block-output' as const,
+      reason: 'unquoted-json-string: quote it',
+    },
+  ],
+  tableFieldIssues: [],
+  notes: [],
+}
+
+describe('POST /api/v2/workflows/[workflowId]/deploy', () => {
+  beforeEach(() => {
+    v2RouteMocks.authenticate.mockResolvedValue({
+      principal: createPersonalApiKeyPrincipal({ userId: 'user-1', keyId: 'personal-key-1' }),
+      rateLimitSubjectIds: ['api-key:personal-key-1', 'user:user-1'],
+      rateLimitSubscription: null,
+      keyType: 'personal',
     })
-    expect(
-      Reflect.get(POST, 'mapInput')({ params: { workflowId: 'workflow-1' }, body: {} })
-    ).toEqual(
-      expect.objectContaining({
-        workflowId: 'workflow-1',
-        name: undefined,
-        description: undefined,
-      })
-    )
-
-    expect(Reflect.get(Reflect.get(POST, 'parseOptions'), 'invalidJsonResponse')).toBeUndefined()
-    expect(
-      Reflect.get(Reflect.get(POST, 'parseOptions'), 'payloadTooLargeResponse')
-    ).toBeUndefined()
-  })
-
-  it('presents the full declared deployment lifecycle response', () => {
-    const body = Reflect.get(
-      POST,
-      'present'
-    )({
-      workflowId: 'workflow-1',
+    v2RouteMocks.preauthRate.mockResolvedValue(V2_PREAUTH_RATE_LIMIT_ALLOWED)
+    v2RouteMocks.operationRate.mockResolvedValue(V2_OPERATION_RATE_LIMIT_ALLOWED)
+    workspaceAuthzMockFns.mockResolveEffectiveWorkspacePermission.mockResolvedValue('admin')
+    workflowContextMockFns.mockResolveActiveWorkflowApplicationContext.mockResolvedValue({
       workspaceId: 'workspace-1',
-      deployedAt: new Date('2026-01-01T00:00:00.000Z'),
-      version: 2,
-      warnings: [],
+      workspaceOrganizationId: null,
+      allowPersonalApiKeys: true,
+      billedAccountUserId: 'billing-owner-1',
+      workflowId: 'workflow-1',
+      workflow: { id: 'workflow-1', workspaceId: 'workspace-1', isDeployed: true },
+    })
+    workflowsOrchestrationMockFns.mockPerformFullDeploy.mockResolvedValue({
+      success: true,
+      version: 4,
+      deploymentVersionId: 'version-4',
       activeDeployment: null,
       latestDeploymentAttempt: null,
+      warnings: [sideEffectWarning],
     })
-    expect(body.data.isDeployed).toBe(false)
-    expect(v2DeployWorkflowContract.response.schema.parse(body)).toEqual(body)
+    workflowsPersistenceUtilsMockFns.mockLoadWorkflowDeploymentVersionState.mockResolvedValue({
+      blocks: {},
+      edges: [],
+    })
+    mocks.buildWorkflowLintReport.mockResolvedValue(unquotedRowJson)
   })
 
-  it('defers deploy analytics to durable activation', () => {
-    expect(Reflect.get(POST, 'onSuccess')).toBeUndefined()
-    expect(mocks.capture).not.toHaveBeenCalled()
-  })
+  /**
+   * Chat, the CLI, and API callers learn a deployed block cannot run from this
+   * response. Mixed into `warnings`, the findings were indistinguishable from
+   * failed side effects, so no surface could present them deliberately.
+   */
+  it('publishes the deployed version lint apart from side-effect warnings', async () => {
+    const response = await POST(
+      createMockRequest('POST', {}, {}, 'http://localhost/api/v2/workflows/workflow-1/deploy'),
+      createRouteContext({ workflowId: 'workflow-1' })
+    )
+    const body = await response.json()
 
-  it('keeps undeploy on the authorized operation and declared response schema', () => {
-    expect(DELETE).toMatchObject({
-      operation: workflowOperations.undeploy,
-      useCase: undeployWorkflow,
-      errorPolicy: v2WorkflowErrorPolicies.concealWorkflowAuthorization,
-    })
-    const body = Reflect.get(
-      DELETE,
-      'present'
-    )({
-      workflowId: 'workflow-1',
-      workspaceId: 'workspace-1',
-      warnings: [],
-    })
-    expect(v2UndeployWorkflowContract.response.schema.parse(body)).toEqual(body)
+    expect(response.status).toBe(200)
+    expect(body.data.warnings).toEqual([sideEffectWarning])
+    expect(body.data.lint.unresolvedReferences).toEqual([
+      {
+        blockId: 'insert',
+        blockName: 'Insert Order',
+        blockType: null,
+        field: 'data',
+        value: ['<start.order_id>'],
+        kind: 'block-output',
+        reason: 'unquoted-json-string: quote it',
+      },
+    ])
   })
 })

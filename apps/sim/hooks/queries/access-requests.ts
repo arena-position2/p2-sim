@@ -22,7 +22,7 @@ import type {
   WorkspaceCreditAvailability,
   WorkspaceUsageGate,
 } from '@/lib/api/contracts/workspaces'
-import { ACCESS_REQUEST_LIST_PAGE_SIZE } from '@/lib/permission-access-requests/constants'
+import { ACCESS_REQUEST_LIST_PAGE_SIZE } from '@/ee/access-requests/lib/constants'
 import {
   ACCESS_REQUESTS_STALE_TIME,
   accessRequestKeys,
@@ -106,14 +106,20 @@ export function useMyAccessRequests(
 export function useOrganizationAccessRequests(
   organizationId: string,
   offset = 0,
-  status: AccessRequestStatus | 'all' = 'pending'
+  status: AccessRequestStatus | 'all' = 'pending',
+  search = ''
 ) {
   return useQuery({
-    queryKey: accessRequestKeys.organization(organizationId, offset, status),
+    queryKey: accessRequestKeys.organization(organizationId, offset, status, search),
     queryFn: ({ signal }) =>
       requestJson(listOrganizationAccessRequestsContract, {
         params: { id: organizationId },
-        query: { offset, limit: ACCESS_REQUEST_PAGE_SIZE, ...(status === 'all' ? {} : { status }) },
+        query: {
+          offset,
+          limit: ACCESS_REQUEST_PAGE_SIZE,
+          ...(status === 'all' ? {} : { status }),
+          ...(search ? { search } : {}),
+        },
         signal,
       }),
     enabled: Boolean(organizationId),

@@ -154,7 +154,6 @@
    */
   --color-amber-50: #fffbeb;
   --color-amber-200: #fde68a;
-  --color-amber-300: #fcd34d;
   --color-amber-400: #fbbf24;
   --color-amber-500: #f59e0b;
   --color-amber-600: #d97706;
@@ -166,7 +165,6 @@
   --color-emerald-400: #34d399;
   --color-emerald-500: #10b981;
   --color-green-500: #22c55e;
-  --color-orange-400: #fb923c;
   --color-purple-500: #a855f7;
   --color-red-50: #fef2f2;
   --color-red-300: #fca5a5;
@@ -233,6 +231,18 @@
   --animate-hero-file-drop: hero-file-drop 480ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-hero-node-pop: hero-node-pop 440ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-hero-edge-draw: hero-edge-draw 520ms ease-out forwards;
+}
+
+/** Runtime collaborator colours must exist even without a matching utility class. */
+@theme static {
+  --color-black: #000000;
+  --color-white: #ffffff;
+  --color-amber-300: #fcd34d;
+  --color-orange-400: #fb923c;
+  --color-pink-400: #f472b6;
+  --color-purple-400: #c084fc;
+  --color-violet-500: #8b5cf6;
+  --color-cool-gray-500: #6b7280;
 }
 
 /**
@@ -652,18 +662,6 @@ html.sidebar-resizing .sidebar-shell-inner {
   transition: none !important;
 }
 
-/* Suppress sidebar transitions during the initial hydration window. The
-   pre-paint script sets the correct --sidebar-width, but store rehydration
-   re-applies it a tick later; without this guard that re-apply animates the
-   rail, reading as a collapse -> expand flash on a fresh page load. Removed
-   after the first paint (see workspace-chrome.tsx) so user-driven toggles and
-   the fullscreen slide still animate. */
-html.sidebar-booting .sidebar-container,
-html.sidebar-booting .sidebar-shell-outer,
-html.sidebar-booting .sidebar-shell-inner {
-  transition: none !important;
-}
-
 .panel-container {
   width: var(--panel-width);
 }
@@ -787,7 +785,7 @@ html.sidebar-booting .sidebar-shell-inner {
     --selection-muted: #1a5cf647;
     --warning: #ea580c;
 
-    /* Inverted surface (dark chrome on light page, e.g. tag dropdown) */
+    /* Inverted surface: dark chrome that stays dark in light mode */
     --surface-inverted: #1b1b1b;
     --surface-inverted-hover: #363636;
     --border-inverted: #363636;

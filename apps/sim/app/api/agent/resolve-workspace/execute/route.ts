@@ -5,12 +5,12 @@ import { and, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
-import { appendCopilotChatMessages } from '@/lib/copilot/chat/messages-store'
-import { normalizeMessage, type PersistedMessage } from '@/lib/copilot/chat/persisted-message'
-import { chatPubSub } from '@/lib/copilot/chat-status'
-import { requestChatTitle } from '@/lib/copilot/request/lifecycle/start'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { fetchStreamingPost } from '@/lib/core/utils/streaming-fetch'
+import { appendCopilotChatMessages } from '@/lib/mothership/chat/messages-store'
+import { normalizeMessage, type PersistedMessage } from '@/lib/mothership/chat/persisted-message'
+import { chatPubSub } from '@/lib/mothership/chat-status'
+import { requestChatTitle } from '@/lib/mothership/request/lifecycle/start'
 
 const logger = createLogger('AgentResolveWorkspaceExecute')
 
@@ -478,8 +478,8 @@ export async function POST(req: NextRequest) {
     body = ExecuteRequestSchema.parse(await req.json())
   } catch (error) {
     if (error instanceof z.ZodError) {
-      logger.warn('Invalid resolve-workspace execute request body', { errors: error.errors })
-      return NextResponse.json({ error: 'Invalid request', details: error.errors }, { status: 400 })
+      logger.warn('Invalid resolve-workspace execute request body', { errors: error.issues })
+      return NextResponse.json({ error: 'Invalid request', details: error.issues }, { status: 400 })
     }
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
