@@ -32,6 +32,38 @@ export const MAX_WORKFLOW_BUILD_CONTINUATION_ROUNDS = 2
 export const MAX_FILE_EDIT_CONTINUATION_ROUNDS = 3
 
 /**
+ * When an HTML edit follow-up only `read`s (no grep yet), force at most one
+ * round that steers toward grep(user tokens) → patch instead of offset paging.
+ */
+export const MAX_HTML_EDIT_GREP_NUDGE_ROUNDS = 1
+
+/**
+ * Successful file inspections (read/grep/glob/artifact) before an HTML edit
+ * turn is forced to call workspace_file instead of paging further.
+ */
+export const HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE = 6
+
+/**
+ * Forced "patch now" rounds after the inspection threshold. After this budget
+ * is exhausted with still no write, the turn stops with a clear user closer.
+ */
+export const MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS = 5
+
+/**
+ * Successful read/grep/glob/load_copilot_artifact calls on the same path
+ * (offset/limit ignored) before hard-stopping when no file mutation ran.
+ * Caps endless HTML paging that never reaches workspace_file / edit_content.
+ */
+export const MAX_FILE_EXPLORE_WITHOUT_MUTATION = 16
+
+/**
+ * Turn-wide cap on file-inspection tools without any successful file mutation.
+ * Kept above {@link MAX_FILE_EXPLORE_WITHOUT_MUTATION} so the path ceiling can
+ * actually fire (both counters increment on every inspection).
+ */
+export const MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION = 24
+
+/**
  * When research/factual intent ends with no live web search tool call, force
  * one more round so Claude/Gemini cannot settle on a memory-only answer.
  */
@@ -58,14 +90,15 @@ export const MAX_POPULATE_EDITS_HARD_LOCK = 20
 export const MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS = 2
 
 /**
- * `get_blocks_metadata` / `load_copilot_artifact` calls allowed after
- * create_workflow and before the first successful populate edit. Further
- * discovery calls are rejected so the model must edit_workflow.
+ * Successful `get_blocks_metadata` calls allowed after create_workflow and
+ * before the first successful populate edit. Further metadata fetches are
+ * rejected so the model must edit_workflow. `load_copilot_artifact` does not
+ * count — only successful metadata fetches burn this budget.
  */
-export const MAX_PRE_POPULATE_DISCOVERY_CALLS = 2
+export const MAX_PRE_POPULATE_DISCOVERY_CALLS = 5
 
 /**
- * Discovery-only rounds refunded against `MAX_TOOL_ITERATIONS` before the first
+ * Metadata-only rounds refunded against `MAX_TOOL_ITERATIONS` before the first
  * successful populate edit. Rejected discovery rounds are not refunded.
  */
-export const MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS = 2
+export const MAX_PRE_POPULATE_DISCOVERY_ROUND_REFUNDS = 5

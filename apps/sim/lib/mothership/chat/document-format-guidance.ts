@@ -76,7 +76,7 @@ export function documentLayoutFollowUpHint(fileName: string, baseHint: string): 
     return `${baseHint} Write finished GFM: # title, ## sections, lists/tables, blank lines. Do not wrap the whole file in a code fence.`
   }
   if (lower.endsWith('.html') || lower.endsWith('.htm')) {
-    return `${baseHint} Preserve the existing HTML. For a title/heading/string change use operation=patch with search_replace and the exact current substring — do not regenerate the page. If using update, edit_content must start from the current file.`
+    return `${baseHint} Preserve the existing HTML. For a title/heading/string change use operation=patch with search_replace and the exact current substring — do not regenerate the page. Full operation=update is only for lean HTML under ~40KB; larger files must use patch.`
   }
   return baseHint
 }
