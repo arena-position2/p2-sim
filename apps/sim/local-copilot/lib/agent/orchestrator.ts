@@ -1045,7 +1045,7 @@ export async function* runLocalCopilotAgent(
   let forcedHtmlEditGrepNudges = 0
   let forcedHtmlEditWriteNudges = 0
   let forcedResearchSearchContinuations = 0
-  /** Metadata / artifact calls after create and before the first successful edit. */
+  /** Successful get_blocks_metadata calls after create and before the first populate edit. */
   let prePopulateDiscoveryCalls = 0
   let refundedPrePopulateDiscoveryRounds = 0
   let roundToolNames: string[] = []
@@ -1108,11 +1108,7 @@ export async function* runLocalCopilotAgent(
       discoveryCallsSoFar: prePopulateDiscoveryCalls,
       toolName,
     })
-    if (decision === 'allow') {
-      prePopulateDiscoveryCalls += 1
-      return null
-    }
-    if (decision !== 'reject') return null
+    if (decision === 'allow' || decision === 'ignore') return null
     roundHadRejectedDiscovery = true
     const message = buildPrePopulateDiscoveryBlockedMessage()
     return {
@@ -1121,6 +1117,12 @@ export async function* runLocalCopilotAgent(
       error: message,
       result: { success: false, error: message, message },
     }
+  }
+
+  /** Counts only successful get_blocks_metadata toward the pre-populate budget. */
+  const recordSuccessfulBlocksMetadataFetch = () => {
+    if (!createdWorkflowThisTurn || successfulPopulateEdits > 0) return
+    prePopulateDiscoveryCalls += 1
   }
 
   // Overflow past maxToolRounds is reserved for write-critical follow-ups
@@ -2243,6 +2245,7 @@ export async function* runLocalCopilotAgent(
             completedToolCallIds.add(parallelCall.id)
 
             if (parallelCall.name === 'get_blocks_metadata' && toolResult.success) {
+              recordSuccessfulBlocksMetadataFetch()
               if (blocksMetadataFetchedThisTurn) {
                 deferredSystemMessages.push({
                   role: 'system',
@@ -2643,6 +2646,7 @@ export async function* runLocalCopilotAgent(
       completedToolCallIds.add(call.id)
 
       if (call.name === 'get_blocks_metadata' && toolResult.success) {
+        recordSuccessfulBlocksMetadataFetch()
         if (blocksMetadataFetchedThisTurn) {
           deferredSystemMessages.push({
             role: 'system',

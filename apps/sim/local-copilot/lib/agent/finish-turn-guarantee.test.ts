@@ -5,6 +5,7 @@
  * mid-process (create without populate, unresolved follow-ups, empty bubble).
  */
 import { describe, expect, it } from 'vitest'
+import { MAX_PRE_POPULATE_DISCOVERY_CALLS } from '@/local-copilot/lib/agent/limits'
 import {
   buildWorkflowBuildChatAppendix,
   synthesizeAssistantSummaryFromTools,
@@ -19,7 +20,7 @@ import {
 } from '@/local-copilot/lib/user-facing-text'
 
 describe('pre-populate discovery budget', () => {
-  it('allows two metadata or artifact calls, then rejects further ones', () => {
+  it('gates only get_blocks_metadata; load_copilot_artifact is ignored', () => {
     expect(
       admitPrePopulateDiscovery({
         createdWorkflowThisTurn: true,
@@ -32,8 +33,16 @@ describe('pre-populate discovery budget', () => {
       admitPrePopulateDiscovery({
         createdWorkflowThisTurn: true,
         successfulPopulateEdits: 0,
-        discoveryCallsSoFar: 2,
+        discoveryCallsSoFar: 99,
         toolName: 'load_copilot_artifact',
+      })
+    ).toBe('ignore')
+    expect(
+      admitPrePopulateDiscovery({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        discoveryCallsSoFar: MAX_PRE_POPULATE_DISCOVERY_CALLS,
+        toolName: 'get_blocks_metadata',
       })
     ).toBe('reject')
   })
@@ -49,7 +58,16 @@ describe('pre-populate discovery budget', () => {
     ).toBe('ignore')
   })
 
-  it('refunds a discovery-only round and does not refund a rejected one', () => {
+  it('refunds a metadata-only round and does not refund mixed or rejected rounds', () => {
+    expect(
+      shouldRefundPrePopulateDiscoveryRound({
+        createdWorkflowThisTurn: true,
+        successfulPopulateEdits: 0,
+        roundToolNames: ['get_blocks_metadata'],
+        refundsSoFar: 0,
+        hadRejectedDiscovery: false,
+      })
+    ).toBe(true)
     expect(
       shouldRefundPrePopulateDiscoveryRound({
         createdWorkflowThisTurn: true,
@@ -58,7 +76,7 @@ describe('pre-populate discovery budget', () => {
         refundsSoFar: 0,
         hadRejectedDiscovery: false,
       })
-    ).toBe(true)
+    ).toBe(false)
     expect(
       shouldRefundPrePopulateDiscoveryRound({
         createdWorkflowThisTurn: true,
