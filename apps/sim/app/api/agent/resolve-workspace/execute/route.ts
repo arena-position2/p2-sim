@@ -4,6 +4,7 @@ import { createLogger } from '@sim/logger'
 import { and, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { V2_WORKFLOW_BILLING_EMAIL_HEADER } from '@/lib/api/contracts/v2/workflows'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { fetchStreamingPost } from '@/lib/core/utils/streaming-fetch'
@@ -472,6 +473,10 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = session.user.id
+  const userEmail = session.user.email?.trim()
+  if (!userEmail) {
+    return NextResponse.json({ error: 'Logged-in user email is required' }, { status: 400 })
+  }
 
   let body: z.infer<typeof ExecuteRequestSchema>
   try {
@@ -671,6 +676,7 @@ export async function POST(req: NextRequest) {
             headers: {
               'X-API-Key': apiKey,
               'Content-Type': 'application/json',
+              [V2_WORKFLOW_BILLING_EMAIL_HEADER]: userEmail,
             },
             body: JSON.stringify({
               input: body.input,
