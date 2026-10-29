@@ -26,6 +26,7 @@ import {
   enrichLocalIntegrationToolParams,
   SEPARATE_DRAFT_RECIPIENTS_KEY,
 } from '@/local-copilot/lib/tools/enrich-integration-params'
+import { ensureStartReservedInputFormatInEditOperations } from '@/local-copilot/lib/tools/ensure-start-reserved-input-format'
 import { injectWorkspaceEnvApiKeyIfNeeded } from '@/local-copilot/lib/tools/inject-workspace-env-api-key'
 import {
   executeMothershipDelegatedTool,
@@ -504,15 +505,23 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      enrichedArgs.operations = coerceLocalEditDropdownInputs(
-        normalizeLocalEditConnections(operations, {
-          blocks: ctx.structuredContext.workflow?.blocks,
-          edges: ctx.structuredContext.workflow?.edges,
-          availableBlocks: ctx.structuredContext.availableBlocks,
-        }),
+      enrichedArgs.operations = ensureStartReservedInputFormatInEditOperations(
+        coerceLocalEditDropdownInputs(
+          normalizeLocalEditConnections(operations, {
+            blocks: ctx.structuredContext.workflow?.blocks,
+            edges: ctx.structuredContext.workflow?.edges,
+            availableBlocks: ctx.structuredContext.availableBlocks,
+          }),
+          {
+            blocksMetadataByType: ctx.blocksMetadataByType,
+            existingBlocks: ctx.structuredContext.workflow?.blocks,
+          }
+        ),
         {
-          blocksMetadataByType: ctx.blocksMetadataByType,
-          existingBlocks: ctx.structuredContext.workflow?.blocks,
+          blocks: ctx.structuredContext.workflow?.blocks,
+          ...(ctx.createdWorkflowThisTurn?.startBlockId
+            ? { knownStartBlockIds: [ctx.createdWorkflowThisTurn.startBlockId] }
+            : {}),
         }
       )
 

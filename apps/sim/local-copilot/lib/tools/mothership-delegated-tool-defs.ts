@@ -4,7 +4,7 @@ import type { LocalCopilotToolDefinition } from '@/local-copilot/lib/types'
 
 const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   run_workflow:
-    'Executes a workflow and returns block outputs, executionId, and status. Call get_workflow_run_options first when trigger inputs are unknown.',
+    'Executes a workflow and returns block outputs, executionId, and status. Call get_workflow_run_options first when trigger inputs are unknown. For Start file[] / files inputs, pass workflow_input.files as [{ id: "<workspace-file-uuid>" }] — never a bare uploads/ or files/ path string; materialize_file chat uploads into files/… first when needed. Do not claim binary file attach is impossible.',
   run_workflow_until_block:
     'Runs a workflow until a specific block completes, then returns partial outputs.',
   run_block:
