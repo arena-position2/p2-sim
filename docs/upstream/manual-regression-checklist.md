@@ -6,6 +6,8 @@ Sources: [ARENA-NOTES.md](../../.agents/ARENA-NOTES.md), [version-6.1-main-vs-ma
 
 Updated 2026-10-28 for fixes on `upstream-sync/2026-10-14` after the 2026-10-14 checklist: copilot “Run not found” and reply formatting, Usage vs Insights and cross-org API billing, image rendering, Slack connect, Google Ads v26, the video builder app, and the agents list.
 
+Updated 2026-10-29: Local Copilot “Fork in new chat” still opens the new chat when the cloud worker has no conversation for that chat. The 2026-10-14 sync made that worker copy mandatory.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -90,6 +92,7 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 - [ ] Local send uses Arena Copilot (local model reply). Cloud send uses Mothership when `COPILOT_API_KEY` is configured.
 - [ ] Local model picker selection persists as the user default; session memory inspector appears on longer Local threads. The picker includes Claude Fable 5.1, GPT-6 Astra, and GPT-5.5, and one of those models returns a reply.
 - [ ] Cloud: finish one turn, then send another after the chat has been idle. The second turn completes. The user does not see “Run not found”. A Local turn that reconnects stays on Local and also does not show “Run not found”.
+- [ ] On Local, fork a finished reply (“Fork in new chat”). The new chat opens, its title starts with `Fork |`, and it contains the messages up to that reply. There is no “Failed to fork chat” toast. On Cloud, with `COPILOT_API_KEY` set, the same action still succeeds.
 - [ ] After a Copilot reply finishes, scrolling the thread does not turn ordinary `*` characters or unfinished markdown into bold.
 - [ ] Ask Copilot for a fixed sequence: today’s calendar, unread Gmail, Slack messages, then a written briefing. The canvas gets `google_calendar_v2`, `gmail_v2`, and `slack` as their own blocks in that order. Those integrations are not attached as Agent tools. A daily time trigger is a `schedule` block, not `schedule_trigger`.
 - [ ] Ask Copilot to create an HTML page. The saved file opens as a complete page, not a truncated tag dump in the chat.
