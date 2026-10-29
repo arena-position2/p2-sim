@@ -24,9 +24,10 @@ export const AGENT_TOOLS_NOT_CANVAS_ADD_TYPES = new Set([
 export const AGENT_TOOLS_NOT_CANVAS_ADD_ERROR =
   'Do not add image_generator_v2 / chart_generator / exa as canvas blocks. ' +
   'Edit the existing Agent block and set params.inputs.tools to an array that MERGES these entries with any existing tools, e.g. ' +
-  '{ type: "image_generator_v2", title: "Image Generator", toolId: "image_generate", usageControl: "auto", params: { inputImage: "<start.files>" } }, ' +
-  '{ type: "chart_generator", title: "Chart Generator", operation: "generate", toolId: "chart_generate", usageControl: "auto" }, ' +
-  '{ type: "exa", title: "Exa Search", operation: "exa_search", toolId: "exa_search", usageControl: "auto" }. ' +
+  '{ type: "image_generator_v2", usageControl: "auto", params: { inputImage: "<start.files>" } }, ' +
+  '{ type: "chart_generator", operation: "generate", usageControl: "auto" }, ' +
+  '{ type: "exa", operation: "exa_search", usageControl: "auto" }. ' +
+  'Omit title, name, toolId, and functionName on new attachments. ' +
   'Also update the Agent messages/system prompt so the model knows when to call each tool based on the user question.'
 
 export interface LookBeforeWriteOk {

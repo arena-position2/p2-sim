@@ -156,6 +156,9 @@ function isRetryableStreamError(error: unknown): boolean {
     return true
   }
   if (error instanceof CopilotBackendError) {
+    // A fresh turn whose channel was not registered comes back as this 404.
+    // The same message can be sent again once a poll is actually in flight.
+    if (error.message === 'Run not found') return true
     return error.status !== undefined && error.status >= 500
   }
   return error instanceof WorkerUnreachableError

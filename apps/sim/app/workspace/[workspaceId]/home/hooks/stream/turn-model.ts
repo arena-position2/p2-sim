@@ -12,6 +12,7 @@ import {
 } from '@/lib/mothership/generated/mothership-stream-v1'
 import { ToolActivity } from '@/lib/mothership/generated/protocol'
 import { CallIntegrationTool } from '@/lib/mothership/generated/tool-catalog-v1'
+import { isExplicitStopReason } from '@/lib/mothership/request/session/abort-reason'
 import type { PersistedStreamEventEnvelope } from '@/lib/mothership/request/session/contract'
 import type { TaskBlockInfo } from '@/lib/mothership/request/types'
 import { extractStreamingStringArgument } from '@/lib/mothership/tools/streaming-args'
@@ -735,6 +736,10 @@ export function reduceEvent(model: TurnModel, envelope: PersistedStreamEventEnve
       // The error tag is content (rendered inline by the error special-tag); turn
       // termination on error is applied by the stream loop's terminal handling,
       // not here, so a non-fatal mid-stream error event never settles the turn.
+      // A user stop carries an internal abort token (`user_stop:abortActiveStream`).
+      // The cancelled completion renders "Stopped by user"; the token is not content.
+      const stopToken = envelope.payload.message || envelope.payload.error
+      if (isExplicitStopReason(stopToken)) break
       const tag = buildMothershipErrorTag(envelope.payload)
       const key = `${spanId}::assistant`
       const openId = model.openTextByKey.get(key)

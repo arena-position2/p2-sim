@@ -5,7 +5,7 @@ Manual QA workbooks (regenerate both via [generate-regression-qa-xlsx.py](./gene
 - [manual-regression-checklist-qa.xlsx](./manual-regression-checklist-qa.xlsx) — deduped, with Steps / Expected behaviour
 - [manual-regression-checklist-updated.xlsx](./manual-regression-checklist-updated.xlsx) — one row per checkbox in [manual-regression-checklist.md](./manual-regression-checklist.md)
 
-Current workbooks: 146 checkbox rows (P0 88, P1 37, P2 21) and 137 deduped QA rows.
+Current workbooks: 147 checkbox rows (P0 89, P1 37, P2 21) and 138 deduped QA rows.
 
 Snapshot below is the 2026-10-14 automated pass (~135 bullets). The 2026-10-28 checklist additions are manual cases for branch fixes; they are not new unit tests.
 
@@ -32,6 +32,12 @@ Fixes on `upstream-sync/2026-10-14` after the first checklist. New rows are manu
 | Agents list allow-list and undeploy | Allowed emails see the agent. Undeploy and inactive chats leave the list. |
 | Video builder `emailId` and Fal usage | Only the video builder opens without `emailId`, and the logged-in email is written onto its URL. Fal calls land on that user’s ledger. |
 | Custom OAuth Apps section and agent access requests | The settings section renders. A platform admin can approve a request. |
+
+## Cases added on 2026-10-29
+
+| Checklist item | Why it is on the sheet |
+| --- | --- |
+| Local fork still opens a new chat when the worker has no conversation | The 2026-10-14 sync made the worker conversation copy mandatory. Arena Copilot keeps the transcript in Sim, so a worker “chat not found” must not fail the fork. Cloud fork still requires the worker copy. Automated in `apps/sim/app/api/mothership/chats/[chatId]/fork/route.test.ts`. |
 
 ## Automated snapshot (2026-10-14)
 
