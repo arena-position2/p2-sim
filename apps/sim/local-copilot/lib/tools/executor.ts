@@ -18,6 +18,7 @@ import { reloadLocalCopilotWorkflowContext } from '@/local-copilot/lib/context/r
 import { getLocalCopilotMemorySnapshot } from '@/local-copilot/lib/diagnostics'
 import { generateWorkflowPatchFromRequest } from '@/local-copilot/lib/patches/generate'
 import { validateWorkflowPatch, validateWorkflowState } from '@/local-copilot/lib/patches/validate'
+import { coerceLocalEditAgentTools } from '@/local-copilot/lib/tools/coerce-edit-agent-tools'
 import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
@@ -506,16 +507,18 @@ async function executeLocalCopilotToolInner(
       }
 
       enrichedArgs.operations = ensureStartReservedInputFormatInEditOperations(
-        coerceLocalEditDropdownInputs(
-          normalizeLocalEditConnections(operations, {
-            blocks: ctx.structuredContext.workflow?.blocks,
-            edges: ctx.structuredContext.workflow?.edges,
-            availableBlocks: ctx.structuredContext.availableBlocks,
-          }),
-          {
-            blocksMetadataByType: ctx.blocksMetadataByType,
-            existingBlocks: ctx.structuredContext.workflow?.blocks,
-          }
+        coerceLocalEditAgentTools(
+          coerceLocalEditDropdownInputs(
+            normalizeLocalEditConnections(operations, {
+              blocks: ctx.structuredContext.workflow?.blocks,
+              edges: ctx.structuredContext.workflow?.edges,
+              availableBlocks: ctx.structuredContext.availableBlocks,
+            }),
+            {
+              blocksMetadataByType: ctx.blocksMetadataByType,
+              existingBlocks: ctx.structuredContext.workflow?.blocks,
+            }
+          )
         ),
         {
           blocks: ctx.structuredContext.workflow?.blocks,
