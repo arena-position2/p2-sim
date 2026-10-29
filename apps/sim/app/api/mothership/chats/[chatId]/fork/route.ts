@@ -30,6 +30,7 @@ export const POST = withRouteHandler(
           input: {
             chatId: parsed.data.params.chatId,
             upToMessageId: parsed.data.body.upToMessageId,
+            copilotBackend: parsed.data.body.copilotBackend,
           },
         })
       )

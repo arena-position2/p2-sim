@@ -3,8 +3,8 @@ import type { SandboxTaskId } from '@/sandbox-tasks/registry'
 
 // export { DEFAULT_EXECUTION_TIMEOUT_MS }
 
-export const DEFAULT_EXECUTION_TIMEOUT_MS = 6000000 // 100 minutes (6000 seconds)
-export const MAX_EXECUTION_DURATION = 6000 // 100 minutes (6000 seconds) - includes buffer for sandbox creation
+export const DEFAULT_EXECUTION_TIMEOUT_MS = 3_600_000 // 60 minutes — E2B rejects a sandbox lifetime over 1 hour
+export const MAX_EXECUTION_DURATION = 3_600 // 60 minutes
 /**
  * Maximum inline source size accepted by document preview endpoints.
  *
