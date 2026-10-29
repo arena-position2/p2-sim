@@ -75,21 +75,16 @@ describe('assertAgentToolsNotAddedAsCanvasBlocks', () => {
                 tools: [
                   {
                     type: 'image_generator_v2',
-                    title: 'Image Generator',
-                    toolId: 'image_generate',
                     usageControl: 'auto',
                   },
                   {
                     type: 'chart_generator',
-                    title: 'Chart Generator',
-                    toolId: 'chart_generate',
+                    operation: 'generate',
                     usageControl: 'auto',
                   },
                   {
                     type: 'exa',
-                    title: 'Exa Search',
                     operation: 'exa_search',
-                    toolId: 'exa_search',
                     usageControl: 'auto',
                   },
                 ],
