@@ -107,7 +107,10 @@ async function main(): Promise<void> {
       }
     }
 
-    const corruptedByWorkflow = new Map<string, Awaited<ReturnType<typeof findCorruptedWorkflowRoomKeys>>>()
+    const corruptedByWorkflow = new Map<
+      string,
+      Awaited<ReturnType<typeof findCorruptedWorkflowRoomKeys>>
+    >()
 
     for (const workflowId of workflowIds) {
       const corrupted = await findCorruptedWorkflowRoomKeys(redis, workflowId)

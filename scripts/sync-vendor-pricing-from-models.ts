@@ -100,7 +100,11 @@ function resolveCanonicalCost(row: VendorPricingRow): number | string | null {
   return null
 }
 
-function formatDrift(row: VendorPricingRow, jsonValue: number | string, canonical: number | string): string {
+function formatDrift(
+  row: VendorPricingRow,
+  jsonValue: number | string,
+  canonical: number | string
+): string {
   return `  - ${row.vendor}/${row.tool}: json=${jsonValue} canonical=${canonical}`
 }
 
