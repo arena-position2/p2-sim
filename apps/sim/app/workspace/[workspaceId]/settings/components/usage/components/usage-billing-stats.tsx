@@ -56,9 +56,10 @@ export function UsageBillingStats({ view }: UsageBillingStatsProps) {
 }
 
 /**
- * User-tab remaining credits:
- * - allocation when a personal cap is set
- * - otherwise the shared organization pool
+ * User-tab remaining credits.
+ * Used credits are this person's agent and workflow runs, counted with the
+ * same billable ledger window as the organization pool. A personal cap, when
+ * set, is the allowance; otherwise the allowance is the organization pool.
  */
 function UserRemainingCredits({
   data,
@@ -75,15 +76,26 @@ function UserRemainingCredits({
 
   const allocatedCredits =
     memberCredits?.limitDollars != null ? dollarsToCredits(memberCredits.limitDollars) : null
+  const memberUsedCredits = data.summary.totalCredits
 
   if (allocatedCredits == null) {
-    return <OrgPoolRemainingCredits data={data} />
-  }
+    const isUnlimited = orgPool.isUnlimited
+    const totalCredits = isUnlimited ? null : orgPool.totalCredits
+    const remainingCredits =
+      isUnlimited || totalCredits == null ? null : Math.max(0, totalCredits - memberUsedCredits)
 
-  const memberUsedCredits =
-    memberCredits?.usedDollars != null
-      ? dollarsToCredits(memberCredits.usedDollars)
-      : data.summary.totalCredits
+    return (
+      <BillingPersonalRemainingCreditsCard
+        totalCredits={totalCredits}
+        usedCredits={memberUsedCredits}
+        remainingCredits={remainingCredits}
+        isUnlimited={isUnlimited}
+        hint='in the organization pool'
+        hideUsedStats
+        barColorClassName='bg-emerald-500'
+      />
+    )
+  }
 
   const display = resolveOrgMemberCreditDisplay({
     orgPool,

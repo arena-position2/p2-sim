@@ -43,7 +43,6 @@ vi.mock('@sim/db/schema', () => schemaTables)
 vi.mock('@/lib/billing/core/billing', () => billingCoreMock)
 vi.mock('@/lib/billing/core/usage', () => billingUsageMock)
 
-import { defaultBillingPeriod } from '@/lib/billing/core/billing-period'
 import { dollarsToCredits } from '@/lib/billing/credits/conversion'
 import {
   getOrgMemberUsageForBillingPeriod,
@@ -54,7 +53,7 @@ import {
 
 const mockGetOrganizationSubscription = billingCoreMockFns.mockGetOrganizationSubscription
 const mockGetOrgUsageLimit = billingUsageMockFns.mockGetOrgUsageLimit
-const { eq: mockEq, gte: mockGte, isNull: mockIsNull, lt: mockLt, or: mockOr } = drizzleOrmMock
+const { eq: mockEq, gte: mockGte, isNull: mockIsNull, or: mockOr } = drizzleOrmMock
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -101,15 +100,11 @@ describe('getOrgMemberUsageForBillingPeriod', () => {
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityType', 'organization')
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityId', 'snapshot-org')
     expect(mockEq).toHaveBeenCalledWith('usageLog.userId', 'actor-2')
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodStart', billingPeriod.start)
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodEnd', billingPeriod.end)
     expect(mockEq).toHaveBeenCalledWith('workspace.organizationId', 'snapshot-org')
     expect(mockIsNull).toHaveBeenCalledWith('usageLog.billingEntityType')
     expect(mockIsNull).toHaveBeenCalledWith('usageLog.billingEntityId')
     expect(mockIsNull).toHaveBeenCalledWith('workspace.organizationAssignedAt')
     expect(mockGte).toHaveBeenCalledWith('usageLog.createdAt', 'workspace.organizationAssignedAt')
-    expect(mockGte).toHaveBeenCalledWith('usageLog.createdAt', billingPeriod.start)
-    expect(mockLt).toHaveBeenCalledWith('usageLog.createdAt', billingPeriod.end)
     expect(dbChainMockFns.leftJoin).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'workspace.id' }),
       expect.anything()
@@ -145,8 +140,6 @@ describe('getOrgMemberUsageForBillingPeriod', () => {
     expect(mockEq).toHaveBeenCalledWith('usageLog.userId', 'actor-2')
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityType', 'organization')
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityId', 'contract-org')
-    expect(mockGte).toHaveBeenCalledWith('usageLog.createdAt', billingPeriod.start)
-    expect(mockLt).toHaveBeenCalledWith('usageLog.createdAt', billingPeriod.end)
     expect(mockEq).not.toHaveBeenCalledWith('workspace.organizationId', 'contract-org')
     expect(mockIsNull).not.toHaveBeenCalledWith('usageLog.billingEntityType')
   })
@@ -232,8 +225,7 @@ describe('getOrgMemberUsageForCurrentPeriod', () => {
     expect(result).toBe(5)
     expect(mockGetOrganizationSubscription).toHaveBeenCalledWith('org-1')
     expect(mockEq).toHaveBeenCalledWith('usageLog.billingEntityId', 'org-1')
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodStart', periodStart)
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodEnd', periodEnd)
+    expect(mockEq).toHaveBeenCalledWith('usageLog.userId', 'user-2')
   })
 
   it('falls back to the all-time window when the org has no subscription period', async () => {
@@ -243,7 +235,6 @@ describe('getOrgMemberUsageForCurrentPeriod', () => {
 
     expect(result).toBe(7)
     expect(mockGetOrganizationSubscription).not.toHaveBeenCalled()
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodStart', defaultBillingPeriod().start)
-    expect(mockEq).toHaveBeenCalledWith('usageLog.billingPeriodEnd', defaultBillingPeriod().end)
+    expect(mockEq).toHaveBeenCalledWith('usageLog.userId', 'user-2')
   })
 })
