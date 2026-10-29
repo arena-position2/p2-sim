@@ -6718,6 +6718,20 @@ export const gmailClientSummary = pgTable(
   })
 )
 
+/** Platform-admin inbox of agent access requests awaiting approve/cancel. */
+export const requestedAgentAccess = pgTable('requested_agent_access', {
+  id: text('id').primaryKey(),
+  agentName: text('agent_name').notNull(),
+  requestedUserEmail: text('requested_user_email').notNull(),
+  workflowId: text('workflow_id').notNull(),
+  requestedUserName: text('requested_user_name'),
+  workspaceId: text('workspace_id'),
+  status: text('status').notNull().default('open'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  approvedBy: text('approved_by'),
+})
+
 export const meetingSummary = pgTable(
   'meeting_summary',
   {

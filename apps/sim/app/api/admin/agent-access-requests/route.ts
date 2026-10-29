@@ -2,9 +2,9 @@ import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
 import { executeSimAgentWorkflow } from '@/lib/agent-access-requests/execute-workflow'
+import { listRequestedAgentAccess } from '@/lib/agent-access-requests/list'
 import {
   type ApproveAgentAccessRequestsResponse,
-  agentAccessRequestRowSchema,
   approveAgentAccessRequestsContract,
   type ListAgentAccessRequestsResponse,
   listAgentAccessRequestsContract,
@@ -17,21 +17,6 @@ import { isPlatformAdminEmail } from '@/lib/permissions/platform-admin-emails'
 
 const logger = createLogger('AdminAgentAccessRequestsAPI')
 
-interface UpstreamListOutput {
-  rows?: unknown
-  rowCount?: number
-  message?: string
-}
-
-interface UpstreamExecuteResponse {
-  data?: {
-    status?: string
-    output?: UpstreamListOutput
-    error?: string | null
-  }
-  error?: unknown
-}
-
 async function requirePlatformAdminEmail() {
   const session = await getSession()
   if (!session?.user?.email || !isPlatformAdminEmail(session.user.email)) {
@@ -41,7 +26,7 @@ async function requirePlatformAdminEmail() {
 }
 
 /**
- * Lists agent access requests for a workspace by executing the configured list workflow.
+ * Lists agent access requests from `requested_agent_access`.
  * Restricted to emails in `NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS`.
  */
 export const GET = withRouteHandler(async (request: NextRequest) => {
@@ -52,35 +37,12 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
   const parsed = await parseRequest(listAgentAccessRequestsContract, request, {})
   if (!parsed.success) return parsed.response
 
-  const workflowId = env.SIM_GET_REQUEST_AGENTS_APPROVAL_WORKFLOW_ID
-  if (!workflowId) {
-    logger.error('SIM_GET_REQUEST_AGENTS_APPROVAL_WORKFLOW_ID is not configured')
-    return NextResponse.json(
-      { error: 'Agent access request listing is not configured' },
-      { status: 500 }
-    )
-  }
-
   try {
-    const workspaceId = parsed.data.query.workspaceId
-    const result = await executeSimAgentWorkflow({
-      workflowId,
-      input: workspaceId ? { workspace_id: workspaceId } : {},
-      signal: request.signal,
-    })
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status })
-    }
-
-    const payload = result.payload as UpstreamExecuteResponse
-    const output = payload.data?.output
-    const rawRows = Array.isArray(output?.rows) ? output.rows : []
-    const rows = agentAccessRequestRowSchema.array().parse(rawRows)
-
+    const { rows, rowCount } = await listRequestedAgentAccess(parsed.data.query.workspaceId)
     const body: ListAgentAccessRequestsResponse = {
       success: true,
       rows,
-      rowCount: typeof output?.rowCount === 'number' ? output.rowCount : rows.length,
+      rowCount,
     }
 
     return NextResponse.json(body, { status: 200 })
