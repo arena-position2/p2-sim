@@ -29,6 +29,7 @@ import {
 } from '@/local-copilot/lib/tools/enrich-integration-params'
 import { ensureStartReservedInputFormatInEditOperations } from '@/local-copilot/lib/tools/ensure-start-reserved-input-format'
 import { injectWorkspaceEnvApiKeyIfNeeded } from '@/local-copilot/lib/tools/inject-workspace-env-api-key'
+import { executeManageSkill, MANAGE_SKILL_TOOL_NAME } from '@/local-copilot/lib/tools/manage-skill'
 import {
   executeMothershipDelegatedTool,
   isMothershipDelegatedTool,
@@ -202,10 +203,10 @@ export interface ToolExecutionResult {
   billing?: LocalToolBillingMetadata
 }
 
-async function runLoadUserSkill(
-  args: Record<string, unknown>,
+async function denySkillToolIfDisallowed(
+  toolName: string,
   ctx: ToolExecutionContext
-): Promise<ToolExecutionResult> {
+): Promise<ToolExecutionResult | null> {
   try {
     const { assertPermissionsAllowed } = await import('@/ee/access-control/utils/permission-check')
     await assertPermissionsAllowed({
@@ -213,6 +214,7 @@ async function runLoadUserSkill(
       workspaceId: ctx.workspaceId,
       toolKind: 'skill',
     })
+    return null
   } catch (error) {
     const message = getErrorMessage(error, 'Skills are not allowed')
     const { LOCAL_OPS_COUNTERS, recordLocalOpsEvent } = await import(
@@ -224,15 +226,23 @@ async function runLoadUserSkill(
       workspaceId: ctx.workspaceId,
       workflowId: ctx.workflowId,
       chatId: ctx.chatId,
-      metadata: { toolName: LOAD_USER_SKILL_TOOL_NAME },
+      metadata: { toolName },
     })
     return {
-      toolName: LOAD_USER_SKILL_TOOL_NAME,
+      toolName,
       success: false,
       error: message,
       result: { error: message },
     }
   }
+}
+
+async function runLoadUserSkill(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const denied = await denySkillToolIfDisallowed(LOAD_USER_SKILL_TOOL_NAME, ctx)
+  if (denied) return denied
 
   const skillName = typeof args.skill_name === 'string' ? args.skill_name.trim() : ''
   const loaded = await executeLoadUserSkill(skillName, ctx.workspaceId)
@@ -249,6 +259,41 @@ async function runLoadUserSkill(
     toolName: LOAD_USER_SKILL_TOOL_NAME,
     success: true,
     result: { content: loaded.content },
+  }
+}
+
+/**
+ * Arena-local manage_skill: Cloud dropped the mothership handler, but the
+ * catalog still advertises the tool. Execute here so delegation never hits
+ * "Tool not found".
+ */
+async function runManageSkill(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const denied = await denySkillToolIfDisallowed(MANAGE_SKILL_TOOL_NAME, ctx)
+  if (denied) return denied
+
+  const executed = await executeManageSkill(args, {
+    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
+    userPermission: ctx.userPermission,
+    messageId: ctx.messageId,
+  })
+
+  if (!executed.success) {
+    return {
+      toolName: MANAGE_SKILL_TOOL_NAME,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName: MANAGE_SKILL_TOOL_NAME,
+    success: true,
+    result: executed.output ?? { success: true },
   }
 }
 
@@ -391,6 +436,13 @@ async function executeLocalCopilotToolInner(
   if (toolName === LOAD_USER_SKILL_TOOL_NAME) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runLoadUserSkill(args, ctx)
+  }
+
+  // manage_skill stays in the delegated catalog for schemas, but runs locally —
+  // Sim no longer registers a mothership handler for it.
+  if (toolName === MANAGE_SKILL_TOOL_NAME) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runManageSkill(args, ctx)
   }
 
   // Cloud agents call load_integration_tool after listing; Arena uses invoke_integration_tool.
