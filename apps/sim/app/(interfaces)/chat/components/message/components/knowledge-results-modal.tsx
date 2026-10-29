@@ -17,6 +17,10 @@ interface KnowledgeResultsModalProps {
 /**
  * Modal that shows knowledge base result chunks for a single document:
  * document name as heading, then each chunk with chunk index and content.
+ *
+ * The dialog portals to `document.body`, outside `.deployed-chat`. The content
+ * root carries that class so surface and text tokens resolve; without it the
+ * panel background is invalid and the chat shows through the file text.
  */
 export function KnowledgeResultsModal({
   isOpen,
@@ -32,7 +36,7 @@ export function KnowledgeResultsModal({
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <ModalContent className='max-h-[85vh] max-w-2xl bg-[var(--color-ds-surface-raised)]'>
+      <ModalContent className='deployed-chat max-h-[85vh] max-w-2xl bg-[var(--color-ds-surface-raised)] text-[var(--color-ds-text-primary)]'>
         <ModalHeader className='border-[var(--color-ds-border-default)] border-b pb-3'>
           <div className='flex items-center justify-between gap-2'>
             <h2 className='font-semibold text-[var(--color-ds-text-primary)] text-lg'>
