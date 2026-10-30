@@ -102,7 +102,10 @@ export async function executeMysqlCommand<TResult extends mysql.QueryResult>(
 
   try {
     assertMysqlExecuteValues(values)
-    const [result] = await connection.execute<TResult>(query, values)
+    const [result] = await connection.execute<TResult>(
+      query,
+      values as Array<string | number | bigint | boolean | Date | null | Buffer | Uint8Array>
+    )
     signal?.throwIfAborted()
     return result
   } catch (error) {

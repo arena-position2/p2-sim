@@ -5,7 +5,7 @@ import { truncate } from '@sim/utils/string'
 import {
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
@@ -1821,7 +1821,12 @@ export async function* runLocalCopilotAgent(
       break
     }
 
-    const orderedToolCalls = sortToolCallsForExecution(
+    const orderedToolCalls: Array<{
+      id: string
+      name: string
+      arguments: string
+      thoughtSignature?: string
+    }> = sortToolCallsForExecution(
       postBuildToolMode === 'oauth_only'
         ? pendingToolCalls.filter((call) => call.name === 'oauth_get_auth_link')
         : pendingToolCalls
@@ -2092,7 +2097,7 @@ export async function* runLocalCopilotAgent(
 
           for (const extra of parallelCalls.slice(1)) roundToolNames.push(extra.name)
 
-          const executable: typeof prepared = []
+          const executable: Array<(typeof prepared)[number]> = []
           const rejectedDiscovery: Array<{
             call: (typeof prepared)[number]['call']
             parsedArgs: Record<string, unknown>

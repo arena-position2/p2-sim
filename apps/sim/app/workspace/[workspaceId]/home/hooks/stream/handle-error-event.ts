@@ -1,3 +1,4 @@
+import { mothershipErrorText } from '@/lib/mothership/chat/error-tag'
 import { isExplicitStopReason } from '@/lib/mothership/request/session/abort-reason'
 import type { PersistedStreamEventEnvelope } from '@/lib/mothership/request/session/contract'
 import type { StreamLoopContext } from '@/app/workspace/[workspaceId]/home/hooks/stream/stream-context'
@@ -17,6 +18,6 @@ export function handleErrorEvent(ctx: StreamLoopContext, parsed: ErrorEvent): vo
   state.sawStreamError = true
   state.liveStatus = undefined
   setLocalLiveStatus(undefined)
-  deps.setError(message || 'An error occurred')
+  deps.setError(mothershipErrorText(parsed.payload) ?? 'An error occurred')
   ops.flush()
 }

@@ -1,5 +1,5 @@
 import { generateId } from '@sim/utils/id'
-import { isPlainRecord } from '@sim/utils/object'
+import { filterUndefined, isPlainRecord, isRecordLike } from '@sim/utils/object'
 import { truncateAtCodePoint } from '@sim/utils/string'
 import type {
   PersistedContentBlock,
@@ -17,6 +17,7 @@ import {
   redactSensitiveContent,
   redactToolCallResult,
 } from '@/lib/mothership/chat/sim-key-redaction'
+import type { FileOperationOwner } from '@/lib/mothership/generated/file-owner'
 import {
   MothershipStreamV1CompletionStatus,
   MothershipStreamV1EventType,
@@ -26,13 +27,14 @@ import {
   MothershipStreamV1ToolOutcome,
   MothershipStreamV1ToolPhase,
 } from '@/lib/mothership/generated/mothership-stream-v1'
+import { ToolActivity, TurnOrigin } from '@/lib/mothership/generated/protocol'
 import type {
   ContentBlock,
   LocalToolCallStatus,
   OrchestratorResult,
 } from '@/lib/mothership/request/types'
+import { normalizeToolActivityDescription } from '@/lib/mothership/tools/display'
 import { RETIRED_BROWSER_REQUEST_TAKEOVER_ID } from '@/lib/mothership/tools/retired-tools'
-import { normalizeToolActivityDescription } from '@/lib/mothership/tools/tool-display'
 import type { BrowserTextSelection, TerminalTextSelection } from '@/stores/panel/types'
 
 /**
@@ -94,8 +96,16 @@ export interface PersistedFileAttachment {
 }
 
 export interface PersistedMessageContext {
+  owner?: FileOperationOwner
   kind: string
   label: string
+  workspaceId?: string
+  projectId?: string
+  executionId?: string
+  fileFolderId?: string
+  command?: string
+  blockId?: string
+  blockIds?: string[]
   workflowId?: string
   knowledgeId?: string
   tableId?: string
@@ -147,6 +157,14 @@ export function copyPersistedMessageContext(c: PersistedMessageContext): Persist
   return {
     kind: c.kind,
     label: c.label,
+    ...(c.owner ? { owner: { ...c.owner } } : {}),
+    ...(c.workspaceId ? { workspaceId: c.workspaceId } : {}),
+    ...(c.projectId ? { projectId: c.projectId } : {}),
+    ...(c.executionId ? { executionId: c.executionId } : {}),
+    ...(c.fileFolderId ? { fileFolderId: c.fileFolderId } : {}),
+    ...(c.command ? { command: c.command } : {}),
+    ...(c.blockId ? { blockId: c.blockId } : {}),
+    ...(Array.isArray(c.blockIds) ? { blockIds: [...c.blockIds] } : {}),
     ...(c.workflowId ? { workflowId: c.workflowId } : {}),
     ...(c.knowledgeId ? { knowledgeId: c.knowledgeId } : {}),
     ...(c.tableId ? { tableId: c.tableId } : {}),
@@ -172,8 +190,8 @@ export interface PersistedMessage {
   requestMode?: 'agent' | 'assistant' | 'plan'
   content: string
   timestamp: string
-  /** "task": a background-task notification opened this turn, not the user (rendered as a system chip). */
-  origin?: 'task'
+  /** Automation opened this turn, not the user (rendered as a system chip). */
+  origin?: TurnOrigin
   requestId?: string
   contentBlocks?: PersistedContentBlock[]
   fileAttachments?: PersistedFileAttachment[]
@@ -210,7 +228,9 @@ export interface PersistedMessage {
  * reference when there is nothing to strip, preserving memoized identity for
  * read-side consumers.
  */
-export function stripToolResultOutput(message: PersistedMessage): PersistedMessage {
+export function stripToolResultOutput<T extends Pick<PersistedMessage, 'contentBlocks'>>(
+  message: T
+): T {
   if (!message.contentBlocks?.length) return message
   let changed = false
   const contentBlocks = message.contentBlocks.map((block) => {
@@ -334,6 +354,16 @@ export function compactToolCallParams(message: PersistedMessage): PersistedMessa
   return changed ? { ...message, contentBlocks } : message
 }
 
+/**
+ * What `copilot_messages.display_content` holds for a stored message: the chat UI's
+ * projection of its content, or null when that equals the content and the column stays empty.
+ * `content` is the stored form, already passed through {@link stripToolResultOutput}.
+ */
+export function displayContentOf(content: PersistedMessage): PersistedMessage | null {
+  const display = compactToolCallParams(content)
+  return display === content ? null : display
+}
+
 // Write: OrchestratorResult → PersistedMessage
 
 function resolveToolState(block: ContentBlock): PersistedToolState {
@@ -455,9 +485,7 @@ function mapContentBlockBody(block: ContentBlock): PersistedContentBlock {
         ...(isSubagentTool && isNonTerminal ? {} : { result: redactedResult }),
         ...(isSubagentTool && isNonTerminal
           ? {}
-          : block.toolCall.params
-            ? { params: block.toolCall.params }
-            : {}),
+          : filterUndefined({ params: block.toolCall.params, activity: block.toolCall.activity })),
         ...(block.calledBy ? { calledBy: block.calledBy } : {}),
         ...(block.toolCall.thoughtSignature
           ? { thoughtSignature: block.toolCall.thoughtSignature }
@@ -633,7 +661,7 @@ export interface UserMessageParams {
   content: string
   fileAttachments?: PersistedFileAttachment[]
   contexts?: PersistedMessageContext[]
-  origin?: 'task'
+  origin?: TurnOrigin
 }
 
 export function buildPersistedUserMessage(params: UserMessageParams): PersistedMessage {
@@ -695,6 +723,7 @@ interface RawBlock {
     result?: { success: boolean; output?: unknown; error?: string }
     display?: { text?: string; title?: string; phaseLabel?: string }
     activityDescription?: string
+    activity?: unknown
     calledBy?: string
     durationMs?: number
     error?: string
@@ -758,11 +787,15 @@ function normalizeCanonicalBlock(block: RawBlock): PersistedContentBlock {
   }
   if (block.toolCall) {
     const activityDescription = normalizeToolActivityDescription(block.toolCall.activityDescription)
+    const activity = isRecordLike(block.toolCall.activity)
+      ? ToolActivity.safeParse(block.toolCall.activity)
+      : undefined
     result.toolCall = {
       id: block.toolCall.id ?? '',
       name: block.toolCall.name ?? '',
       state: normalizeToolState(block.toolCall.state),
       ...(activityDescription ? { activityDescription } : {}),
+      ...(activity?.success ? { activity: activity.data } : {}),
       ...(block.toolCall.params ? { params: block.toolCall.params } : {}),
       ...(block.toolCall.result ? { result: block.toolCall.result } : {}),
       ...(block.toolCall.calledBy ? { calledBy: block.toolCall.calledBy } : {}),
@@ -962,7 +995,8 @@ export function normalizeMessage(raw: Record<string, unknown>): PersistedMessage
   if (raw.requestId && typeof raw.requestId === 'string') {
     msg.requestId = raw.requestId
   }
-  if (raw.origin === 'task') msg.origin = 'task'
+  const origin = TurnOrigin.safeParse(raw.origin)
+  if (origin.success) msg.origin = origin.data
 
   if (Array.isArray(raw.geminiModelPartRounds) && raw.geminiModelPartRounds.length > 0) {
     // double-cast-allowed: JSONB reload — rounds are opaque Gemini history parts

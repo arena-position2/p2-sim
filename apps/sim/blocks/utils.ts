@@ -76,6 +76,50 @@ function isFreeOpenRouterModel(modelId: string): boolean {
 }
 
 /**
+ * Block types available as tools inside the Agent block tool picker.
+ * These remain canvas blocks (`category: 'blocks'`) but are also selectable as agent tools.
+ */
+export const AGENT_TOOL_BLOCK_TYPES = new Set([
+  'api',
+  'webhook_request',
+  'workflow',
+  'workflow_input',
+  'knowledge',
+  'function',
+  'table',
+  'image_generator_v2',
+  'chart_generator',
+])
+
+/**
+ * Block types that are built-in to the platform (as opposed to third-party integrations).
+ * Used to categorize tools in the tool selection dropdown.
+ */
+export const BUILT_IN_TOOL_TYPES = new Set([
+  'api',
+  'file_v5',
+  'function',
+  'knowledge',
+  'search',
+  'thinking',
+  'image_generator',
+  'image_generator_v2',
+  'image_fusion',
+  'video_generator',
+  'video_generator_v2',
+  'video_generator_v3',
+  'vision',
+  'translate',
+  'tts',
+  'stt',
+  'memory',
+  'table_v2',
+  'webhook_request',
+  'workflow',
+  'chart_generator',
+])
+
+/**
  * Model options for the Agent block: same as {@link getModelOptions}, including evaluation
  * models, but OpenRouter entries are limited to models OpenRouter reports as free.
  */
@@ -692,50 +736,6 @@ export function normalizeFileInput(
 
   return files
 }
-
-/**
- * Block types available as tools inside the Agent block tool picker.
- * These remain canvas blocks (`category: 'blocks'`) but are also selectable as agent tools.
- */
-export const AGENT_TOOL_BLOCK_TYPES = new Set([
-  'api',
-  'webhook_request',
-  'workflow',
-  'workflow_input',
-  'knowledge',
-  'function',
-  'table',
-  'image_generator_v2',
-  'chart_generator',
-])
-
-/**
- * Block types that are built-in to the platform (as opposed to third-party integrations).
- * Used to categorize tools in the tool selection dropdown.
- */
-export const BUILT_IN_TOOL_TYPES = new Set([
-  'api',
-  'file_v5',
-  'function',
-  'knowledge',
-  'search',
-  'thinking',
-  'image_generator',
-  'image_generator_v2',
-  'image_fusion',
-  'video_generator',
-  'video_generator_v2',
-  'video_generator_v3',
-  'vision',
-  'translate',
-  'tts',
-  'stt',
-  'memory',
-  'table_v2',
-  'webhook_request',
-  'workflow',
-  'chart_generator',
-])
 
 /**
  * Shared wand configuration for the Response Format code subblock.

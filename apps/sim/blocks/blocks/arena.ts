@@ -1,5 +1,5 @@
 import { ArenaIcon } from '@/components/icons'
-import type { BlockConfig, BlockMeta } from '@/blocks/types'
+import { type BlockConfig, type BlockMeta, IntegrationType } from '@/blocks/types'
 
 export const ArenaBlock: BlockConfig = {
   type: 'arena',
@@ -8,6 +8,7 @@ export const ArenaBlock: BlockConfig = {
   longDescription: 'Arena',
   docsLink: '',
   category: 'tools',
+  integrationType: IntegrationType.Productivity,
   bgColor: '#E0E0E0',
   icon: ArenaIcon,
   subBlocks: [

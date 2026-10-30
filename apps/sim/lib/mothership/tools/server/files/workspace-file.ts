@@ -19,8 +19,15 @@ import {
   type BaseServerTool,
   type ServerToolContext,
 } from '@/lib/mothership/tools/server/base-tool'
-import { DocCompileUserError } from '@/lib/mothership/tools/server/files/doc-compile-error'
-import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
+import { rejectHtmlFullUpdate } from '@/lib/mothership/tools/server/files/html-edit-size-guards'
+import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/file-manager'
+import {
+  compileDoc,
+  DOCXJS_SOURCE_MIME,
+  getE2BDocFormat,
+  PPTXGENJS_SOURCE_MIME,
+} from '@/lib/uploads/documents/compile'
+import { DocCompileUserError } from '@/lib/uploads/documents/compile-error'
 import {
   admitCreateWorkspaceFile,
   createWorkspaceFile,
@@ -31,18 +38,10 @@ import { readWorkspaceFileContent } from '@/lib/workspace-files/application/read
 import { readWorkspaceFileMetadata } from '@/lib/workspace-files/application/read-workspace-file-metadata'
 import { renameWorkspaceFile } from '@/lib/workspace-files/application/rename-workspace-file'
 import { parseOwnedFileReference } from '@/lib/workspace-files/owned-files'
-import type { SandboxTaskId } from '@/sandbox-tasks/registry'
-import {
-  compileDoc,
-  DOCXJS_SOURCE_MIME,
-  getE2BDocFormat,
-  PPTXGENJS_SOURCE_MIME,
-} from './doc-compile'
-import { storeCompiledDoc } from './doc-compiled-store'
+import type { SandboxTaskId } from '@/sandboxes/registry'
 import { buildEmbeddedImageRefWarning } from './embedded-image-refs'
-import { ensureCopilotFileFolderPath } from './file-folder-application'
-import { storeFileIntent } from './file-intent-store'
-import { rejectHtmlFullUpdate } from './html-edit-size-guards'
+import { ensureCopilotFileFolderPath } from './folder-application'
+import { storeFileIntent } from './intent-store'
 import { validateSearchReplaceForPatch } from './patch-search-replace'
 
 const logger = createLogger('WorkspaceFileServerTool')
@@ -318,25 +317,10 @@ export async function compileDocForWrite(args: {
 
   if (docInfo.isDoc) {
     try {
-      const compiled = await runSandboxTask(
+      await runSandboxTask(
         docInfo.taskId!,
         { code: source, workspaceId },
-        { ownerKey, signal }
-      )
-      if (!Buffer.isBuffer(compiled) || compiled.length === 0) {
-        return {
-          ok: false,
-          message: `${docInfo.formatName} generation produced an empty file. Add content (e.g. pptx.addSlide() / pdf.addPage()) and retry.`,
-        }
-      }
-      // Serve/preview load this artifact — without it, E2B-enabled serve returns 409
-      // forever and download paths may resolve to 0 bytes.
-      await storeCompiledDoc(
-        workspaceId,
-        source,
-        docInfo.ext!,
-        docInfo.binaryContentType!,
-        compiled
+        { ownerKey, signal, filePrincipal: principal }
       )
     } catch (err) {
       return {

@@ -15,7 +15,7 @@ import {
   createWorkspaceFileSecretProvenanceFromRegistry,
   EXACT_EMPTY_WORKSPACE_FILE_SECRET_PROVENANCE,
   type WorkspaceFileSecretProvenance,
-} from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+} from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import {
   createWorkspaceFileBufferByPath,
   updateWorkspaceFileContentBufferByPath,

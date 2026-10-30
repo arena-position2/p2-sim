@@ -1,5 +1,5 @@
 import { GoogleIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import { type BlockConfig, IntegrationType } from '@/blocks/types'
 
 /** In-flight promise cache keyed by workspaceId — deduplicates concurrent fetchOptions + fetchOptionById calls */
 let _inflightFetch: {
@@ -40,6 +40,7 @@ export const GoogleAdsV1Block: BlockConfig = {
     'Simplified Google Ads block that uses AI (Grok with GPT-4o fallback) to automatically generate GAQL queries from natural language prompts. Perfect for quick queries without complex configuration. Supports campaign performance, keyword analysis, search terms, and more.',
   docsLink: 'https://docs.sim.ai/tools/google-ads-v1',
   category: 'tools',
+  integrationType: IntegrationType.Marketing,
   bgColor: '#4285f4',
   icon: GoogleIcon,
   subBlocks: [

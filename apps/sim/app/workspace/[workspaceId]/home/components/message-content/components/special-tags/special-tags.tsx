@@ -32,7 +32,7 @@ import { isRecordLike, omit } from '@sim/utils/object'
 import { useParams } from 'next/navigation'
 import { getOrganizationSettingsHref } from '@/components/settings/navigation'
 import { ThinkingLoader } from '@/components/ui/thinking-loader'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { buildHostedUpgradeUrl, HOSTED_BILLING_SETTINGS_URL } from '@/lib/billing/upgrade-reasons'
 import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { isBrowserAgentAvailable, sendBrowserPanelAction } from '@/lib/browser-agent/transport'
@@ -128,12 +128,10 @@ import {
 } from '@/hooks/queries/environment'
 import { useKnowledgeBasesQuery } from '@/hooks/queries/kb/knowledge'
 import { useTablesList } from '@/hooks/queries/tables'
-import { findWorkspaceFileByPath } from '@/hooks/queries/utils/find-workspace-file-by-src'
 import { useWorkflows } from '@/hooks/queries/workflows'
-import { useWorkspaceFiles } from '@/hooks/queries/workspace-files'
+import { useWorkspaceFileAtPath, useWorkspaceFileLookup } from '@/hooks/queries/workspace-files'
 import { useWorkspaceUsageGate } from '@/hooks/queries/workspace-usage'
 import { useSettingsNavigation } from '@/hooks/use-settings-navigation'
-
 export interface OptionsItemData {
   title: string
   description: string
@@ -2096,7 +2094,7 @@ function OptionsDisplay({ data, onSelect }: OptionsDisplayProps) {
           />
         </button>
       ) : (
-        <span className='text-[var(--text-body)] text-sm'>Suggested follow-ups</span>
+        <span className='block text-[var(--text-body)] text-sm'>Suggested follow-ups</span>
       )}
       <Expandable expanded={expanded}>
         <ExpandableContent className='mt-1.5'>
@@ -2198,12 +2196,20 @@ function WorkspaceResourceDisplayContent({
 }: WorkspaceResourceDisplayProps & { workspaceId: string; addressed?: boolean }) {
   const { data: workflows = [] } = useWorkflows(workspaceId)
   const { data: tables = [] } = useTablesList(workspaceId)
-  const { data: files = [] } = useWorkspaceFiles(workspaceId)
   const { data: knowledgeBases = [] } = useKnowledgeBasesQuery(workspaceId)
+  const isFile = data.type === 'file'
+  const idLookup = useWorkspaceFileLookup(workspaceId, 'id', isFile ? data.id : undefined)
+  const fileById = idLookup.data
+  /** Only when the id names no file (or there is none): a path is the chip's fallback identity. */
+  const { file: fileFromPath } = useWorkspaceFileAtPath(
+    workspaceId,
+    isFile ? data.path : undefined,
+    {
+      enabled: !data.id || fileById === null || idLookup.isError,
+    }
+  )
 
   const resource = useMemo<WorkspaceResourceRef>(() => {
-    const fileFromPath =
-      data.type === 'file' ? findWorkspaceFileByPath(files, data.path) : undefined
     const title =
       data.type === 'workflow'
         ? (workflows.find((workflow) => workflow.id === data.id)?.name ??
@@ -2214,7 +2220,7 @@ function WorkspaceResourceDisplayContent({
           : data.type === 'dashboard'
             ? (data.title ?? fallbackWorkspaceResourceTitle(data.type))
             : data.type === 'file'
-              ? (files.find((file) => file.id === data.id)?.name ??
+              ? (fileById?.name ??
                 fileFromPath?.name ??
                 data.title ??
                 fallbackWorkspaceResourceTitle(data.type))
@@ -2234,7 +2240,8 @@ function WorkspaceResourceDisplayContent({
     data.path,
     data.title,
     data.type,
-    files,
+    fileById,
+    fileFromPath,
     knowledgeBases,
     tables,
     workflows,
@@ -3712,6 +3719,47 @@ function MothershipErrorDisplay({ data }: { data: MothershipErrorTagData }) {
 }
 
 function UsageUpgradeDisplay({ data }: { data: UsageUpgradeTagData }) {
+  return data.reason === 'job_run_budget' ? (
+    <JobRunBudgetDisplay message={data.message} />
+  ) : (
+    <PlanUsageLimitDisplay data={data} />
+  )
+}
+
+/**
+ * A scheduled job's run reached its own spend cap. The cap belongs to the job, not to the
+ * account, so the card offers no billing action: the next run starts with a fresh cap.
+ */
+interface JobRunBudgetDisplayProps {
+  message: string
+}
+
+function JobRunBudgetDisplay({ message }: JobRunBudgetDisplayProps) {
+  return (
+    <InteractionCard
+      title={
+        <span className='inline-flex items-center gap-2'>
+          <TriangleAlert
+            aria-hidden
+            className='size-[14px] shrink-0 text-[var(--badge-amber-text)]'
+          />
+          Run Spend Limit Reached
+        </span>
+      }
+    >
+      <div className='px-2 pb-2'>
+        <p className='text-[var(--text-body)] text-small leading-5'>{message}</p>
+      </div>
+    </InteractionCard>
+  )
+}
+
+interface PlanUsageLimitDisplayProps {
+  data: UsageUpgradeTagData
+}
+
+/** The payer's plan limit: the card links to where the plan or the limit can change. */
+function PlanUsageLimitDisplay({ data }: PlanUsageLimitDisplayProps) {
   const { data: session } = useSession()
   const hostContext = useOptionalWorkspaceHostContext()
   const organizationContext = useOptionalOrganizationContext()

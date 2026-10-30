@@ -1,5 +1,10 @@
 import { FigmaIcon } from '@/components/icons'
-import type { BlockConfig, BlockMeta, SubBlockType } from '@/blocks/types'
+import {
+  type BlockConfig,
+  type BlockMeta,
+  IntegrationType,
+  type SubBlockType,
+} from '@/blocks/types'
 
 export const FigmaBlock: BlockConfig = {
   type: 'figma',
@@ -9,6 +14,7 @@ export const FigmaBlock: BlockConfig = {
     'Integrate Figma into your workflow. Create new Figma files, convert designs to HTML/React/Angular code, manage comments, and access team projects. Requires Figma API key for authentication.',
   docsLink: 'https://docs.sim.ai/tools/figma',
   category: 'tools',
+  integrationType: IntegrationType.Productivity,
   bgColor: '#F24E1E',
   icon: FigmaIcon,
   subBlocks: [

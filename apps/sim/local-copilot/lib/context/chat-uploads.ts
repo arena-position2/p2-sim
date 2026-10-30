@@ -1,4 +1,4 @@
-import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
+import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/file-manager'
 import type { CopilotFileAttachmentRef } from '@/local-copilot/lib/user-turn-content'
 
 /** Prefix for the system note listing chat-scoped uploads. */

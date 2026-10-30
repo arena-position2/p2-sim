@@ -1,12 +1,11 @@
 import type { Metadata } from 'next'
 import { getEnv } from '@/lib/core/config/env'
-import { isSearchIndexableAppUrl, SITE_URL } from '@/lib/core/utils/urls'
+import { isSearchIndexableAppUrl, SITE_URL, toSiteUrl } from '@/lib/core/utils/urls'
 import {
   HOME_PAGE_DESCRIPTION,
   HOME_PAGE_TITLE,
 } from '@/app/(landing)/components/home-structured-data'
 import Landing from '@/app/(landing)/landing'
-
 export const revalidate = 3600
 
 const allowIndexing = isSearchIndexableAppUrl(getEnv('NEXT_PUBLIC_APP_URL'))
@@ -57,6 +56,7 @@ export const metadata: Metadata = {
   },
   alternates: {
     canonical: SITE_URL,
+    types: { 'text/markdown': toSiteUrl('/index.md') },
     languages: {
       'en-US': SITE_URL,
       'x-default': SITE_URL,

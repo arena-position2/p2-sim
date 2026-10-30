@@ -11,7 +11,7 @@ import { parseRequest } from '@/lib/api/server'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { verifyInternalDelegationToken } from '@/lib/auth/internal'
 import { checkMothershipUsageLimits } from '@/lib/billing/calculations/usage-monitor'
-import { requireBillingAttributionHeader } from '@/lib/billing/core/billing-attribution'
+import { requireBillingAttributionHeader } from '@/lib/billing/core/attribution'
 import { acceptsMediaType } from '@/lib/core/utils/media-types'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { getPersonalAndWorkspaceEnv } from '@/lib/environment/utils'
@@ -48,7 +48,6 @@ import {
 } from '@/executor/utils/resolved-secret-trace-registry'
 import type { ChatContext } from '@/stores/panel'
 import { hasToolId } from '@/tools/tool-ids'
-
 /** Caps this response on serverless hosts only; the Node server bounds nothing with it. */
 export const maxDuration = 3600
 

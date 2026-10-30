@@ -14,7 +14,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getAllOAuthServices } from '../apps/sim/lib/oauth/utils'
+import { getAllOAuthServices, getServiceConfigByServiceId } from '../apps/sim/lib/oauth/utils'
 import { INTEGRATION_METADATA } from '../packages/deployment-config/src/integration-metadata'
 import { formatGeneratedSource } from './format-generated-source'
 
@@ -60,10 +60,19 @@ function buildOAuthDeploymentFacts(): CanonicalOAuthDeploymentFacts {
   const providers = new Map<string, string>()
   const credentialConfiguredOAuthServiceIds: string[] = []
   for (const serviceId of [...catalogServiceIds].sort()) {
-    if (!canonicalServices.has(serviceId)) {
+    const registered = canonicalServices.get(serviceId)
+    const aliased = registered ? undefined : getServiceConfigByServiceId(serviceId)
+    const service =
+      registered ??
+      (aliased
+        ? {
+            credentialConfigured: Boolean(aliased.clientConfiguration),
+            serviceAccountProviderId: aliased.serviceAccountProviderId,
+          }
+        : undefined)
+    if (!service) {
       throw new Error(`Integration catalog references unknown OAuth service: ${serviceId}`)
     }
-    const service = canonicalServices.get(serviceId)
     if (service?.credentialConfigured) credentialConfiguredOAuthServiceIds.push(serviceId)
     const providerId = service?.serviceAccountProviderId
     if (providerId) providers.set(serviceId, providerId)

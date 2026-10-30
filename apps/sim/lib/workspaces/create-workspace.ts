@@ -4,6 +4,7 @@ import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
 import { ensureUserInOrganization } from '@/lib/billing/organizations/membership'
 import { PlatformEvents } from '@/lib/core/telemetry'
+import { createProjectRecord } from '@/lib/projects/membership'
 import { seedGeneralSkillsIntoWorkspace } from '@/lib/skill-share/repository'
 import { buildDefaultWorkflowArtifacts } from '@/lib/workflows/defaults'
 import { saveWorkflowToNormalizedTables } from '@/lib/workflows/persistence/utils'
@@ -48,8 +49,14 @@ export async function createWorkspace({
 
   try {
     await db.transaction(async (tx) => {
+      const projectId = await createProjectRecord(tx, {
+        name,
+        organizationId,
+        ownerId: userId,
+      })
       await tx.insert(workspace).values({
         id: workspaceId,
+        projectId,
         name,
         color,
         ownerId: userId,

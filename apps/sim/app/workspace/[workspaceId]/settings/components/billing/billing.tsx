@@ -20,7 +20,7 @@ import { isOrgAdminRole } from '@sim/platform-authz/predicates'
 import { getErrorMessage } from '@sim/utils/errors'
 import { formatDate } from '@sim/utils/formatting'
 import { useRouter } from 'next/navigation'
-import { useSession, useSubscription } from '@/lib/auth/auth-client'
+import { useSession, useSubscription } from '@/lib/auth/client'
 import { isArenaBilling } from '@/lib/billing/arena/env'
 import { isStarterPlan } from '@/lib/billing/arena/starter-plan'
 import { ON_DEMAND_UNLIMITED } from '@/lib/billing/constants'
@@ -124,12 +124,7 @@ interface BillingProps {
   governingWorkspaceName?: string
 }
 
-export function Billing({
-  scope,
-  organizationId,
-  creditUsageHref,
-  governingWorkspaceName,
-}: BillingProps) {
+export function Billing({ scope, organizationId, creditUsageHref }: BillingProps) {
   const router = useRouter()
   const isOrganizationScope = scope === 'organization'
 

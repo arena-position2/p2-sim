@@ -2,7 +2,7 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
 import { getChatImageFetchUrl } from '@/lib/chat/image-fetch-url'
 import { uploadInternalFileSession } from '@/lib/uploads/client/session-upload'
-import { ensureFileNameExtension } from '@/lib/uploads/utils/file-utils'
+import { ensureFileNameExtension } from '@/lib/uploads/utils/file'
 
 export interface WorkflowAttachmentInput {
   name: string

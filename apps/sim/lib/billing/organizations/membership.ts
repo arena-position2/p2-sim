@@ -24,17 +24,18 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import { normalizeEmail } from '@sim/utils/string'
 import { and, count, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { revokeUserOAuthGrants } from '@/lib/auth/oauth-access-token'
 import {
   invalidateMembershipCache,
   invalidateSecurityPolicyVersionCache,
 } from '@/lib/auth/security-policy'
 import { applySessionPolicyToNewMember } from '@/lib/auth/session-policy'
-import { syncUsageLimitsFromSubscription } from '@/lib/billing/core/usage'
+import { createUserStatsIfMissing, syncUsageLimitsFromSubscription } from '@/lib/billing/core/usage'
 import {
   assertNoUnresolvedEnterpriseIssuance,
   resolveEnterpriseMetadataIntent,
 } from '@/lib/billing/enterprise-outbox'
-import { acquireUserBillingIdentityLock } from '@/lib/billing/organizations/billing-identity-lock'
+import { acquireUserBillingIdentityLock } from '@/lib/billing/organizations/identity-lock'
 import { setOrgMemberUsageLimit } from '@/lib/billing/organizations/member-limits'
 import { MEMBER_BILLING_RECONCILIATION_EVENT_TYPE } from '@/lib/billing/organizations/membership-reconciliation-event'
 import { reassignOrganizationSharedResourcesTx } from '@/lib/billing/organizations/resource-handoff'
@@ -59,18 +60,23 @@ import { acquireAdvisoryXactLock } from '@/lib/db/advisory-locks'
 import { isRetryableTransactionError } from '@/lib/db/transaction'
 import type { DbOrTx, DbTransaction } from '@/lib/db/types'
 import { acquireInvitationMutationLocks } from '@/lib/invitations/locks'
+import { type StoppedRun, stopLiveRunsTx } from '@/lib/mothership/async-runs/repository'
 import { requireMemberManagementAuthority } from '@/lib/organizations/members/authority'
 import {
   revokePersonalApiKeysTx,
   revokeUserSessionsTx,
 } from '@/lib/organizations/members/revocation'
 import { reassignOrganizationProjects } from '@/lib/projects/membership'
+import {
+  handoffProjectsForOrganizationDepartureTx,
+  lockProjectsForResourceDepartureTx,
+} from '@/lib/projects/resource-handoff'
 import { removeWorkspaceSkillMembershipsTx } from '@/lib/skills/access'
 import { reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx } from '@/lib/workspaces/resource-handoff'
 import { WorkspaceBillingAccountRemovalError } from '@/lib/workspaces/utils'
 import { endDirectoryMembershipTx } from '@/ee/scim/lib/identity/end-directory-membership'
 
-export { acquireUserBillingIdentityLock } from '@/lib/billing/organizations/billing-identity-lock'
+export { acquireUserBillingIdentityLock } from '@/lib/billing/organizations/identity-lock'
 export { WORKSPACE_BILLING_ACCOUNT_REMOVAL_ERROR } from '@/lib/workspaces/utils'
 
 const logger = createLogger('OrganizationMembership')
@@ -539,6 +545,11 @@ export interface RemoveMemberResult {
     workspaceAccessRevoked: number
     pendingInvitationsCancelled: number
   }
+  /**
+   * Chat runs the change stopped in its transaction. The caller delivers their Stop with
+   * `deliverRunStops`: this module sits in page graphs that must not load that delivery.
+   */
+  stoppedRuns: StoppedRun[]
 }
 
 export interface RemoveExternalWorkspaceAccessResult {
@@ -548,6 +559,11 @@ export interface RemoveExternalWorkspaceAccessResult {
   permissionGroupsRevoked: number
   credentialMembershipsRevoked: number
   pendingInvitationsCancelled: number
+  /**
+   * Chat runs the change stopped in its transaction. The caller delivers their Stop with
+   * `deliverRunStops`: this module sits in page graphs that must not load that delivery.
+   */
+  stoppedRuns: StoppedRun[]
 }
 
 export type MembershipAdditionFailureCode =
@@ -568,6 +584,8 @@ async function reassignOwnedOrganizationResourcesTx({
   organizationId: string
   workspaceIds: string[]
 }) {
+  /** Project gates precede the workspace owner rewrite, the order file writers lock in. */
+  if (workspaceIds.length > 0) await lockProjectsForResourceDepartureTx(tx, workspaceIds)
   const ownerId = await reassignOrganizationSharedResourcesTx(tx, organizationId, userId)
   if (!ownerId) return 0
 
@@ -577,6 +595,7 @@ async function reassignOwnedOrganizationResourcesTx({
     toUserId: ownerId,
     workspaceIds,
   })
+  await handoffProjectsForOrganizationDepartureTx(tx, organizationId, userId)
 
   if (workspaceIds.length === 0) return 0
 
@@ -1088,6 +1107,11 @@ export interface TransferOrganizationMemberResult {
   credentialMembershipsRevoked: number
   pendingInvitationsCancelled: number
   usageCaptured: number
+  /**
+   * Chat runs the change stopped in its transaction. The caller delivers their Stop with
+   * `deliverRunStops`: this module sits in page graphs that must not load that delivery.
+   */
+  stoppedRuns: StoppedRun[]
 }
 
 /**
@@ -1104,6 +1128,7 @@ export async function transferUserBetweenOrganizations(
     credentialMembershipsRevoked: 0,
     pendingInvitationsCancelled: 0,
     usageCaptured: 0,
+    stoppedRuns: [],
   }
   if (params.sourceOrganizationId === params.destinationOrganizationId) {
     return {
@@ -1235,6 +1260,14 @@ export async function transferUserBetweenOrganizations(
           )
           await removeWorkspaceSkillMembershipsTx(tx, workspaceIds, params.userId)
         }
+        /** The source organization's runs this transfer ends. */
+        const stoppedRuns = [
+          ...(await stopLiveRunsTx(tx, {
+            userId: params.userId,
+            organizationId: params.sourceOrganizationId,
+          })),
+          ...(await stopLiveRunsTx(tx, { userId: params.userId, workspaceIds })),
+        ]
 
         const added = await ensureUserInOrganizationTx(tx, {
           userId: params.userId,
@@ -1264,6 +1297,7 @@ export async function transferUserBetweenOrganizations(
           // Nothing to capture: the member's ledger rows stay stamped to the
           // source org's period and are billed at its cycle close.
           usageCaptured: 0,
+          stoppedRuns,
         }
       }
     )
@@ -1327,11 +1361,16 @@ export async function removeUserFromOrganization(
       .limit(1)
 
     if (!existingMember) {
-      return { success: false, error: 'Member not found', billingActions }
+      return { success: false, error: 'Member not found', billingActions, stoppedRuns: [] }
     }
 
     if (existingMember.role === 'owner') {
-      return { success: false, error: 'Cannot remove organization owner', billingActions }
+      return {
+        success: false,
+        error: 'Cannot remove organization owner',
+        billingActions,
+        stoppedRuns: [],
+      }
     }
 
     const result = await withInvitationSafeOrganizationAccessMutation(
@@ -1416,14 +1455,40 @@ export async function removeUserFromOrganization(
          * same commit, so the directory and the organization can never disagree
          * about who is a member.
          */
+        if (revokePersonalApiKeys) await revokePersonalApiKeysTx(tx, { userId })
+        await endDirectoryMembershipTx(tx, { userId, organizationId })
+        /** The member's organization Assistant runs and their runs in its workspaces end with access. */
+        const stoppedRuns = [
+          ...(await stopLiveRunsTx(tx, { userId, organizationId })),
+          ...(await stopLiveRunsTx(tx, { userId, workspaceIds })),
+        ]
+
+        if (workspaceIds.length > 0) {
+          const resourceOwnershipReassignment =
+            await reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx({
+              tx,
+              workspaceIds,
+              departingUserId: userId,
+            })
+          if (resourceOwnershipReassignment.unresolved.length > 0) {
+            throw new WorkspaceBillingAccountRemovalError()
+          }
+        }
+
+        /**
+         * Session revocation writes the organization row, so it waits until the
+         * handoff above holds the workspace rows. Storage writers lock a
+         * workspace row and then its organization payer row; writing the
+         * organization first and then waiting on the workspace rows inverts that
+         * order and deadlocks against a concurrent upload or delete.
+         */
         await revokeUserSessionsTx(tx, {
           userId,
           organizationId,
           ...(spareSessionToken ? { spareSessionToken } : {}),
           ...(spareSessionId ? { spareSessionId } : {}),
         })
-        if (revokePersonalApiKeys) await revokePersonalApiKeysTx(tx, { userId })
-        await endDirectoryMembershipTx(tx, { userId, organizationId })
+        if (revokePersonalApiKeys) await revokeUserOAuthGrants(userId, tx)
 
         if (workspaceIds.length === 0) {
           return {
@@ -1434,17 +1499,8 @@ export async function removeUserFromOrganization(
             usageCaptured: 0,
             credentialMembershipsRevoked: 0,
             pendingInvitationsCancelled: cancelledInvitations.length,
+            stoppedRuns,
           }
-        }
-
-        const resourceOwnershipReassignment =
-          await reassignSharedResourceOwnershipForWorkspaceMemberRemovalTx({
-            tx,
-            workspaceIds,
-            departingUserId: userId,
-          })
-        if (resourceOwnershipReassignment.unresolved.length > 0) {
-          throw new WorkspaceBillingAccountRemovalError()
         }
 
         const deletedPerms = await tx
@@ -1471,6 +1527,7 @@ export async function removeUserFromOrganization(
           usageCaptured: 0,
           credentialMembershipsRevoked,
           pendingInvitationsCancelled: cancelledInvitations.length,
+          stoppedRuns,
         }
       }
     )
@@ -1481,7 +1538,7 @@ export async function removeUserFromOrganization(
         userId,
         memberId,
       })
-      return { success: true, removed: false, billingActions }
+      return { success: true, removed: false, billingActions, stoppedRuns: [] }
     }
 
     billingActions.usageCaptured = result.usageCaptured
@@ -1544,10 +1601,10 @@ export async function removeUserFromOrganization(
       }
     }
 
-    return { success: true, removed: true, billingActions }
+    return { success: true, removed: true, billingActions, stoppedRuns: result.stoppedRuns }
   } catch (error) {
     if (error instanceof WorkspaceBillingAccountRemovalError) {
-      return { success: false, error: error.message, billingActions }
+      return { success: false, error: error.message, billingActions, stoppedRuns: [] }
     }
     if (onError === 'throw') throw error
 
@@ -1557,7 +1614,12 @@ export async function removeUserFromOrganization(
       memberId,
       error,
     })
-    return { success: false, error: 'Failed to remove user from organization', billingActions }
+    return {
+      success: false,
+      error: 'Failed to remove user from organization',
+      billingActions,
+      stoppedRuns: [],
+    }
   }
 }
 
@@ -1571,6 +1633,13 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
   actorUserId?: string
 }): Promise<RemoveExternalWorkspaceAccessResult> {
   const { userId, organizationId } = params
+  const nothingRemoved = {
+    workspaceAccessRevoked: 0,
+    permissionGroupsRevoked: 0,
+    credentialMembershipsRevoked: 0,
+    pendingInvitationsCancelled: 0,
+    stoppedRuns: [],
+  }
 
   try {
     const [existingMember] = await db
@@ -1583,10 +1652,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
       return {
         success: false,
         error: 'User is an organization member',
-        workspaceAccessRevoked: 0,
-        permissionGroupsRevoked: 0,
-        credentialMembershipsRevoked: 0,
-        pendingInvitationsCancelled: 0,
+        ...nothingRemoved,
       }
     }
 
@@ -1595,6 +1661,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
       permissionGroupsRevoked,
       credentialMembershipsRevoked,
       pendingInvitationsCancelled,
+      stoppedRuns,
     } = await withInvitationSafeOrganizationAccessMutation(
       { userId, organizationId, scope: 'external' },
       async (tx, { workspaceIds, invitationIds }) => {
@@ -1651,6 +1718,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
             permissionGroupsRevoked: deletedPermissionGroups.length,
             credentialMembershipsRevoked: 0,
             pendingInvitationsCancelled: cancelledInvitations.length,
+            stoppedRuns: [],
           }
         }
 
@@ -1687,6 +1755,8 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
           permissionGroupsRevoked: deletedPermissionGroups.length,
           credentialMembershipsRevoked,
           pendingInvitationsCancelled: cancelledInvitations.length,
+          /** The member's runs in the workspaces they lose. */
+          stoppedRuns: await stopLiveRunsTx(tx, { userId, workspaceIds }),
         }
       }
     )
@@ -1704,6 +1774,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
         permissionGroupsRevoked,
         credentialMembershipsRevoked,
         pendingInvitationsCancelled,
+        stoppedRuns,
       }
     }
 
@@ -1722,6 +1793,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
       permissionGroupsRevoked,
       credentialMembershipsRevoked,
       pendingInvitationsCancelled,
+      stoppedRuns,
     }
   } catch (error) {
     if (error instanceof OrchestrationError || isRetryableTransactionError(error)) throw error
@@ -1729,10 +1801,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
       return {
         success: false,
         error: error.message,
-        workspaceAccessRevoked: 0,
-        permissionGroupsRevoked: 0,
-        credentialMembershipsRevoked: 0,
-        pendingInvitationsCancelled: 0,
+        ...nothingRemoved,
       }
     }
 
@@ -1744,10 +1813,7 @@ export async function removeExternalUserFromOrganizationWorkspaces(params: {
     return {
       success: false,
       error: 'Failed to remove external workspace member',
-      workspaceAccessRevoked: 0,
-      permissionGroupsRevoked: 0,
-      credentialMembershipsRevoked: 0,
-      pendingInvitationsCancelled: 0,
+      ...nothingRemoved,
     }
   }
 }
@@ -1881,14 +1947,7 @@ export async function transferOrganizationOwnership(
         .limit(1)
 
       if (oldStats) {
-        await tx
-          .insert(userStats)
-          .values({
-            id: generateId(),
-            userId: newOwnerUserId,
-            usageLimitUpdatedAt: new Date(),
-          })
-          .onConflictDoNothing({ target: userStats.userId })
+        await createUserStatsIfMissing(tx, newOwnerUserId)
 
         const overage = oldStats.billedOverageThisPeriod || '0'
         const overageNum = toNumber(toDecimal(overage))

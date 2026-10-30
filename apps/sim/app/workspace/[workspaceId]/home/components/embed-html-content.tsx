@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getErrorMessage } from '@sim/utils/errors'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 
 interface EmbedHtmlContentProps {
   persona?: string

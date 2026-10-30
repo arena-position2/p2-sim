@@ -17,7 +17,7 @@ import type {
   ResumeStatus,
 } from '@/executor/types'
 import { attachExecutionResult, normalizeError } from '@/executor/utils/errors'
-import { buildSentinelEndId } from '@/executor/utils/subflow-utils'
+import { buildSentinelEndId } from '@/executor/utils/subflow'
 
 const logger = createLogger('ExecutionEngineV2')
 

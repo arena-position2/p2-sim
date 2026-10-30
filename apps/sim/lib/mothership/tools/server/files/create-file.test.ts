@@ -16,7 +16,7 @@ vi.mock('@/lib/workspace-files/application/write-workspace-file-by-path', () => 
   updateWorkspaceFileContentBufferByPath: vi.fn(),
 }))
 
-vi.mock('@/lib/uploads/contexts/workspace/workspace-file-secret-provenance', () => ({
+vi.mock('@/lib/uploads/contexts/workspace/file-secret-provenance', () => ({
   EXACT_EMPTY_WORKSPACE_FILE_SECRET_PROVENANCE: { status: 'exact', entries: [] },
   createWorkspaceFileSecretProvenanceFromRegistry: vi.fn(async () => ({
     safe: true,

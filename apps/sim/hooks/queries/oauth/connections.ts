@@ -8,7 +8,7 @@ import {
   type OAuthAccountSummary,
   type OAuthConnection,
 } from '@/lib/api/contracts/oauth-connections'
-import { client } from '@/lib/auth/auth-client'
+import { client } from '@/lib/auth/client'
 import { readOAuthReturnContext } from '@/lib/credentials/client-state'
 import { OAUTH_CREDENTIAL_DRAFT_CALLBACK_PARAM } from '@/lib/credentials/draft-constants'
 import { OAUTH_PROVIDERS, type OAuthServiceConfig } from '@/lib/oauth'

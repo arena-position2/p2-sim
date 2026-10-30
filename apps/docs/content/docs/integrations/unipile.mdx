@@ -1,0 +1,603 @@
+---
+title: LinkedIn (Unipile)
+description: LinkedIn company data and messaging via Unipile
+integration:
+  type: "unipile"
+  color: "#0F2736"
+---
+
+import { ReferenceDetails } from "@/components/ui/reference-details"
+
+## OAuth scopes [#oauth-scopes]
+
+Sim requests no OAuth scopes for LinkedIn (Unipile). For a self-hosted deployment, register your own app with the provider using the settings below. See [Integrations and OAuth](/platform/self-hosting/integrations-oauth) for setup.
+
+| Setting | Value |
+| ------- | ----- |
+| Environment variables | `UNIPILE_API_KEY` |
+
+## Use the block [#usage-instructions]
+
+Shared workspaces list public LinkedIn accounts from `outreach_user_connections_v1` plus your personal connections via Unipile hosted authentication (`GET /api/unipile/accounts`). Other workspaces connect LinkedIn via hosted authentication only. Uses `UNIPILE_API_KEY` from the deployment environment. Covers LinkedIn company and user profiles, posts, comments, reactions, search, messaging, relations, and attachments.
+
+## Actions
+
+### Unipile Comment a post
+
+Comments on a post or replies to a comment (`POST /api/v1/posts/\{post_id\}/comments`, multipart). LinkedIn: `post_id` is the post social_id; optional `mentions` is a JSON array of \{ name, profile_id, is_company? \} for `\{\{n\}\}` placeholders in text (the Unipile block uses a mention table to build this). See https://developer.unipile.com/docs/posts-and-comments Uses server UNIPILE_API_KEY.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `post_id` | string | Yes | Post id path param. LinkedIn: social_id from the post object. Instagram: provider_id \(not post short code\). |
+| `account_id` | string | Yes | Unipile account id \(multipart field\) |
+| `text` | string | Yes | Comment \(max 1250\). LinkedIn: `\{\{n\}\}` = nth entry in `mentions` — e.g. Hey \{\{0\}\}, check this out! |
+| `mentions` | string | No | Optional LinkedIn JSON array like Unipile docs: \[\{ "name": "…", "profile_id": "…" \}\]. The proxy sends a real JSON `mentions` array \(no file parts\) or an `application/json` multipart part when attachments are uploaded. Use `\{\{0\}\}`, `\{\{1\}\}` in `text` in the same order. |
+| `name` | string | No | Legacy: single-mention display name \(prefer `mentions` JSON or block table\) |
+| `profile_id` | string | No | Legacy: single-mention profile_id |
+| `is_company` | string | No | Legacy: true/false with name+profile_id |
+| `external_link` | string | No | LinkedIn only: https URL for link preview; URL should also appear in text. |
+| `as_organization` | string | No | LinkedIn only: organization id to comment as that org. |
+| `comment_id` | string | No | Optional: reply to this comment. LinkedIn: id from the comments list. |
+| `attachments` | json | No | Optional files as UserFile array \(multipart `attachments` parts, same as send message / create post\). Legacy string still accepted. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. CommentSent\) |
+| `comment_id` | string | Created comment id |
+
+</ReferenceDetails>
+
+### Unipile Create Post
+
+Creates a LinkedIn post (`POST /api/v1/posts` multipart). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile connected account id |
+| `text` | string | Yes | Post body. LinkedIn: `\{\{n\}\}` = nth entry in `mentions` — e.g. Hey \{\{0\}\}, check this out! |
+| `attachments` | json | No | Attachments as UserFile array \(preferred\) or legacy string |
+| `video_thumbnail` | json | No | Video thumbnail as UserFile \(preferred\) or legacy string |
+| `repost` | string | No | Repost form field |
+| `include_job_posting` | string | No | include_job_posting form field |
+| `mentions` | string | No | LinkedIn: JSON array of \{ name, profile_id, is_company? \} \(see Unipile create post\). Sent as JSON `mentions` when no media upload; with files, as an `application/json` multipart part. Match `\{\{0\}\}` in post text. |
+| `external_link` | string | No | external_link form field |
+| `as_organization` | string | No | as_organization form field |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. PostCreated\) |
+| `post_id` | string | Created post id |
+
+</ReferenceDetails>
+
+### Unipile Get Chat
+
+Retrieves a chat by id (`GET /api/v1/chats/\{chat_id\}`). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `chat_id` | string | Yes | Unipile chat id |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. Chat\) |
+| `id` | string | Chat id |
+| `account_id` | string | Account id |
+| `account_type` | string | Account type \(e.g. WHATSAPP\) |
+| `provider_id` | string | Provider id |
+| `name` | string | Chat display name |
+| `subject` | string | Chat subject |
+| `timestamp` | string | Chat timestamp |
+| `unread_count` | number | Unread message count |
+| `content_type` | string | Content type |
+| `last_message_text` | string | Text of the last message when present |
+| `chat` | json | Full Chat payload from Unipile |
+
+</ReferenceDetails>
+
+### Unipile Retrieve LinkedIn search parameters
+
+Returns LinkedIn search parameter IDs for building a search body (`GET /api/v1/linkedin/search/parameters`). LinkedIn expects IDs, not raw labels. Guide: https://developer.unipile.com/docs/linkedin-search Uses server UNIPILE_API_KEY.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile account id \(required query param\) |
+| `type` | string | Yes | Required: which parameter list to fetch \(e.g. LOCATION, PEOPLE, COMPANY, … per Unipile docs\). |
+| `service` | string | No | CLASSIC \(default\), RECRUITER, or SALES_NAVIGATOR — which LinkedIn API surface to query. |
+| `keywords` | string | No | Optional keywords seed \(not applicable when type is EMPLOYMENT_TYPE\). |
+| `limit` | number | No | Optional page size 1–100 \(Unipile default 10\). |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. LinkedinSearchParametersList\) |
+| `item_count` | number | Number of parameter rows returned |
+| `items` | json | LinkedIn search parameter items \(id, title, …\) |
+| `cursor` | string | Pagination cursor when present |
+| `paging` | json | Paging metadata \(e.g. page_count\) |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile Get Message Attachment
+
+Downloads an attachment from a message (`GET /api/v1/messages/\{message_id\}/attachments/\{attachment_id\}`). Text-like bodies return `content`; binary returns `content_base64` plus `mime_type`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `message_id` | string | Yes | Unipile message id |
+| `attachment_id` | string | Yes | Attachment id |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | UTF-8 body when text-like |
+| `content_base64` | string | Base64 body for binary attachments |
+| `mime_type` | string | Response content type when known |
+
+</ReferenceDetails>
+
+### Unipile Get Post
+
+Retrieves a single post (`GET /api/v1/posts/\{post_id\}`). Requires `account_id` query (Unipile). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `post_id` | string | Yes | Post id \(path\). LinkedIn: activity id, `urn:li:ugcPost:…`, or `urn:li:share:…` per URL shape; Instagram: provider_id or shortcode. |
+| `account_id` | string | Yes | Unipile connected account id \(required query param\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Discriminator when present |
+| `id` | string | Post id |
+| `text` | string | Post text |
+| `share_url` | string | Share URL |
+| `post` | json | Full post payload |
+
+</ReferenceDetails>
+
+### Unipile Retrieve a profile
+
+Retrieves a user profile (`GET /api/v1/users/\{identifier\}`). Required: `account_id`, `user_identifier` (path). Optional LinkedIn queries: `linkedin_sections` (JSON array string—avoid `*` for high volume; see throttling), `linkedin_api` (recruiter | sales_navigator), `notify` (boolean; profile visit notification). Consult provider limits: https://developer.unipile.com/docs/provider-limits-and-restrictions Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile account id \(required query parameter\) |
+| `user_identifier` | string | Yes | Path `\{identifier\}`: provider internal id or public id \(e.g. LinkedIn public slug\) |
+| `linkedin_sections_json` | string | No | Optional JSON array of LinkedIn profile section names for Unipile `linkedin_sections` \(e.g. `\["experience_preview","skills"\]`\). Prefer preview or targeted sections; `*` is heavy and easy to throttle. |
+| `linkedin_api` | string | No | Optional `linkedin_api` query: recruiter \| sales_navigator \(when subscribed\) |
+| `notify` | boolean | No | Optional `notify` query: whether the profile visit is notified to the viewee |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. UserProfile\) |
+| `provider` | string | Provider id |
+| `public_identifier` | string | Public slug |
+| `first_name` | string | First name |
+| `last_name` | string | Last name |
+| `headline` | string | Headline |
+| `public_profile_url` | string | Public profile URL |
+| `throttled_sections` | json | When LinkedIn throttles section payloads, Unipile lists affected section names \(if any\) |
+| `profile` | json | Full user profile payload |
+
+</ReferenceDetails>
+
+### Unipile Perform Linkedin search
+
+Runs LinkedIn Classic, Sales Navigator, or Recruiter search (`POST /api/v1/linkedin/search`). Pass `search_body` as a JSON string built from api, category, keywords, filters, optional `\{ url \}`, etc. Use Retrieve LinkedIn search parameters for filter IDs. Guide: https://developer.unipile.com/docs/linkedin-search Query: account_id (required), optional cursor, limit (0–100; Classic should stay ≤50). Uses server UNIPILE_API_KEY.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile account id \(required query parameter\) |
+| `search_body` | string | Yes | JSON string for the POST body: classic people/companies/posts/jobs, sales_navigator, recruiter, \{ "url": "…" \} to search from a public URL, or \{ "cursor": "…" \} for a long cursor in the body. |
+| `cursor` | string | No | Optional cursor query param for pagination \(short cursors\) |
+| `limit` | number | No | Optional result limit 0–100 \(Unipile default 10\). Sales Navigator / Recruiter up to 100; LinkedIn Classic should not exceed 50. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. LinkedinSearch\) |
+| `item_count` | number | Number of search results in this page |
+| `items` | json | Search result items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata |
+| `config` | json | Echoed search config when present |
+| `metadata` | json | Search metadata \(history/context/request ids\) when present |
+
+</ReferenceDetails>
+
+### Unipile List all chats
+
+Lists chats (`GET /api/v1/chats`) with optional filters: unread, cursor, before/after ISO UTC datetimes, limit (1–250), account_type, account_id. Uses server UNIPILE_API_KEY.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | No | Optional filter: Unipile account id or comma-separated ids \(omit to query without account filter\). |
+| `unread` | boolean | No | Optional: true = unread chats only, false = read chats only. |
+| `cursor` | string | No | Pagination cursor from a previous ChatList response. |
+| `before` | string | No | Optional ISO 8601 UTC end boundary \(exclusive\), e.g. 2025-12-31T23:59:59.999Z |
+| `after` | string | No | Optional ISO 8601 UTC start boundary \(exclusive\), e.g. 2025-01-01T00:00:00.000Z |
+| `limit` | number | No | Optional page size 1–250. |
+| `account_type` | string | No | Optional provider filter: WHATSAPP, LINKEDIN, SLACK, TWITTER, MESSENGER, INSTAGRAM, TELEGRAM |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. ChatList\) |
+| `item_count` | number | Number of chats in this page |
+| `items` | json | Chat items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata when present |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List Chat Attendees
+
+Lists attendees for a chat (`GET /api/v1/chats/\{chat_id\}/attendees`). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `chat_id` | string | Yes | Unipile chat id |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. ChatAttendeeList\) |
+| `item_count` | number | Number of attendees |
+| `items` | json | ChatAttendee items |
+| `cursor` | string | Pagination cursor when present |
+| `paging` | json | Paging metadata when present |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List Chat Messages
+
+Lists messages in a chat (`GET /api/v1/chats/\{chat_id\}/messages`). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `chat_id` | string | Yes | Unipile chat id |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. MessageList\) |
+| `item_count` | number | Number of messages returned |
+| `items` | json | Message objects from Unipile |
+
+</ReferenceDetails>
+
+### Unipile List Post Comments
+
+Lists comments on a post (`GET /api/v1/posts/\{post_id\}/comments`). Requires `account_id` query (Unipile). Optional `cursor`, `limit` (1–100), `sort_by`, `comment_id` (replies). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `post_id` | string | Yes | Path `post_id`. LinkedIn: use **`social_id`** \(e.g. `urn:li:activity:…`\) from GET post / list posts — bare activity digits from the URL are auto-normalized to that URN. Instagram: **provider_id** only \(shortcode not supported for this route\). |
+| `account_id` | string | Yes | Unipile connected account id \(required query param\) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `limit` | number | No | Page size 1–100 \(Unipile default 100\) |
+| `sort_by` | string | No | MOST_RECENT or MOST_RELEVANT |
+| `comment_id` | string | No | Optional: list replies for this comment id \(LinkedIn: from comments list\) |
+| `max_items` | number | No | Stop after this many comments, following pages if needed. Omit to return one page. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. CommentList\) |
+| `item_count` | number | Number of comments in this page |
+| `items` | json | Comment items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List All Post Reactions
+
+Lists every reaction on a post (`GET /api/v1/posts/\{post_id\}/reactions`), following Unipile paging until complete. LinkedIn: use the post social_id from GET post or list posts; see https://developer.unipile.com/docs/posts-and-comments Uses server UNIPILE_API_KEY.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `post_id` | string | Yes | Post id path param. LinkedIn: use `social_id` from the post object \(GET post / list posts\); the id visible in the URL may not work. |
+| `account_id` | string | Yes | Unipile connected account id \(query param\) |
+| `comment_id` | string | No | Optional: list reactions on a comment instead of the post. LinkedIn: comment id from the comments list. |
+| `limit` | number | No | Optional page size per upstream request \(1–100, default 100\). |
+| `max_items` | number | No | Stop after this many reactions. Omit to load every page. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. PostReactionList\) |
+| `item_count` | number | Total number of reactions after loading all pages |
+| `items` | json | Post reaction items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List User Comments
+
+Lists comments for a user (`GET /api/v1/users/\{identifier\}/comments`). Requires `account_id` and `user_identifier`. Optional `cursor`. Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile account id \(required query parameter\) |
+| `user_identifier` | string | Yes | User identifier \(Unipile path segment\) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. CommentList\) |
+| `item_count` | number | Number of comments in this page |
+| `items` | json | Comment items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List all posts
+
+Returns posts written by a user or company (`GET /api/v1/users/\{identifier\}/posts`). Requires `account_id` and `user_identifier` (path). Optional `cursor`, `limit` (1–100), and LinkedIn `is_company`. Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile account id \(required query parameter\) |
+| `user_identifier` | string | Yes | Path `\{identifier\}`: provider id or public id \(e.g. LinkedIn slug, or company id\) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `limit` | string | No | Optional `limit` query 1–100 \(page size; number or string\) |
+| `is_company` | boolean | No | LinkedIn: true when the identifier is a company page |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. PostList\) |
+| `item_count` | number | Number of posts in this page |
+| `items` | json | Post items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List User Reactions
+
+Lists reactions for a user (`GET /api/v1/users/\{identifier\}/reactions`). Requires `account_id` and `user_identifier`. Optional `cursor`. Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile account id \(required query parameter\) |
+| `user_identifier` | string | Yes | User identifier \(Unipile path segment\) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. PostReactionList\) |
+| `item_count` | number | Number of reactions in this page |
+| `items` | json | PostReaction items |
+| `cursor` | string | Next page cursor |
+| `paging` | json | Paging metadata |
+| `total_items` | number | Total items when returned by API |
+
+</ReferenceDetails>
+
+### Unipile List User Relations
+
+Lists all LinkedIn relations for an account (`GET /api/v1/users/relations`), following cursor pagination internally until complete (with safety caps). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile connected account id |
+| `filter` | string | No | Optional Unipile `filter` query \(match by user name\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. UserRelationsList\) |
+| `item_count` | number | Number of relations |
+| `items` | json | UserRelation items |
+| `cursor` | string | Pagination cursor when present |
+| `paging` | json | Paging metadata when present |
+| `total_items` | number | Total items when returned by API |
+| `fetch_all` | boolean | True when backend fetched all pages internally |
+| `pages_fetched` | number | Number of upstream pages fetched |
+| `truncated` | boolean | True when a safety cap stopped early |
+| `truncation_reason` | string | When truncated: max_pages or max_items |
+
+</ReferenceDetails>
+
+### Unipile Retrieve LinkedIn Company Profile
+
+Fetches a LinkedIn company profile via Unipile (`GET /api/v1/linkedin/company/\{identifier\}?account_id=…`). Uses `UNIPILE_API_KEY` from the server environment.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `identifier` | string | Yes | LinkedIn company public identifier \(URL path segment, e.g. position2\) |
+| `account_id` | string | Yes | Unipile connected account id \(`account_id` query parameter\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. CompanyProfile\) |
+| `id` | string | Company id |
+| `name` | string | Company name |
+| `description` | string | Company description |
+| `public_identifier` | string | LinkedIn public slug |
+| `profile_url` | string | LinkedIn profile URL |
+| `followers_count` | number | Follower count |
+| `employee_count` | number | Employee count |
+| `website` | string | Company website |
+| `logo` | string | Logo URL |
+| `profile` | json | Full CompanyProfile payload from Unipile |
+
+</ReferenceDetails>
+
+### Unipile Send Chat Message
+
+Sends a message in a chat (`POST /api/v1/chats/\{chat_id\}/messages` as multipart form). Uses server `UNIPILE_API_KEY`.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `chat_id` | string | Yes | Unipile chat id |
+| `text` | string | Yes | Message body text |
+| `account_id` | string | Yes | Unipile connected account id |
+| `thread_id` | string | No | Optional thread id |
+| `quote_id` | string | No | Optional quote id |
+| `attachments` | json | No | Attachments as UserFile array \(preferred\) or legacy string; forwarded as multipart attachments |
+| `typing_duration` | string | No | Typing duration field \(form string\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. MessageSent\) |
+| `message_id` | string | Sent message id |
+
+</ReferenceDetails>
+
+### Unipile Start New Chat
+
+Starts a new chat via Unipile (`POST /api/v1/chats` as multipart form). Requires `attendees_ids` (array of attendee provider ids). Uses `UNIPILE_API_KEY` from the server environment.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `account_id` | string | Yes | Unipile connected account id |
+| `text` | string | Yes | Initial message text |
+| `attendees_ids` | json | Yes | Attendee provider ids for Unipile `attendees_ids` \(array preferred; comma-separated legacy string also accepted\) |
+| `attachments` | json | No | Attachments as UserFile array \(preferred\) or legacy string |
+| `voice_message` | json | No | Voice message as UserFile \(preferred\) or legacy string |
+| `video_message` | json | No | Video message as UserFile \(preferred\) or legacy string |
+| `subject` | string | No | Chat subject |
+| `api` | string | No | Unipile `api` form field \(default: 'classic'\) |
+| `topic` | string | No | Unipile `topic` form field \(default: 'service_request'\) |
+| `applicant_id` | string | No | Applicant id \(Unipile form string\) |
+| `invitation_id` | string | No | Invitation id \(Unipile form string\) |
+| `inmail` | string | No | Set to 'true' or 'false' to send the `inmail` form field |
+| `signature` | string | No | Recruiter API: signature |
+| `hiring_project_id` | string | No | Recruiter API: hiring_project_id |
+| `job_posting_id` | string | No | Recruiter API: job_posting_id |
+| `sourcing_channel` | string | No | Recruiter API: sourcing_channel |
+| `email_address` | string | No | Recruiter API: email_address |
+| `visibility` | string | No | Recruiter API: PUBLIC \| PRIVATE \| PROJECT |
+| `follow_up` | string | No | Recruiter API: JSON string for follow_up object |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `object` | string | Unipile object type \(e.g. ChatStarted\) |
+| `chat_id` | string | Created chat id |
+| `message_id` | string | Created message id |
+
+</ReferenceDetails>
+
+

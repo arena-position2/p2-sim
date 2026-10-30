@@ -18,8 +18,9 @@ export const DELETED_WORKFLOW_LABEL = 'Deleted Workflow'
 
 /**
  * Resolves the workflow a log row points at, or null when there is nowhere to
- * navigate. Sim agent jobs have no workflow of their own, and a deleted
- * workflow leaves both id fields empty.
+ * navigate. Sim agent jobs have no workflow of their own, a deleted workflow
+ * leaves both id fields empty, and an archived workflow keeps its id but can no
+ * longer be opened.
  *
  * Single source of truth for "is this log's workflow reachable" — the list row,
  * its context menu, and the details panel must agree, or a row can render as
@@ -28,10 +29,27 @@ export const DELETED_WORKFLOW_LABEL = 'Deleted Workflow'
 export function resolveLogWorkflowId(log: {
   trigger?: string | null
   workflowId?: string | null
-  workflow?: { id?: string } | null
+  workflow?: { id?: string; archivedAt?: string | null } | null
 }): string | null {
-  if (log.trigger === 'mothership') return null
+  if (log.trigger === 'mothership' || log.workflow?.archivedAt) return null
   return log.workflow?.id || log.workflowId || null
+}
+
+/**
+ * The workflow label a log row and its details panel show. An archived workflow keeps its name
+ * (it just cannot be opened, see {@link resolveLogWorkflowId}); only a hard-deleted workflow, which
+ * leaves no workflow id, reads as deleted.
+ */
+export function getLogWorkflowLabel(log: {
+  trigger?: string | null
+  workflowId?: string | null
+  jobTitle?: string | null
+  workflow?: { id?: string; name?: string | null; archivedAt?: string | null } | null
+}): string {
+  if (log.trigger === 'mothership') return log.jobTitle || 'Untitled Job'
+  return log.workflow?.id || log.workflowId
+    ? log.workflow?.name || 'Unknown'
+    : DELETED_WORKFLOW_LABEL
 }
 
 /** Path to a workflow in the editor. */

@@ -35,6 +35,10 @@ const LOCAL_DEV_FRAME_ANCESTORS = ['http://localhost:3001'] as const
  * relative import that itself pulls in no `@/` paths (../../consent/constants).
  */
 
+/** File responses select CSP at runtime; JSON and error responses retain the main policy. */
+export const FILE_DELIVERY_CSP_PATH_PATTERN =
+  '/(?:api/files/serve/.+|api/files/public/[^/]+/(?:content|inline)|api/projects/[^/]+/files/(?:inline|download|[^/]+/(?:content|artifact|export|versions/[^/]+/content))|api/workspaces/[^/]+/files/(?:inline|download|[^/]+/versions/[^/]+/content)|api/v2/projects/[^/]+/files/(?:bulk-download|[^/]+/(?:content|export|versions/[^/]+/content))|api/v2/files/(?:bulk-download|[^/]+(?:/versions/[^/]+/content)?))'
+
 const DEFAULT_SOCKET_URL = 'http://localhost:3002'
 const DEFAULT_OLLAMA_URL = 'http://localhost:11434'
 

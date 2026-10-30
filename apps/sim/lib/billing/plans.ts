@@ -1,3 +1,5 @@
+import { toStringOrNull } from '@sim/utils/coerce'
+import { toArray, toRecord } from '@sim/utils/object'
 import type Stripe from 'stripe'
 import { isArenaBilling } from '@/lib/billing/arena/env'
 import { getArenaPlans } from '@/lib/billing/arena/plans'
@@ -116,6 +118,25 @@ export function getPlanByPriceId(priceId: string): BillingPlan | undefined {
   return getPlans().find(
     (plan) => plan.priceId === priceId || plan.annualDiscountPriceId === priceId
   )
+}
+
+/**
+ * Whether a `customer.subscription.updated` event moved the subscription to a different price.
+ * Stripe lists `items` in `previous_attributes` for any item change, including a seat-only
+ * quantity change, so the previous price ids are compared with the current ones.
+ */
+export function didSubscriptionPriceChange(
+  subscription: Stripe.Subscription,
+  previousAttributes: unknown
+): boolean {
+  const previousItems = toRecord(toRecord(previousAttributes).items).data
+  if (previousItems === undefined) return false
+  const priceIds = (items: unknown) =>
+    toArray(items)
+      .map((item) => toStringOrNull(toRecord(toRecord(item).price).id))
+      .sort()
+      .join(',')
+  return priceIds(previousItems) !== priceIds(subscription.items?.data)
 }
 
 export interface StripePlanResolution {

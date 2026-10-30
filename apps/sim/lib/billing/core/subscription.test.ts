@@ -284,7 +284,7 @@ describe('hasWorkspaceLiveSyncAccess', () => {
     })
 
     await expect(hasWorkspaceLiveSyncAccess('workspace-host')).resolves.toBe(false)
-    expect(mockGetHighestPriorityPersonalSubscription).toHaveBeenCalledWith('workspace-owner')
+    expect(mockGetHighestPriorityPersonalSubscription).toHaveBeenCalledWith('workspace-owner', {})
     expect(mockGetHighestPrioritySubscription).not.toHaveBeenCalled()
   })
 

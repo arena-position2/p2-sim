@@ -27,11 +27,11 @@ import { EdgeManager } from '@/executor/execution/edge-manager'
 import type { NodeExecutionOrchestrator } from '@/executor/orchestrators/node'
 import type { ExecutionContext, ExecutionResult } from '@/executor/types'
 import { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
+import { buildSentinelEndId } from '@/executor/utils/subflow'
 import {
   buildLoopSentinelEndId,
   buildLoopSentinelStartId,
 } from '@/executor/utils/subflow-node-id-codec'
-import { buildSentinelEndId } from '@/executor/utils/subflow-utils'
 import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
 import { ExecutionEngine } from './engine'
 

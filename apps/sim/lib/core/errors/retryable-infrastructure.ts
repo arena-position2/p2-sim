@@ -54,13 +54,6 @@ const RETRYABLE_APP_ERROR_CODES = new Set([
  * did not complete against a reachable server — the same class as
  * `ECONNRESET`/`ETIMEDOUT` above.
  */
-const RETRYABLE_PG_CLIENT_ERROR_CODES = new Set([
-  'CONNECT_TIMEOUT',
-  'CONNECTION_CLOSED',
-  'CONNECTION_ENDED',
-  'CONNECTION_DESTROYED',
-])
-
 const RETRYABLE_MESSAGE_FRAGMENTS = [
   'CONNECTION_CLOSED',
   'connection terminated unexpectedly',
@@ -68,6 +61,24 @@ const RETRYABLE_MESSAGE_FRAGMENTS = [
   'server closed the connection unexpectedly',
   'Client network socket disconnected',
 ] as const
+
+const RETRYABLE_PG_CLIENT_ERROR_CODES = new Set([
+  'CONNECT_TIMEOUT',
+  'CONNECTION_CLOSED',
+  'CONNECTION_ENDED',
+  'CONNECTION_DESTROYED',
+])
+
+/**
+ * Deadlines the app enforces on its own reads: a read whose budget ran out before its query
+ * began (`DatabaseReadDeadlineError`) and a coalesced read that never settled
+ * (`CoalesceSettleTimeoutError`). Neither read produced an answer or an effect, the same
+ * class as `ETIMEDOUT` above.
+ */
+const RETRYABLE_READ_DEADLINE_ERROR_CODES = new Set([
+  'DATABASE_READ_DEADLINE_EXCEEDED',
+  'COALESCE_SETTLE_TIMEOUT',
+])
 
 function getErrorChain(error: unknown): Array<Error & Record<string, unknown>> {
   const chain: Array<Error & Record<string, unknown>> = []
@@ -98,6 +109,7 @@ export function describeRetryableInfrastructureError(
       (code && RETRYABLE_NETWORK_ERROR_CODES.has(code)) ||
       (code && RETRYABLE_APP_ERROR_CODES.has(code)) ||
       (code && RETRYABLE_PG_CLIENT_ERROR_CODES.has(code)) ||
+      (code && RETRYABLE_READ_DEADLINE_ERROR_CODES.has(code)) ||
       (errno && RETRYABLE_NETWORK_ERROR_CODES.has(errno)) ||
       messageMatched
     ) {

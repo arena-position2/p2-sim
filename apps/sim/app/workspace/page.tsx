@@ -13,8 +13,8 @@ import {
   ARENA_SSO_SESSION_REQUIRED_PATH,
   buildArenaSimResumeUrl,
 } from '@/lib/auth/arena-sim-resume'
-import { useSession } from '@/lib/auth/auth-client'
-// import { recoverFromStaleSession } from '@/lib/auth/stale-session-recovery'
+import { useSession } from '@/lib/auth/client'
+import { recoverFromStaleSession } from '@/lib/auth/stale-session-recovery'
 import {
   buildUpgradeHref,
   isUpgradeReason,

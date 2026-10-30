@@ -304,7 +304,7 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
 export const gmailReadV2Tool: ToolConfig<GmailReadParams, GmailToolResponse> = {
   id: 'gmail_read_v2',
   name: 'Gmail Read',
-  description: 'Read emails from Gmail',
+  description: 'Read emails from Gmail.',
   version: '2.0.0',
   oauth: gmailReadTool.oauth,
   params: gmailReadTool.params,

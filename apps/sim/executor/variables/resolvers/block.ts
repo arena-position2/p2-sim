@@ -14,16 +14,13 @@ import {
   resolveBlockReferenceAsync,
 } from '@/executor/utils/block-reference'
 import { formatInertStringLiteral, formatLiteralForCode } from '@/executor/utils/code-formatting'
+import { aggregateLoopIterationOutputs, collectLoopScopedOutputs } from '@/executor/utils/subflow'
 import {
   buildOuterBranchScopedId,
   extractBaseBlockId,
   extractOuterBranchIndex,
   stripCloneSuffixes,
 } from '@/executor/utils/subflow-node-id-codec'
-import {
-  aggregateLoopIterationOutputs,
-  collectLoopScopedOutputs,
-} from '@/executor/utils/subflow-utils'
 import {
   type AsyncPathNavigator,
   navigatePath,

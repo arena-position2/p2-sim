@@ -11,6 +11,7 @@ import {
 } from '@/lib/auth/arena-sim-resume'
 import { getActiveOrganizationId } from '@/lib/auth/session-response'
 import { isChangelogEnabled } from '@/lib/changelog/feature-flag'
+import { isComputerUseAvailable } from '@/lib/computer-use/availability.server'
 import { isLocalLoginEnabled } from '@/lib/core/config/env-flags'
 import { isDashboardsEnabled } from '@/lib/dashboards/feature-flag'
 import {
@@ -19,6 +20,7 @@ import {
 } from '@/lib/desktop/executor/availability'
 import { isMothershipModelSelectorEnabled, isPlanModeEnabled } from '@/lib/mothership/feature-flags'
 import { resolveOrganizationEntryPath } from '@/lib/navigation/resolve-app-entry'
+import { isProjectsEnabled } from '@/lib/projects/rollout.server'
 import { isWorkflowTestsEnabled } from '@/lib/workflow-tests/feature-flag'
 import { ApplicationLoading } from '@/app/_shell/application-loading'
 import { getQueryClient } from '@/app/_shell/providers/get-query-client'
@@ -148,6 +150,8 @@ async function WorkspaceContent({
     workflowTestsEnabled,
     changelogEnabled,
     desktopExecutorRegistered,
+    computerUseEnabled,
+    projectsEnabled,
   ] = await Promise.all([
     cookies(),
     orgSettings,
@@ -159,12 +163,14 @@ async function WorkspaceContent({
       activeOrganizationId
     ),
     isMothershipModelSelectorEnabled(),
-    isPlanModeEnabled(),
+    isPlanModeEnabled(session.user.id).catch(() => false),
     resolveOrganizationEntryPath(session),
     isDashboardsEnabled(hostContext.hostOrganizationId),
     isWorkflowTestsEnabled(hostContext.hostOrganizationId),
     isChangelogEnabled(hostContext.hostOrganizationId),
     hasDesktopBackgroundExecutor(session.user.id),
+    isComputerUseAvailable(hostContext.hostOrganizationId),
+    isProjectsEnabled(),
     prefetchWorkspaceAccess(queryClient, workspaceId, principal),
     prefetchWorkspaceForkAvailability(queryClient, workspaceId, principal, hostContext),
   ])
@@ -178,7 +184,9 @@ async function WorkspaceContent({
           'workflow-tests': workflowTestsEnabled,
           changelog: changelogEnabled,
           'mothership-model-selector': modelSelectorEnabled,
+          'mothership-computer-use': computerUseEnabled,
           'mothership-plan-mode': planModeEnabled,
+          projects: projectsEnabled,
         }}
       >
         <WorkspaceHostProvider workspaceId={workspaceId} initialContext={hostContext}>

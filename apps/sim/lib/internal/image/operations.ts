@@ -1,6 +1,6 @@
 import { createLogger } from '@sim/logger'
-import { getErrorMessage } from '@sim/utils/errors'
 import type { ImageToolBody } from '@/lib/api/contracts/tools/media/image'
+import { getUserFacingErrorMessage } from '@/lib/core/errors/database-query-error'
 import { isPayloadSizeLimitError } from '@/lib/core/utils/stream-limits'
 import { runImageToolGeneration } from '@/lib/image-generation/run-image-tool.server'
 import type { ImageGenerationInput } from '@/lib/internal/image/schema'
@@ -68,7 +68,7 @@ export async function executeImageGeneration(
   } catch (error) {
     context.signal?.throwIfAborted()
     logger.error(`[${requestId}] Image generation operation error:`, error)
-    const errorMessage = getErrorMessage(error, 'Unknown error')
+    const errorMessage = getUserFacingErrorMessage(error, 'Unknown error')
     return Response.json(
       { error: errorMessage },
       { status: isPayloadSizeLimitError(error) ? 413 : 500 }

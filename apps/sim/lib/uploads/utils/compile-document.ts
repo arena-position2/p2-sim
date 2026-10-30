@@ -1,9 +1,9 @@
 import { sha256Hex } from '@sim/security/hash'
 import { runSandboxTask } from '@/lib/execution/sandbox/run-task'
-import { loadCompiledDocByExt } from '@/lib/mothership/tools/server/files/doc-compile'
-import { parseWorkspaceFileKey } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
+import { parseWorkspaceFileKey } from '@/lib/uploads/contexts/workspace/file-manager'
+import { loadCompiledDocByExt } from '@/lib/uploads/documents/compile'
 import { getContentType } from '@/app/api/files/utils'
-import type { SandboxTaskId } from '@/sandbox-tasks/registry'
+import type { SandboxTaskId } from '@/sandboxes/registry'
 
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const PDF_MAGIC = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d])

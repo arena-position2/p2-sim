@@ -8,7 +8,7 @@ import { useQueryStates } from 'nuqs'
 import { requestJson } from '@/lib/api/client/request'
 import type { WorkspaceSearchFilters } from '@/lib/api/contracts/knowledge'
 import { getWorkspaceHostContextContract } from '@/lib/api/contracts/workspaces'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { MothershipHandoffStorage } from '@/lib/core/utils/browser-storage'
 import {
   getMothershipAttachmentPreviewUrl,
@@ -36,7 +36,7 @@ import {
   useResourcePanelController,
 } from '@/app/workspace/[workspaceId]/home/hooks/use-resource-panel'
 import { useRestoredChatEntry } from '@/app/workspace/[workspaceId]/home/hooks/use-restored-chat-entry'
-import { resolveWorkspaceResourceRef } from '@/app/workspace/[workspaceId]/home/resolve-resource-ref'
+import { fetchWorkspaceResourceRef } from '@/app/workspace/[workspaceId]/home/resolve-resource-ref'
 import { searchFiltersFromParams } from '@/app/workspace/[workspaceId]/home/search-params'
 import type {
   ChatRequestMode,
@@ -47,7 +47,6 @@ import { useFeatureFlag } from '@/app/workspace/[workspaceId]/providers/feature-
 import { useFileAttachments } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/copilot/components/user-input/hooks/use-file-attachments'
 import { mentionifyIntegrations } from '@/blocks/integration-matcher'
 import { useMarkMothershipChatRead } from '@/hooks/queries/mothership-chats'
-import { getWorkspaceFilesQueryOptions } from '@/hooks/queries/workspace-files'
 import { useHydrated } from '@/hooks/use-hydrated'
 import { useMothershipDraftsStore } from '@/stores/mothership-drafts/store'
 import { useOrganizationChatModeStore } from '@/stores/organization-chat-mode/store'
@@ -180,11 +179,7 @@ function OrganizationHomeContent({
           toast.error('This resource is outside this organization.')
           return
         }
-        const files =
-          ref.type === 'file'
-            ? await queryClient.fetchQuery(getWorkspaceFilesQueryOptions(ref.workspaceId))
-            : []
-        const resource = resolveWorkspaceResourceRef(ref, files)
+        const resource = await fetchWorkspaceResourceRef(queryClient, ref.workspaceId, ref)
         if (!resource) {
           toast.error(`Couldn't find "${ref.title}" in its workspace`)
           return
@@ -299,6 +294,32 @@ function OrganizationHomeContent({
     files.clearAttachedFiles()
   }
 
+  const editQueuedMessage = (id: string) => {
+    const queued = chat.editQueuedMessage(id)
+    if (queued) {
+      const queuedMode = queued.requestMode ?? requestMode
+      setSelectedMode(queuedMode)
+      setDraft(queued.content, queued.contexts)
+      setRestoredContexts(queued.contexts ?? [])
+      files.restoreAttachedFiles(
+        (queued.fileAttachments ?? []).map((file) => ({
+          id: file.id,
+          key: file.key,
+          name: file.filename,
+          type: file.media_type,
+          size: file.size,
+          path:
+            file.path ||
+            getMothershipAttachmentPreviewUrl(file) ||
+            getMothershipAttachmentUrl(file),
+          previewUrl: getMothershipAttachmentPreviewUrl(file),
+          uploading: false,
+        }))
+      )
+    }
+    return queued
+  }
+
   const composer =
     requestMode !== 'assistant' && !canBuild ? (
       <div className='px-4 py-3 text-[var(--text-muted)] text-sm'>
@@ -317,6 +338,11 @@ function OrganizationHomeContent({
         onModeChange={canSelectMode ? changeMode : undefined}
         value={draft}
         restoredContexts={restoredContexts}
+        messages={chat.messages}
+        onEditQueuedTail={() => {
+          const tail = chat.messageQueue.at(-1)
+          return tail ? Boolean(editQueuedMessage(tail.id)) : false
+        }}
         files={files}
         isInitialView={!hasChat}
         isSending={chat.isSending || chat.isReconnecting}
@@ -357,31 +383,7 @@ function OrganizationHomeContent({
           dispatchingHeadId={chat.dispatchingHeadId}
           onRemoveQueuedMessage={chat.removeFromQueue}
           onSendQueuedMessage={chat.sendNow}
-          onEditQueuedMessage={(id) => {
-            const queued = chat.editQueuedMessage(id)
-            if (queued) {
-              const queuedMode = queued.requestMode ?? requestMode
-              setSelectedMode(queuedMode)
-              setDraft(queued.content, queued.contexts)
-              setRestoredContexts(queued.contexts ?? [])
-              files.restoreAttachedFiles(
-                (queued.fileAttachments ?? []).map((file) => ({
-                  id: file.id,
-                  key: file.key,
-                  name: file.filename,
-                  type: file.media_type,
-                  size: file.size,
-                  path:
-                    file.path ||
-                    getMothershipAttachmentPreviewUrl(file) ||
-                    getMothershipAttachmentUrl(file),
-                  previewUrl: getMothershipAttachmentPreviewUrl(file),
-                  uploading: false,
-                }))
-              )
-            }
-            return queued
-          }}
+          onEditQueuedMessage={editQueuedMessage}
           onCancelQueueEdit={chat.cancelQueueEdit}
           userId={session?.user?.id}
           chatId={chat.resolvedChatId}

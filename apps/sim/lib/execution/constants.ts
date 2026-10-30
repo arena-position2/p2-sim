@@ -1,7 +1,4 @@
-// import { DEFAULT_EXECUTION_TIMEOUT_MS } from '@/lib/core/execution-limits'
-import type { SandboxTaskId } from '@/sandbox-tasks/registry'
-
-// export { DEFAULT_EXECUTION_TIMEOUT_MS }
+import type { SandboxTaskId } from '@/sandboxes/registry'
 
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 3_600_000 // 60 minutes — E2B rejects a sandbox lifetime over 1 hour
 export const MAX_EXECUTION_DURATION = 3_600 // 60 minutes

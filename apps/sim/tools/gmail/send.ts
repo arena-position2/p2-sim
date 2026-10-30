@@ -142,7 +142,7 @@ interface GmailSendV2Response {
 export const gmailSendV2Tool: InternalToolConfig<GmailSendParams, GmailSendV2Response> = {
   id: 'gmail_send_v2',
   name: 'Gmail Send',
-  description: 'Send emails using Gmail',
+  description: 'Send emails using Gmail.',
   version: '2.0.0',
   oauth: gmailSendTool.oauth,
   params: gmailSendTool.params,

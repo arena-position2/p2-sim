@@ -7,7 +7,7 @@ import { createLogger } from '@sim/logger'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { usePostHog } from 'posthog-js/react'
 import type { WorkspaceSearchFilters } from '@/lib/api/contracts/knowledge'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import {
   LandingPromptStorage,
   type LandingWorkflowSeed,
@@ -305,7 +305,7 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
     (context: ChatContext) => {
       const resolved = resolveResourceFromContext(context)
       if (!resolved) return
-      removeResource(resolved.type, resolved.id)
+      removeResource({ type: resolved.type, id: resolved.id })
     },
     [resolveResourceFromContext, removeResource]
   )

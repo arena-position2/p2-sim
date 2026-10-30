@@ -7,7 +7,7 @@ import {
   getDevelopmentReferenceImageErrorMessage,
   resolveDevelopmentReferenceImage,
 } from '@/lib/development/resolve-development-reference-image'
-import type { RawFileInput } from '@/lib/uploads/utils/file-utils'
+import type { RawFileInput } from '@/lib/uploads/utils/file'
 
 const logger = createLogger('DevelopmentToolReferenceImage')
 

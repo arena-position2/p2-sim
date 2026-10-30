@@ -17,7 +17,7 @@ vi.mock('@/lib/uploads/core/storage-service', () => ({
   downloadFile: mockDownloadFile,
 }))
 
-vi.mock('@/lib/uploads/contexts/execution/execution-file-manager', () => ({
+vi.mock('@/lib/uploads/contexts/execution/file-manager', () => ({
   uploadExecutionFile: mockUploadExecutionFile,
 }))
 

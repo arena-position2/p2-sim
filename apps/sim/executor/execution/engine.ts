@@ -22,7 +22,7 @@ import type {
 } from '@/executor/types'
 import { attachExecutionResult, normalizeError } from '@/executor/utils/errors'
 import { projectResolvedSecretDiagnosticError } from '@/executor/utils/resolved-secret-content-projection'
-import { buildSentinelEndId } from '@/executor/utils/subflow-utils'
+import { buildSentinelEndId } from '@/executor/utils/subflow'
 
 const logger = createLogger('ExecutionEngine')
 

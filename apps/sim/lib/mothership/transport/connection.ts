@@ -5,13 +5,12 @@ import type { SimConnection } from '@/lib/mothership/generated/sim-transport'
 
 /**
  * Server-owned topology; no browser or model input chooses a callback destination.
- *
  * Direct callbacks are only for Sim Cloud. Arena sets `isHosted` for product
- * features, but Cloud mothership still treats this process as a customer and
- * rejects `direct` with "Customer requests require outbound Sim transport".
+ * features, but Cloud mothership still classifies this process as a customer.
  */
-export function getSimConnection(): SimConnection {
-  const mode = env.MOTHERSHIP_SIM_TRANSPORT ?? (isSimCloudHosted ? 'direct' : 'checkpoint')
+export function getSimConnection(override?: SimConnection['mode']): SimConnection {
+  const mode =
+    override ?? env.MOTHERSHIP_SIM_TRANSPORT ?? (isSimCloudHosted ? 'direct' : 'checkpoint')
   if (mode === 'direct') return { mode }
   return {
     mode,

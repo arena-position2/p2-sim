@@ -18,16 +18,19 @@ import {
   executeCopilotFileUseCase,
   resolveCopilotWorkspaceFileReference,
 } from '@/lib/mothership/application/execute-file-use-case'
+import { recordServiceCost } from '@/lib/mothership/billing/service-observer'
 import { GenerateImage } from '@/lib/mothership/generated/tool-catalog-v1'
 import {
   assertServerToolNotAborted,
   type BaseServerTool,
   type ServerToolContext,
 } from '@/lib/mothership/tools/server/base-tool'
-import { assertOpaqueWorkspaceFileModelSafe } from '@/lib/mothership/tools/server/model-input'
-import { writeCopilotWorkspaceFileByPath } from '@/lib/mothership/vfs/resource-writer'
-import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
-import { createWorkspaceFileSecretProvenanceFromRegistry } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+import {
+  validateCopilotWorkspaceFileWriteTarget,
+  writeCopilotWorkspaceFileByPath,
+} from '@/lib/mothership/vfs/resource-writer'
+import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/file-manager'
+import { createWorkspaceFileSecretProvenanceFromRegistry } from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
 import { readWorkspaceFileContent } from '@/lib/workspace-files/application/read-workspace-file-content'
 
@@ -150,7 +153,7 @@ async function loadReferenceImage(
     }
     throw error
   }
-  await assertOpaqueWorkspaceFileModelSafe({ workspaceId, file })
+
   try {
     const { content } = await executeCopilotFileUseCase(
       context,
@@ -159,6 +162,7 @@ async function loadReferenceImage(
         fileId: file.id,
         assertedWorkspaceId: workspaceId,
         maxBytes: MAX_MEDIA_BYTES,
+        contentView: 'opaque',
       },
       { fileId: file.id }
     )
@@ -191,9 +195,17 @@ export const generateImageServerTool: BaseServerTool<GenerateImageArgs, Generate
     }
 
     try {
+      const outputFile = params.outputs?.files?.[0]
+      if (outputFile?.path) {
+        await validateCopilotWorkspaceFileWriteTarget(context, {
+          workspaceId,
+          target: { path: outputFile.path, mode: outputFile.mode ?? 'create' },
+        })
+      }
+
       const { imageCount, promptImageUrl, singleImagePrompt, singleImagePrompts } =
         await resolveImageGenerationCount({ prompt })
-      const apiKey = getRotatingApiKey('google')
+      const apiKey = getRotatingApiKey('gemini')
       const ai = new GoogleGenAI({ apiKey })
 
       const aspectRatio = params.aspectRatio || '1:1'
@@ -248,8 +260,39 @@ export const generateImageServerTool: BaseServerTool<GenerateImageArgs, Generate
         imageCount,
       })
 
-      const generatedFiles: NonNullable<GenerateImageResult['files']> = []
-      const count = Math.min(MAX_IMAGES_TO_GENERATE, Math.max(1, imageCount))
+      const response = await ai.models.generateContent({
+        model: NANO_BANANA_MODEL,
+        contents: [{ role: 'user', parts }],
+        config: {
+          responseModalities: ['IMAGE', 'TEXT'],
+        },
+      })
+
+      let imageBase64: string | undefined
+
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData?.data) {
+            imageBase64 = part.inlineData.data
+            break
+          }
+        }
+      }
+
+      if (!imageBase64) {
+        const textParts = response.candidates?.[0]?.content?.parts
+          ?.filter((p) => p.text)
+          .map((p) => p.text)
+          .join(' ')
+        return {
+          success: false,
+          message: `Image generation returned no image data. ${textParts ? `Model response: ${textParts.slice(0, 500)}` : 'No response from model.'}`,
+        }
+      }
+
+      await recordServiceCost('nano_banana_2', NANO_BANANA_IMAGE_COST_USD)
+
+      assertServerToolNotAborted(context)
       // Reference images were asserted opaque-egress-safe above, so the prompt
       // is the only secret-bearing input these files can inherit. Recording its
       // provenance is what keeps the written file readable by the model later:
@@ -263,6 +306,9 @@ export const generateImageServerTool: BaseServerTool<GenerateImageArgs, Generate
       const secretProvenance = promptProvenance.safe
         ? promptProvenance.provenance
         : { status: 'unknown' as const }
+
+      const generatedFiles: NonNullable<GenerateImageResult['files']> = []
+      const count = Math.min(MAX_IMAGES_TO_GENERATE, Math.max(1, imageCount))
 
       for (let index = 0; index < count; index++) {
         const promptForImage = singleImagePrompts?.[index] || singleImagePrompt || prompt

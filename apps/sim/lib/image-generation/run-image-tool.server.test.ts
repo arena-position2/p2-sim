@@ -15,7 +15,7 @@ vi.mock('@/lib/image-generation/openai-reference.server', () => ({
   generateOpenAIImageEdit: vi.fn(),
 }))
 
-vi.mock('@/lib/uploads/utils/file-utils.server', () => ({
+vi.mock('@/lib/uploads/utils/file.server', () => ({
   resolveInternalFileUrl: vi.fn(),
 }))
 

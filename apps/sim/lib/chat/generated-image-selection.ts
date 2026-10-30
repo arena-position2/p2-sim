@@ -4,7 +4,7 @@ import {
   isInternalServeUrl,
   resolveChatImageSourceUrl,
 } from '@/lib/chat/image-fetch-url'
-import { ensureFileNameExtension, getExtensionFromMimeType } from '@/lib/uploads/utils/file-utils'
+import { ensureFileNameExtension, getExtensionFromMimeType } from '@/lib/uploads/utils/file'
 
 export interface SelectedGeneratedImage extends AssistantGeneratedImage {
   messageId: string
