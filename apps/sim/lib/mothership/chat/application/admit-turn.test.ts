@@ -124,6 +124,34 @@ describe('organization turn admission through current private-chat authorization
       expect.anything()
     )
   })
+
+  it('persists the Arena Local catalog id onto the chat and the admitted user message', async () => {
+    queueTableRows(copilotChats, [chat])
+    queueTableRows(member, [{ role: 'member' }])
+    dbChainMockFns.returning
+      .mockResolvedValueOnce([{ model: 'bedrock-claude-fable-5-1' }])
+      .mockResolvedValueOnce([{ id: 'run-1', organizationId: 'org-1', workspaceId: null }])
+      .mockResolvedValueOnce([{ key: 'claim' }])
+
+    await admitChatTurn.execute({
+      principal,
+      input: { ...input(), chatModel: 'bedrock-claude-fable-5-1' },
+    })
+
+    expect(dbChainMockFns.set).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'bedrock-claude-fable-5-1' })
+    )
+    expect(mocks.append).toHaveBeenCalledWith(
+      chatId,
+      expect.any(Array),
+      expect.objectContaining({
+        streamId,
+        chatModel: 'bedrock-claude-fable-5-1',
+      }),
+      expect.anything()
+    )
+  })
+
   /**
    * Another attempt with this id re-took the claim after this one's in-progress
    * TTL ran out. That attempt may admit the turn, so this one must not, and the

@@ -42,6 +42,12 @@ interface AdmitTurnInput {
   effortChoice?: MothershipEffort
   /** The composer's desktop, offered for its background executor to run this turn's desktop tools. */
   desktopDeviceId?: string
+  /**
+   * Arena Local catalog id for this turn (e.g. `bedrock-claude-fable-5-1`).
+   * When set, persists onto `copilot_chats.model` so transcript rows copy the
+   * picker selection rather than a stale hosted default.
+   */
+  chatModel?: string
 }
 
 /**
@@ -104,6 +110,7 @@ export const admitChatTurn = defineAuthorizedChatUseCase({
     const desktopDeviceId = await turnDesktopDevice(principal, workspaceId, input.desktopDeviceId)
     const turnConfig = sql`COALESCE(${copilotChats.config}, '{}'::jsonb) || jsonb_build_object('conversationMode', ${request.mode ?? 'agent'}::text)`
     return withRunAdmissionLock(userId, request.messageId, async (tx) => {
+      const nextChatModel = input.chatModel?.trim() || undefined
       const [chat] = await tx
         .update(copilotChats)
         .set({
@@ -112,6 +119,7 @@ export const admitChatTurn = defineAuthorizedChatUseCase({
           config: input.effortChoice
             ? withChatEffortChoice(turnConfig, input.effortChoice)
             : turnConfig,
+          ...(nextChatModel ? { model: nextChatModel } : {}),
         })
         .where(
           and(

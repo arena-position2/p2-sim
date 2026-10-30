@@ -71,8 +71,9 @@ export async function getLocalCopilotUserAccess(
 }
 
 /**
- * Persists the user's Local picker selection onto `default_model`. Cloud
- * mothership `chat.model` is left alone so switching backends does not mix ids.
+ * Persists the user's Local picker selection onto `default_model` (per-user
+ * default for new sessions). The active chat's `copilot_chats.model` is updated
+ * separately on each Local turn via chat admission (`chatModel`).
  */
 export async function updateLocalCopilotDefaultModel(
   userId: string,
