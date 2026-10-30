@@ -1,11 +1,33 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  BEDROCK_TOOL_USE_ID_MAX_LENGTH,
   createReadableStreamFromBedrockStream,
   getBedrockInferenceProfileId,
+  normalizeBedrockToolUseId,
   supportsToolResultStatus,
   toBedrockConversationUsage,
 } from '@/providers/bedrock/utils'
 import type { AgentStreamEvent } from '@/providers/stream-events'
+
+describe('normalizeBedrockToolUseId', () => {
+  it('keeps short valid ids unchanged', () => {
+    expect(normalizeBedrockToolUseId('tooluse_abc123')).toBe('tooluse_abc123')
+  })
+
+  it('sanitizes characters outside the Bedrock pattern', () => {
+    expect(normalizeBedrockToolUseId('toolu:bdrk/01ABC')).toBe('toolu_bdrk_01ABC')
+  })
+
+  it('shortens oversized ids to the Bedrock limit deterministically', () => {
+    const longId = `toolu_bdrk_${'a'.repeat(80)}`
+    const first = normalizeBedrockToolUseId(longId)
+    const second = normalizeBedrockToolUseId(longId)
+    expect(first.length).toBeLessThanOrEqual(BEDROCK_TOOL_USE_ID_MAX_LENGTH)
+    expect(first).toMatch(/^[a-zA-Z0-9_-]+$/)
+    expect(first).toBe(second)
+    expect(normalizeBedrockToolUseId(`toolu_bdrk_${'b'.repeat(80)}`)).not.toBe(first)
+  })
+})
 
 describe('getBedrockInferenceProfileId', () => {
   it.concurrent('prefixes geo inference profile for models that require it', () => {

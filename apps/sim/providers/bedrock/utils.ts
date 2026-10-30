@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type {
   Message as BedrockMessage,
   ContentBlock,
@@ -223,6 +224,9 @@ export function checkForForcedToolUsage(
   return null
 }
 
+/** AWS Bedrock Converse `toolUseId` max length (pattern `[a-zA-Z0-9_-]+`). */
+export const BEDROCK_TOOL_USE_ID_MAX_LENGTH = 64
+
 /**
  * Generates a unique tool use ID for Bedrock.
  * AWS Bedrock requires toolUseId to be 1-64 characters, pattern [a-zA-Z0-9_-]+
@@ -231,9 +235,35 @@ export function generateToolUseId(toolName: string): string {
   const timestamp = Date.now().toString(36) // Base36 timestamp (9 chars)
   const random = randomFloat().toString(36).substring(2, 7) // 5 random chars
   const suffix = `-${timestamp}-${random}` // ~15 chars
-  const maxNameLength = 64 - suffix.length
+  const maxNameLength = BEDROCK_TOOL_USE_ID_MAX_LENGTH - suffix.length
   const truncatedName = toolName.substring(0, maxNameLength).replace(/[^a-zA-Z0-9_-]/g, '_')
   return `${truncatedName}${suffix}`
+}
+
+/**
+ * Ensures a Bedrock `toolUseId` satisfies Converse constraints.
+ *
+ * Claude Fable (and some other Bedrock models) can emit ids longer than 64
+ * characters. Echoing those on the next turn fails validation. Normalization is
+ * deterministic so assistant `toolUse` and user `toolResult` stay paired.
+ */
+export function normalizeBedrockToolUseId(
+  rawId: string | undefined | null,
+  fallbackName = 'tool'
+): string {
+  const raw = typeof rawId === 'string' ? rawId.trim() : ''
+  if (!raw) return generateToolUseId(fallbackName)
+
+  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '_')
+  if (!sanitized) return generateToolUseId(fallbackName)
+  if (sanitized.length <= BEDROCK_TOOL_USE_ID_MAX_LENGTH) return sanitized
+
+  const hash = createHash('sha256').update(raw).digest('base64url').replace(/=+$/g, '').slice(0, 20)
+  const prefixLen = BEDROCK_TOOL_USE_ID_MAX_LENGTH - hash.length - 1
+  return `${sanitized.slice(0, Math.max(1, prefixLen))}_${hash}`.slice(
+    0,
+    BEDROCK_TOOL_USE_ID_MAX_LENGTH
+  )
 }
 
 /**

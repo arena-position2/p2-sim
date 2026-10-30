@@ -1,5 +1,5 @@
-import { generateId } from '@sim/utils/id'
 import type { ChatCompletionChunk } from '@/local-copilot/lib/providers/types'
+import { generateToolUseId } from '@/providers/bedrock/utils'
 
 /** DeepSeek V3.2 native tool-call token (`｜` is U+FF5C). */
 const DSML_TOKEN = '｜DSML｜'
@@ -110,8 +110,9 @@ export function parseDeepSeekDsmlToolCalls(text: string): RecoveredDeepSeekToolC
 export function createDeepSeekDsmlRecoverySession(
   options: DeepSeekDsmlRecoveryOptions = {}
 ): DeepSeekDsmlRecoverySession {
-  const generateToolCallId =
-    options.generateToolCallId ?? ((name: string) => `${name}-${generateId()}`)
+  // Bedrock Converse rejects toolUseId longer than 64 chars — never invent
+  // `${name}-${uuid}` (long Arena tool names overflow that limit).
+  const generateToolCallId = options.generateToolCallId ?? generateToolUseId
   const allowedToolNames = options.allowedToolNames
   let hold = ''
   let droppedMarkup = ''

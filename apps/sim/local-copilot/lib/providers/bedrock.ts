@@ -28,6 +28,7 @@ import {
   buildBedrockInferenceConfig,
   generateToolUseId,
   getBedrockInferenceProfileId,
+  normalizeBedrockToolUseId,
 } from '@/providers/bedrock/utils'
 
 const logger = createLogger('LocalCopilotBedrockProvider')
@@ -319,7 +320,7 @@ export function convertMessagesToBedrock(messages: ChatMessage[]): BedrockConver
         const toolMessage = messages[index]
         content.push({
           toolResult: {
-            toolUseId: toolMessage.toolCallId || generateToolUseId('tool'),
+            toolUseId: normalizeBedrockToolUseId(toolMessage.toolCallId, 'tool'),
             content: [{ text: getMessageContentText(toolMessage.content) }],
           },
         })
@@ -340,7 +341,7 @@ export function convertMessagesToBedrock(messages: ChatMessage[]): BedrockConver
         ...anthropicThinkingBlocksToBedrockContent(message.anthropicThinkingBlocks),
         ...message.toolCalls.map((call) => {
           const toolUse: ToolUseBlock = {
-            toolUseId: call.id || generateToolUseId(call.name),
+            toolUseId: normalizeBedrockToolUseId(call.id, call.name),
             name: call.name,
             input: parseToolArguments(call.arguments),
           }
@@ -675,7 +676,7 @@ export function createBedrockProvider(config: LocalCopilotConfig): LocalCopilotP
             yield {
               type: 'tool_call',
               toolCall: {
-                id: block.toolUse.toolUseId || generateToolUseId(name || 'tool'),
+                id: normalizeBedrockToolUseId(block.toolUse.toolUseId, name || 'tool'),
                 name,
                 arguments: JSON.stringify(block.toolUse.input ?? {}),
               },
@@ -739,7 +740,7 @@ export function createBedrockProvider(config: LocalCopilotConfig): LocalCopilotP
             const toolUse = start.toolUse
             const name = toolUse.name ?? ''
             pendingToolCalls.set(index, {
-              id: toolUse.toolUseId || generateToolUseId(name || 'tool'),
+              id: normalizeBedrockToolUseId(toolUse.toolUseId, name || 'tool'),
               name,
               arguments: '',
             })
