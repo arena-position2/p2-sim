@@ -144,7 +144,7 @@ export const env = createEnv({
     TURNSTILE_SECRET_KEY:                  z.string().min(1).optional(),           // Cloudflare Turnstile secret key for captcha verification
     ENCRYPTION_KEY:                        z.string().min(32),                     // Key for encrypting sensitive data
     API_ENCRYPTION_KEY:                    z.string().min(32).optional(),          // Dedicated key for encrypting API keys (optional for OSS)
-    ENCRYPT_ACCOUNT_TOKENS:                z.boolean().optional(),                 // Seal OAuth access/refresh tokens on write (read by @sim/db); takes effect only with a 64-hex ENCRYPTION_KEY. Enable only once every app, worker, and background-task deployment runs a release that reads sealed tokens
+    ENCRYPT_ACCOUNT_TOKENS:                z.boolean().optional(),                 // Opt-out: OAuth access/refresh tokens are sealed on write (read by @sim/db) and backfilled by migrate whenever ENCRYPTION_KEY is 64 hex characters; false or 0 writes plaintext. Sealed tokens need v0.9.33+ on every process that reads them
     INTERNAL_API_SECRET:                   z.string().min(32),                     // Secret for internal API authentication
     INTERNAL_JWT_SECRET:                   z.string().min(32).optional(),          // Dedicated signing key for internal JWTs (falls back to INTERNAL_API_SECRET); separating limits blast radius if one leaks
 
@@ -459,6 +459,7 @@ export const env = createEnv({
     IVM_MAX_BROKERS_PER_EXECUTION:         z.string().optional().default('1000'),    // Max broker calls per sandbox task execution
     IVM_REMOTE_WORKER_URL:                 z.string().optional(),                    // ws(s)://<host>/v1/worker of a dedicated worker host; workers run there unless the isolated-vm-local-workers kill switch is on
     IVM_REMOTE_WORKER_TOKEN:               z.string().optional(),                    // Token the worker host expects (its IVM_HOST_TOKEN, >= 32 chars); required with IVM_REMOTE_WORKER_URL
+    IVM_REMOTE_WORKER_MAX_AGE_MS:          z.coerce.number().int().positive().optional(), // (default 120000) Age at which a worker host connection stops taking executions, so host deploys drain; keep below the host's deregistration delay
 
     // Knowledge Base Processing Configuration - Shared across all processing methods
     KB_CONFIG_MAX_DURATION:                z.number().optional().default(600),     // Max processing duration in seconds (10 minutes)
