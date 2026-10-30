@@ -2408,10 +2408,12 @@ export async function executeFunctionRequest(
         : isRemoteSandboxEnabled
     const remainingExecutionMs =
       executionDeadlineAt === undefined ? undefined : Math.max(1, executionDeadlineAt - Date.now())
-    const timeout =
+    const timeout = Math.min(
+      DEFAULT_EXECUTION_TIMEOUT_MS,
       remainingExecutionMs === undefined
         ? (requestedTimeout ?? DEFAULT_EXECUTION_TIMEOUT_MS)
         : Math.max(1, Math.min(requestedTimeout ?? remainingExecutionMs, remainingExecutionMs))
+    )
     executionDeadlineController = createTimeoutAbortController(timeout, req.signal)
     executionSignal = executionDeadlineController.signal
     timeoutForError = timeout

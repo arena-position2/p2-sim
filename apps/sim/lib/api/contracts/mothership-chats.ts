@@ -369,6 +369,8 @@ export const restoreMothershipChatContract = defineRouteContract({
 
 export const forkMothershipChatBodySchema = z.object({
   upToMessageId: z.string().min(1, 'upToMessageId is required'),
+  /** The chat input's backend. Local chats have no worker conversation to copy. */
+  copilotBackend: z.enum(['local', 'external']).optional(),
 })
 export type ForkMothershipChatBody = z.input<typeof forkMothershipChatBodySchema>
 

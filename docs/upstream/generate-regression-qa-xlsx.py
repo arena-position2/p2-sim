@@ -357,6 +357,18 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1",
         "Workspace chat and Local/Cloud copilot",
         "P0",
+        "Local fork still opens a new chat when the worker has no conversation",
+        "1. On Local, finish at least one Copilot reply.\n"
+        "2. Use Fork in new chat on that reply.\n"
+        "3. Confirm the new chat opens with a title starting Fork | and the messages up to that reply.\n"
+        "4. On Cloud, with COPILOT_API_KEY set, fork a finished reply the same way.",
+        "Local fork opens the new chat. There is no “Failed to fork chat” toast. "
+        "Cloud fork still succeeds and keeps the worker conversation.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
         "Finished Copilot reply does not turn asterisks into bold on scroll",
         "1. Get a Copilot reply that contains ordinary * characters or unfinished markdown.\n"
         "2. Wait until the reply has finished, then scroll the thread away and back.",

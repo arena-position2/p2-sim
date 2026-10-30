@@ -58,7 +58,7 @@ export const MessageActions = memo(function MessageActions({
   const owner = params.organizationId
     ? { organizationId: params.organizationId }
     : params.workspaceId
-  const { chatId } = useChatSurface()
+  const { chatId, copilotBackend } = useChatSurface()
   const { copied, copy: copyMessage } = useCopyToClipboard({ resetMs: 1500 })
   const [copiedRequestId, setCopiedRequestId] = useState(false)
   const [pendingFeedback, setPendingFeedback] = useState<'up' | 'down' | null>(null)
@@ -135,7 +135,11 @@ export const MessageActions = memo(function MessageActions({
   const handleFork = async () => {
     if (!owner || !chatId || !messageId || forkChat.isPending) return
     try {
-      const result = await forkChat.mutateAsync({ chatId, upToMessageId: messageId })
+      const result = await forkChat.mutateAsync({
+        chatId,
+        upToMessageId: messageId,
+        ...(copilotBackend ? { copilotBackend } : {}),
+      })
       if (result.failedFileCopies) {
         toast.warning(
           `${result.failedFileCopies} file${result.failedFileCopies === 1 ? '' : 's'} could not be copied to the fork`

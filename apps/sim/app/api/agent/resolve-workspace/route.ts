@@ -1,6 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { V2_WORKFLOW_BILLING_EMAIL_HEADER } from '@/lib/api/contracts/v2/workflows'
 import { getSession } from '@/lib/auth'
 
 const logger = createLogger('AgentResolveWorkspace')
@@ -25,6 +26,10 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = session.user.id
+  const userEmail = session.user.email?.trim()
+  if (!userEmail) {
+    return NextResponse.json({ error: 'Logged-in user email is required' }, { status: 400 })
+  }
 
   const apiKey = process.env.SIM_WORKFLOW_API_KEY
   if (!apiKey) {
@@ -65,6 +70,7 @@ export async function POST(req: NextRequest) {
       headers: {
         'X-API-Key': apiKey,
         'Content-Type': 'application/json',
+        [V2_WORKFLOW_BILLING_EMAIL_HEADER]: userEmail,
       },
       body: JSON.stringify({
         message,

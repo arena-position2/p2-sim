@@ -1,12 +1,13 @@
 import type { SessionPrincipal } from '@sim/auth/principal'
 import { db } from '@sim/db'
-import { copilotChats } from '@sim/db/schema'
+import { copilotChats, localCopilotConversations } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
+import { toRecord } from '@sim/utils/object'
 import { and, eq, isNull } from 'drizzle-orm'
 import { defineWorkspaceOperation } from '@/lib/core/application'
 import { defineOrganizationOperation } from '@/lib/core/application/organization-operation'
-import { OrchestrationError } from '@/lib/core/orchestration/types'
+import { asOrchestrationError, OrchestrationError } from '@/lib/core/orchestration/types'
 import { mapWithConcurrency } from '@/lib/core/utils/concurrency'
 import { defineAuthorizedChatUseCase } from '@/lib/mothership/chat/application/authorized-chat-use-case'
 import { resolveOwnedChatContext } from '@/lib/mothership/chat/application/context'
@@ -32,13 +33,63 @@ import {
 } from '@/lib/mothership/chat/rewrite-file-references'
 import { publishChatStatusChanged } from '@/lib/mothership/chat-status'
 import { type MothershipResource, sanitizeChatResources } from '@/lib/mothership/resources/types'
+import { hasCopilotApiKey } from '@/lib/mothership/server/copilot-api-keys'
 import { captureServerEvent } from '@/lib/posthog/server'
 import { deleteFile } from '@/lib/uploads/core/storage-service'
+import { getLocalCopilotUserAccess } from '@/local-copilot/lib/access'
+import type { CopilotBackendPreference } from '@/local-copilot/lib/copilot-backend-preference'
+import { mothershipChatConversationTitle } from '@/local-copilot/lib/persistence/store'
 
 const logger = createLogger('ForkChat')
+
+/** `required` copies the worker conversation. `if-present` continues when the worker has none. */
+type ForkWorkerPolicy = 'skip' | 'if-present' | 'required'
+
 interface ForkChatInput {
   chatId: string
   upToMessageId: string
+  copilotBackend?: CopilotBackendPreference
+}
+
+/** Arena Copilot keeps the transcript in Sim. The worker's 404 is "nothing to copy", not a missing chat. */
+function configMarksArenaCopilot(config: unknown): boolean {
+  return toRecord(config).arenaCopilot === true
+}
+
+function withArenaCopilotMarker(config: unknown): Record<string, unknown> {
+  return { ...toRecord(config), arenaCopilot: true }
+}
+
+async function arenaCopilotServedChat(userId: string, chatId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: localCopilotConversations.id })
+    .from(localCopilotConversations)
+    .where(
+      and(
+        eq(localCopilotConversations.userId, userId),
+        eq(localCopilotConversations.title, mothershipChatConversationTitle(chatId))
+      )
+    )
+    .limit(1)
+  return Boolean(row)
+}
+
+async function resolveForkWorkerPolicy(params: {
+  userId: string
+  chatId: string
+  config: unknown
+  copilotBackend?: CopilotBackendPreference
+}): Promise<{ policy: ForkWorkerPolicy; arena: boolean }> {
+  const access = await getLocalCopilotUserAccess(params.userId)
+  if (access.localOnly) return { policy: 'skip', arena: true }
+
+  const marked = configMarksArenaCopilot(params.config)
+  const servedLocally =
+    !marked && access.hasAccess ? await arenaCopilotServedChat(params.userId, params.chatId) : false
+  const arena = marked || servedLocally || params.copilotBackend === 'local'
+  if (!arena) return { policy: 'required', arena: false }
+  if (!hasCopilotApiKey()) return { policy: 'skip', arena: true }
+  return { policy: 'if-present', arena: true }
 }
 
 /** Copies a private conversation under its current owner policy before publishing its local rows. */
@@ -140,19 +191,37 @@ export const forkChat = defineAuthorizedChatUseCase({
       const newChatResources = rewriteResourceFileRefs(parentResources, maps, chatOwnedFileIds)
       const cutUser = [...forkedMessages].reverse().find((message) => message.role === 'user')
       if (!cutUser) throw new Error('The fork has no user message')
-      workerCopyRequested = true
-      await copyWorkerConversation({
-        sourceChatId: chatId,
-        newChatId: newId,
-        ...(context.organizationId
-          ? { organizationId: context.organizationId }
-          : { workspaceId: context.workspaceId }),
+      const { policy: workerPolicy, arena } = await resolveForkWorkerPolicy({
         userId,
-        upToMessageId: cutUser.id,
-        includeResponse: forkedMessages.at(-1)?.role === 'assistant',
-        fileIds: Object.fromEntries(maps.fileIds),
-        fileKeys: Object.fromEntries(maps.fileKeys),
+        chatId,
+        config: parent.config,
+        copilotBackend: input.copilotBackend,
       })
+      if (workerPolicy !== 'skip') {
+        workerCopyRequested = true
+        try {
+          await copyWorkerConversation({
+            sourceChatId: chatId,
+            newChatId: newId,
+            ...(context.organizationId
+              ? { organizationId: context.organizationId }
+              : { workspaceId: context.workspaceId }),
+            userId,
+            upToMessageId: cutUser.id,
+            includeResponse: forkedMessages.at(-1)?.role === 'assistant',
+            fileIds: Object.fromEntries(maps.fileIds),
+            fileKeys: Object.fromEntries(maps.fileKeys),
+          })
+        } catch (error) {
+          const missingOnWorker = asOrchestrationError(error)?.code === 'not_found'
+          if (!(workerPolicy === 'if-present' && missingOnWorker)) throw error
+          workerCopyRequested = false
+          logger.info('Forking an Arena Copilot chat that has no worker conversation', {
+            chatId,
+            newChatId: newId,
+          })
+        }
+      }
 
       /** Publish only after both the file bytes and the worker conversation are prepared. */
       await db.transaction(async (tx) => {
@@ -182,7 +251,7 @@ export const forkChat = defineAuthorizedChatUseCase({
             model: parent.model,
             resources: newChatResources,
             previewYaml: parent.previewYaml,
-            config: parent.config,
+            config: arena ? withArenaCopilotMarker(parent.config) : parent.config,
             conversationId: null,
             updatedAt: now,
             lastSeenAt: now,

@@ -518,7 +518,9 @@ export async function runStreamLoop(
         try {
           await options.onEvent?.(streamEvent)
         } catch (error) {
-          if (options.assertControllerOwnership) throw error
+          if (options.assertControllerOwnership || error instanceof WorkerStreamInterruptedError) {
+            throw error
+          }
           logger.warn('Failed to forward stream event', {
             type: streamEvent.type,
             error: getErrorMessage(error),

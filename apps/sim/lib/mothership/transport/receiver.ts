@@ -20,12 +20,22 @@ const logger = createLogger('MothershipTransportReceiver')
  */
 interface OutboundReceiver {
   controller: AbortController
+  channelId: string
   pollInFlight: boolean
   pollStartedAt: number
   generation: number
   /** Generation whose register grace elapsed while that poll was still in flight. */
   registeredGeneration: number
   waiters: Array<() => void>
+}
+
+interface EnsureSimReceiverOptions {
+  /**
+   * A fresh chat turn needs this much of the long-poll left. A poll inside the
+   * last few seconds still looks registered, then aborts, and the worker answers
+   * the retry as a reattach with "Run not found".
+   */
+  minRemainingMs?: number
 }
 
 const receivers = new Map<string, OutboundReceiver>()
@@ -37,8 +47,10 @@ let stopHandlersInstalled = false
  * request to be registered on the worker before chat stamps `simConnection`.
  */
 const POLL_REGISTER_GRACE_MS = 750
+/** Idle channels long-poll for this long. The fetch timeout must match. */
+const POLL_TIMEOUT_MS = 30_000
 /** Matches the poll fetch timeout, plus slack so a live long-poll is still trusted. */
-const POLL_TRUST_MS = 32_000
+const POLL_TRUST_MS = POLL_TIMEOUT_MS + 2_000
 const POLL_READY_TIMEOUT_MS = 5_000
 
 export async function receiveSimControls(
@@ -53,7 +65,7 @@ export async function receiveSimControls(
         method: 'POST',
         headers: mothershipRequestHeaders(),
         body: JSON.stringify({ channelId }),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
         redirect: 'error',
         spanName: 'sim → worker transport poll',
         operation: 'sim_transport_poll',
@@ -108,28 +120,40 @@ function installStopHandlers(): void {
   process.once('SIGINT', stop)
 }
 
-function pollIsRegistered(state: OutboundReceiver): boolean {
+function pollAgeMs(state: OutboundReceiver): number {
+  if (state.pollStartedAt <= 0) return Number.POSITIVE_INFINITY
+  return Date.now() - state.pollStartedAt
+}
+
+function pollHasRemainingLife(state: OutboundReceiver, minRemainingMs: number): boolean {
+  return state.pollInFlight && pollAgeMs(state) < POLL_TIMEOUT_MS - minRemainingMs
+}
+
+function pollIsRegistered(state: OutboundReceiver, minRemainingMs = 0): boolean {
   return (
     state.pollInFlight &&
     state.registeredGeneration === state.generation &&
-    Date.now() - state.pollStartedAt < POLL_TRUST_MS
+    pollAgeMs(state) < POLL_TRUST_MS &&
+    (minRemainingMs <= 0 || pollHasRemainingLife(state, minRemainingMs))
   )
 }
 
-function waitForRegisteredPoll(state: OutboundReceiver): Promise<void> {
-  if (pollIsRegistered(state)) return Promise.resolve()
+function waitForRegisteredPoll(state: OutboundReceiver, minRemainingMs: number): Promise<void> {
+  if (pollIsRegistered(state, minRemainingMs)) return Promise.resolve()
   return new Promise((resolve) => {
     state.waiters.push(resolve)
   })
 }
 
 /** True once a poll has been in flight through the register grace. False on timeout. */
-async function waitForLivePoll(state: OutboundReceiver): Promise<boolean> {
-  if (pollIsRegistered(state)) return true
+async function waitForLivePoll(state: OutboundReceiver, minRemainingMs = 0): Promise<boolean> {
+  if (pollIsRegistered(state, minRemainingMs)) return true
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
-      waitForRegisteredPoll(state).then(() => true),
+      waitForRegisteredPoll(state, minRemainingMs).then(() =>
+        pollIsRegistered(state, minRemainingMs)
+      ),
       new Promise<boolean>((resolve) => {
         timer = setTimeout(() => resolve(false), POLL_READY_TIMEOUT_MS)
       }),
@@ -143,6 +167,7 @@ function startReceiver(baseURL: string, channelId: string): OutboundReceiver {
   const controller = new AbortController()
   const state: OutboundReceiver = {
     controller,
+    channelId,
     pollInFlight: false,
     pollStartedAt: 0,
     generation: 0,
@@ -177,37 +202,57 @@ function startReceiver(baseURL: string, channelId: string): OutboundReceiver {
   return state
 }
 
+function dropReceiver(baseURL: string, state: OutboundReceiver): void {
+  state.controller.abort()
+  if (receivers.get(baseURL) === state) receivers.delete(baseURL)
+}
+
 /**
  * Starts the outbound poller for this worker if needed, then waits until a poll
  * is in flight long enough for the worker to register the channel. Every turn
  * waits, including after a disconnect: a sticky ready flag from the first poll
  * lets a later chat stamp `checkpoint` while the worker has dropped the channel.
- * Go then 500s, Sim retries as a reattach/resume, and the user sees "Run not found".
+ * Go then 500s, Sim retries as a reattach, and the user sees "Run not found".
+ *
+ * Returns false when no poll registered in time. Callers must not send the chat
+ * until this is true — continuing against a dead channel is what burns the turn.
  */
-export async function ensureSimReceiverForBaseURL(baseURL: string): Promise<void> {
+export async function ensureSimReceiverForBaseURL(
+  baseURL: string,
+  options?: EnsureSimReceiverOptions
+): Promise<boolean> {
   const connection = getSimConnection()
-  if (connection.mode !== 'checkpoint' || !env.COPILOT_API_KEY) return
+  if (connection.mode !== 'checkpoint' || !env.COPILOT_API_KEY) return true
 
+  const minRemainingMs = options?.minRemainingMs ?? 0
   let state = receivers.get(baseURL)
-  if (
+  const channelMismatch = Boolean(state && state.channelId !== connection.channelId)
+  const expiring = Boolean(
     state &&
-    !state.controller.signal.aborted &&
-    state.pollInFlight &&
-    state.pollStartedAt > 0 &&
-    Date.now() - state.pollStartedAt >= POLL_TRUST_MS
-  ) {
-    state.controller.abort()
-    if (receivers.get(baseURL) === state) receivers.delete(baseURL)
+      minRemainingMs > 0 &&
+      !state.controller.signal.aborted &&
+      state.pollInFlight &&
+      !pollHasRemainingLife(state, minRemainingMs)
+  )
+  const stale = Boolean(
+    state &&
+      !state.controller.signal.aborted &&
+      state.pollInFlight &&
+      pollAgeMs(state) >= POLL_TRUST_MS
+  )
+  if (state && (channelMismatch || expiring || stale)) {
+    dropReceiver(baseURL, state)
     state = undefined
   }
   if (!state || state.controller.signal.aborted) {
     state = startReceiver(baseURL, connection.channelId)
   }
 
-  const live = await waitForLivePoll(state)
+  const live = await waitForLivePoll(state, minRemainingMs)
   if (!live) {
-    logger.warn('Outbound Sim transport poll did not start in time; continuing', { baseURL })
+    logger.warn('Outbound Sim transport poll did not register in time', { baseURL })
   }
+  return live
 }
 
 export async function startSimReceivers(): Promise<void> {

@@ -343,6 +343,21 @@ describe('POST /api/mothership/chats/[chatId]/fork', () => {
     expect(res.status).toBe(status)
   })
 
+  it('publishes a Local copilot fork when the worker has no conversation', async () => {
+    setEnv({ COPILOT_API_KEY: 'test-key' })
+    mockFetchGo.mockResolvedValue(Response.json({ error: 'Chat not found' }, { status: 404 }))
+    const res = await POST(
+      createRequest('chat-1', { upToMessageId: 'msg-2', copilotBackend: 'local' }),
+      createRouteContext({ chatId: 'chat-1' })
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.success).toBe(true)
+    expect(typeof body.id).toBe('string')
+    expect(mockAppendCopilotChatMessages).toHaveBeenCalled()
+    expect(mockPublishStatusChanged).toHaveBeenCalled()
+  })
+
   it('surfaces failed blob copies and excludes their metadata from publication', async () => {
     mockExecuteChatFileBlobCopies.mockResolvedValue({
       copied: 1,

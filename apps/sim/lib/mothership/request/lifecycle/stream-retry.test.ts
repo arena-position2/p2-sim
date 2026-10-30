@@ -41,6 +41,29 @@ describe('stream recovery budget', () => {
     expect(retry.nextDelay(error)).toBeNull()
   })
 
+  it('retries a missing run three times, and does not retry a different 4xx', () => {
+    vi.useFakeTimers()
+    const missing = new CopilotBackendError('Run not found', {
+      status: 404,
+      body: '{"error":"Run not found"}',
+    })
+    const retry = new StreamRetryWindow()
+    for (let index = 0; index < 3; index++) {
+      const delay = retry.nextDelay(missing)
+      expect(delay).not.toBeNull()
+      vi.advanceTimersByTime(delay ?? 0)
+    }
+    expect(retry.nextDelay(missing)).toBeNull()
+    expect(
+      new StreamRetryWindow().nextDelay(
+        new CopilotBackendError('The agent service could not process this request.', {
+          status: 400,
+          body: '{"error":"bad request"}',
+        })
+      )
+    ).toBeNull()
+  })
+
   it('keeps a reachable failure to three retries however often the worker reattaches', () => {
     vi.useFakeTimers()
     const error = new StreamEndedWithoutTerminalError('/api/mothership')

@@ -47,6 +47,7 @@ import {
   BillingLimitError,
   CopilotBackendError,
   runStreamLoop,
+  WorkerStreamInterruptedError,
 } from '@/lib/mothership/request/go/stream'
 import {
   createProviderToolCallIdentity,
@@ -98,6 +99,37 @@ import type { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secr
 import { shouldRouteToLocalCopilot } from '@/local-copilot/lib/routing'
 
 const logger = createLogger('CopilotLifecycle')
+
+/** Worker answer when a retry reattaches to a run the dead channel never created. */
+const MISSING_RUN_MESSAGE = 'Run not found'
+/**
+ * A fresh turn will not use a long-poll with less than this left. The poll
+ * aborts at 30s; sending in that window is what the follow-up click hits.
+ */
+const FRESH_POLL_MIN_REMAINING_MS = 8_000
+
+function isMissingRunEvent(event: StreamEvent): boolean {
+  if (event.type !== MothershipStreamV1EventType.error) return false
+  const message = event.payload.message || event.payload.error
+  return message === MISSING_RUN_MESSAGE
+}
+
+/**
+ * Holds the chat POST until the worker has this process's channel registered.
+ * `false` is the only failure: a test double that returns nothing must not block.
+ */
+async function requireRegisteredSimPoll(baseURL: string, fresh: boolean): Promise<void> {
+  if (getSimConnection().mode !== 'checkpoint') return
+  const live = await ensureSimReceiverForBaseURL(
+    baseURL,
+    fresh ? { minRemainingMs: FRESH_POLL_MIN_REMAINING_MS } : undefined
+  )
+  if (live === false) {
+    throw new WorkerStreamInterruptedError(
+      new Error('Outbound Sim transport poll is not registered')
+    )
+  }
+}
 
 /** After a renewed lease's end, the wait looks once more before it calls the call lost. */
 const LEASE_RECHECK_SLACK_MS = 1_000
@@ -1004,8 +1036,8 @@ async function runResumeLegWithRetry(
     options.abortSignal?.throwIfAborted()
     const errorsBeforeAttempt = leg.errors.length
     await authorizeLifecycleContinuation(execContext)
-    if (execContext.mothershipBaseURL && getSimConnection().mode === 'checkpoint') {
-      await ensureSimReceiverForBaseURL(execContext.mothershipBaseURL)
+    if (execContext.mothershipBaseURL) {
+      await requireRegisteredSimPoll(execContext.mothershipBaseURL, false)
     }
     try {
       await runStreamLoop(
@@ -1281,11 +1313,9 @@ async function runCheckpointLoop(
     const isResume = route === '/api/tools/resume'
     if (isResume || options.recovery) await authorizeLifecycleContinuation(execContext)
     // Each attempt, including a retry and a tool resume, waits for a poll that is
-    // actually in flight. A channel that died after the first turn makes Go 500,
-    // the retry reattaches, and the user sees "Run not found".
-    if (getSimConnection().mode === 'checkpoint') {
-      await ensureSimReceiverForBaseURL(mothershipBaseURL)
-    }
+    // actually in flight. A follow-up clicked as the long-poll dies used to POST
+    // anyway; Go 500s, the retry reattaches, and the user sees "Run not found".
+    await requireRegisteredSimPoll(mothershipBaseURL, !isResume && !options.recovery)
 
     // Enterprise BYOK rides EVERY leg, resume included: a resume that lands on a dead
     // run becomes a continuation with no closure holding the key. Re-resolved per leg so
@@ -1305,6 +1335,17 @@ async function runCheckpointLoop(
          has an HTTP buffer worth a per-event macrotask flush. */
       flushAfterEvent: options.flushAfterEvent ?? Boolean(callerOnEvent),
       onEvent: async (event: StreamEvent) => {
+        // A content-less "Run not found" is the reattach of a turn that never
+        // started. Retry it on a live poll instead of rendering that string.
+        if (
+          !isResume &&
+          !options.recovery &&
+          context.accumulatedContent.length === 0 &&
+          context.toolCalls.size === 0 &&
+          isMissingRunEvent(event)
+        ) {
+          throw new WorkerStreamInterruptedError(new Error(MISSING_RUN_MESSAGE))
+        }
         retry?.recovered()
         if (
           event.type === MothershipStreamV1EventType.run &&

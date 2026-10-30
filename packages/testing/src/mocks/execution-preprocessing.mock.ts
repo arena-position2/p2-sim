@@ -29,4 +29,5 @@ export const executionPreprocessingMockFns = {
 export const executionPreprocessingMock = {
   preprocessExecution: executionPreprocessingMockFns.mockPreprocessExecution,
   WORKFLOW_NOT_DEPLOYED_CODE: 'WORKFLOW_NOT_DEPLOYED',
+  BILLING_EMAIL_NOT_FOUND_CODE: 'BILLING_EMAIL_NOT_FOUND',
 }

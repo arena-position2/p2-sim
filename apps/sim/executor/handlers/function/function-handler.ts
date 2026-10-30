@@ -63,7 +63,8 @@ export class FunctionBlockHandler implements BlockHandler {
         ? inputs.timeout
         : undefined
     const remainingExecutionMs = getRemainingExecutionMs(ctx.abortSignal)
-    const timeout =
+    const timeout = Math.min(
+      DEFAULT_EXECUTION_TIMEOUT_MS,
       remainingExecutionMs === undefined
         ? (requestedTimeout ?? DEFAULT_EXECUTION_TIMEOUT_MS)
         : Math.max(
@@ -72,6 +73,7 @@ export class FunctionBlockHandler implements BlockHandler {
               ? remainingExecutionMs
               : Math.min(requestedTimeout, remainingExecutionMs)
           )
+    )
     const secretMountPolicy =
       inputs.secretScope === undefined
         ? undefined

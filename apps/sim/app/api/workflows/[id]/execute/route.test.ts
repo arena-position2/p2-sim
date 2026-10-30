@@ -298,7 +298,7 @@ const EXECUTION_CALLERS: ExecutionCallerCase[] = [
       apiKeyType: 'personal',
       principal: PERSONAL_API_KEY_PRINCIPAL,
     },
-    headers: { 'X-API-Key': 'personal-key' },
+    headers: { 'X-API-Key': 'personal-key', 'X-Sim-Email': 'payer@example.com' },
     usesExternalInput: true,
   },
   {
@@ -311,7 +311,7 @@ const EXECUTION_CALLERS: ExecutionCallerCase[] = [
       apiKeyType: 'workspace',
       principal: WORKSPACE_API_KEY_PRINCIPAL,
     },
-    headers: { 'X-API-Key': 'workspace-key' },
+    headers: { 'X-API-Key': 'workspace-key', 'X-Sim-Email': 'payer@example.com' },
     usesExternalInput: true,
   },
   {
@@ -320,7 +320,7 @@ const EXECUTION_CALLERS: ExecutionCallerCase[] = [
       success: false,
       error: 'Unauthorized',
     },
-    headers: {},
+    headers: { 'X-Sim-Email': 'payer@example.com' },
     usesExternalInput: true,
     isPublic: true,
   },
@@ -391,6 +391,7 @@ function createInternalProvenanceRequest(
     bundleComplete?: boolean
     includeHeader?: boolean
     includeField?: boolean
+    extraHeaders?: Record<string, string>
   } = {}
 ): NextRequest {
   const caller = EXECUTION_CALLERS[4]
@@ -403,6 +404,7 @@ function createInternalProvenanceRequest(
     bundleComplete = true,
     includeHeader = true,
     includeField = true,
+    extraHeaders,
   } = options
 
   return createMockRequest(
@@ -427,6 +429,7 @@ function createInternalProvenanceRequest(
       'Content-Type': 'application/json',
       ...(executionMode === 'async' ? { 'X-Execution-Mode': 'async' } : {}),
       ...caller.headers,
+      ...extraHeaders,
       ...(includeHeader
         ? { [PRIVATE_SECRET_PROVENANCE_HEADER]: PRIVATE_SECRET_PROVENANCE_BUNDLE_V1 }
         : {}),
@@ -617,7 +620,8 @@ describe('workflow execute async route', () => {
     },
     {
       name: 'non-internal caller',
-      request: () => createInternalProvenanceRequest(),
+      request: () =>
+        createInternalProvenanceRequest({ extraHeaders: { 'X-Sim-Email': 'payer@example.com' } }),
       caller: EXECUTION_CALLERS[1],
     },
   ])('rejects $name provenance before preprocessing', async ({ request, caller }) => {
@@ -1224,7 +1228,11 @@ describe('workflow execute async route', () => {
       createMockRequest(
         'POST',
         { inputFromExecutionId: 'source-execution' },
-        { 'Content-Type': 'application/json', 'X-API-Key': 'personal-key' }
+        {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'personal-key',
+          'X-Sim-Email': 'payer@example.com',
+        }
       ),
       createRouteContext({ id: 'workflow-1' })
     )
@@ -2183,6 +2191,7 @@ describe('workflow execute async route', () => {
       {
         'Content-Type': 'application/json',
         'X-API-Key': 'valid',
+        'X-Sim-Email': 'payer@example.com',
         'X-Sim-MCP-Tool-Call': 'true',
       }
     )

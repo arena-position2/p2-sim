@@ -803,10 +803,14 @@ function chatEffortMutationOptions(queryClient: QueryClient, chatId: string | un
 async function forkChat(params: {
   chatId: string
   upToMessageId: string
+  copilotBackend?: 'local' | 'external'
 }): Promise<{ id: string; failedFileCopies?: number }> {
   const data = await requestJson(forkMothershipChatContract, {
     params: { chatId: params.chatId },
-    body: { upToMessageId: params.upToMessageId },
+    body: {
+      upToMessageId: params.upToMessageId,
+      ...(params.copilotBackend ? { copilotBackend: params.copilotBackend } : {}),
+    },
   })
   return { id: data.id, failedFileCopies: data.failedFileCopies }
 }

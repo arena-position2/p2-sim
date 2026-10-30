@@ -189,4 +189,32 @@ describe('outbound receiver lifecycle', () => {
     expect(polls).toBe(2)
     expect(settled).toBe(true)
   })
+
+  it('replaces a poll that is about to time out before a fresh turn uses it', async () => {
+    const baseURL = `https://worker-${generateId()}.test`
+    const now = 1_700_000_000_000
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
+    let polls = 0
+    mocks.fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/poll')) {
+        polls += 1
+        await new Promise<void>(() => {})
+      }
+      return Response.json({ accepted: true })
+    })
+
+    try {
+      await ensureSimReceiverForBaseURL(baseURL)
+      expect(polls).toBe(1)
+
+      nowSpy.mockReturnValue(now + 25_000)
+      await ensureSimReceiverForBaseURL(baseURL, { minRemainingMs: 8_000 })
+      expect(polls).toBe(2)
+
+      await ensureSimReceiverForBaseURL(baseURL)
+      expect(polls).toBe(2)
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
 })
