@@ -6,7 +6,7 @@ import {
   parseImageUrls,
   s3UriToPathObject,
 } from '@/lib/utils/parse-image-urls'
-import { AuthMode, type BlockConfig } from '@/blocks/types'
+import { AuthMode, type BlockConfig, type BlockMeta } from '@/blocks/types'
 
 const NANO_BANANA_PRO_MODEL = 'gemini-3-pro-image-preview'
 
@@ -134,3 +134,8 @@ export const ImageFusionBlock: BlockConfig = {
     metadata: { type: 'json', description: 'Generation metadata' },
   },
 }
+
+export const ImageFusionBlockMeta = {
+  tags: ['image-generation', 'llm'],
+  url: 'https://ai.google.dev',
+} as const satisfies BlockMeta

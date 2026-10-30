@@ -20,7 +20,10 @@ import { fileURLToPath } from 'node:url'
 import ts from '@typescript/typescript6'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const SCHEMA_PATH = join(ROOT, 'packages/db/schema.ts')
+const SCHEMA_PATHS = [
+  join(ROOT, 'packages/db/schema.ts'),
+  join(ROOT, 'packages/db/arena-schema.ts'),
+] as const
 const OUTPUT_PATH = join(ROOT, 'packages/testing/src/mocks/schema-tables.generated.ts')
 /** Non-schema `@sim/db` barrel modules whose literal exports the `@sim/db` mock re-exports. */
 const DB_BARREL_FILES = ['packages/db/pool-profiles.ts', 'packages/db/triggers.ts'] as const
@@ -114,7 +117,15 @@ function collect(path: string) {
 }
 
 function render(): string {
-  const { tables, enums, constants } = collect(SCHEMA_PATH)
+  const tables: Record<string, string[]> = {}
+  const enums: Record<string, unknown[]> = {}
+  const constants: Record<string, unknown> = {}
+  for (const schemaPath of SCHEMA_PATHS) {
+    const collected = collect(schemaPath)
+    Object.assign(tables, collected.tables)
+    Object.assign(enums, collected.enums)
+    Object.assign(constants, collected.constants)
+  }
   const barrelConstants: Record<string, unknown> = {}
   for (const file of DB_BARREL_FILES)
     Object.assign(barrelConstants, collect(join(ROOT, file)).constants)

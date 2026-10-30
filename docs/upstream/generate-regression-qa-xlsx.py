@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Generate the Arena QA workbooks from this plan and the markdown checklist.
+"""Generate the single consolidated Arena QA workbook from this plan and the markdown checklist.
 
-- manual-regression-checklist-qa.xlsx — deduped rows with steps and expected behaviour
-- manual-regression-checklist-updated.xlsx — one row per markdown checkbox
+- manual-regression-checklist-qa.xlsx — consolidated workbook with:
+  1. Checklist: deduped QA test cases with step-by-step instructions and expected behaviour
+  2. Summary: priority counts and pass/fail/N/A live formulas
+  3. Run info: environment metadata, intentionally-off list, and suggested pass order
+  4. Markdown checkboxes (1:1): raw checkbox rows from manual-regression-checklist.md
+  5. Dedup log: explanation of which markdown checkboxes were merged into QA rows
 """
 
 from __future__ import annotations
@@ -16,7 +20,6 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 OUT = Path(__file__).with_name("manual-regression-checklist-qa.xlsx")
-UPDATED = Path(__file__).with_name("manual-regression-checklist-updated.xlsx")
 MARKDOWN = Path(__file__).with_name("manual-regression-checklist.md")
 
 SECTION_NAMES = {
@@ -291,6 +294,15 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1",
         "Deployed chat",
         "P0",
+        "Knowledge reference modal stays opaque",
+        "1. Get a deployed-chat reply that cites a knowledge document.\n"
+        "2. Open that reference.",
+        "The dialog background is opaque and the text is readable. The chat does not show through the file text.",
+    ),
+    (
+        "1",
+        "Deployed chat",
+        "P0",
         "Inactive or unauthorized chat → error, no junk log",
         "1. Note execution-log / run count for the deployment.\n"
         "2. Open an inactive or unauthorized chat URL and attempt a send.\n"
@@ -369,6 +381,25 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1",
         "Workspace chat and Local/Cloud copilot",
         "P0",
+        "Suggested follow-up does not show Run not found",
+        "1. On Cloud, finish a reply that offers a suggested follow-up.\n"
+        "2. Click that follow-up as soon as the reply finishes.",
+        "The follow-up completes. The user does not see “Run not found”.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
+        "Stopping a running turn is not an error",
+        "1. Start a Local turn and stop it before it finishes.\n"
+        "2. Repeat on Cloud.\n"
+        "3. Read the thread after each stop.",
+        "The thread shows stopped. There is no error toast and no user_stop: text in the reply.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
         "Finished Copilot reply does not turn asterisks into bold on scroll",
         "1. Get a Copilot reply that contains ordinary * characters or unfinished markdown.\n"
         "2. Wait until the reply has finished, then scroll the thread away and back.",
@@ -393,6 +424,26 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1. Ask Copilot to create an HTML page.\n"
         "2. Open the saved file.",
         "The file opens as a complete page. The chat does not dump a truncated tag soup in place of the file.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
+        "Start inputFormat keeps reserved chat fields",
+        "1. Ask Local Copilot to build a chat workflow.\n"
+        "2. Open the Start block input format.\n"
+        "3. If the workflow takes a file, inspect how that file is passed.",
+        "inputFormat includes input, conversationId, and files (file[]), plus any custom fields. "
+        "A file input is an object with id, not a bare path.",
+    ),
+    (
+        "1",
+        "Workspace chat and Local/Cloud copilot",
+        "P0",
+        "Knowledge search is an Agent tool of type knowledge",
+        "1. Ask Local Copilot for a workflow that searches a knowledge base.\n"
+        "2. Open the Agent tools list and save the workflow.",
+        "The Agent tool type is knowledge, not knowledge_base. The workflow saves.",
     ),
     (
         "1",
@@ -539,6 +590,16 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "2. Open console and logs for the run.",
         "Chart payloads, image payloads, and the acting user are visible in run logs/console.",
     ),
+    (
+        "1",
+        "Workflow engine",
+        "P1",
+        "Function sandbox timeout stays at 60 minutes",
+        "1. Run a short Function block.\n"
+        "2. If a timeout control is visible, set it above 60 minutes and run again.",
+        "The short run completes. A timeout above 60 minutes is capped at 60 minutes. "
+        "Do not wait an hour. E2B must not reject the sandbox lifetime.",
+    ),
     # --- Extended integrations ---
     (
         "1",
@@ -675,6 +736,17 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1. Configure user access / user memory for Local.\n"
         "2. Send a follow-up turn that should use that memory/access.",
         "Next turn respects user access and user memory.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot creates a workspace skill",
+        "1. Ask Local Copilot to create a workspace skill.\n"
+        "2. Open Skills and confirm it is listed.\n"
+        "3. Ask Copilot to list it, then delete it.",
+        "The skill appears under Skills. List and delete from Copilot succeed. "
+        "This is separate from publishing a skill into the share catalog.",
     ),
     # --- Arena task block ---
     (
@@ -1524,7 +1596,7 @@ def write_run_info(wb: Workbook) -> None:
     order = [
         "1. Section 0 post-sync gates (when this is a sync candidate).",
         "2. P0 identity, SSO, deployed chat, billing package, builder run, agent model.",
-        "3. P0 Local / Cloud copilot and Arena task block.",
+        "3. P0 Local / Cloud copilot (suggested follow-up, stop, Start inputs, knowledge on the Agent, Local skill) and Arena task block. A short Function run stays within the 60-minute sandbox cap.",
         "4. P1 exclusive blocks that this environment has credentials for.",
         "5. P1 customized Slack (Arena Bot and Copilot Connect), HubSpot Accounts, Zoom, Slides, Shopify, Gmail, Drive, distinct image variations, and image edit.",
         "6. P0 video builder emailId, agents-list undeploy, and X-Sim-Email cross-org billing.",
@@ -1589,10 +1661,55 @@ def parse_markdown_checklist(path: Path) -> list[tuple[str, str, str, str]]:
     return rows
 
 
-def write_markdown_checklist(rows: list[tuple[str, str, str, str]]) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Checklist"
+def write_summary(wb: Workbook, markdown_rows: list[tuple[str, str, str, str]]) -> None:
+    ws = wb.create_sheet("Summary")
+    headers = [
+        "Priority",
+        "QA checklist rows (deduped)",
+        "Markdown checkboxes (1:1)",
+        "Passed",
+        "Failed",
+        "N/A",
+        "Remaining",
+    ]
+    ws.append(headers)
+    style_header(ws, len(headers))
+
+    max_qa_row = len(ROWS) + 1
+    for row_idx, label in enumerate(("P0", "P1", "P2"), start=2):
+        qa_count = sum(1 for r in ROWS if r[2] == label)
+        md_count = sum(1 for r in markdown_rows if r[2] == label)
+        ws.append(
+            [
+                label,
+                qa_count,
+                md_count,
+                f'=COUNTIFS(Checklist!D$2:D${max_qa_row}, "{label}", Checklist!H$2:H${max_qa_row}, "Pass")',
+                f'=COUNTIFS(Checklist!D$2:D${max_qa_row}, "{label}", Checklist!H$2:H${max_qa_row}, "Fail")',
+                f'=COUNTIFS(Checklist!D$2:D${max_qa_row}, "{label}", Checklist!H$2:H${max_qa_row}, "N/A")',
+                f'=B{row_idx}-SUM(D{row_idx}:F{row_idx})',
+            ]
+        )
+
+    ws.append(
+        [
+            "Total",
+            len(ROWS),
+            len(markdown_rows),
+            "=SUM(D2:D4)",
+            "=SUM(E2:E4)",
+            "=SUM(F2:F4)",
+            "=SUM(G2:G4)",
+        ]
+    )
+    for col in range(1, len(headers) + 1):
+        ws.cell(5, col).font = Font(bold=True)
+
+    autosize(ws, {1: 12, 2: 26, 3: 26, 4: 12, 5: 12, 6: 12, 7: 14})
+
+
+def write_markdown_sheet(wb: Workbook, rows: list[tuple[str, str, str, str]]) -> None:
+    ws = wb.create_sheet("Markdown checkboxes (1-1)")
     headers = ["#", "Section", "Area", "Priority", "Checklist item", "Result", "Notes"]
     ws.append(headers)
     style_header(ws, len(headers))
@@ -1616,50 +1733,20 @@ def write_markdown_checklist(rows: list[tuple[str, str, str, str]]) -> None:
     ws.add_data_validation(dv)
     dv.add(f"F2:F{ws.max_row}")
 
-    summary = wb.create_sheet("Summary")
-    summary.append(["Priority", "Item count"])
-    style_header(summary, 2)
-    for label in ("P0", "P1", "P2"):
-        summary.append([label, sum(1 for row in rows if row[2] == label)])
-    summary.append([])
-    summary.append(["Total", len(rows)])
-    autosize(summary, {1: 14, 2: 14})
-
-    info = wb.create_sheet("Run info")
-    info["A1"] = "Arena vs Sim manual regression checklist"
-    info["A1"].font = Font(bold=True, size=14)
-    info["A2"] = (
-        "One row per checkbox in docs/upstream/manual-regression-checklist.md. "
-        "Steps and expected behaviour are in manual-regression-checklist-qa.xlsx."
-    )
-    info["A2"].alignment = Alignment(wrap_text=True)
-    info["A4"] = "Field"
-    info["B4"] = "Value"
-    header_fill = PatternFill("solid", fgColor="1F4E79")
-    header_font = Font(color="FFFFFF", bold=True)
-    for cell in (info["A4"], info["B4"]):
-        cell.fill = header_fill
-        cell.font = header_font
-    for index, field in enumerate(
-        ["Date", "Environment URL", "Org", "Plan", "User role", "Tester"], start=5
-    ):
-        info.cell(index, 1, field)
-    autosize(info, {1: 28, 2: 80})
-    info.row_dimensions[2].height = 32
-
-    wb.save(UPDATED)
-
 
 def main() -> None:
+    markdown_rows = parse_markdown_checklist(MARKDOWN)
     wb = Workbook()
     write_checklist(wb)
+    write_summary(wb, markdown_rows)
     write_run_info(wb)
+    write_markdown_sheet(wb, markdown_rows)
     write_dedup_log(wb)
     wb.save(OUT)
-    markdown_rows = parse_markdown_checklist(MARKDOWN)
-    write_markdown_checklist(markdown_rows)
-    print(f"Wrote {OUT} with {len(ROWS)} checklist rows and {len(DEDUP_LOG)} dedup entries")
-    print(f"Wrote {UPDATED} with {len(markdown_rows)} markdown checkbox rows")
+    print(
+        f"Wrote consolidated {OUT} with {len(ROWS)} QA checklist rows, "
+        f"{len(markdown_rows)} 1:1 markdown checkbox rows, and {len(DEDUP_LOG)} dedup entries"
+    )
 
 
 if __name__ == "__main__":

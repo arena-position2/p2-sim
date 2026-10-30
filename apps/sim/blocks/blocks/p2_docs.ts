@@ -1,5 +1,5 @@
 import { PresentationIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { IntegrationType } from '@/blocks/types'
 
 export const P2DocsBlock: BlockConfig = {
@@ -149,3 +149,8 @@ export const P2DocsBlock: BlockConfig = {
     total: { type: 'number', description: 'Total number of team members returned' },
   },
 }
+
+export const P2DocsBlockMeta = {
+  tags: ['document-processing', 'content-management'],
+  url: 'https://www.position2.com',
+} as const satisfies BlockMeta

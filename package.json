@@ -136,7 +136,8 @@
     "type-check": "turbo run type-check",
     "release": "bun run scripts/create-single-release.ts",
     "test:scripts": "vitest run --config scripts/vitest.config.ts",
-    "check:agent-cli-boundary": "bun run scripts/check-agent-cli-boundary.ts"
+    "check:agent-cli-boundary": "bun run scripts/check-agent-cli-boundary.ts",
+    "check:arena-seams": "bun run scripts/check-arena-seams.ts"
   },
   "overrides": {
     "react": "19.2.4",

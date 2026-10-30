@@ -1,13 +1,15 @@
 # Manual regression checklist ↔ automated coverage
 
-Manual QA workbooks (regenerate both via [generate-regression-qa-xlsx.py](./generate-regression-qa-xlsx.py)):
+Manual QA workbook (regenerate via [generate-regression-qa-xlsx.py](./generate-regression-qa-xlsx.py)):
 
-- [manual-regression-checklist-qa.xlsx](./manual-regression-checklist-qa.xlsx) — deduped, with Steps / Expected behaviour
-- [manual-regression-checklist-updated.xlsx](./manual-regression-checklist-updated.xlsx) — one row per checkbox in [manual-regression-checklist.md](./manual-regression-checklist.md)
+- [manual-regression-checklist-qa.xlsx](./manual-regression-checklist-qa.xlsx) — single consolidated workbook containing:
+  - `Checklist` (145 deduped QA test cases with `Steps to test` and `Expected behaviour`)
+  - `Summary` (priority counts and live Pass / Fail / N/A / Remaining formulas)
+  - `Run info` (environment metadata, intentionally-off list, and suggested pass order)
+  - `Markdown checkboxes (1-1)` (all 154 raw checkbox rows from [manual-regression-checklist.md](./manual-regression-checklist.md))
+  - `Dedup log` (13 deduplication mappings)
 
-Current workbooks: 147 checkbox rows (P0 89, P1 37, P2 21) and 138 deduped QA rows.
-
-Snapshot below is the 2026-10-14 automated pass (~135 bullets). The 2026-10-28 checklist additions are manual cases for branch fixes; they are not new unit tests.
+Snapshot below is the 2026-10-14 automated pass (~135 bullets). The 2026-10-28, 2026-10-29, and 2026-10-30 checklist additions are manual cases for branch fixes. Where a row names an existing test, that test already guarded the fix. This pass does not add new unit tests.
 
 ## Cases added or tightened on 2026-10-28
 
@@ -38,6 +40,18 @@ Fixes on `upstream-sync/2026-10-14` after the first checklist. New rows are manu
 | Checklist item | Why it is on the sheet |
 | --- | --- |
 | Local fork still opens a new chat when the worker has no conversation | The 2026-10-14 sync made the worker conversation copy mandatory. Arena Copilot keeps the transcript in Sim, so a worker “chat not found” must not fail the fork. Cloud fork still requires the worker copy. Automated in `apps/sim/app/api/mothership/chats/[chatId]/fork/route.test.ts`. |
+
+## Cases added on 2026-10-30
+
+| Checklist item | Why it is on the sheet |
+| --- | --- |
+| Suggested follow-up does not show “Run not found” | A follow-up clicked as the Cloud long-poll dies must wait for a live poll and complete. Automated in `apps/sim/lib/mothership/request/lifecycle/stream-retry.test.ts` and `apps/sim/lib/mothership/transport/receiver.test.ts`. |
+| Stopping a running turn is not an error | Stop shows stopped. There is no error toast and no `user_stop:` text. Manual. The guard is in the home stream hooks and `apps/sim/local-copilot/integration/mothership-lifecycle.ts`. |
+| Start `inputFormat` keeps reserved chat fields | Local Copilot seeds `input`, `conversationId`, and `files`, and keeps custom fields. A file input is `{ "id": "<uuid>" }`. Automated in `apps/sim/local-copilot/lib/tools/ensure-start-reserved-input-format.test.ts`. |
+| Knowledge search is an Agent tool of type `knowledge` | The Agent tool is `knowledge`, not `knowledge_base`, and the workflow saves. Automated in `apps/sim/local-copilot/lib/tools/coerce-edit-agent-tools.test.ts`. |
+| Knowledge reference modal stays opaque | The deployed-chat reference dialog is opaque and readable. Manual. The portaled dialog in `apps/sim/app/(interfaces)/chat/components/message/components/knowledge-results-modal.tsx` carries `deployed-chat`. |
+| Local Copilot creates a workspace skill | Create, list, and delete a workspace skill from Local Copilot. Separate from skill-share publish. Automated in `apps/sim/local-copilot/lib/tools/manage-skill.test.ts`. |
+| Function sandbox timeout stays at 60 minutes | A short Function run completes. A longer timeout is capped at 60 minutes so E2B does not reject the sandbox lifetime. Manual. The cap is `DEFAULT_EXECUTION_TIMEOUT_MS` in `apps/sim/lib/execution/constants.ts`. |
 
 ## Automated snapshot (2026-10-14)
 

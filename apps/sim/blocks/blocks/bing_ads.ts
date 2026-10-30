@@ -1,6 +1,6 @@
 import { MicrosoftIcon } from '@/components/icons'
 import { resolveExecutionWorkspaceId } from '@/lib/workspaces/is-admin-workspace'
-import type { BlockConfig } from '@/blocks/types'
+import type { BlockConfig, BlockMeta } from '@/blocks/types'
 
 /** In-flight promise cache keyed by workspaceId — deduplicates concurrent fetchOptions + fetchOptionById calls */
 let _inflightFetch: {
@@ -169,3 +169,8 @@ Generate a clear, specific question about Bing Ads performance based on the user
     },
   },
 }
+
+export const BingAdsBlockMeta = {
+  tags: ['marketing', 'data-analytics'],
+  url: 'https://ads.microsoft.com',
+} as const satisfies BlockMeta

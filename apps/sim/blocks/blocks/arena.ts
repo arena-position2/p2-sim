@@ -1,5 +1,5 @@
 import { ArenaIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import type { BlockConfig, BlockMeta } from '@/blocks/types'
 
 export const ArenaBlock: BlockConfig = {
   type: 'arena',
@@ -657,3 +657,8 @@ export const ArenaBlock: BlockConfig = {
     },
   },
 }
+
+export const ArenaBlockMeta = {
+  tags: ['project-management', 'automation'],
+  url: 'https://www.position2.com',
+} as const satisfies BlockMeta

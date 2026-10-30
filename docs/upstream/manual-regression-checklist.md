@@ -8,6 +8,8 @@ Updated 2026-10-28 for fixes on `upstream-sync/2026-10-14` after the 2026-10-14 
 
 Updated 2026-10-29: Local Copilot “Fork in new chat” still opens the new chat when the cloud worker has no conversation for that chat. The 2026-10-14 sync made that worker copy mandatory.
 
+Updated 2026-10-30: suggested follow-up while the long-poll is dying, stop a running turn, Start reserved chat inputs, knowledge attached as an Agent tool, the deployed-chat knowledge reference modal, a workspace skill from Local Copilot, and the 60-minute Function sandbox cap.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -80,6 +82,7 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 - [ ] Golden queries load and can be inserted.
 - [ ] Feedback submit and the feedback view work. A chart in a feedback reply renders as a chart, not raw option JSON.
 - [ ] Knowledge references stay on the reply after refresh.
+- [ ] Open a knowledge reference on a deployed-chat reply. The dialog is opaque and the text is readable. The chat does not show through the file text.
 - [ ] Inactive or unauthorized chat returns an error and does not write a junk execution log.
 - [ ] Voice controls stay absent.
 - [ ] Workflow builder right panel: a chat or app deployment shows **Launch** (lightning) beside **Run**. Launch opens that deployment (`/chat/{identifier}?fromControlBar=true`, or the app redirect in a new tab). A workflow with no chat deployment does not show Launch. **Run** still executes the workflow in the builder. On a narrow panel, Deploy, Launch, and Run stay on one row without overlapping. The home composer Local model name truncates instead of stretching the input.
@@ -93,6 +96,10 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 - [ ] Local model picker selection persists as the user default; session memory inspector appears on longer Local threads. The picker includes Claude Fable 5.1, GPT-6 Astra, and GPT-5.5, and one of those models returns a reply.
 - [ ] Cloud: finish one turn, then send another after the chat has been idle. The second turn completes. The user does not see “Run not found”. A Local turn that reconnects stays on Local and also does not show “Run not found”.
 - [ ] On Local, fork a finished reply (“Fork in new chat”). The new chat opens, its title starts with `Fork |`, and it contains the messages up to that reply. There is no “Failed to fork chat” toast. On Cloud, with `COPILOT_API_KEY` set, the same action still succeeds.
+- [ ] On Cloud, click a suggested follow-up as soon as a reply finishes. The follow-up completes. The user does not see “Run not found”.
+- [ ] Stop a running Local or Cloud turn. The thread shows stopped. There is no error toast and no `user_stop:` text in the reply.
+- [ ] Ask Local Copilot to build a chat workflow. Start `inputFormat` includes `input`, `conversationId`, and `files` (`file[]`), plus any custom fields. A file input is `{ "id": "<uuid>" }`, not a bare path.
+- [ ] Ask Local Copilot for a workflow that searches a knowledge base. The Agent tool type is `knowledge`, not `knowledge_base`. The workflow saves.
 - [ ] After a Copilot reply finishes, scrolling the thread does not turn ordinary `*` characters or unfinished markdown into bold.
 - [ ] Ask Copilot for a fixed sequence: today’s calendar, unread Gmail, Slack messages, then a written briefing. The canvas gets `google_calendar_v2`, `gmail_v2`, and `slack` as their own blocks in that order. Those integrations are not attached as Agent tools. A daily time trigger is a `schedule` block, not `schedule_trigger`.
 - [ ] Ask Copilot to create an HTML page. The saved file opens as a complete page, not a truncated tag dump in the chat.
@@ -120,6 +127,7 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 - [ ] Nested loops and nested subflows save and run (upstream rejects these; Arena allows them).
 - [ ] Agent model picker: OpenRouter list is free-only; Azure Anthropic and Arena-added image models still appear where expected.
 - [ ] Run logs and the console show chart payloads, image payloads, and the acting user.
+- [ ] A short Function block run completes. A timeout above 60 minutes is capped at 60 minutes so E2B does not reject the sandbox lifetime. Do not wait an hour.
 
 ### Extended integrations (P1)
 
@@ -152,6 +160,7 @@ Covered in section 1 for the chat switch. Also verify:
 
 - [ ] Tool calls, patches, and audit history persist across reload.
 - [ ] User access and user memory apply to the next turn.
+- [ ] Ask Local Copilot to create a workspace skill. It appears under Skills. Listing and deleting that skill from Copilot also work. This is separate from publishing a skill into the share catalog.
 
 ### Arena task block (P0)
 
@@ -284,7 +293,7 @@ One read or one write each, using a test account. Skip any integration this envi
 
 1. Section 0 post-sync gates (when this is a sync candidate).
 2. P0 identity, SSO, deployed chat, billing, builder run, agent model.
-3. P0 Local / Cloud copilot and Arena task block.
+3. P0 Local / Cloud copilot (suggested follow-up, stop, Start inputs, knowledge on the Agent, Local skill) and Arena task block. A short Function run stays within the 60-minute sandbox cap.
 4. P1 exclusive blocks that this environment has credentials for.
 5. P1 customized Slack (Arena Bot and Copilot Connect), HubSpot Accounts, Zoom, Slides, Shopify, Gmail, Drive, distinct image variations, and image edit.
 6. P0 video builder `emailId`, agents-list undeploy, and `X-Sim-Email` cross-org billing.

@@ -1,5 +1,5 @@
 import { FigmaIcon } from '@/components/icons'
-import type { BlockConfig, SubBlockType } from '@/blocks/types'
+import type { BlockConfig, BlockMeta, SubBlockType } from '@/blocks/types'
 
 export const FigmaBlock: BlockConfig = {
   type: 'figma',
@@ -349,3 +349,8 @@ export const FigmaBlock: BlockConfig = {
     metadata: { type: 'json', description: 'Response metadata' },
   },
 }
+
+export const FigmaBlockMeta = {
+  tags: ['content-management', 'automation'],
+  url: 'https://www.figma.com',
+} as const satisfies BlockMeta

@@ -1,5 +1,5 @@
 import { SpyfuIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import {
   SPYFU_DEFAULT_OPERATION_ID,
   spyfuDateOperationIds,
@@ -199,3 +199,8 @@ export const SpyfuBlock: BlockConfig = {
     method: { type: 'string', description: 'HTTP method used in the request.' },
   },
 }
+
+export const SpyfuBlockMeta = {
+  tags: ['seo', 'marketing'],
+  url: 'https://www.spyfu.com',
+} as const satisfies BlockMeta

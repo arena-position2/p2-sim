@@ -14,7 +14,7 @@ import { ApiTriggerBlock } from '@/blocks/blocks/api_trigger'
 import { ApifyBlock, ApifyBlockMeta } from '@/blocks/blocks/apify'
 import { ApolloBlock, ApolloBlockMeta } from '@/blocks/blocks/apollo'
 import { AppConfigBlock, AppConfigBlockMeta } from '@/blocks/blocks/appconfig'
-import { ArenaBlock } from '@/blocks/blocks/arena'
+import { ArenaBlock, ArenaBlockMeta } from '@/blocks/blocks/arena'
 import { ArenaDevelopmentBlock } from '@/blocks/blocks/arena-development'
 import { ArxivBlock, ArxivBlockMeta } from '@/blocks/blocks/arxiv'
 import { AsanaBlock, AsanaBlockMeta } from '@/blocks/blocks/asana'
@@ -26,7 +26,7 @@ import {
   AzureDataExplorerBlockMeta,
 } from '@/blocks/blocks/azure_data_explorer'
 import { AzureDevOpsBlock, AzureDevOpsBlockMeta } from '@/blocks/blocks/azure_devops'
-import { BingAdsBlock } from '@/blocks/blocks/bing_ads'
+import { BingAdsBlock, BingAdsBlockMeta } from '@/blocks/blocks/bing_ads'
 import { BitbucketBlock, BitbucketBlockMeta } from '@/blocks/blocks/bitbucket'
 import { BoxBlock, BoxBlockMeta, BoxV2Block } from '@/blocks/blocks/box'
 import { BrandfetchBlock, BrandfetchBlockMeta } from '@/blocks/blocks/brandfetch'
@@ -91,7 +91,7 @@ import { ExaBlock, ExaBlockMeta } from '@/blocks/blocks/exa'
 import { ExtendBlock, ExtendBlockMeta, ExtendV2Block } from '@/blocks/blocks/extend'
 import { FacebookAdsBlock, FacebookAdsBlockMeta } from '@/blocks/blocks/facebook_ads'
 import { FathomBlock, FathomBlockMeta } from '@/blocks/blocks/fathom'
-import { FigmaBlock } from '@/blocks/blocks/figma'
+import { FigmaBlock, FigmaBlockMeta } from '@/blocks/blocks/figma'
 import { FileBlock, FileV2Block, FileV3Block, FileV4Block, FileV5Block } from '@/blocks/blocks/file'
 import { FindymailBlock, FindymailBlockMeta } from '@/blocks/blocks/findymail'
 import { FirecrawlBlock, FirecrawlBlockMeta } from '@/blocks/blocks/firecrawl'
@@ -165,7 +165,7 @@ import { HunterBlock, HunterBlockMeta } from '@/blocks/blocks/hunter'
 import { IAMBlock, IAMBlockMeta } from '@/blocks/blocks/iam'
 import { IcypeasBlock, IcypeasBlockMeta } from '@/blocks/blocks/icypeas'
 import { IdentityCenterBlock, IdentityCenterBlockMeta } from '@/blocks/blocks/identity_center'
-import { ImageFusionBlock } from '@/blocks/blocks/image_fusion'
+import { ImageFusionBlock, ImageFusionBlockMeta } from '@/blocks/blocks/image_fusion'
 import { ImageGeneratorBlock, ImageGeneratorV2Block } from '@/blocks/blocks/image_generator'
 import { ImapBlock, ImapBlockMeta } from '@/blocks/blocks/imap'
 import { IncidentioBlock, IncidentioBlockMeta } from '@/blocks/blocks/incidentio'
@@ -271,7 +271,7 @@ import { OpenAIBlock, OpenAIBlockMeta } from '@/blocks/blocks/openai'
 import { OracleDatabaseBlock, OracleDatabaseBlockMeta } from '@/blocks/blocks/oracledb'
 import { OtterBlock, OtterBlockMeta } from '@/blocks/blocks/otter'
 import { OutlookBlock, OutlookBlockMeta } from '@/blocks/blocks/outlook'
-import { P2DocsBlock } from '@/blocks/blocks/p2_docs'
+import { P2DocsBlock, P2DocsBlockMeta } from '@/blocks/blocks/p2_docs'
 import { PagerDutyBlock, PagerDutyBlockMeta } from '@/blocks/blocks/pagerduty'
 import { ParallelBlock, ParallelBlockMeta } from '@/blocks/blocks/parallel'
 import { PeopleDataLabsBlock, PeopleDataLabsBlockMeta } from '@/blocks/blocks/peopledatalabs'
@@ -339,7 +339,7 @@ import { SnowflakeBlock, SnowflakeBlockMeta } from '@/blocks/blocks/snowflake'
 import { SplunkBlock, SplunkBlockMeta } from '@/blocks/blocks/splunk'
 import { SportmonksBlock, SportmonksBlockMeta } from '@/blocks/blocks/sportmonks'
 import { SpotifyBlock, SpotifyBlockMeta } from '@/blocks/blocks/spotify'
-import { SpyfuBlock } from '@/blocks/blocks/spyfu'
+import { SpyfuBlock, SpyfuBlockMeta } from '@/blocks/blocks/spyfu'
 import { SQSBlock, SQSBlockMeta } from '@/blocks/blocks/sqs'
 import { SquareBlock, SquareBlockMeta } from '@/blocks/blocks/square'
 import { SSHBlock, SSHBlockMeta, SSHV2Block } from '@/blocks/blocks/ssh'
@@ -812,7 +812,13 @@ export const BLOCK_REGISTRY: Record<string, BlockConfig> = {
 
 const ARENA_CUSTOM_BLOCK_META_REGISTRY: Record<string, BlockMeta> = {
   airweave: AirweaveBlockMeta,
+  arena: ArenaBlockMeta,
+  bing_ads: BingAdsBlockMeta,
   facebook_ads: FacebookAdsBlockMeta,
+  figma: FigmaBlockMeta,
+  image_fusion: ImageFusionBlockMeta,
+  p2_docs: P2DocsBlockMeta,
+  spyfu: SpyfuBlockMeta,
   unipile: UnipileBlockMeta,
 }
 
