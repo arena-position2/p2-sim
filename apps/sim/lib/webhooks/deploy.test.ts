@@ -33,6 +33,9 @@ vi.mock('@/lib/webhooks/provider-subscriptions', () => ({
   createExternalWebhookSubscription: vi.fn(),
   hasWebhookConfigChanged: vi.fn(),
 }))
+vi.mock('@/lib/webhooks/registration-service', () => ({
+  prepareStableWebhookRegistrations: vi.fn(),
+}))
 vi.mock('@/lib/webhooks/utils.server', () => ({
   findConflictingWebhookPathOwner: vi.fn(),
 }))
@@ -67,6 +70,7 @@ vi.mock('@/lib/webhooks/quickbooks-credentials', () => ({
 import {
   buildProviderConfig,
   cleanupInactiveDeploymentWebhooks,
+  prepareStableTriggerWebhooksForDeploy,
   resolveTriggerCredentialId,
   resolveWebhookConfigForBlock,
   saveTriggerWebhooksForDeploy,
@@ -78,7 +82,9 @@ import {
   hasWebhookConfigChanged,
 } from '@/lib/webhooks/provider-subscriptions'
 import { getProviderHandler } from '@/lib/webhooks/providers'
+import { WebhookDeploymentConfigurationError } from '@/lib/webhooks/providers/errors'
 import { quickBooksHandler } from '@/lib/webhooks/providers/quickbooks'
+import { prepareStableWebhookRegistrations } from '@/lib/webhooks/registration-service'
 import { findConflictingWebhookPathOwner } from '@/lib/webhooks/utils.server'
 import { getBlock } from '@/blocks'
 import { getTrigger } from '@/triggers'
@@ -324,7 +330,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     if (result?.success) throw new Error('expected failure')
     expect(result?.error).toEqual({
       message:
-        'Legacy Assistant events require a native Sim Slack connection. Choose an Agent View event for a custom bot.',
+        'Legacy Assistant events require a native Arena Slack connection. Choose an Agent View event for a custom bot.',
       status: 400,
     })
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
@@ -358,7 +364,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(result?.success).toBe(false)
     if (result?.success) throw new Error('expected failure')
     expect(result?.error).toEqual({
-      message: 'The Sim Slack app trigger is disabled for this deployment. Select a custom bot.',
+      message: 'The Arena Slack app trigger is disabled for this deployment. Select a custom bot.',
       status: 400,
     })
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
@@ -409,7 +415,7 @@ describe('resolveWebhookConfigForBlock — slack_oauth routing', () => {
     expect(result?.success).toBe(false)
     if (result?.success) throw new Error('expected failure')
     expect(result?.error?.status).toBe(400)
-    expect(result?.error?.message).toContain('not available on the Sim Slack app')
+    expect(result?.error?.message).toContain('not available on the Arena Slack app')
     expect(mockRefreshAccessTokenIfNeeded).not.toHaveBeenCalled()
   })
 })
@@ -746,4 +752,32 @@ describe('saveTriggerWebhooksForDeploy activation recovery', () => {
       expect((await saveTriggerWebhooksForDeploy(input)).success).toBe(true)
     }
   )
+})
+
+describe('prepareStableTriggerWebhooksForDeploy failure status', () => {
+  const prepare = (failure: unknown) => {
+    vi.mocked(prepareStableWebhookRegistrations).mockRejectedValueOnce(failure)
+    return prepareStableTriggerWebhooksForDeploy({
+      request: createMockRequest('POST'),
+      workflowId: 'workflow-1',
+      workflow: { id: 'workflow-1', workspaceId: 'workspace-1' },
+      userId: 'user-1',
+      blocks: {},
+      requestId: 'request-1',
+      deploymentVersionId: 'version-1',
+      operationId: 'operation-1',
+      generation: 1,
+    })
+  }
+  const rejected = new WebhookDeploymentConfigurationError('Zoho Desk webhook creation failed')
+
+  it('fails terminally when every candidate was rejected for its configuration', async () => {
+    const result = await prepare(new AggregateError([rejected, rejected]))
+    expect(result.error?.status).toBe(400)
+  })
+
+  it('stays retryable when any candidate failed transiently', async () => {
+    const result = await prepare(new AggregateError([rejected, new Error('HTTP 503')]))
+    expect(result.error?.status).toBe(500)
+  })
 })

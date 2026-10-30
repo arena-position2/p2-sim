@@ -66,7 +66,7 @@ vi.mock('@/connectors/registry.server', () => ({
   },
 }))
 
-import { resolveBillingAttribution } from '@/lib/billing/core/billing-attribution'
+import { resolveBillingAttribution } from '@/lib/billing/core/attribution'
 import { ProviderCapacityDeferredError } from '@/lib/core/rate-limiter/provider-capacity-error'
 import { compileCredentialGroupWorkflowAccessPolicy } from '@/lib/credential-groups/application/workflow-access-policy'
 import {
@@ -81,7 +81,7 @@ import {
 } from '@/lib/knowledge/application/documents'
 import { searchKnowledge } from '@/lib/knowledge/application/search'
 import * as connectorTokens from '@/lib/knowledge/connectors/access-token'
-import { getConnectorFailureDiagnostic } from '@/lib/knowledge/connectors/connector-error'
+import { getConnectorFailureDiagnostic } from '@/lib/knowledge/connectors/error'
 import {
   beginListingCheckpoint,
   listingFingerprint,
@@ -105,7 +105,7 @@ import {
 import { createContentSyncLease, createMemberSyncLease } from '@/lib/knowledge/connectors/sync-lock'
 import { addDocument, persistDocumentAcls } from '@/lib/knowledge/connectors/sync-persistence'
 import * as documentService from '@/lib/knowledge/documents/service'
-import { downloadFileFromUrl } from '@/lib/uploads/utils/file-utils.server'
+import { downloadFileFromUrl } from '@/lib/uploads/utils/file.server'
 import { CONNECTOR_REGISTRY } from '@/connectors/registry.server'
 import type { ConnectorConfig, ExternalDocument, SyncResult } from '@/connectors/types'
 
@@ -965,8 +965,9 @@ describe('durable source and member cycles in PostgreSQL', () => {
         await db.insert(document).values(rows.slice(offset, offset + 1_000))
       await db.execute(sql`ANALYZE document`)
     }
-    const isWindowScan = (query: string) => /^\s*with "document" as materialized/i.test(query)
-    /** Runs the pass, returning the window statements it issued outside transactions. */
+    const isWindowStatement = (query: string) => /^\s*with "document" as materialized/i.test(query)
+    const isWindowCount = (query: string) => query.includes('json_build_array')
+    /** Runs the pass, returning the window scans and counts it issued outside transactions. */
     const reconcile = async () => {
       const hardDelete = vi.spyOn(documentService, 'hardDeleteDocuments')
       const statements = vi.spyOn(db.$client, 'unsafe')
@@ -1001,14 +1002,20 @@ describe('durable source and member cycles in PostgreSQL', () => {
           hardDeleted: hardDelete.mock.calls.flatMap(([batch]) => batch),
           walked: statements.mock.calls
             .map(([query, params]) => ({ query, params }))
-            .filter(({ query }) => isWindowScan(query)),
+            .filter(({ query }) => isWindowStatement(query) && !isWindowCount(query)),
+          counted: statements.mock.calls
+            .map(([query, params]) => ({ query, params }))
+            .filter(({ query }) => isWindowStatement(query) && isWindowCount(query)),
         }
       } finally {
         statements.mockRestore()
         hardDelete.mockRestore()
       }
     }
-    /** Plans a window statement from freshly analyzed statistics, returning the document rows it read. */
+    /**
+     * Plans a window statement from freshly analyzed statistics, returning the document rows it
+     * read and the scans that read them, so a statement over the bound names the plan behind it.
+     */
     const explainWalk = async (query: string, params: Parameters<typeof db.$client.unsafe>[1]) => {
       const [explained] = await db.$client.begin(async (tx) => {
         await tx.unsafe('ANALYZE document')
@@ -1018,17 +1025,16 @@ describe('durable source and member cycles in PostgreSQL', () => {
         const plan = toRecord(node)
         return [plan, ...toArray(plan.Plans).flatMap(nodes)]
       }
-      const plan = nodes(toRecord(toArray(explained['QUERY PLAN'])[0]).Plan)
-      return plan
+      const scans = nodes(toRecord(toArray(explained['QUERY PLAN'])[0]).Plan)
         .filter((node) => node['Relation Name'] === 'document')
-        .reduce(
-          (total, node) =>
-            total +
+        .map((node) => ({
+          scan: `${node['Node Type']}${node['Index Name'] ? ` on ${node['Index Name']}` : ''}`,
+          read:
             ((toNumberOrNull(node['Actual Rows']) ?? 0) +
               (toNumberOrNull(node['Rows Removed by Filter']) ?? 0)) *
-              (toNumberOrNull(node['Actual Loops']) ?? 1),
-          0
-        )
+            (toNumberOrNull(node['Actual Loops']) ?? 1),
+        }))
+      return { read: scans.reduce((total, { read }) => total + read, 0), scans }
     }
     /**
      * Every window statement reads at most one window of documents, whichever connector index
@@ -1040,7 +1046,8 @@ describe('durable source and member cycles in PostgreSQL', () => {
     ) => {
       expect(walked.length).toBeGreaterThan(0)
       for (const { query, params } of walked) {
-        expect(await explainWalk(query, params), query).toBeLessThanOrEqual(
+        const { read, scans } = await explainWalk(query, params)
+        expect(read, `${query}\n${JSON.stringify(scans, null, 2)}`).toBeLessThanOrEqual(
           RECONCILIATION_WINDOW_SIZE
         )
       }
@@ -1062,7 +1069,7 @@ describe('durable source and member cycles in PostgreSQL', () => {
         deletedAt: new Date(startedAt.getTime() - 60_000),
       }))
       await seed([...present, ...absent, ...tombstoned], present.length)
-      const { pass, stats, hardDeleted, walked } = await reconcile()
+      const { pass, stats, hardDeleted, walked, counted } = await reconcile()
       expect(pass).toMatchObject({ complete: true, holdNotice: null })
       expect(stats.docsDeleted).toBe(absent.length)
       expect(hardDeleted.sort()).toEqual(tombstoned.map((item) => item.id).sort())
@@ -1076,6 +1083,13 @@ describe('durable source and member cycles in PostgreSQL', () => {
         stored.filter((item) => item.id.includes('-z-')).every((item) => item.acl.length === 0)
       ).toBe(true)
       await expectBounded(walked)
+      /** The listing's counts read the connector window by window too, never in one statement. */
+      expect(counted).toHaveLength(
+        Math.floor(
+          (present.length + absent.length + tombstoned.length) / RECONCILIATION_WINDOW_SIZE
+        ) + 1
+      )
+      await expectBounded(counted)
     }, 120_000)
 
     it('scans a dense window once and never reads every tombstone of the connector', async () => {
@@ -1095,7 +1109,7 @@ describe('durable source and member cycles in PostgreSQL', () => {
         deletedAt: new Date(startedAt.getTime() - 60_000),
       }))
       await seed([...dense, ...seenTombstones], seenTombstones.length)
-      const { pass, hardDeleted, walked } = await reconcile()
+      const { pass, hardDeleted, walked, counted } = await reconcile()
       expect(pass).toMatchObject({ complete: true, holdNotice: null })
       expect(hardDeleted.sort()).toEqual(dense.map((item) => item.id).sort())
       expect(
@@ -1113,6 +1127,7 @@ describe('durable source and member cycles in PostgreSQL', () => {
       )
       /** `deleted_at < $1` implies the tombstone index, which would read every connector tombstone. */
       await expectBounded(walked)
+      await expectBounded(counted)
     }, 120_000)
   })
 

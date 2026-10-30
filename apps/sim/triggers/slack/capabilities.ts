@@ -4,6 +4,7 @@ import {
   SLACK_MANAGED_USER_ENROLLMENT_CALLBACK_PATH,
   SLACK_MANAGED_USER_SCOPES,
 } from '@/lib/credential-groups/slack-managed-user-scopes'
+import { SLACK_AGENT_SCOPES } from '@/triggers/slack/shared'
 
 /**
  * Slack app capabilities that can be toggled on in the manifest generator.
@@ -301,14 +302,6 @@ export function getSlackManagedUserAuthorizationManifestConfig(
 
 const WEBHOOK_URL_PLACEHOLDER = '<deploy workflow to generate webhook URL>'
 
-export const SLACK_AGENT_SCOPES = [
-  'assistant:write',
-  'chat:write',
-  'chat:write.customize',
-  'im:history',
-  'im:write',
-] as const
-
 export const SLACK_AGENT_EVENTS = [
   'agent_session_stopped',
   'agent_session_title_changed',
@@ -421,10 +414,10 @@ export function buildSlackManifest(
     ]),
   ].sort()
   const events = [...new Set([...SLACK_AGENT_EVENTS, ...active.flatMap((c) => c.events)])].sort()
-  const displayName = appName.trim() || 'Sim Workflow Bot'
+  const displayName = appName.trim() || 'Arena Workflow Bot'
   const trimmedDescription = description?.trim() || ''
   const isInteractive = active.some((c) => c.interactivity)
-  const agentDescription = trimmedDescription || `${displayName} — an AI agent powered by Sim.`
+  const agentDescription = trimmedDescription || `${displayName} — an AI agent powered by Arena.`
 
   if (agentDescription.length > 300) {
     throw new Error('Slack agent description must be 300 characters or fewer')

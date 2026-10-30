@@ -4,7 +4,7 @@ import { truncate } from '@sim/utils/string'
 import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import { asOrchestrationError } from '@/lib/core/orchestration/types'
 import { PlatformEvents } from '@/lib/core/telemetry'
 import { getEffectiveEnvironmentSnapshot } from '@/lib/environment/utils'

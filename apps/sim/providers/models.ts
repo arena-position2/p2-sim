@@ -90,7 +90,8 @@ export interface ModelCapabilities {
     streamed?: ThinkingStreamVisibility
     /**
      * Explicit API mode for the pickers' `none` level on models that think by
-     * default. Omitted, `none` sends no thinking config.
+     * default. Omitted, `none` sends no thinking config, except on Gemini 3+, which
+     * has no off switch and sends its lowest declared level instead.
      */
     noneMode?: 'between_tools' | 'disabled'
     /** Whether forced tool choice can be combined with configured thinking. */
@@ -604,6 +605,34 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         releaseDate: '2026-09-29',
       },
       {
+        id: 'gpt-6.1-terra',
+        pricing: {
+          input: 1.0,
+          cachedInput: 0.05,
+          output: 5.0,
+          tiers: [
+            {
+              aboveInputTokens: 272000,
+              input: 2.0,
+              cachedInput: 0.1,
+              output: 7.5,
+            },
+          ],
+          updatedAt: '2026-10-27',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+          maxOutputTokens: 128000,
+        },
+        contextWindow: 1050000,
+        releaseDate: '2026-10-26',
+      },
+      {
         id: 'gpt-6-sol',
         pricing: {
           input: 2.0,
@@ -705,7 +734,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         contextWindow: 1047576,
         releaseDate: '2025-04-14',
-        sunset: { status: 'legacy' },
+        sunset: { status: 'deprecated' },
       },
       // GPT-5.6 family
       {

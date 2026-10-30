@@ -21,7 +21,7 @@ export const slackMessageTool: InternalToolConfig<SlackMessageParams, SlackMessa
       required: false,
       visibility: 'user-only',
       description:
-        'Authentication method: oauth (Sim Bot / bot token) or bot_token (Custom Bot / user token). Choose bot_token for user-level actions; choose oauth for bot/app actions.',
+        'Authentication method: oauth (Arena Bot / bot token) or bot_token (Custom Bot / user token). Choose bot_token for user-level actions; choose oauth for bot/app actions.',
     },
     destinationType: {
       type: 'string',

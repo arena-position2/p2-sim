@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api'
 import {
   parsePrincipal,
   type SerializedPrincipalV1,
@@ -18,8 +19,12 @@ import {
 import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
+import { getDeterministicAdmissionRejectionCode } from '@/lib/core/admission/rejection'
+import { isReservationHeadroomDenial } from '@/lib/core/admission/transient-failure'
+import { buildRecordedJobFailureResult } from '@/lib/core/async-jobs/recorded-failure'
 import type { AsyncExecutionCorrelation } from '@/lib/core/async-jobs/types'
+import type { ExecutionScope } from '@/lib/core/errors/execution-scope-deleted'
 import { logFailureOnce } from '@/lib/core/errors/failure-log'
 import {
   capExecutionTimeoutMs,
@@ -31,15 +36,22 @@ import {
   RESERVATION_TTL_BUFFER_MS,
 } from '@/lib/core/execution-limits'
 import type { RequestAttribution } from '@/lib/core/utils/request-attribution'
-import { preprocessExecution } from '@/lib/execution/preprocessing'
+import type { ExecutionActor } from '@/lib/execution/actor-resolution'
+import {
+  isWorkflowStateRejection,
+  type PreprocessExecutionError,
+  preprocessExecution,
+  RATE_LIMIT_EXCEEDED_CODE,
+} from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
 import { cleanupExecutionBase64Cache } from '@/lib/uploads/utils/user-file-base64.server'
-import {
-  executeWorkflowCore,
-  wasExecutionFinalizedByCore,
-} from '@/lib/workflows/executor/execution-core'
+import { executeWorkflowCore } from '@/lib/workflows/executor/execution-core'
 import { handlePostExecutionPauseState } from '@/lib/workflows/executor/pause-persistence'
+import {
+  isRecordedWorkflowFailure,
+  resolveDeletedExecutionScope,
+} from '@/lib/workflows/executor/recorded-failure'
 import { WORKFLOW_EXECUTION_CONCURRENCY_LIMIT } from '@/background/concurrency-limits'
 import { ExecutionSnapshot } from '@/executor/execution/snapshot'
 import type { ExecutionMetadata } from '@/executor/execution/types'
@@ -73,6 +85,12 @@ export type WorkflowExecutionPayload = {
   principal: SerializedPrincipalV1
   userId: string
   billingAttribution: BillingAttributionSnapshot
+  /**
+   * Actor identity the enqueuing surface resolved alongside the billing
+   * snapshot. The worker cannot re-derive a caller-named payer actor, so it
+   * rides the payload with the attribution it belongs to.
+   */
+  executionActor?: ExecutionActor
   workspaceId: string
   input?: any
   triggerType?: CoreTriggerType
@@ -107,6 +125,33 @@ type LegacyWorkflowExecutionPayload = Omit<WorkflowExecutionPayload, 'principal'
 }
 
 type WorkflowExecutionJobPayload = WorkflowExecutionPayload | LegacyWorkflowExecutionPayload
+
+/**
+ * Whether a preprocessing rejection is an outcome of the workflow's or account's state rather
+ * than a fault. A workflow-state rejection writes no execution log, so it completes at once. A
+ * quota or account rejection (exhausted usage, spent headroom, rate limit, suspended account)
+ * writes one, so it completes only once that log is saved; an unsaved one (an outage) still fails
+ * the job and alerts. A retryable rejection and every other failure fail the job.
+ */
+function isNonFaultPreprocessingRejection(
+  rejection: PreprocessExecutionError,
+  rejectionLogged: boolean
+): boolean {
+  if (rejection.retryable === true) return false
+  if (isWorkflowStateRejection(rejection)) return true
+  const quotaRejection =
+    getDeterministicAdmissionRejectionCode(rejection) !== undefined ||
+    isReservationHeadroomDenial(rejection) ||
+    rejection.code === RATE_LIMIT_EXCEEDED_CODE
+  return quotaRejection && rejectionLogged
+}
+
+/** Completes the job with a failure already in the execution log, keeping it on the run's span. */
+function completeWithRecordedFailure(workflowId: string, executionId: string, error: unknown) {
+  const failure = toError(error)
+  trace.getActiveSpan()?.recordException(failure)
+  return buildRecordedJobFailureResult({ workflowId, executionId, error: failure.message })
+}
 
 function requireLegacyWorkflowJobString(value: unknown, field: string): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -198,6 +243,7 @@ export async function executeWorkflowJob(
         loggingSession.setTrustedExecutionCorrelation(correlation)
       }
       loggingSession.setExecutionDeadlineAt(getExecutionDeadlineAt(timeoutController.signal))
+      let preprocessingRejection: PreprocessExecutionError | undefined
 
       try {
         const preprocessResult = await preprocessExecution({
@@ -221,6 +267,7 @@ export async function executeWorkflowJob(
             workflowId,
             statusCode: preprocessResult.error?.statusCode,
           })
+          preprocessingRejection = preprocessResult.error
 
           throw new Error(preprocessResult.error?.message || 'Preprocessing failed')
         }
@@ -243,6 +290,7 @@ export async function executeWorkflowJob(
           userId: actorUserId,
           principal,
           billingAttribution: preprocessResult.billingAttribution,
+          executionActor: payload.executionActor,
           sessionUserId: undefined,
           workflowUserId: workflow.userId,
           triggerType: payload.triggerType || 'api',
@@ -316,10 +364,25 @@ export async function executeWorkflowJob(
           executionId,
         })
 
+        const completeWithDeletedScope = (scope: ExecutionScope) => {
+          logger.info(`[${requestId}] Workflow execution ended: its ${scope} was deleted`, {
+            workflowId,
+            executionId,
+          })
+          return completeWithRecordedFailure(workflowId, executionId, error)
+        }
+
+        // Checked before the timeout: a deleted scope leaves nobody to alert about a slow run.
+        const deletedScope = await resolveDeletedExecutionScope(error, loggingSession)
+        if (deletedScope) return completeWithDeletedScope(deletedScope)
+
         if (error instanceof ExecutionTimeoutError) throw error
 
-        if (wasExecutionFinalizedByCore(error, executionId)) {
-          throw error
+        // A failure core already recorded is the workflow's outcome, not a job fault; a run past
+        // its deadline (checked after the await, which can outlast it) still fails the job.
+        if (await isRecordedWorkflowFailure(error, executionId, loggingSession)) {
+          if (timeoutController.isTimedOut()) throw error
+          return completeWithRecordedFailure(workflowId, executionId, error)
         }
 
         const executionResult = hasExecutionResult(error) ? error.executionResult : undefined
@@ -335,6 +398,16 @@ export async function executeWorkflowJob(
           traceSpans,
           executionState: executionResult?.executionState,
         })
+
+        const scopeDeletedOnCompletion = loggingSession.getDeletedScope()
+        if (scopeDeletedOnCompletion) return completeWithDeletedScope(scopeDeletedOnCompletion)
+
+        if (
+          preprocessingRejection &&
+          isNonFaultPreprocessingRejection(preprocessingRejection, loggingSession.hasCompleted())
+        ) {
+          return completeWithRecordedFailure(workflowId, executionId, error)
+        }
 
         throw error
       } finally {

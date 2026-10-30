@@ -74,10 +74,10 @@ it('uses the existing default name when the bot name is cleared', async () => {
   mocks.loading = false
   await render()
   await click('Set up Slack app')
-  await fill('Sim Workflow Bot', '')
+  await fill('Arena Workflow Bot', '')
   expect(button('Next')).not.toBeDisabled()
   await click('Next')
   const link = document.querySelector<HTMLAnchorElement>('a[href*="manifest_json"]')!
   const manifest = JSON.parse(new URL(link.href).searchParams.get('manifest_json')!)
-  expect(manifest.display_information.name).toBe('Sim Workflow Bot')
+  expect(manifest.display_information.name).toBe('Arena Workflow Bot')
 })

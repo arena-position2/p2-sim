@@ -20,6 +20,7 @@
  */
 
 import { type ReactNode, act as reactAct, StrictMode, useEffect, useState } from 'react'
+import { createDeferred } from '@sim/testing/helpers/deferred'
 import { authClientMock, authClientMockFns } from '@sim/testing/mocks/auth-client.mock'
 import { libDesktopMock, libDesktopMockFns } from '@sim/testing/mocks/lib-desktop.mock'
 import { nextNavigationMock, nextNavigationMockFns } from '@sim/testing/mocks/next-navigation.mock'
@@ -59,11 +60,11 @@ vi.mock('@/lib/mothership/tools/client/local-filesystem', () => ({
 vi.mock('@/lib/mothership/tools/client/browser-tool-execution', () => ({
   executeBrowserToolOnClient: mockExecuteBrowserToolOnClient,
 }))
-vi.mock('@/lib/auth/auth-client', () => authClientMock)
+vi.mock('@/lib/auth/client', () => authClientMock)
 vi.unmock('@/stores/execution/store')
 vi.unmock('@/stores/terminal')
 vi.unmock('@/stores/terminal/console/store')
-vi.mock('@/app/workspace/[workspaceId]/w/[workflowId]/utils/workflow-execution-utils', () => ({
+vi.mock('@/app/workspace/[workspaceId]/w/[workflowId]/utils/workflow-execution', () => ({
   executeWorkflowWithFullLogging: mockExecuteWorkflow,
 }))
 
@@ -79,6 +80,7 @@ vi.mock('@/lib/api/client/request', async (importOriginal) => {
   }
 })
 
+import { ToastProvider } from '@sim/emcn'
 import type { ApiClientRequest } from '@/lib/api/client/request'
 import type { AnyApiRouteContract } from '@/lib/api/contracts'
 import type { CopilotChatAbortBody, CopilotChatStopBody } from '@/lib/api/contracts/copilot'
@@ -89,8 +91,15 @@ import {
 } from '@/lib/core/config/deployment-shape'
 import { MothershipHandoffStorage } from '@/lib/core/utils/browser-storage'
 import { MOTHERSHIP_STREAM_REPLAY_HEADER } from '@/lib/mothership/constants'
-import type { MothershipStreamV1EventEnvelope } from '@/lib/mothership/generated/mothership-stream-v1'
-import { getChatResourceSelectionId } from '@/lib/mothership/resources/types'
+import {
+  MothershipStreamV1CompletionStatus,
+  type MothershipStreamV1EventEnvelope,
+} from '@/lib/mothership/generated/mothership-stream-v1'
+import type { PersistedStreamEventEnvelope } from '@/lib/mothership/request/session/contract'
+import {
+  getChatResourceSelectionId,
+  type MothershipResource,
+} from '@/lib/mothership/resources/types'
 import { ChatSurfaceProvider } from '@/app/workspace/[workspaceId]/home/components/chat-surface-context'
 import { collectCitedMessageSources } from '@/app/workspace/[workspaceId]/home/components/message-content/message-sources'
 import { ModelSelector } from '@/app/workspace/[workspaceId]/home/components/user-input/components/model-selector'
@@ -328,7 +337,9 @@ function renderUseChat(
 
   act(() => {
     root.render(
-      <QueryClientProvider client={queryClient}>{(<Probe />) as ReactNode}</QueryClientProvider>
+      <ToastProvider>
+        <QueryClientProvider client={queryClient}>{(<Probe />) as ReactNode}</QueryClientProvider>
+      </ToastProvider>
     )
   })
 
@@ -342,9 +353,11 @@ function renderUseChat(
       requestMode = mode
       act(() =>
         root.render(
-          <QueryClientProvider client={queryClient}>
-            <Probe />
-          </QueryClientProvider>
+          <ToastProvider>
+            <QueryClientProvider client={queryClient}>
+              <Probe />
+            </QueryClientProvider>
+          </ToastProvider>
         )
       )
     },
@@ -389,7 +402,9 @@ function renderUseChatInChat(
 
   act(() => {
     root.render(
-      <QueryClientProvider client={queryClient}>{(<Probe />) as ReactNode}</QueryClientProvider>
+      <ToastProvider>
+        <QueryClientProvider client={queryClient}>{(<Probe />) as ReactNode}</QueryClientProvider>
+      </ToastProvider>
     )
   })
 
@@ -405,9 +420,11 @@ function renderUseChatInChat(
       queryClient.setQueryData(mothershipChatKeys.detail(chatId), nextHistory)
       act(() =>
         root.render(
-          <QueryClientProvider client={queryClient}>
-            <Probe />
-          </QueryClientProvider>
+          <ToastProvider>
+            <QueryClientProvider client={queryClient}>
+              <Probe />
+            </QueryClientProvider>
+          </ToastProvider>
         )
       )
     },
@@ -460,7 +477,11 @@ function renderHomeLikeSurface(): {
 
   act(() => {
     root.render(
-      <QueryClientProvider client={queryClient}>{(<HomeLike />) as ReactNode}</QueryClientProvider>
+      <ToastProvider>
+        <QueryClientProvider client={queryClient}>
+          {(<HomeLike />) as ReactNode}
+        </QueryClientProvider>
+      </ToastProvider>
     )
   })
 
@@ -523,9 +544,11 @@ function renderComposerSwap(): {
   const render = () =>
     act(() => {
       root.render(
-        <QueryClientProvider client={queryClient}>
-          <HomeLike />
-        </QueryClientProvider>
+        <ToastProvider>
+          <QueryClientProvider client={queryClient}>
+            <HomeLike />
+          </QueryClientProvider>
+        </ToastProvider>
       )
     })
   render()
@@ -576,7 +599,9 @@ function renderStrictModeHandoffConsumer(): void {
   act(() => {
     root.render(
       <StrictMode>
-        <QueryClientProvider client={queryClient}>{(<Probe />) as ReactNode}</QueryClientProvider>
+        <ToastProvider>
+          <QueryClientProvider client={queryClient}>{(<Probe />) as ReactNode}</QueryClientProvider>
+        </ToastProvider>
       </StrictMode>
     )
   })
@@ -749,6 +774,268 @@ describe('useChat remount send recovery', () => {
     }
   )
 
+  describe('a tab the server removed while the client was still adding it', () => {
+    const chat: MothershipChatHistory = {
+      id: 'chat-removed-file',
+      title: 'Files',
+      messages: [],
+      activeStreamId: null,
+      resources: [],
+    }
+
+    /**
+     * Streams a turn that opens a file tab without an effect (the client
+     * persists it), then the server's own removal of that file as an effect.
+     * Later turns only complete. The removal is held until `addSent` resolves,
+     * so the client's own write for the add has started by then. Returns each
+     * send's resource attachments.
+     */
+    function streamAddThenServerRemoval(addSent: Promise<void>): unknown[] {
+      const sentAttachments: unknown[] = []
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== '/api/mothership/chat' || init?.method !== 'POST') {
+          return fetchStub(input, init)
+        }
+        const sent = JSON.parse(String(init.body))
+        sentAttachments.push(sent.resourceAttachments)
+        const envelope = { v: 1 as const, ts: '', stream: { streamId: sent.userMessageId } }
+        const file = { type: 'file' as const, id: 'deleted-file', title: 'report.csv' }
+        const complete: PersistedStreamEventEnvelope = {
+          ...envelope,
+          seq: 3,
+          type: 'complete',
+          payload: { status: 'complete' },
+        }
+        const events: PersistedStreamEventEnvelope[] =
+          sentAttachments.length === 1
+            ? [
+                {
+                  ...envelope,
+                  seq: 1,
+                  type: 'resource',
+                  payload: { op: 'upsert', resource: file },
+                },
+                {
+                  ...envelope,
+                  seq: 2,
+                  type: 'resource',
+                  payload: { op: 'remove', resource: file, effectId: 'remove-deleted-file' },
+                },
+                complete,
+              ]
+            : [complete]
+        const encoder = new TextEncoder()
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const [first, ...rest] = events
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(first)}\n\n`))
+            if (rest.length > 0) {
+              await addSent
+              // One macrotask lets a write that already failed settle in the queue.
+              await sleep(0)
+            }
+            for (const event of rest) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+            }
+            controller.close()
+          },
+        })
+        return new Response(body, {
+          headers: { 'Content-Type': 'text/event-stream', 'x-mothership-chat-id': chat.id },
+        })
+      })
+      return sentAttachments
+    }
+
+    /**
+     * Resource writes the hook sent, as `METHOD id`, and a promise that
+     * resolves once the first add has been sent.
+     */
+    function recordResourceWrites(persist: () => Promise<unknown>): {
+      writes: string[]
+      addSent: Promise<void>
+    } {
+      const writes: string[] = []
+      const addSent = createDeferred<void>()
+      mockRequestJson.mockImplementation(async (contract: AnyApiRouteContract, input) => {
+        if (contract.path !== '/api/mothership/chat/resources') return { chats: [] }
+        const { body } = input as { body: { resource?: { id: string }; resourceId?: string } }
+        writes.push(`${contract.method} ${body.resource?.id ?? body.resourceId}`)
+        if (contract.method !== 'POST') return { resources: [] }
+        addSent.resolve()
+        return persist()
+      })
+      return { writes, addSent: addSent.promise }
+    }
+
+    it('drops a failed add without re-posting it or deleting server-side', async () => {
+      const { writes, addSent } = recordResourceWrites(async () => {
+        throw new Error('Persist failed')
+      })
+      const sentAttachments = streamAddThenServerRemoval(addSent)
+      const { getResult } = renderUseChatInChat(chat.id, chat)
+
+      await act(async () => {
+        await getResult().sendMessage('Export the report, then delete it')
+      })
+      const writesBeforeRemoval = [...writes]
+      await act(async () => {
+        queryClient.setQueryData(mothershipChatKeys.detail(chat.id), { ...chat })
+        await sleep(0)
+      })
+      await act(async () => {
+        await getResult().sendMessage('What is open?')
+      })
+
+      expect(writesBeforeRemoval).not.toContain('DELETE deleted-file')
+      expect(writes).toEqual(writesBeforeRemoval)
+      expect(getResult().resources.map((resource) => resource.id)).not.toContain('deleted-file')
+      expect(JSON.stringify(sentAttachments.at(-1) ?? [])).not.toContain('deleted-file')
+    })
+
+    it('drops a failed add when the removal arrives in a reconnect replay', async () => {
+      const { writes } = recordResourceWrites(async () => {
+        throw new Error('Persist failed')
+      })
+      const file = { type: 'file' as const, id: 'deleted-file', title: 'report.csv' }
+      const sentAttachments: unknown[] = []
+      let streamId = ''
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/mothership/chat/stream')) {
+          const removal: PersistedStreamEventEnvelope = {
+            v: 1,
+            ts: '',
+            stream: { streamId },
+            seq: 2,
+            type: 'resource',
+            payload: { op: 'remove', resource: file, effectId: 'remove-deleted-file' },
+          }
+          const opened: PersistedStreamEventEnvelope = {
+            ...removal,
+            seq: 1,
+            payload: { op: 'upsert', resource: file },
+          }
+          return Response.json({
+            success: true,
+            events: [opened, removal].map((event) => ({ eventId: event.seq, streamId, event })),
+            status: 'complete',
+          })
+        }
+        if (url !== '/api/mothership/chat' || init?.method !== 'POST') {
+          return fetchStub(input, init)
+        }
+        const sent = JSON.parse(String(init.body))
+        sentAttachments.push(sent.resourceAttachments)
+        streamId = sent.userMessageId
+        const envelope = { v: 1 as const, ts: '', stream: { streamId } }
+        const events: PersistedStreamEventEnvelope[] =
+          sentAttachments.length === 1
+            ? [{ ...envelope, seq: 1, type: 'resource', payload: { op: 'upsert', resource: file } }]
+            : [{ ...envelope, seq: 1, type: 'complete', payload: { status: 'complete' } }]
+        return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+          headers: { 'Content-Type': 'text/event-stream', 'x-mothership-chat-id': chat.id },
+        })
+      })
+      const { getResult } = renderUseChatInChat(chat.id, chat)
+
+      await act(async () => {
+        await getResult().sendMessage('Export the report, then delete it')
+      })
+      await waitFor(() => !getResult().isSending)
+      const writesBeforeRemoval = [...writes]
+      await act(async () => {
+        queryClient.setQueryData(mothershipChatKeys.detail(chat.id), { ...chat })
+        await sleep(0)
+      })
+      await act(async () => {
+        await getResult().sendMessage('What is open?')
+      })
+
+      expect(writes).toEqual(writesBeforeRemoval)
+      expect(getResult().resources.map((resource) => resource.id)).not.toContain('deleted-file')
+      expect(JSON.stringify(sentAttachments.at(-1) ?? [])).not.toContain('deleted-file')
+    })
+  })
+
+  describe('closing a file tab', () => {
+    const projectFile: MothershipResource = {
+      type: 'file',
+      id: 'shared-file',
+      title: 'brief.md',
+      owner: { entityType: 'project', entityId: 'project-1' },
+    }
+    const workspaceFile: MothershipResource = {
+      type: 'file',
+      id: 'shared-file',
+      title: 'notes.md',
+      workspaceId: 'ws-1',
+      owner: { entityType: 'workspace', entityId: 'ws-1' },
+    }
+
+    /** Opens a chat holding `resources` and records each resource DELETE body. */
+    function renderChatRecordingRemovals(resources: MothershipResource[], selected?: string) {
+      const history: MothershipChatHistory = {
+        id: 'chat-file-tabs',
+        title: 'Files',
+        messages: [],
+        activeStreamId: null,
+        resources,
+      }
+      const removals: unknown[] = []
+      mockRequestJson.mockImplementation(async (contract: AnyApiRouteContract, input) => {
+        if (contract.path !== '/api/mothership/chat/resources') return { chats: [] }
+        removals.push((input as { body: unknown }).body)
+        return { resources: [] }
+      })
+      const { getResult } = renderUseChatInChat(history.id, history, undefined, selected)
+      return { history, removals, getResult }
+    }
+
+    it('closes a Project file tab by its owner and leaves a workspace file with the same id', async () => {
+      const { history, removals, getResult } = renderChatRecordingRemovals(
+        [projectFile, workspaceFile],
+        getChatResourceSelectionId(projectFile)
+      )
+
+      await act(async () => {
+        getResult().removeResource(projectFile)
+        await sleep(0)
+      })
+
+      expect(removals).toEqual([
+        {
+          chatId: history.id,
+          resourceType: 'file',
+          resourceId: 'shared-file',
+          owner: { entityType: 'project', entityId: 'project-1' },
+        },
+      ])
+      expect(getResult().resources).toEqual([workspaceFile])
+      expect(getResult().activeResourceId).not.toBe(getChatResourceSelectionId(projectFile))
+    })
+
+    it('closes a workspace file tab named only by type and id, deleting it as stored', async () => {
+      const { history, removals, getResult } = renderChatRecordingRemovals([workspaceFile])
+
+      await act(async () => {
+        getResult().removeResource({ type: 'file', id: 'shared-file' })
+        await sleep(0)
+      })
+
+      expect(removals).toEqual([
+        {
+          chatId: history.id,
+          resourceType: 'file',
+          resourceId: 'shared-file',
+          workspaceId: 'ws-1',
+          owner: { entityType: 'workspace', entityId: 'ws-1' },
+        },
+      ])
+      expect(getResult().resources).toEqual([])
+    })
+  })
+
   it('restores an explicitly selected Search tab while reconnecting an active turn', async () => {
     const shape = resolveDeploymentShape()
     seedDeploymentShape({ ...shape, features: shape.features })
@@ -756,7 +1043,9 @@ describe('useChat remount send recovery', () => {
       id: 'chat-reconnecting-search',
       title: 'Search',
       activeStreamId: 'accepted-search',
-      messages: [{ id: 'accepted-search', role: 'user', content: 'Find the policy' }],
+      messages: [
+        { id: 'accepted-search', role: 'user', content: 'Find the policy', timestamp: '' },
+      ],
       resources: [
         {
           type: 'search',
@@ -1988,6 +2277,103 @@ describe('useChat remount send recovery', () => {
     expect(order.indexOf('history')).toBeGreaterThanOrEqual(0)
     expect(order.indexOf('history')).toBeLessThan(order.indexOf('post'))
   })
+
+  it.each([false, undefined])(
+    'holds a recovered send with lost context without weakening admission protection (%s)',
+    async (admissionUnknown) => {
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        }
+      )
+      writeQueuedSendHandoffState({
+        id: 'queued-selection',
+        chatId: 'chat-a',
+        workspaceId: 'ws-1',
+        supersededStreamId: 'previous-response',
+        userMessageId: 'prepared-selection-request',
+        message: 'Explain @Browser with @Docs',
+        contexts: [
+          { kind: 'docs', label: 'Docs' },
+          {
+            kind: 'browser_tab',
+            tabId: 'tab-a',
+            label: 'Browser',
+            selection: { text: 'Selected passage', title: 'x'.repeat(513) },
+          },
+        ],
+        stopRequired: true,
+        admissionUnknown,
+        requestedAt: Date.now(),
+      })
+      const history: MothershipChatHistory = {
+        id: 'chat-a',
+        title: 'Selection review',
+        messages: [],
+        activeStreamId: null,
+        resources: [],
+      }
+      mockRequestJson.mockResolvedValue({ chat: history })
+      const { getResult } = renderUseChatInChat('chat-a', history)
+      await waitFor(() => readQueuedSendHandoffState() === null)
+      expect(allQueuedMessages()).toEqual([
+        expect.objectContaining({
+          id: 'queued-selection',
+          content: 'Explain @Browser with @Docs',
+          contexts: [{ kind: 'docs', label: 'Docs' }],
+          hold: 'user',
+          hasUnavailableContexts: true,
+          resumeUserMessageId: 'prepared-selection-request',
+          admissionUnknown: admissionUnknown !== false,
+        }),
+      ])
+      expect(document.body.textContent).toContain('Edit or remove it before sending.')
+      expect(document.querySelectorAll('[aria-label="Notifications"] li')).toHaveLength(1)
+      await act(async () => {
+        void getResult().sendNow('queued-selection')
+      })
+      expect(state.abortBodies).toHaveLength(0)
+      expect(state.postBodies).toHaveLength(0)
+      expect(document.querySelectorAll('[aria-label="Notifications"] li')).toHaveLength(2)
+      await act(() => {
+        void getResult().sendNow('queued-selection')
+      })
+      expect(document.querySelectorAll('[aria-label="Notifications"] li')).toHaveLength(3)
+
+      await act(async () => {
+        const edited = getResult().editQueuedMessage('queued-selection')
+        if (admissionUnknown === false) {
+          expect(edited?.content).toBe('Explain @Browser with @Docs')
+          await getResult().sendMessage('Explain @Docs', undefined, [
+            { kind: 'docs', label: 'Docs' },
+          ])
+        } else {
+          expect(edited).toBeUndefined()
+        }
+      })
+      if (admissionUnknown === false) {
+        expect(document.body.textContent).toContain('Reattach it before sending.')
+        await waitFor(() => state.postBodies.length === 1)
+        expect(state.abortBodies).toEqual([
+          { streamId: 'previous-response', workspaceId: 'ws-1', chatId: 'chat-a' },
+        ])
+        expect(state.postBodies[0]).toMatchObject({
+          message: 'Explain @Docs',
+          contexts: [{ kind: 'docs', label: 'Docs' }],
+        })
+        expect(state.postBodies[0].userMessageId).not.toBe('prepared-selection-request')
+      } else {
+        expect(allQueuedMessages()[0]).toMatchObject({
+          resumeUserMessageId: 'prepared-selection-request',
+          admissionUnknown: true,
+        })
+        expect(state.postBodies).toHaveLength(0)
+      }
+    }
+  )
 
   it.each([false, true])(
     'the remounted handoff reader requires Stop settlement (settled: %s)',
@@ -4674,7 +5060,12 @@ describe('useChat remount send recovery', () => {
         title: 'Trace inspection',
         activeStreamId: status === 'active' ? 'accepted-request' : null,
         messages: [
-          { id: 'accepted-request', role: 'user', content: 'check the trace for this req' },
+          {
+            id: 'accepted-request',
+            role: 'user',
+            content: 'check the trace for this req',
+            timestamp: '',
+          },
           ...(status === 'active'
             ? []
             : [
@@ -4682,11 +5073,14 @@ describe('useChat remount send recovery', () => {
                   id: 'accepted-answer',
                   role: 'assistant' as const,
                   content: '',
+                  timestamp: '',
                   contentBlocks: [
                     {
                       type: 'complete' as const,
                       status:
-                        status === 'cancelled' ? ('cancelled' as const) : ('success' as const),
+                        status === 'cancelled'
+                          ? MothershipStreamV1CompletionStatus.cancelled
+                          : MothershipStreamV1CompletionStatus.complete,
                     },
                   ],
                 },
@@ -4712,7 +5106,12 @@ describe('useChat remount send recovery', () => {
       title: 'Trace inspection',
       activeStreamId: null,
       messages: [
-        { id: 'different-request', role: 'user', content: 'check the trace for this req' },
+        {
+          id: 'different-request',
+          role: 'user',
+          content: 'check the trace for this req',
+          timestamp: '',
+        },
       ],
       resources: [],
     })
@@ -4849,9 +5248,11 @@ describe('useChat remount send recovery', () => {
       const render = (chatId?: string) =>
         act(() =>
           root.render(
-            <QueryClientProvider client={queryClient}>
-              <Surface chatId={chatId} />
-            </QueryClientProvider>
+            <ToastProvider>
+              <QueryClientProvider client={queryClient}>
+                <Surface chatId={chatId} />
+              </QueryClientProvider>
+            </ToastProvider>
           )
         )
       render()

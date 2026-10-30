@@ -1,5 +1,5 @@
 import { PresentationIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import { type BlockConfig, IntegrationType } from '@/blocks/types'
 
 export const PresentationBlock: BlockConfig = {
   type: 'presentation',
@@ -8,6 +8,7 @@ export const PresentationBlock: BlockConfig = {
   longDescription:
     'Integrate Presentation creation into the workflow. Can create presentations with customizable slides, tone, and verbosity.',
   category: 'tools',
+  integrationType: IntegrationType.Documents,
   bgColor: '#F4B400',
   icon: PresentationIcon,
   subBlocks: [

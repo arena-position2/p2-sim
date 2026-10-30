@@ -70,7 +70,7 @@ export async function loadWorkspaceResourceSummaries(
       )
       .limit(MAX_CONTEXT_TABLES),
 
-    listWorkspaceFiles(workspaceId, { limit: MAX_CONTEXT_FILES }),
+    listWorkspaceFiles(workspaceId),
   ])
 
   return {
@@ -84,7 +84,7 @@ export async function loadWorkspaceResourceSummaries(
       name: table.name,
       description: table.description,
     })),
-    workspaceFiles: files.map((file) => ({
+    workspaceFiles: files.slice(0, MAX_CONTEXT_FILES).map((file) => ({
       id: file.id,
       name: file.name,
       path: canonicalWorkspaceFilePath({ folderPath: file.folderPath, name: file.name }),

@@ -31,8 +31,8 @@ export type FeatureFlagContext = AppConfigGateContext
 /**
  * The single definition of a feature flag. Everything about a flag lives in one
  * place: its name (the registry key), a human-readable `description`, and the
- * `fallback` secret consulted when AppConfig isn't the source of truth (truthy ⇒ on
- * globally).
+ * optional `fallback` secret consulted when AppConfig is not the source of truth.
+ * A null fallback keeps the flag off outside AppConfig.
  *
  * Gating by workspace/org/user/admin is deliberately NOT part of a definition — it lives only
  * in the hosted AppConfig document, so no environment can grant access from a code
@@ -40,8 +40,8 @@ export type FeatureFlagContext = AppConfigGateContext
  */
 interface FeatureFlagDefinition {
   description: string
-  /** Env/secret key consulted when AppConfig isn't the source of truth. Truthy ⇒ on. */
-  fallback: keyof typeof env
+  /** Null means AppConfig-only; otherwise a truthy env/secret enables the fallback. */
+  fallback: keyof typeof env | null
 }
 
 /** The single registry of known flags. To add a flag, add one entry here. */
@@ -50,6 +50,18 @@ const FEATURE_FLAGS = {
     description:
       'Enable dashboard resources, rendering, analytics, and Mothership authoring. Supports global and organization rollout; disabled by default.',
     fallback: 'DASHBOARDS',
+  },
+  'mothership-computer-use': {
+    description:
+      'Enable native macOS computer use in Mothership. Supports global and organization rollout; ' +
+      'personal workspaces follow the global switch. Each device must also opt in.',
+    fallback: 'MSHIP_COMPUTER_USE',
+  },
+  'mothership-search-integration-tools': {
+    description:
+      'Give Search Assistant read-only integration discovery, calls, and matching prompt ' +
+      'instructions. Global AppConfig on/off only; disabled by default with no env fallback.',
+    fallback: null,
   },
   'workflow-tests': {
     description:
@@ -66,12 +78,6 @@ const FEATURE_FLAGS = {
       'Show the Mothership model selector, model-specific effort levels, and Fast for supported ' +
       'models. Global on/off only; disabled uses Astra with simplified effort labels.',
     fallback: 'MSHIP_MODEL_SELECTOR',
-  },
-  'mothership-plan-mode': {
-    description:
-      'Show and admit Mothership Plan conversations. Global on/off only, shared by organization ' +
-      'and workspace surfaces.',
-    fallback: 'MSHIP_PLAN_MODE',
   },
   'agent-memory-history': {
     description:
@@ -99,10 +105,10 @@ const FEATURE_FLAGS = {
   },
   projects: {
     description:
-      'Expose the Project APIs once the membership backfill has validated. Global on/off only; ' +
+      'Expose Projects and Project-scoped features, including files and memories. Global on/off only; ' +
       'workspace creation assigns Projects and lifecycle protections apply either way. ' +
-      'Off-AppConfig falls back to PROJECT_API_ENABLED.',
-    fallback: 'PROJECT_API_ENABLED',
+      'Off-AppConfig falls back to PROJECTS.',
+    fallback: 'PROJECTS',
   },
   'knowledge-member-access': {
     description:
@@ -115,11 +121,26 @@ const FEATURE_FLAGS = {
       'targeting. Off-AppConfig falls back to KNOWLEDGE_MEMBER_ACCESS.',
     fallback: 'KNOWLEDGE_MEMBER_ACCESS',
   },
+  'isolated-vm-local-workers': {
+    description:
+      'Kill switch: run JavaScript sandbox workers as local child processes even where ' +
+      'IVM_REMOTE_WORKER_URL names a dedicated worker host. Global on/off only; off by default, ' +
+      'so a configured host is used unless this is turned on. AppConfig-only: when AppConfig is ' +
+      'unreachable the host stays in use.',
+    fallback: null,
+  },
+  'mothership-abandoned-run-takeover-disabled': {
+    description:
+      'Kill switch for Sim taking over Chat runs whose controller died (a deploy or a crash) and ' +
+      're-running their interrupted tool. Global on/off only; on stops every takeover scan. ' +
+      'Off by default, so takeovers run unless this is turned on.',
+    fallback: null,
+  },
 } satisfies Record<string, FeatureFlagDefinition>
 
 /**
  * The closed set of known feature flags. Derived from the registry, so a flag
- * cannot exist — or be checked — without a definition (and its mandatory fallback).
+ * cannot exist — or be checked — without a definition (and its explicit fallback policy).
  */
 export type FeatureFlagName = keyof typeof FEATURE_FLAGS
 
@@ -129,8 +150,12 @@ function fallbackFlags(): FeatureFlagsConfig {
   for (const [name, def] of Object.entries(FEATURE_FLAGS) as Array<
     [string, FeatureFlagDefinition]
   >) {
-    const fallback = env[def.fallback]
-    flags[name] = { enabled: isTruthy(Array.isArray(fallback) ? undefined : fallback) }
+    const fallbackValue = def.fallback === null ? undefined : env[def.fallback]
+    const fallbackEnabled =
+      typeof fallbackValue === 'string' ||
+      typeof fallbackValue === 'boolean' ||
+      typeof fallbackValue === 'number'
+    flags[name] = { enabled: fallbackEnabled && isTruthy(fallbackValue) }
   }
   return flags
 }
@@ -177,7 +202,8 @@ export async function getFeatureFlags(): Promise<FeatureFlagsConfig> {
       environment: env.APPCONFIG_ENVIRONMENT as string,
       profile: FEATURE_FLAGS_PROFILE,
     },
-    parseGateConfig
+    parseGateConfig,
+    { shareWithTriggerRuns: true }
   )
 
   return value ?? fallbackFlags()

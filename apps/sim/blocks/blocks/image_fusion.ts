@@ -6,7 +6,7 @@ import {
   parseImageUrls,
   s3UriToPathObject,
 } from '@/lib/utils/parse-image-urls'
-import { AuthMode, type BlockConfig } from '@/blocks/types'
+import { AuthMode, type BlockConfig, type BlockMeta, IntegrationType } from '@/blocks/types'
 
 const NANO_BANANA_PRO_MODEL = 'gemini-3-pro-image-preview'
 
@@ -19,6 +19,7 @@ export const ImageFusionBlock: BlockConfig = {
     'Combine or fuse multiple images into one using Google Nano Banana Pro. Upload two or more images and describe how to merge them in the prompt. Use 1K resolution for faster results; 2K/4K may hit API deadlines with multiple images.',
   docsLink: 'https://docs.sim.ai/tools/image_generator',
   category: 'tools',
+  integrationType: IntegrationType.AI,
   bgColor: '#4D5FFF',
   icon: ImageIcon,
   subBlocks: [
@@ -134,3 +135,8 @@ export const ImageFusionBlock: BlockConfig = {
     metadata: { type: 'json', description: 'Generation metadata' },
   },
 }
+
+export const ImageFusionBlockMeta = {
+  tags: ['image-generation', 'llm'],
+  url: 'https://ai.google.dev',
+} as const satisfies BlockMeta

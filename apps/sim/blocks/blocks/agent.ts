@@ -1,8 +1,5 @@
 import { createLogger } from '@sim/logger'
-import { omit } from '@sim/utils/object'
 import { AgentIcon } from '@/components/icons'
-import { normalizeReferenceFileParams } from '@/lib/image-generation/reference-files'
-import { normalizeFallbackModels } from '@/lib/workflows/blocks/fallback-models'
 import { getModelFallbackSubBlock, MODEL_FALLBACK_INPUTS } from '@/blocks/model-fallbacks'
 import type { BlockConfig } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
@@ -11,6 +8,7 @@ import {
   getModelCapabilityCondition,
   getProviderCredentialSubBlocks,
   getSerializedModelProviderId,
+  normalizeFileInput,
   RESPONSE_FORMAT_WAND_CONFIG,
 } from '@/blocks/utils'
 import { START_FILES_REF } from '@/executor/constants'
@@ -474,13 +472,8 @@ Return ONLY the JSON array.`,
         return getSerializedModelProviderId(lookupModel, AGENT_FALLBACK_MODEL)
       },
       params: (params: Record<string, any>) => {
-        const normalizedFiles = normalizeReferenceFileParams(params.files)
-        const withFiles = normalizedFiles ? { ...params, files: normalizedFiles } : params
-        const fallbackModels = normalizeFallbackModels(params.fallbackModels)
-        const baseParams =
-          fallbackModels.length > 0
-            ? { ...withFiles, fallbackModels }
-            : omit(withFiles, ['fallbackModels'])
+        const normalizedFiles = normalizeFileInput(params.files)
+        const baseParams = normalizedFiles ? { ...params, files: normalizedFiles } : params
 
         if (MODELS_WITHOUT_AGENT_TOOLS.includes(params.model)) {
           return { ...baseParams, tools: undefined }

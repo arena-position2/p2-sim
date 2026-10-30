@@ -10,7 +10,7 @@ import {
   parseUpdateCostBillingMessageId,
 } from '@/lib/billing/core/usage-attribution-backfill'
 
-const logger = createLogger('MothershipChatAttribution')
+const logger = createLogger('MothershipChatAttributionReconciliation')
 
 export type ReconciliationMode = 'audit' | 'dry-run' | 'apply' | 'verify' | 'rollback'
 

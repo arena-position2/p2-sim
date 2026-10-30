@@ -5,6 +5,7 @@ import type { SubBlockConfig } from '@/blocks/types'
 import {
   SLACK_ALL_EVENT_OPTIONS,
   SLACK_SOURCE_OPTIONS,
+  SLACK_STREAM_RESPONSE_EVENTS,
   SLACK_THREAD_OPTIONS,
   SLACK_TRIGGER_OUTPUTS,
   slackEventsSupportingFilter,
@@ -24,7 +25,6 @@ const COMMAND_FILTER_EVENTS = slackEventsSupportingFilter('command')
 // so they are not catalog `filters`.
 const BOT_FILTER_EVENTS = ['message', 'app_mention']
 const OWN_MESSAGE_EVENTS = ['message', 'app_mention', 'reaction_added', 'reaction_removed']
-const STREAM_RESPONSE_EVENTS = ['message', 'app_mention', 'assistant_thread_started']
 const CUSTOM_BOT_REACTIVE_CONDITION = {
   watchFields: ['customBotCredential'],
   requiredType: 'service_account' as const,
@@ -75,15 +75,15 @@ export function getSlackTriggerCredentialSubBlock(extendedScopesEnabled: boolean
     serviceId: 'slack',
     credentialKind: 'any',
     credentialLabels: {
-      oauthGroup: 'Sim app',
-      oauthConnect: 'Connect the Sim app',
+      oauthGroup: 'Arena app',
+      oauthConnect: 'Connect the Arena app',
       serviceAccountGroup: 'Custom bots',
       serviceAccountConnect: 'Set up a custom bot',
     },
     requiredScopes: getScopesForService('slack'),
     placeholder: 'Select Slack account or bot',
     description:
-      'Connect the native Sim Slack app, or choose a custom Slack bot you set up once and reuse across triggers and actions.',
+      'Connect the native Arena Slack app, or choose a custom Slack bot you set up once and reuse across triggers and actions.',
     required: true,
     mode: 'trigger',
   }
@@ -181,7 +181,7 @@ export const slackOAuthTrigger: TriggerConfig = {
         'Create a Slack agent session and stream selected workflow outputs into the conversation that started this run. Custom bots only.',
       required: false,
       mode: 'trigger',
-      condition: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+      condition: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       reactiveCondition: CUSTOM_BOT_REACTIVE_CONDITION,
     },
     {
@@ -194,13 +194,13 @@ export const slackOAuthTrigger: TriggerConfig = {
       required: {
         field: 'streamResponse',
         value: true,
-        and: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+        and: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       },
       mode: 'trigger',
       condition: {
         field: 'streamResponse',
         value: true,
-        and: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+        and: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       },
       reactiveCondition: CUSTOM_BOT_REACTIVE_CONDITION,
     },
@@ -216,7 +216,7 @@ export const slackOAuthTrigger: TriggerConfig = {
       condition: {
         field: 'streamResponse',
         value: true,
-        and: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+        and: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       },
       reactiveCondition: CUSTOM_BOT_REACTIVE_CONDITION,
     },
@@ -235,7 +235,7 @@ export const slackOAuthTrigger: TriggerConfig = {
       condition: {
         field: 'streamResponse',
         value: true,
-        and: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+        and: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       },
       reactiveCondition: CUSTOM_BOT_REACTIVE_CONDITION,
     },
@@ -250,7 +250,7 @@ export const slackOAuthTrigger: TriggerConfig = {
       condition: {
         field: 'streamResponse',
         value: true,
-        and: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+        and: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       },
       reactiveCondition: CUSTOM_BOT_REACTIVE_CONDITION,
     },
@@ -265,7 +265,7 @@ export const slackOAuthTrigger: TriggerConfig = {
       condition: {
         field: 'streamResponse',
         value: true,
-        and: { field: 'eventType', value: STREAM_RESPONSE_EVENTS },
+        and: { field: 'eventType', value: SLACK_STREAM_RESPONSE_EVENTS },
       },
       reactiveCondition: CUSTOM_BOT_REACTIVE_CONDITION,
     },

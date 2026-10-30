@@ -3,6 +3,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  extractLiveTokensFromPatchMissExcerpt,
+  MAX_PATCH_SEARCH_CHARS,
+  patchSearchOverlapsLiveTokens,
   searchLooksTruncated,
   validateSearchReplaceForPatch,
 } from '@/lib/mothership/tools/server/files/patch-search-replace'
@@ -40,7 +43,7 @@ describe('validateSearchReplaceForPatch', () => {
         existingContent,
         fileName,
       })
-    ).toEqual({ ok: true })
+    ).toEqual({ ok: true, search: '<title>Care Plan</title>' })
   })
 
   it('rejects empty search', () => {
@@ -68,6 +71,33 @@ describe('validateSearchReplaceForPatch', () => {
     }
   })
 
+  it('rejects search longer than MAX_PATCH_SEARCH_CHARS before scanning the file', () => {
+    const search = `<button id="generateBtn">${'x'.repeat(MAX_PATCH_SEARCH_CHARS)}</button>`
+    const result = validateSearchReplaceForPatch({
+      search,
+      existingContent: `${search}<p>other</p>`,
+      fileName,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errorType).toBe('search_too_long')
+      expect(result.message).toMatch(/too long/i)
+      expect(result.message).toContain(String(MAX_PATCH_SEARCH_CHARS))
+      expect(result.excerpt).toBeTruthy()
+    }
+  })
+
+  it('accepts a unique search at the max length', () => {
+    const needle = 'a'.repeat(MAX_PATCH_SEARCH_CHARS)
+    expect(
+      validateSearchReplaceForPatch({
+        search: needle,
+        existingContent: `prefix ${needle} suffix`,
+        fileName,
+      })
+    ).toEqual({ ok: true, search: needle })
+  })
+
   it('rejects search that is not in the file', () => {
     const result = validateSearchReplaceForPatch({
       search: '<title>Stale Title</title>',
@@ -78,6 +108,7 @@ describe('validateSearchReplaceForPatch', () => {
     if (!result.ok) {
       expect(result.errorType).toBe('search_not_found')
       expect(result.message).toContain('Stale Title')
+      expect(result.excerpt).toMatch(/None of these tokens occur/i)
     }
   })
 
@@ -100,6 +131,66 @@ describe('validateSearchReplaceForPatch', () => {
         replaceAll: true,
         fileName,
       })
-    ).toEqual({ ok: true })
+    ).toEqual({ ok: true, search: 'old' })
+  })
+
+  it('matches a unique unescaped search and stores the file bytes', () => {
+    const result = validateSearchReplaceForPatch({
+      search: '<button id=\\"generateBtn\\">Generate</button>',
+      existingContent: '<button id="generateBtn">Generate</button>',
+      fileName,
+    })
+    expect(result).toEqual({
+      ok: true,
+      search: '<button id="generateBtn">Generate</button>',
+    })
+  })
+
+  it('keeps a raw search that already matches backslash quotes', () => {
+    const raw = 'say \\"hi\\"'
+    const result = validateSearchReplaceForPatch({
+      search: raw,
+      existingContent: `before ${raw} after`,
+      fileName,
+    })
+    expect(result).toEqual({ ok: true, search: raw })
+  })
+
+  it('returns live lines when a search token occurs in the file', () => {
+    const result = validateSearchReplaceForPatch({
+      search: '<div class="drop" id="dropzone"><h4>Brand Logo</h4></div>',
+      existingContent: '<div class="drop-zone" id="generateBtn">Generate</div>\n<p>Other</p>',
+      fileName,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errorType).toBe('search_not_found')
+      expect(result.excerpt).toContain('1: <div class="drop-zone" id="generateBtn">Generate</div>')
+      expect(result.excerpt).not.toContain('<p>Other</p>')
+      expect(result.message).toContain(result.excerpt)
+    }
+  })
+})
+
+describe('live excerpt tokens for patch repair', () => {
+  it('extracts tokens from a live-lines excerpt', () => {
+    const excerpt =
+      'Live lines containing generateBtn, Generate:\n1: <div class="drop-zone" id="generateBtn">Generate</div>'
+    expect(extractLiveTokensFromPatchMissExcerpt(excerpt)).toEqual(
+      expect.arrayContaining(['generateBtn', 'Generate'])
+    )
+  })
+
+  it('returns no tokens when the excerpt had no hits', () => {
+    expect(
+      extractLiveTokensFromPatchMissExcerpt('None of these tokens occur in the file: foo, bar')
+    ).toEqual([])
+  })
+
+  it('requires the next search to overlap live tokens', () => {
+    const live = new Set(['generateBtn', 'Generate'])
+    expect(patchSearchOverlapsLiveTokens('id="generateBtn"', live)).toBe(true)
+    expect(patchSearchOverlapsLiveTokens('<button>Generate</button>', live)).toBe(true)
+    expect(patchSearchOverlapsLiveTokens('<div class="invented">Nope</div>', live)).toBe(false)
   })
 })

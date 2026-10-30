@@ -195,25 +195,41 @@ export async function waitForToolConfirmation(
       return true
     }
 
-    const pollDurable = async () => {
-      if (settled) return
+    const checkDurableConfirmation = async (source: 'subscribe' | 'pubsub' | 'poll') => {
+      if (settled) return false
       if (options.executionScope) {
         try {
-          await revokeExpiredSimToolExecutions(options.executionScope)
+          await revokeExpiredSimToolExecutions({ ...options.executionScope, toolCallId })
         } catch (error) {
           logger.warn('Could not verify retained tool execution ownership', {
             toolCallId,
             error: toError(error).message,
           })
+          return false
         }
       }
-      const fromRedis = await getRedisToolConfirmation(toolCallId)
-      if (tryAccept(fromRedis, 'redis')) return
-      const fromDb = await getToolConfirmation(toolCallId)
-      if (tryAccept(fromDb, 'db-poll')) return
+      if (options.settleOverdue) {
+        try {
+          await options.settleOverdue()
+        } catch (error) {
+          logger.warn('Could not settle an overdue tool call; checking again on the next poll', {
+            toolCallId,
+            error: toError(error).message,
+          })
+        }
+      }
+      if (source === 'poll') {
+        const fromRedis = await getRedisToolConfirmation(toolCallId)
+        if (tryAccept(fromRedis, 'redis')) return true
+      }
+      const latest = await getToolConfirmation(toolCallId)
+      return tryAccept(latest, source === 'poll' ? 'db-poll' : source)
+    }
+
+    const scheduleDurablePoll = () => {
       if (settled) return
       pollTimer = setTimeout(() => {
-        void pollDurable()
+        void checkDurableConfirmation('poll').then(scheduleDurablePoll)
       }, TOOL_CONFIRMATION_POLL_MS)
     }
 
@@ -239,9 +255,7 @@ export async function waitForToolConfirmation(
         })
         return
       }
-      void getToolConfirmation(toolCallId).then((latest) => {
-        tryAccept(latest, 'pubsub-db')
-      })
+      void checkDurableConfirmation('pubsub')
     })
 
     if (timeoutMs !== null) timeoutId = setTimeout(() => settle(null), timeoutMs)
@@ -251,6 +265,6 @@ export async function waitForToolConfirmation(
     }
     abortSignal?.addEventListener('abort', onAbort, { once: true })
 
-    void pollDurable()
+    void checkDurableConfirmation('subscribe').then(scheduleDurablePoll)
   })
 }

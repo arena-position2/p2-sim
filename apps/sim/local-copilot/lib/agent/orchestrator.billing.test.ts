@@ -9,7 +9,7 @@ const { mockRecordLocalCopilotTurnUsage, mockChatCompletionStream } = vi.hoisted
   mockChatCompletionStream: vi.fn(),
 }))
 
-vi.mock('@/lib/billing/core/billing-attribution', () => ({
+vi.mock('@/lib/billing/core/attribution', () => ({
   resolveBillingAttribution: vi.fn().mockResolvedValue({
     actorUserId: 'user-1',
     billedAccountUserId: 'user-1',

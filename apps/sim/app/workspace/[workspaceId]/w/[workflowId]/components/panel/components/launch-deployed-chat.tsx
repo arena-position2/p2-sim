@@ -52,6 +52,7 @@ export function LaunchDeployedChat({ workflowId, workspaceId }: LaunchDeployedCh
       href={href}
       mobileCompact
       variant='primary'
+      className='min-w-[30px] shrink'
       leftIcon={Zap}
       target={opensNewTab ? '_blank' : undefined}
       rel={opensNewTab ? 'noopener noreferrer' : undefined}

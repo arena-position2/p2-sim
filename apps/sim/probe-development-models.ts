@@ -3,6 +3,7 @@
  * (model id + structured outputs beta + max_tokens) with a tiny prompt.
  * Delete after verification.
  */
+// biome-ignore-all lint/suspicious/noConsole: one-off CLI probe prints pass/fail to the terminal
 import Anthropic from '@anthropic-ai/sdk'
 import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema'
 

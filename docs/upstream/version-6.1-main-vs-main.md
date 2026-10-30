@@ -1,6 +1,6 @@
 # version-6.1-main vs p2-sim main
 
-Report for the next upstream merge. Fork `main` is `simstudioai/sim` `main` plus branding. Everything below is the gap between that tree and `version-6.1-main`.
+Historical seam inventory for the sync merged into `version-6.2-main` (`upstream-sync/2026-10-14`). Fork `main` is `simstudioai/sim` `main` plus branding. Everything below is the gap between that tree and `version-6.1-main` at the time of the report. The next sync compares `version-6.2-main` with `origin/main`.
 
 This report names behavior and seams. It does not perform the merge, the split, or the wrap.
 
@@ -40,9 +40,9 @@ Since that commit:
 
 A raw diff of the two tips is about 11,000 files because it mixes our features with upstream we have not merged yet. Use the three-dot split above.
 
-## Next merge
+## Merge carried into version-6.2-main
 
-Do this in order:
+This plan was carried out by cutting `version-6.2-main` from `version-6.1-main` and merging `upstream-sync/2026-10-14` into it. The steps below are the record of that plan:
 
 1. Merge fork `main` into `version-6.1-main` and take upstream for the 9,289 files we did not touch.
 2. On the 588 overlapping files, keep upstream’s control flow and re-apply only the seams in this report.
@@ -209,7 +209,7 @@ Local copilot should stay a separate runtime. It should call upstream tools thro
 |---|---|---|
 | `apps/sim/local-copilot/**` | Already separate | Own tree and own tables. |
 | `lib/copilot/request/lifecycle/*`, `chat/payload.ts`, `chat/post.ts` | Stuck until extracted | Hosted flag, default model, and thinking are inside their turn loop. Pass them as session options from local copilot. |
-| `tools/server/image/generate-image.ts`, `files/create-file.ts` | Can be split | Arena image and file behavior as tool handlers registered from local copilot or `lib/image-generation`. |
+| `tools/server/image/generate-image.ts`, `files/create-file.ts` | Can be split | The `create-file.ts` handler stays. Registration is `lib/mothership/tools/server/arena-registry.ts`, spread from `getServerToolRegistry`. |
 | `tools/server/workflow/edit-workflow/index.ts` | Stuck until extracted | Nested-loop allowance is an in-place removal of their “nested subflows are not supported” checks. See workflow engine. |
 | `request/tools/billing.ts` | Can be split | Call Arena usage attribution. Leave their billing tool as the upstream implementation. |
 
@@ -588,5 +588,6 @@ Files that stay **stuck** until someone extracts the branch. These are the ones 
 - Sidebar render files in section 1
 - Editor `file-upload.tsx`
 - Generated `packages/db/migrations/meta/*_snapshot.json`
+- `apps/sim/lib/mothership/tools/server/router.ts` — only the `getServerToolRegistry` spread of `arenaServerToolRegistry`. Arena keys stay in `arena-registry.ts`. Merge `9621949090` dropped `create_empty_file` by taking upstream's router after `3df0a311e8` had put those keys back inside the object.
 
-Everything exclusive in sections 3, 4, 8, and 9 can come back as new files after upstream is applied. The merge pain is the stuck list plus the three registries (`blocks/registry-maps.ts`, `tools/registry.ts`, `integrations.json`).
+Everything exclusive in sections 3, 4, 8, and 9 can come back as new files after upstream is applied. The merge pain is the stuck list plus the registries (`blocks/registry-maps.ts`, `tools/registry.ts`, `integrations.json`, and that one router spread).

@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import type { WorkflowState } from '@sim/workflow-types/workflow'
-import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/attribution'
 import type { MothershipResource } from '@/lib/mothership/resources/types'
 import { normalizeEditWorkflowArgs } from '@/lib/mothership/tools/server/workflow/edit-workflow/normalize-args'
 import type { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
@@ -18,6 +18,8 @@ import { reloadLocalCopilotWorkflowContext } from '@/local-copilot/lib/context/r
 import { getLocalCopilotMemorySnapshot } from '@/local-copilot/lib/diagnostics'
 import { generateWorkflowPatchFromRequest } from '@/local-copilot/lib/patches/generate'
 import { validateWorkflowPatch, validateWorkflowState } from '@/local-copilot/lib/patches/validate'
+import { coerceLocalEditAgentTools } from '@/local-copilot/lib/tools/coerce-edit-agent-tools'
+import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
 import { canonicalCreateFilePath } from '@/local-copilot/lib/tools/enrich-file-tool-args'
@@ -25,7 +27,9 @@ import {
   enrichLocalIntegrationToolParams,
   SEPARATE_DRAFT_RECIPIENTS_KEY,
 } from '@/local-copilot/lib/tools/enrich-integration-params'
+import { ensureStartReservedInputFormatInEditOperations } from '@/local-copilot/lib/tools/ensure-start-reserved-input-format'
 import { injectWorkspaceEnvApiKeyIfNeeded } from '@/local-copilot/lib/tools/inject-workspace-env-api-key'
+import { executeManageSkill, MANAGE_SKILL_TOOL_NAME } from '@/local-copilot/lib/tools/manage-skill'
 import {
   executeMothershipDelegatedTool,
   isMothershipDelegatedTool,
@@ -136,6 +140,17 @@ export interface ToolExecutionContext {
    * Full-replace HTML/text updates must follow a read of the same file.
    */
   readVfsPaths?: Set<string>
+  /**
+   * Canonical `files/...` path → normalized patch searches that missed this turn.
+   * Shared across `{ ...toolCtx }` copies. A later patch with the same normalized
+   * search is rejected before the file is opened.
+   */
+  failedPatchSearches?: Map<string, Set<string>>
+  /**
+   * Canonical `files/...` path → live excerpt tokens from the last patch miss.
+   * The next patch search must overlap these tokens (copied from the live file).
+   */
+  livePatchExcerptTokens?: Map<string, Set<string>>
   /** Workflow ids created earlier in this turn (membership bypass until refresh). */
   allowedWorkflowIds?: Set<string>
   /** Active tool_use id for idempotency keying. */
@@ -188,10 +203,10 @@ export interface ToolExecutionResult {
   billing?: LocalToolBillingMetadata
 }
 
-async function runLoadUserSkill(
-  args: Record<string, unknown>,
+async function denySkillToolIfDisallowed(
+  toolName: string,
   ctx: ToolExecutionContext
-): Promise<ToolExecutionResult> {
+): Promise<ToolExecutionResult | null> {
   try {
     const { assertPermissionsAllowed } = await import('@/ee/access-control/utils/permission-check')
     await assertPermissionsAllowed({
@@ -199,6 +214,7 @@ async function runLoadUserSkill(
       workspaceId: ctx.workspaceId,
       toolKind: 'skill',
     })
+    return null
   } catch (error) {
     const message = getErrorMessage(error, 'Skills are not allowed')
     const { LOCAL_OPS_COUNTERS, recordLocalOpsEvent } = await import(
@@ -210,15 +226,23 @@ async function runLoadUserSkill(
       workspaceId: ctx.workspaceId,
       workflowId: ctx.workflowId,
       chatId: ctx.chatId,
-      metadata: { toolName: LOAD_USER_SKILL_TOOL_NAME },
+      metadata: { toolName },
     })
     return {
-      toolName: LOAD_USER_SKILL_TOOL_NAME,
+      toolName,
       success: false,
       error: message,
       result: { error: message },
     }
   }
+}
+
+async function runLoadUserSkill(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const denied = await denySkillToolIfDisallowed(LOAD_USER_SKILL_TOOL_NAME, ctx)
+  if (denied) return denied
 
   const skillName = typeof args.skill_name === 'string' ? args.skill_name.trim() : ''
   const loaded = await executeLoadUserSkill(skillName, ctx.workspaceId)
@@ -235,6 +259,41 @@ async function runLoadUserSkill(
     toolName: LOAD_USER_SKILL_TOOL_NAME,
     success: true,
     result: { content: loaded.content },
+  }
+}
+
+/**
+ * Arena-local manage_skill: Cloud dropped the mothership handler, but the
+ * catalog still advertises the tool. Execute here so delegation never hits
+ * "Tool not found".
+ */
+async function runManageSkill(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const denied = await denySkillToolIfDisallowed(MANAGE_SKILL_TOOL_NAME, ctx)
+  if (denied) return denied
+
+  const executed = await executeManageSkill(args, {
+    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
+    userPermission: ctx.userPermission,
+    messageId: ctx.messageId,
+  })
+
+  if (!executed.success) {
+    return {
+      toolName: MANAGE_SKILL_TOOL_NAME,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName: MANAGE_SKILL_TOOL_NAME,
+    success: true,
+    result: executed.output ?? { success: true },
   }
 }
 
@@ -362,6 +421,8 @@ async function executeLocalCopilotToolInner(
   ctx.mutationIdempotency ??= new Map()
   ctx.listedIntegrationToolIds ??= new Set()
   ctx.readVfsPaths ??= new Set()
+  ctx.failedPatchSearches ??= new Map()
+  ctx.livePatchExcerptTokens ??= new Map()
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
 
@@ -375,6 +436,13 @@ async function executeLocalCopilotToolInner(
   if (toolName === LOAD_USER_SKILL_TOOL_NAME) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runLoadUserSkill(args, ctx)
+  }
+
+  // manage_skill stays in the delegated catalog for schemas, but runs locally —
+  // Sim no longer registers a mothership handler for it.
+  if (toolName === MANAGE_SKILL_TOOL_NAME) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runManageSkill(args, ctx)
   }
 
   // Cloud agents call load_integration_tool after listing; Arena uses invoke_integration_tool.
@@ -490,11 +558,27 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      enrichedArgs.operations = normalizeLocalEditConnections(operations, {
-        blocks: ctx.structuredContext.workflow?.blocks,
-        edges: ctx.structuredContext.workflow?.edges,
-        availableBlocks: ctx.structuredContext.availableBlocks,
-      })
+      enrichedArgs.operations = ensureStartReservedInputFormatInEditOperations(
+        coerceLocalEditAgentTools(
+          coerceLocalEditDropdownInputs(
+            normalizeLocalEditConnections(operations, {
+              blocks: ctx.structuredContext.workflow?.blocks,
+              edges: ctx.structuredContext.workflow?.edges,
+              availableBlocks: ctx.structuredContext.availableBlocks,
+            }),
+            {
+              blocksMetadataByType: ctx.blocksMetadataByType,
+              existingBlocks: ctx.structuredContext.workflow?.blocks,
+            }
+          )
+        ),
+        {
+          blocks: ctx.structuredContext.workflow?.blocks,
+          ...(ctx.createdWorkflowThisTurn?.startBlockId
+            ? { knownStartBlockIds: [ctx.createdWorkflowThisTurn.startBlockId] }
+            : {}),
+        }
+      )
 
       const lookBefore = assertEditWorkflowLookBeforeWrite({
         operations: enrichedArgs.operations,
@@ -766,15 +850,25 @@ async function executeLocalCopilotToolInner(
         }
       }
 
-      await ensureHandlersReady()
-      const { createServerToolHandler } = await import(
-        '@/lib/mothership/tools/registry/server-tool-adapter'
+      // The mothership server router no longer registers workflow-authoring tools.
+      const { getBlocksMetadataServerTool } = await import(
+        '@/lib/mothership/tools/server/blocks/get-blocks-metadata-tool'
       )
-      const handler = createServerToolHandler('get_blocks_metadata')
-      const metadataResult = await handler(
-        { blockIds: missingIds },
-        toCopilotServerToolContext(ctx)
-      )
+      let metadataResult: { success: boolean; output?: unknown; error?: string }
+      try {
+        const output = await getBlocksMetadataServerTool.execute(
+          { blockIds: missingIds },
+          { userId: ctx.userId, workspaceId: ctx.workspaceId }
+        )
+        metadataResult = { success: true, output }
+      } catch (error) {
+        const message = getErrorMessage(error, 'get_blocks_metadata failed')
+        metadataResult = {
+          success: false,
+          error: message,
+          output: { error: message },
+        }
+      }
 
       if (
         metadataResult.success &&

@@ -21,7 +21,7 @@ import {
   v2InvalidBodyResponse,
   v2RateLimits,
 } from '@/lib/api/server/routes'
-import { getWorkspaceBilledAccountUserId } from '@/lib/billing/core/billing-attribution'
+import { getWorkspaceBilledAccountUserId } from '@/lib/billing/core/attribution'
 import { tryAdmit } from '@/lib/core/admission/gate'
 import { ADMISSION_ERROR_DESCRIPTOR } from '@/lib/core/admission/transient-failure'
 import type { ForbiddenDetailCode } from '@/lib/core/application'
@@ -423,6 +423,8 @@ export const POST = withRouteHandler(
       if (runIdHeader !== undefined && !isPublicApiAccess) {
         requestedExecutionId = runIdHeader
       }
+      /** Required caller-named payer; the contract has already rejected a missing header. */
+      const billingPayerEmail = parsed.data.headers['x-sim-email']
 
       let result: ExecuteWorkflowServiceResult
       if (apiKeyPrincipal) {
@@ -471,6 +473,7 @@ export const POST = withRouteHandler(
             input: {
               ...commonInput,
               input: body.input ?? {},
+              billingPayerEmail,
               requestedTimeoutSeconds: body.executionTimeoutSeconds,
               mode: body.async
                 ? 'async'
@@ -522,6 +525,7 @@ export const POST = withRouteHandler(
           triggerType: 'api',
           requestId,
           workflowRecord: workflowAuthorization.workflow,
+          billingPayerEmail,
           includeFileBase64: body.includeFileBase64,
           base64MaxBytes: body.base64MaxBytes,
           selectedOutputs: body.selectedOutputs,

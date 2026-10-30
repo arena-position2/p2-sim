@@ -1,5 +1,9 @@
 import type { Principal } from '@sim/auth/principal'
 import { resolvePrincipalAttribution } from '@sim/auth/principal'
+import {
+  inlinesRunFiles,
+  withholdUnadmittedInlineFiles,
+} from '@/lib/workflows/application/admit-run-files'
 import { defineAuthorizedWorkflowUseCase } from '@/lib/workflows/application/authorized-workflow-use-case'
 import { resolveActiveWorkflowApplicationContext } from '@/lib/workflows/application/context'
 import { workflowOperations } from '@/lib/workflows/application/operations'
@@ -27,6 +31,13 @@ export interface ExecuteWorkflowInput {
    * id by the surface adapter. Carries the recursion guard across API hops.
    */
   callChain?: string[]
+  /**
+   * Email of the Sim user whose organization (or personal plan) pays for this
+   * run instead of the workflow workspace. The v2 execute surface requires it;
+   * other callers of this use case may omit it, in which case the workspace
+   * payer applies.
+   */
+  billingPayerEmail?: string
 }
 
 function authenticatesExecutionCredentials(principal: Principal): boolean {
@@ -41,7 +52,7 @@ export const executeWorkflowOperation = defineAuthorizedWorkflowUseCase({
     const attribution = resolvePrincipalAttribution(principal, {
       workspaceBillingOwnerUserId: context.billedAccountUserId,
     })
-    return executeWorkflowService({
+    const result = await executeWorkflowService({
       workflowId: context.workflowId,
       principal,
       userId: attribution.attributedUserId,
@@ -52,7 +63,7 @@ export const executeWorkflowOperation = defineAuthorizedWorkflowUseCase({
       callChain: input.callChain,
       useAuthenticatedUserAsActor: authenticatesExecutionCredentials(principal),
       workflowRecord: context.workflow,
-      includeFileBase64: input.includeFileBase64,
+      includeFileBase64: inlinesRunFiles(principal, input.includeFileBase64, input.mode),
       base64MaxBytes: input.base64MaxBytes,
       selectedOutputs: input.selectedOutputs,
       rateLimitCounter: input.mode === 'async' ? 'async' : 'sync',
@@ -63,5 +74,6 @@ export const executeWorkflowOperation = defineAuthorizedWorkflowUseCase({
       includeThinking: input.includeThinking,
       includeToolCalls: input.includeToolCalls,
     })
+    return withholdUnadmittedInlineFiles(principal, context.workspaceId, result)
   },
 })

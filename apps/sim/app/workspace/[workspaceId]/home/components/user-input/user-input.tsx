@@ -28,6 +28,7 @@ import { ChevronDown, Paperclip, Plus, Slash } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { useParams } from 'next/navigation'
 import { getMothershipAttachmentPreviewUrl } from '@/lib/mothership/chat/attachment-preview'
+import { UNAVAILABLE_CONTEXT_NOTICE } from '@/lib/mothership/chat/context'
 import { MOTHERSHIP_ADD_CONTEXT_EVENT } from '@/lib/mothership/events'
 import { SIM_RESOURCE_DRAG_TYPE, SIM_RESOURCES_DRAG_TYPE } from '@/lib/mothership/resource-types'
 import { MOTHERSHIP_ACCEPT_ATTRIBUTE } from '@/lib/uploads/utils/validation'
@@ -46,8 +47,10 @@ import {
 import { ConversationModeSelector } from '@/app/workspace/[workspaceId]/home/components/user-input/components/conversation-mode-selector'
 import { InputToolbar } from '@/app/workspace/[workspaceId]/home/components/user-input/components/input-toolbar'
 import { useConversationModeShortcut } from '@/app/workspace/[workspaceId]/home/components/user-input/hooks/use-conversation-mode-shortcut'
+import { usePromptHistory } from '@/app/workspace/[workspaceId]/home/components/user-input/hooks/use-prompt-history'
 import { handleMothershipAddContextEvent } from '@/app/workspace/[workspaceId]/home/components/user-input/mothership-context-event'
 import type {
+  ChatMessage,
   ChatRequestMode,
   FileAttachmentForApi,
   MothershipResource,
@@ -94,13 +97,13 @@ function LocalCopilotModelPicker({ catalogId, onCatalogIdChange }: LocalCopilotM
           type='button'
           aria-label='Local Copilot model'
           className={cn(
-            'ml-1 inline-flex h-7 items-center gap-0.5 rounded-[10px] bg-[var(--surface-5)] px-2.5',
+            'ml-1 inline-flex h-7 min-w-0 max-w-full items-center gap-0.5 rounded-[10px] bg-[var(--surface-5)] px-2.5',
             'text-[var(--text-primary)] text-sm dark:bg-[var(--surface-4)]',
             'hover-hover:bg-[var(--surface-2)] dark:hover-hover:bg-[var(--surface-6)]'
           )}
         >
-          {selectedLabel}
-          <ChevronDown className='size-[12px] text-[var(--text-muted)]' />
+          <span className='min-w-0 truncate'>{selectedLabel}</span>
+          <ChevronDown className='size-[12px] shrink-0 text-[var(--text-muted)]' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='start' side='top' className='min-w-[14rem]'>
@@ -146,7 +149,8 @@ interface UserInputProps {
   onStopGeneration: () => void
   isInitialView?: boolean
   onSendQueuedHead?: () => void
-  onEditQueuedTail?: () => void
+  onEditQueuedTail?: () => boolean
+  getMessages?: () => readonly ChatMessage[]
 }
 
 export interface UserInputHandle {
@@ -176,6 +180,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     isInitialView = true,
     onSendQueuedHead,
     onEditQueuedTail,
+    getMessages,
   },
   ref
 ) {
@@ -228,6 +233,12 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     initialValue,
     onContextAdd,
     onPasteFiles: handlePasteFiles,
+  })
+  const history = usePromptHistory({
+    editor,
+    attachedFiles: files.attachedFiles,
+    restoreAttachedFiles: files.restoreAttachedFiles,
+    getMessages,
   })
   const editorRef = useRef(editor)
   editorRef.current = editor
@@ -452,7 +463,9 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     () => ({
       loadQueuedMessage: (msg: QueuedMessage) => {
         const currentEditor = editorRef.current
-        currentEditor.setValue(msg.content)
+        history.reset()
+        const { hasUnavailableContexts } = currentEditor.restorePrompt(msg.content, msg.contexts)
+        if (hasUnavailableContexts) toast.info(UNAVAILABLE_CONTEXT_NOTICE)
         const restored: AttachedFile[] = (msg.fileAttachments ?? []).map((a) => ({
           id: a.id,
           name: a.filename,
@@ -464,7 +477,6 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
           previewUrl: getMothershipAttachmentPreviewUrl(a),
         }))
         filesRef.current.restoreAttachedFiles(restored)
-        currentEditor.setContexts(msg.contexts ?? [])
         currentEditor.focusAtEnd()
       },
       populatePrompt: (text: string) => {
@@ -576,6 +588,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
 
   /** Empties the text, chips, attachments, transcript, and the saved draft in one step. */
   const clearComposer = useCallback(() => {
+    history.reset()
     editorRef.current.clear()
     if (draftSaveTimerRef.current !== null) {
       window.clearTimeout(draftSaveTimerRef.current)
@@ -590,7 +603,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     resetTranscript()
     filesRef.current.clearAttachedFiles()
     filesRef.current = { ...filesRef.current, attachedFiles: [] }
-  }, [resetTranscript])
+  }, [resetTranscript, history.reset])
 
   const handleSubmit = useCallback(() => {
     const currentFiles = filesRef.current
@@ -646,8 +659,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
     if (filesRef.current.attachedFiles.length > 0) return false
     const onEditQueuedTail = onEditQueuedTailRef.current
     if (!onEditQueuedTail) return false
-    onEditQueuedTail()
-    return true
+    return onEditQueuedTail()
   }, [])
 
   const handlePlusClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
@@ -672,7 +684,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
         }
       }}
       className={cn(
-        'relative z-10 mx-auto w-full max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
+        'relative z-10 mx-auto w-full min-w-0 max-w-chat cursor-text rounded-2xl border border-[var(--border-1)] bg-[var(--white)] px-2.5 py-2 dark:bg-[var(--surface-4)]',
         inter.className,
         isInitialView && 'shadow-ambient'
       )}
@@ -695,6 +707,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
         placeholder='Ask Arena to '
         onSubmit={handleEnterSubmit}
         onArrowUpOnEmpty={handleArrowUpOnEmpty}
+        onNavigateHistory={history.navigate}
         className={cn(
           'max-h-[200px] max-md:max-h-[min(200px,calc(var(--mobile-viewport-height,100dvh)*0.25))]',
           isInitialView && 'min-h-[56px] max-md:min-h-0'
@@ -702,6 +715,7 @@ const UserInputImpl = forwardRef<UserInputHandle, UserInputProps>(function UserI
       />
 
       <InputToolbar
+        plan={requestMode === 'plan'}
         leadingControls={
           <>
             <Tooltip.Root>

@@ -10,11 +10,7 @@ import { buildImageBillingMetadata } from '@/lib/tools/image-pricing'
 import type { StorageContext } from '@/lib/uploads'
 import { S3_AGENT_GENERATED_IMAGES_CONFIG } from '@/lib/uploads/config'
 import { downloadFile } from '@/lib/uploads/core/storage-service'
-import {
-  extractStorageKey,
-  inferContextFromKey,
-  isInternalFileUrl,
-} from '@/lib/uploads/utils/file-utils'
+import { extractStorageKey, inferContextFromKey, isInternalFileUrl } from '@/lib/uploads/utils/file'
 import { saveGeneratedImage } from '@/lib/uploads/utils/image-storage.server'
 import type { ToolResponse } from '@/tools/types'
 
@@ -655,7 +651,7 @@ async function resolveInternalImageViaProviderUrl(
     ? internalReference
     : `${getBaseUrl()}${internalReference.startsWith('/') ? internalReference : `/${internalReference}`}`
 
-  const { resolveInternalFileUrl } = await import('@/lib/uploads/utils/file-utils.server')
+  const { resolveInternalFileUrl } = await import('@/lib/uploads/utils/file.server')
   const resolution = await resolveInternalFileUrl(absoluteUrl, userId, requestId, logger)
   if (resolution.error || !resolution.fileUrl) {
     throw new Error(resolution.error?.message ?? 'Failed to resolve provider image URL')

@@ -235,6 +235,28 @@ export function preciseTimestampKey<Row>(
   }
 }
 
+/**
+ * A `timestamp` key that orders on the raw column, so an index on `(…, <column>, id)` serves
+ * both the order and the cursor seek, while still finishing a walk begun before that.
+ *
+ * A cursor minted under the millisecond {@link timestampKey} carries a date rather than the
+ * precise form (see {@link classifyTimestampCursor}) and was read under truncated ordering,
+ * where rows sharing a millisecond fall in `id` order rather than stored order. Resuming one
+ * under the raw ordering would skip or repeat rows inside that millisecond, so it keeps the
+ * truncated key it was minted under, and so does every cursor that page mints, until the walk
+ * ends. `readCursor` returns the row's {@link preciseTimestampText}.
+ */
+export function resumableTimestampKey<Row>(
+  column: Column,
+  read: (row: Row) => Date,
+  readCursor: (row: Row) => string,
+  cursorKeys: CursorKey[] | undefined
+): KeysetKey<Row> {
+  return cursorKeys !== undefined && classifyTimestampCursor(cursorKeys[0]) === 'date'
+    ? timestampKey(column, read)
+    : preciseTimestampKey(column, readCursor)
+}
+
 export function sortDirection(order: ListSortOrder): typeof asc {
   return order === 'asc' ? asc : desc
 }
@@ -244,9 +266,15 @@ export function sortDirection(order: ListSortOrder): typeof asc {
  * On a paginated list these are the keyset's keys; on a single-page list they
  * are just the sort plus its tiebreaker.
  */
-export function listOrderBy(keys: readonly SQLWrapper[], order: ListSortOrder): SQL[] {
-  const direction = sortDirection(order)
-  return keys.map((key) => direction(key))
+export function listOrderBy(
+  keys: readonly SQLWrapper[],
+  order: ListSortOrder | readonly ListSortOrder[]
+): SQL[] {
+  if (typeof order !== 'string' && order.length !== keys.length)
+    throw new Error('Sort directions must match key columns')
+  return keys.map((key, index) =>
+    sortDirection(typeof order === 'string' ? order : order[index])(key)
+  )
 }
 
 /** `ORDER BY` for a keyset, each key in its own {@link KeysetKey.direction} or the requested one. */
@@ -332,9 +360,10 @@ export function keysetPage<Row>(
 export function keysetAfter<Row>(
   keys: readonly KeysetKey<Row>[],
   values: CursorKey[],
-  order: ListSortOrder
+  order: ListSortOrder | readonly ListSortOrder[]
 ): SQL | null {
-  if (values.length !== keys.length) return null
+  if (values.length !== keys.length || (typeof order !== 'string' && order.length !== keys.length))
+    return null
 
   const bound: SQL[] = []
   for (const [i, key] of keys.entries()) {
@@ -346,12 +375,16 @@ export function keysetAfter<Row>(
   const clauses = keys.map((key, i) =>
     and(
       ...keys.slice(0, i).map((prior, j) => eq(prior.expr, bound[j])),
-      (keyDirection(key, order) === 'asc' ? gt : lt)(key.expr, bound[i])
+      (keyDirection(key, typeof order === 'string' ? order : order[i]) === 'asc' ? gt : lt)(
+        key.expr,
+        bound[i]
+      )
     )
   )
   const after = or(...clauses)
   if (!after) return null
   if (keys.length === 1 || !keys[0].boundsScan) return after
-  const atOrBeyond = keyDirection(keys[0], order) === 'asc' ? gte : lte
+  const atOrBeyond =
+    keyDirection(keys[0], typeof order === 'string' ? order : order[0]) === 'asc' ? gte : lte
   return and(atOrBeyond(keys[0].expr, bound[0]), after) ?? null
 }

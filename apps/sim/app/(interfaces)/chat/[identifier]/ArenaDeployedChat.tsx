@@ -6,7 +6,7 @@ import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import { useRouter } from 'next/navigation'
-import { client } from '@/lib/auth/auth-client'
+import { client } from '@/lib/auth/client'
 import { useGeneratedImageReuse } from '@/lib/chat/use-generated-image-reuse'
 import { getCustomInputFields, normalizeInputFormatValue } from '@/lib/workflows/input-format-utils'
 import {
@@ -184,7 +184,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
 
   const [showScrollButton, setShowScrollButton] = useState(false)
-  const [userHasScrolled, setUserHasScrolled] = useState(false)
   const isUserScrollingRef = useRef(false)
 
   const [authRequired, setAuthRequired] = useState<'password' | 'email' | 'sso' | null>(null)
@@ -323,13 +322,8 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       const { scrollTop, scrollHeight, clientHeight } = container
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
       setShowScrollButton(distanceFromBottom > 100)
-
-      // Track if user is manually scrolling during streaming
-      if (isStreamingResponse && !isUserScrollingRef.current) {
-        setUserHasScrolled(true)
-      }
     }, 100),
-    [isStreamingResponse]
+    [messagesContainerRef]
   )
 
   // Fetch history messages
@@ -517,9 +511,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   // Reset user scroll tracking when streaming starts
   useEffect(() => {
     if (isStreamingResponse) {
-      // Reset userHasScrolled when streaming starts
-      setUserHasScrolled(false)
-
       // Give a small delay to distinguish between programmatic scroll and user scroll
       isUserScrollingRef.current = true
       setTimeout(() => {
@@ -696,17 +687,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     //   })
   }, [identifier])
 
-  const refreshChat = () => {
-    fetchChatConfig()
-  }
-
-  const handleAuthSuccess = () => {
-    setAuthRequired(null)
-    setTimeout(() => {
-      refreshChat()
-    }, 800)
-  }
-
   // Handle sending a message
   const handleSendMessage = async (
     messageParam?: string,
@@ -739,9 +719,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       conversationId,
       filesCount: (files?.length ?? 0) + effectiveGeneratedImages.length,
     })
-
-    // Reset userHasScrolled when sending a new message
-    setUserHasScrolled(false)
 
     let userMessageId: string | null = null
     // Create abort controller for request cancellation

@@ -32,7 +32,6 @@ import type { SettingsHeaderMeta } from '@/components/settings/settings-header'
 import type { DeploymentFeatures, DeploymentShape } from '@/lib/api/contracts/workspaces'
 import { organizationRoutes } from '@/lib/navigation/paths'
 import { DEFAULT_WORKSPACE_DOCS_PATH } from '@/ee/whitelabeling/org-branding-utils'
-
 export type SettingsPlane = 'account' | 'selfhost' | 'workspace'
 
 export type AccountSettingsSection =
@@ -64,6 +63,7 @@ export function isPlatformAdminEmailSettingsSection(section: string): boolean {
 export type SelfHostSettingsSection = 'general' | 'billing' | 'chat-keys'
 
 export type OrganizationSettingsSection =
+  | 'knowledge-graphs'
   | 'recently-deleted'
   | 'integrations'
   | 'connected-accounts'
@@ -1061,6 +1061,7 @@ export const ORGANIZATION_SETTINGS_GROUPS = [
   { key: 'organization', title: 'Organization' },
   { key: 'governance', title: 'Governance' },
   { key: 'sim-search', title: 'Sim Search' },
+  { key: 'platform', title: 'Platform' },
 ] as const
 
 type OrganizationSettingsGroup = (typeof ORGANIZATION_SETTINGS_GROUPS)[number]['key']
@@ -1074,6 +1075,7 @@ type OrganizationSettingsGroup = (typeof ORGANIZATION_SETTINGS_GROUPS)[number]['
 const ORGANIZATION_SECTION_GROUPS: Record<OrganizationSettingsSection, OrganizationSettingsGroup> =
   {
     billing: 'account',
+    'knowledge-graphs': 'account',
     members: 'organization',
     'connected-accounts': 'organization',
     usage: 'organization',
@@ -1095,6 +1097,16 @@ export const ORGANIZATION_SETTINGS_ITEMS: SettingsNavigationItem<OrganizationSet
   Object.keys(ORGANIZATION_SECTION_GROUPS) as OrganizationSettingsSection[]
 ).map((id) => {
   const group = ORGANIZATION_SECTION_GROUPS[id]
+  if (id === 'knowledge-graphs') {
+    return {
+      id,
+      label: 'Knowledge graphs',
+      description:
+        'Your private knowledge across this organization’s workspaces. New chats use the active graph; existing chats keep their original graph.',
+      icon: Database,
+      group,
+    }
+  }
   if (id === 'recently-deleted') {
     return {
       id,
@@ -1200,7 +1212,8 @@ export function resolveOrganizationSectionAccess({
   isTargetOrganizationAdmin,
 }: ResolveOrganizationSectionAccessOptions): OrganizationSectionAccess {
   if (!isTargetOrganizationMember) return 'unavailable'
-  if (section === 'search-mcp' || section === 'recently-deleted') return 'view'
+  if (section === 'search-mcp' || section === 'recently-deleted' || section === 'knowledge-graphs')
+    return 'view'
   if (section === 'members' || section === 'requests')
     return isTargetOrganizationAdmin ? 'manage' : 'view'
   return isTargetOrganizationAdmin ? 'manage' : 'unavailable'
@@ -1256,6 +1269,7 @@ export function isOrganizationSettingsSectionAvailable(
   if (
     section === 'members' ||
     section === 'search-mcp' ||
+    section === 'knowledge-graphs' ||
     section === 'recently-deleted' ||
     section === 'requests'
   )

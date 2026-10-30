@@ -2,12 +2,24 @@ import { dbReplica } from '@sim/db'
 import {
   copilotChats,
   copilotRuns,
+  organization,
   usageLog,
+  user,
   workflow,
   workflowExecutionLogs,
   workspace,
 } from '@sim/db/schema'
-import { and, eq, inArray, isNotNull, or, type SQL, type SQLWrapper, sql } from 'drizzle-orm'
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  notInArray,
+  or,
+  type SQL,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm'
 import {
   type UsageChargeTypeValue,
   type UsageLogSourceValue,
@@ -199,6 +211,154 @@ export function ledgerCostSelect() {
     rawCost: sql<string>`coalesce(sum(coalesce(${usageLog.rawCost}, ${usageLog.cost})::numeric), 0)`,
     count: sql<number>`count(*)::int`,
   }
+}
+
+export interface ExternalApiUsageRow {
+  organizationId: string
+  organizationName: string
+  workspaceId: string
+  workspaceName: string
+  workflowId: string
+  workflowName: string | null
+  actorUserId: string | null
+  executionCount: number
+  billableCost: number
+  rawCost: number
+  count: number
+  usage: UsageMetrics
+}
+
+interface ExternalApiUsageQuery {
+  payerCondition: SQL
+  homeOrganizationIds: string[]
+  period: ResolvedPeriod
+}
+
+/** Same rows By Agent lists: billed API runs whose workflow lives in another organization. */
+function externalApiRunConditions(params: ExternalApiUsageQuery) {
+  const { payerCondition, homeOrganizationIds, period } = params
+  return and(
+    payerCondition,
+    isNotNull(workspace.organizationId),
+    eq(usageLog.billingEntityType, 'organization'),
+    sql`${workspace.organizationId} <> ${usageLog.billingEntityId}`,
+    homeOrganizationIds.length > 0
+      ? notInArray(workspace.organizationId, homeOrganizationIds)
+      : undefined,
+    eq(usageLog.billable, true),
+    isNotNull(usageLog.workflowId),
+    ...ledgerPeriodBounds(period)
+  )
+}
+
+function externalApiExecutionJoin() {
+  return and(
+    eq(workflowExecutionLogs.executionId, usageLog.executionId),
+    eq(workflowExecutionLogs.trigger, 'api')
+  )
+}
+
+/**
+ * API runs billed to an organization other than the one that owns the workflow.
+ *
+ * `payerCondition` selects which billed rows the viewer may see. The workflow's
+ * organization must differ from the billed organization, so the owning
+ * organization keeps those runs in its normal workflow rollup. `homeOrganizationIds`
+ * additionally drops workflows from organizations the viewer belongs to.
+ */
+export async function listExternalApiUsage(
+  params: ExternalApiUsageQuery
+): Promise<ExternalApiUsageRow[]> {
+  const { payerCondition, homeOrganizationIds, period } = params
+
+  const workflowLabel = sql<string>`coalesce(nullif(trim(${workflow.name}), ''), ${usageLog.workflowId})`
+  const actorLabel = sql<string>`coalesce(lower(${user.email}), ${usageLog.actorUserId})`
+
+  const rows = await dbReplica
+    .select({
+      organizationId: organization.id,
+      organizationName: organization.name,
+      workspaceId: sql<string>`min(${usageLog.workspaceId})`,
+      workspaceName: workspace.name,
+      workflowId: sql<string>`min(${usageLog.workflowId})`,
+      workflowName: workflowLabel,
+      actorUserId: sql<string | null>`min(${usageLog.actorUserId})`,
+      executionCount: sql<number>`count(distinct ${usageLog.executionId})::int`,
+      ...ledgerCostSelect(),
+      ...usageMetricsSelect(),
+    })
+    .from(usageLog)
+    .innerJoin(workflowExecutionLogs, externalApiExecutionJoin())
+    .innerJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .innerJoin(organization, eq(organization.id, workspace.organizationId))
+    .leftJoin(workflow, eq(workflow.id, usageLog.workflowId))
+    .leftJoin(user, eq(user.id, usageLog.actorUserId))
+    .where(externalApiRunConditions({ payerCondition, homeOrganizationIds, period }))
+    .groupBy(organization.id, organization.name, workspace.name, workflowLabel, actorLabel)
+
+  return sortByBillableCostDesc(
+    rows.flatMap((row) => {
+      if (!row.organizationId || !row.workspaceId || !row.workflowId) return []
+      return [
+        {
+          organizationId: row.organizationId,
+          organizationName: row.organizationName ?? row.organizationId,
+          workspaceId: row.workspaceId,
+          workspaceName: row.workspaceName ?? row.workspaceId,
+          workflowId: row.workflowId,
+          workflowName: row.workflowName,
+          actorUserId: row.actorUserId,
+          executionCount: parseIntMetric(row.executionCount),
+          billableCost: parseDecimal(row.billableCost),
+          rawCost: parseDecimal(row.rawCost),
+          count: parseIntMetric(row.count),
+          usage: mapUsageMetrics(row),
+        },
+      ]
+    })
+  )
+}
+
+export interface ExternalApiCostBucket {
+  bucketStart: string
+  billableCost: number
+  rawCost: number
+  executionCount: number
+  usage: UsageMetrics
+}
+
+/**
+ * By Agent cost rolled into the same hour or day buckets as Cost & activity.
+ */
+export async function listExternalApiCostBuckets(
+  params: ExternalApiUsageQuery & { useHourlyBuckets: boolean }
+): Promise<ExternalApiCostBucket[]> {
+  const bucketExpr = timeBucketExpr(params.useHourlyBuckets)
+  const rows = await dbReplica
+    .select({
+      bucketStart: bucketExpr,
+      executionCount: sql<number>`count(distinct ${usageLog.executionId})::int`,
+      ...ledgerCostSelect(),
+      ...usageMetricsSelect(),
+    })
+    .from(usageLog)
+    .innerJoin(workflowExecutionLogs, externalApiExecutionJoin())
+    .innerJoin(workspace, eq(workspace.id, usageLog.workspaceId))
+    .where(externalApiRunConditions(params))
+    .groupBy(bucketExpr)
+
+  return rows.flatMap((row) => {
+    if (row.bucketStart == null) return []
+    return [
+      {
+        bucketStart: coerceToDate(row.bucketStart)?.toISOString() ?? String(row.bucketStart),
+        billableCost: parseDecimal(row.billableCost),
+        rawCost: parseDecimal(row.rawCost),
+        executionCount: parseIntMetric(row.executionCount),
+        usage: mapUsageMetrics(row),
+      },
+    ]
+  })
 }
 
 /**
@@ -515,6 +675,37 @@ export function densifyTimeSeries(
 
   densified.sort((a, b) => a.bucketStart.localeCompare(b.bucketStart))
   return densified
+}
+
+/** Adds By Agent cost onto the chart buckets for the same hour or day. */
+export function mergeExternalApiCostBuckets(
+  timeSeries: UsageTimeSeriesBucket[],
+  buckets: ExternalApiCostBucket[]
+): void {
+  for (const bucket of buckets) {
+    const existing = timeSeries.find((row) => row.bucketStart === bucket.bucketStart)
+    if (existing) {
+      existing.billableCost += bucket.billableCost
+      existing.rawCost += bucket.rawCost
+      existing.executionCount += bucket.executionCount
+      existing.usage = {
+        inputTokens: existing.usage.inputTokens + bucket.usage.inputTokens,
+        outputTokens: existing.usage.outputTokens + bucket.usage.outputTokens,
+        totalTokens: existing.usage.totalTokens + bucket.usage.totalTokens,
+        invocationCount: existing.usage.invocationCount + bucket.usage.invocationCount,
+      }
+      continue
+    }
+    timeSeries.push({
+      bucketStart: bucket.bucketStart,
+      billableCost: bucket.billableCost,
+      rawCost: bucket.rawCost,
+      executionCount: bucket.executionCount,
+      activeUserCount: 0,
+      usage: bucket.usage,
+    })
+  }
+  timeSeries.sort((a, b) => a.bucketStart.localeCompare(b.bucketStart))
 }
 
 export function parseActorType(value: string | null | undefined) {

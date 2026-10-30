@@ -77,7 +77,7 @@ export async function resolveSlackSelectorToken({
         ok: false,
         status: 401,
         error:
-          'No user token found. Reconnect the Slack account with user-token permissions, or choose Sim Bot.',
+          'No user token found. Reconnect the Slack account with user-token permissions, or choose Arena Bot.',
         authRequired: true,
       }
     }

@@ -9,9 +9,9 @@ import {
   normalizeImageUrlForCompare,
 } from '@/lib/chat/assistant-assets'
 
-const logger = createLogger('ChatMessageConstants')
-
 export { normalizeImageUrlForCompare } from '@/lib/chat/assistant-assets'
+
+const logger = createLogger('ChatMessageImages')
 
 /**
  * Common base64-encoded image headers

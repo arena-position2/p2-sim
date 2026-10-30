@@ -7,6 +7,7 @@ import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
   formatDebugInspectionChatResult,
+  generatedImageChatMarkdown,
   synthesizeAssistantSummaryFromTools,
   type ToolTurnRecord,
   turnHasDebugInspectionTools,
@@ -353,6 +354,23 @@ describe('file inspection continuation', () => {
         { name: 'load_copilot_artifact', success: true, result: {} },
       ])
     ).toMatch(/did not finish applying the fix/i)
+  })
+})
+
+describe('generated image chat markdown', () => {
+  it('renders saved images as markdown the chat snapshotter can display', () => {
+    const record: ToolTurnRecord = {
+      name: 'generate_image',
+      success: true,
+      result: {
+        message: 'Image generated and saved at "files/diagram.png"',
+        vfsPath: 'files/diagram.png',
+        files: [{ fileId: 'file-1', fileName: 'diagram.png', vfsPath: 'files/diagram.png' }],
+      },
+    }
+
+    expect(generatedImageChatMarkdown([record])).toBe('![diagram.png](files/diagram.png)')
+    expect(synthesizeAssistantSummaryFromTools([record])).toBe('![diagram.png](files/diagram.png)')
   })
 })
 

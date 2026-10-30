@@ -6,15 +6,17 @@ import { interruptibleSleep } from '@sim/utils/helpers'
 import { generateId } from '@sim/utils/id'
 import { isPlainRecord, omit } from '@sim/utils/object'
 import { workspaceSearchFiltersSchema } from '@/lib/api/contracts/knowledge/search'
+import { getBenchmarkMothershipUrl } from '@/lib/benchmarks/config'
 import {
   type AttributedBillingRequestEnvelope,
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
   checkAttributedUsageLimits,
   createAttributedBillingRequestEnvelope,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import { env } from '@/lib/core/config/env'
 import { isCopilotToolPermissionsEnabled, isSimCloudHosted } from '@/lib/core/config/env-flags'
+import { withFileOwnerContext } from '@/lib/mothership/application/file-owner-context'
 import { SIM_TOOL_EXECUTION_LEASE_SECONDS } from '@/lib/mothership/async-runs/execution-lease'
 import type { AsyncCompletionSignal } from '@/lib/mothership/async-runs/lifecycle'
 import {
@@ -22,6 +24,7 @@ import {
   getChatViewDesktopLeaseRemainingMs,
   updateRunStatus,
 } from '@/lib/mothership/async-runs/repository'
+import type { CopilotResourceAdmission } from '@/lib/mothership/auth/application-delegation'
 import {
   CLIENT_TOOL_RESULT_TIMEOUT_MS,
   TOOL_WATCHDOG_RESUME_GRACE_MS,
@@ -47,6 +50,7 @@ import {
   BillingLimitError,
   CopilotBackendError,
   runStreamLoop,
+  WorkerStreamInterruptedError,
 } from '@/lib/mothership/request/go/stream'
 import {
   createProviderToolCallIdentity,
@@ -57,6 +61,7 @@ import {
   authorizeLifecycleContinuation,
   restoreBillingAdmission,
 } from '@/lib/mothership/request/lifecycle/admission'
+import type { DurableStreamKind } from '@/lib/mothership/request/lifecycle/durable-run'
 import { StreamRetryWindow } from '@/lib/mothership/request/lifecycle/stream-retry'
 import { recordDegraded } from '@/lib/mothership/request/metrics'
 import { AbortReason } from '@/lib/mothership/request/session/abort-reason'
@@ -83,14 +88,19 @@ import type {
   StreamEvent,
   StreamingContext,
 } from '@/lib/mothership/request/types'
-import type { SecretMountPolicy } from '@/lib/mothership/secret-mount-policy'
+import {
+  NO_SECRET_AUTHORITY,
+  normalizeSecretMountPolicy,
+  type SecretMountPolicy,
+  type TurnSecretAuthority,
+} from '@/lib/mothership/secret-mount-policy'
 import { getMothershipBaseURL } from '@/lib/mothership/server/agent-url'
 import { hasCopilotApiKey } from '@/lib/mothership/server/copilot-api-keys'
 import { prepareExecutionContext } from '@/lib/mothership/tools/handlers/context'
 import { getSimConnection } from '@/lib/mothership/transport/connection'
 import { ensureSimReceiverForBaseURL } from '@/lib/mothership/transport/receiver'
 import { isWorkspaceCapabilityWithheld } from '@/lib/permission-groups/capability-assertions'
-import { filterModelSafeWorkspaceFileAttachments } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+import { filterModelSafeWorkspaceFileAttachments } from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import { appendUnavailableAttachmentNotice } from '@/lib/uploads/utils/model-input'
 import type { ExecutorDelegationOrigin } from '@/executor/types'
 import { refuseResolvedSecretProjection } from '@/executor/utils/resolved-secret-projection-refusal'
@@ -98,6 +108,37 @@ import type { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secr
 import { shouldRouteToLocalCopilot } from '@/local-copilot/lib/routing'
 
 const logger = createLogger('CopilotLifecycle')
+
+/** Worker answer when a retry reattaches to a run the dead channel never created. */
+const MISSING_RUN_MESSAGE = 'Run not found'
+/**
+ * A fresh turn will not use a long-poll with less than this left. The poll
+ * aborts at 30s; sending in that window is what the follow-up click hits.
+ */
+const FRESH_POLL_MIN_REMAINING_MS = 8_000
+
+function isMissingRunEvent(event: StreamEvent): boolean {
+  if (event.type !== MothershipStreamV1EventType.error) return false
+  const message = event.payload.message || event.payload.error
+  return message === MISSING_RUN_MESSAGE
+}
+
+/**
+ * Holds the chat POST until the worker has this process's channel registered.
+ * `false` is the only failure: a test double that returns nothing must not block.
+ */
+async function requireRegisteredSimPoll(baseURL: string, fresh: boolean): Promise<void> {
+  if (getSimConnection().mode !== 'checkpoint') return
+  const live = await ensureSimReceiverForBaseURL(
+    baseURL,
+    fresh ? { minRemainingMs: FRESH_POLL_MIN_REMAINING_MS } : undefined
+  )
+  if (live === false) {
+    throw new WorkerStreamInterruptedError(
+      new Error('Outbound Sim transport poll is not registered')
+    )
+  }
+}
 
 /** After a renewed lease's end, the wait looks once more before it calls the call lost. */
 const LEASE_RECHECK_SLACK_MS = 1_000
@@ -278,6 +319,9 @@ function resultContent(context: StreamingContext, options: CopilotLifecycleOptio
 }
 
 export interface CopilotLifecycleOptions extends OrchestratorOptions {
+  /** Internal benchmark runner policy, independent of browser and model payloads. */
+  benchmark?: 'plan' | 'tool-free' | 'distill' | 'reconstruct' | 'resolve'
+  copilotResourceAdmission?: CopilotResourceAdmission
   /** Trusted entry point for Search metering; never read from model arguments. */
   searchSurface?: 'copilot' | 'slack'
   mcpBlockId?: string
@@ -294,6 +338,7 @@ export interface CopilotLifecycleOptions extends OrchestratorOptions {
   goRoute?: string
   /** Reattach this existing run; goRoute still identifies the original interaction surface. */
   recovery?: {
+    kind?: DurableStreamKind
     billingAdmission?: { billingRequestId: string; serializedAttribution: string }
     streamId: string
     events: readonly StreamEvent[]
@@ -415,6 +460,7 @@ export async function runCopilotLifecycle(
   const payloadMsgId =
     options.recovery?.streamId ??
     (typeof requestPayload?.messageId === 'string' ? requestPayload.messageId : generateId())
+  const secretAuthority = turnSecretAuthority(userId, requestMode, options)
   const runIdentity = await ensureHeadlessRunIdentity({
     requestPayload,
     userId,
@@ -425,6 +471,7 @@ export async function runCopilotLifecycle(
     executionId,
     runId,
     messageId: payloadMsgId,
+    secretAuthority,
   })
   if (runIdentity.cancelled) {
     return { success: false, cancelled: true, content: '', contentBlocks: [], toolCalls: [] }
@@ -452,12 +499,6 @@ export async function runCopilotLifecycle(
               ...(options.resolvedSecretTraceRegistry
                 ? { resolvedSecretTraceRegistry: options.resolvedSecretTraceRegistry }
                 : {}),
-              ...(options.secretMountPolicy
-                ? { secretMountPolicy: options.secretMountPolicy }
-                : {}),
-              ...(options.secretActorUserId !== undefined
-                ? { secretActorUserId: options.secretActorUserId }
-                : {}),
             },
           }
         : {}),
@@ -480,8 +521,6 @@ export async function runCopilotLifecycle(
           resolvedSecretTraceRegistry: lifecycleOptions.resolvedSecretTraceRegistry,
           environmentContext: lifecycleOptions.environmentContext,
           userPermission: lifecycleOptions.userPermission,
-          secretMountPolicy: lifecycleOptions.secretMountPolicy,
-          secretActorUserId: lifecycleOptions.secretActorUserId,
         }
       ))
     if (
@@ -495,6 +534,11 @@ export async function runCopilotLifecycle(
       throw new Error('Organization execution context does not match its authenticated scope')
     }
     execContext.messageId = payloadMsgId
+    execContext.secretMountPolicy = secretAuthority.secretMountPolicy
+    execContext.secretActorUserId = secretAuthority.secretActorUserId
+    execContext.benchmark = options.benchmark
+    if (lifecycleOptions.copilotResourceAdmission)
+      execContext.copilotResourceAdmission = lifecycleOptions.copilotResourceAdmission
     if (options.recovery?.userTimezone) execContext.userTimezone = options.recovery.userTimezone
     execContext.requestMode = requestMode
     execContext.searchSurface = lifecycleOptions.searchSurface ?? 'copilot'
@@ -508,10 +552,6 @@ export async function runCopilotLifecycle(
           ? (execContext.assistantSearch ?? requestPayload.assistantSearch ?? {})
           : (requestPayload.assistantSearch ?? {})
       )
-      if (execContext.requestMode === 'assistant') {
-        execContext.secretActorUserId = null
-        execContext.secretMountPolicy = { secretScope: 'selected', mountedSecrets: [] }
-      }
     }
     execContext.copilotInteractionMode =
       lifecycleOptions.interactive === true ? 'interactive' : 'headless'
@@ -594,12 +634,15 @@ export async function runCopilotLifecycle(
           'scope' in admission ? admission.scope : undefined
         )
       } else if (
-        await shouldRouteToLocalCopilot({
+        // An explicit Local turn must not fall through to the worker. A denied
+        // route check used to reattach that turn, and the worker answered "Run not found".
+        lifecycleOptions.copilotBackend === 'local' ||
+        (await shouldRouteToLocalCopilot({
           workflowId: lifecycleOptions.workflowId ?? requestPayload.workflowId,
           workspaceId: lifecycleOptions.workspaceId ?? requestPayload.workspaceId,
           userId: lifecycleOptions.userId,
           copilotBackend: lifecycleOptions.copilotBackend,
-        })
+        }))
       ) {
         logger.info('Delegating copilot turn to Arena Copilot', {
           chatId: context.chatId,
@@ -1001,6 +1044,9 @@ async function runResumeLegWithRetry(
     options.abortSignal?.throwIfAborted()
     const errorsBeforeAttempt = leg.errors.length
     await authorizeLifecycleContinuation(execContext)
+    if (execContext.mothershipBaseURL) {
+      await requireRegisteredSimPoll(execContext.mothershipBaseURL, false)
+    }
     try {
       await runStreamLoop(
         url,
@@ -1211,17 +1257,17 @@ async function runCheckpointLoop(
   let payload: Record<string, unknown> = initialPayload
   let retry: StreamRetryWindow | undefined
   const callerOnEvent = options.onEvent
-  const mothershipBaseURL = await getMothershipBaseURL({ userId: options.userId })
+  const mothershipBaseURL = options.benchmark
+    ? getBenchmarkMothershipUrl()
+    : await getMothershipBaseURL({ userId: options.userId })
   execContext.mothershipBaseURL = mothershipBaseURL
-  if (initialRoute === '/api/mothership' || initialRoute === '/api/copilot') {
-    const simConnection = getSimConnection()
+  if (
+    initialRoute === '/api/mothership' ||
+    initialRoute === '/api/copilot' ||
+    (initialRoute === '/api/mothership/execute' && options.benchmark)
+  ) {
+    const simConnection = getSimConnection(options.benchmark ? 'checkpoint' : undefined)
     payload = { ...payload, simConnection }
-  }
-  // Boot may have no-op'd the poller while transport still defaulted to `direct`.
-  // Await readiness: chat before a registered channel makes Go 500, then a retry
-  // or tool resume surfaces as "Run not found".
-  if (getSimConnection().mode === 'checkpoint') {
-    await ensureSimReceiverForBaseURL(mothershipBaseURL)
   }
   // Go's ChatRequest rejects keys it does not declare. Drop the deployment flag
   // and Arena's catalog id before the body leaves this process.
@@ -1235,6 +1281,7 @@ async function runCheckpointLoop(
   const systemPromptOverride = env.MSHIP_SYSPROMPT_OVERRIDE
 
   if (
+    !options.benchmark &&
     initialRoute !== '/api/tools/resume' &&
     typeof systemPromptOverride === 'string' &&
     systemPromptOverride.trim() !== ''
@@ -1270,6 +1317,8 @@ async function runCheckpointLoop(
     payload = { ...payload, organizationId: lifecycleOrganizationId, chatId: execContext.chatId }
   }
 
+  payload = await withFileOwnerContext(payload, execContext, mothershipBaseURL, initialRoute)
+
   for (;;) {
     await options.assertControllerOwnership?.()
     context.streamComplete = false
@@ -1280,6 +1329,10 @@ async function runCheckpointLoop(
     }
     const isResume = route === '/api/tools/resume'
     if (isResume || options.recovery) await authorizeLifecycleContinuation(execContext)
+    // Each attempt, including a retry and a tool resume, waits for a poll that is
+    // actually in flight. A follow-up clicked as the long-poll dies used to POST
+    // anyway; Go 500s, the retry reattaches, and the user sees "Run not found".
+    await requireRegisteredSimPoll(mothershipBaseURL, !isResume && !options.recovery)
 
     // Enterprise BYOK rides EVERY leg, resume included: a resume that lands on a dead
     // run becomes a continuation with no closure holding the key. Re-resolved per leg so
@@ -1299,6 +1352,17 @@ async function runCheckpointLoop(
          has an HTTP buffer worth a per-event macrotask flush. */
       flushAfterEvent: options.flushAfterEvent ?? Boolean(callerOnEvent),
       onEvent: async (event: StreamEvent) => {
+        // A content-less "Run not found" is the reattach of a turn that never
+        // started. Retry it on a live poll instead of rendering that string.
+        if (
+          !isResume &&
+          !options.recovery &&
+          context.accumulatedContent.length === 0 &&
+          context.toolCalls.size === 0 &&
+          isMissingRunEvent(event)
+        ) {
+          throw new WorkerStreamInterruptedError(new Error(MISSING_RUN_MESSAGE))
+        }
         retry?.recovered()
         if (
           event.type === MothershipStreamV1EventType.run &&
@@ -1485,19 +1549,26 @@ async function runCheckpointLoop(
         }
         for (const [toolCallId, promise] of context.pendingToolPromises) {
           if (pendingWatchdogs.get(toolCallId)?.promise === promise) continue
+          const toolCall = context.toolCalls.get(toolCallId)
           const waitBudgetMs =
-            pendingToolWaitBudgetMs(context.toolCalls.get(toolCallId), context.desktopDeviceId) +
+            pendingToolWaitBudgetMs(toolCall, context.desktopDeviceId) +
             TOOL_WATCHDOG_RESUME_GRACE_MS
+          const clientCapAt = now + Math.max(waitBudgetMs, CLIENT_TOOL_RESULT_TIMEOUT_MS)
+          // Neither the wait nor a lease carries a call past the deadline the worker named for it.
+          const ceilingAt =
+            toolCall?.deadlineAt === undefined
+              ? clientCapAt
+              : Math.min(clientCapAt, toolCall.deadlineAt + TOOL_WATCHDOG_RESUME_GRACE_MS)
           pendingWatchdogs.set(toolCallId, {
             promise,
             settlement: promise.then(
               () => ({ toolCallId, promise }),
               () => ({ toolCallId, promise })
             ),
-            deadlineAt: now + waitBudgetMs,
+            deadlineAt: Math.min(now + waitBudgetMs, ceilingAt),
             waitBudgetMs,
             startedAt: now,
-            ceilingAt: now + Math.max(waitBudgetMs, CLIENT_TOOL_RESULT_TIMEOUT_MS),
+            ceilingAt,
           })
           maximumWaitBudgetMs = Math.max(maximumWaitBudgetMs, waitBudgetMs)
         }
@@ -1687,11 +1758,6 @@ async function runCheckpointLoop(
       streamId: context.messageId,
       results,
     } satisfies ResumeRequest
-    // Keep the outbound channel registered across the tool pause; a dead poller
-    // lets the worker drop the parked run and resume answers "Run not found".
-    if (getSimConnection().mode === 'checkpoint') {
-      await ensureSimReceiverForBaseURL(mothershipBaseURL)
-    }
 
     if (isAborted(options, context)) {
       cancelPendingTools(context)
@@ -1725,8 +1791,6 @@ async function buildExecutionContext(
     resolvedSecretTraceRegistry?: ResolvedSecretTraceRegistry
     environmentContext?: CopilotEnvironmentContext
     userPermission?: PermissionType
-    secretMountPolicy?: SecretMountPolicy
-    secretActorUserId?: string | null
   }
 ): Promise<ExecutionContext> {
   const {
@@ -1742,8 +1806,6 @@ async function buildExecutionContext(
     resolvedSecretTraceRegistry,
     environmentContext,
     userPermission,
-    secretMountPolicy,
-    secretActorUserId,
   } = params
   const userTimezone =
     typeof requestPayload?.userTimezone === 'string' ? requestPayload.userTimezone : undefined
@@ -1780,7 +1842,6 @@ async function buildExecutionContext(
     execContext.assistantSearch = workspaceSearchFiltersSchema.parse(
       requestPayload?.assistantSearch ?? {}
     )
-    if (requestMode === 'assistant') execContext.secretActorUserId = null
   }
   if (userPermission) execContext.userPermission = userPermission
   execContext.messageId =
@@ -1792,9 +1853,30 @@ async function buildExecutionContext(
   if (resolvedSecretTraceRegistry) {
     execContext.resolvedSecretTraceRegistry = resolvedSecretTraceRegistry
   }
-  if (secretMountPolicy) execContext.secretMountPolicy = secretMountPolicy
-  if (secretActorUserId !== undefined) execContext.secretActorUserId = secretActorUserId
   return execContext
+}
+
+/**
+ * The one source of a turn's secret authority: its execution context runs under it, and a
+ * headless run records it so a lane that rebuilds its tool context from Go's request — the
+ * in-band tool route — re-derives it instead of defaulting. Assistant mode mounts nothing.
+ */
+function turnSecretAuthority(
+  userId: string,
+  requestMode: string | undefined,
+  options: CopilotLifecycleOptions
+): TurnSecretAuthority {
+  if (requestMode === 'assistant') return NO_SECRET_AUTHORITY
+  const secretActorUserId =
+    options.secretActorUserId !== undefined
+      ? options.secretActorUserId
+      : options.executionContext?.secretActorUserId
+  return {
+    secretMountPolicy: normalizeSecretMountPolicy(
+      options.secretMountPolicy ?? options.executionContext?.secretMountPolicy
+    ),
+    secretActorUserId: secretActorUserId === undefined ? userId : secretActorUserId,
+  }
 }
 
 async function ensureHeadlessRunIdentity(input: {
@@ -1807,6 +1889,7 @@ async function ensureHeadlessRunIdentity(input: {
   executionId?: string
   runId?: string
   messageId: string
+  secretAuthority: TurnSecretAuthority
 }): Promise<{ executionId?: string; runId?: string; cancelled?: boolean }> {
   if (!input.chatId || input.executionId || input.runId) {
     return {
@@ -1833,6 +1916,7 @@ async function ensureHeadlessRunIdentity(input: {
         typeof input.requestPayload?.provider === 'string' ? input.requestPayload.provider : null,
       requestContext: {
         source: 'headless_lifecycle',
+        secretAuthority: input.secretAuthority,
       },
     })
     return { executionId, runId, cancelled: run.status === 'cancelled' }

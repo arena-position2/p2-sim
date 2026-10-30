@@ -89,6 +89,10 @@ const RECOVERABLE_WORKSPACE_FILE_PATCH_ERROR_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
   'search_looks_truncated',
+  'search_too_long',
+  'search_repeated',
+  'search_ignores_live_excerpt',
+  'html_full_update_too_large',
 ])
 
 /**
@@ -192,6 +196,8 @@ export function buildWorkflowBuildChatAppendix(
     createdWorkflowThisTurn?: boolean
     successfulPopulateEdits?: number
     unresolvedFollowUpHint?: string | null
+    /** Shown as the full closer. The model hint is not prefixed onto this sentence. */
+    unresolvedFollowUpUserHint?: string | null
   }
 ): string | null {
   const createdWithoutPopulate =
@@ -205,6 +211,9 @@ export function buildWorkflowBuildChatAppendix(
       ? `I created the workflow, but the last edit did not add the blocks. ${detail}`
       : 'I created the workflow, but the edits did not add the requested blocks. Continue so I can apply them.'
   }
+
+  const userHint = options?.unresolvedFollowUpUserHint?.trim() ?? ''
+  if (userHint) return userHint
 
   if (hint) {
     return `I made partial progress but still need to finish: ${hint}`
@@ -623,6 +632,34 @@ export function stripLeakedToolMarkers(text: string, options?: { trim?: boolean 
 /**
  * Builds a concise assistant reply when the model finishes tool use without prose.
  */
+function generatedImagePaths(result: unknown): string[] {
+  const payload = asRecord(result)
+  const files = Array.isArray(payload.files) ? payload.files : []
+  const fromFiles = files.flatMap((file) => {
+    const path = asRecord(file).vfsPath
+    return typeof path === 'string' && path.trim() ? [path.trim()] : []
+  })
+  if (fromFiles.length > 0) return fromFiles
+  const vfsPath = payload.vfsPath
+  return typeof vfsPath === 'string' && vfsPath.trim() ? [vfsPath.trim()] : []
+}
+
+/** Markdown images the chat renderer can snapshot. Plain "saved to" text does not render. */
+export function generatedImageChatMarkdown(records: ToolTurnRecord[]): string | null {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  for (const record of records) {
+    if (record.name !== 'generate_image' || !record.success) continue
+    for (const path of generatedImagePaths(record.result)) {
+      if (seen.has(path)) continue
+      seen.add(path)
+      const alt = path.split('/').pop() || 'Image'
+      lines.push(`![${alt}](${path})`)
+    }
+  }
+  return lines.length > 0 ? lines.join('\n\n') : null
+}
+
 export function synthesizeAssistantSummaryFromTools(records: ToolTurnRecord[]): string | null {
   const parts: string[] = []
 
@@ -694,33 +731,14 @@ export function synthesizeAssistantSummaryFromTools(records: ToolTurnRecord[]): 
     }
 
     if (record.name === 'generate_image') {
+      const markdown = generatedImageChatMarkdown([record])
+      if (markdown) {
+        parts.push(markdown)
+        continue
+      }
       const payload = asRecord(record.result)
       const message = typeof payload.message === 'string' ? payload.message.trim() : ''
-      if (message) {
-        parts.push(message)
-        continue
-      }
-
-      const files = Array.isArray(payload.files) ? payload.files : []
-      if (files.length > 1) {
-        const paths = files
-          .map((file) => asRecord(file).vfsPath ?? asRecord(file).fileName)
-          .filter((path): path is string => typeof path === 'string' && path.length > 0)
-        parts.push(
-          paths.length
-            ? `Generated ${files.length} images: ${paths.map((path) => `"${path}"`).join(', ')}.`
-            : `Generated ${files.length} image variations.`
-        )
-        continue
-      }
-
-      const vfsPath =
-        (typeof payload.vfsPath === 'string' && payload.vfsPath) ||
-        (typeof payload.fileName === 'string' && payload.fileName) ||
-        null
-      if (vfsPath) {
-        parts.push(`Image saved to "${vfsPath}".`)
-      }
+      if (message) parts.push(message)
       continue
     }
 

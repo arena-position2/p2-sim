@@ -5,7 +5,7 @@ import { getErrorMessage, toError } from '@sim/utils/errors'
 import { generateId, isValidUuid } from '@sim/utils/id'
 import type { BlockState } from '@sim/workflow-types/workflow'
 import { releaseExecutionSlot } from '@/lib/billing/calculations/usage-reservation'
-import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/attribution'
 import { logFailureOnce } from '@/lib/core/errors/failure-log'
 import { createTimeoutAbortController, getTimeoutErrorMessage } from '@/lib/core/execution-limits'
 import { SSE_HEADERS } from '@/lib/core/utils/sse'
@@ -84,6 +84,11 @@ export interface ExecuteWorkflowServiceParams {
   /** Pre-fetched workflow row (already authorized by the caller). */
   workflowRecord?: WorkflowRecord
   upstreamBillingAttribution?: BillingAttributionSnapshot
+  /**
+   * Caller-named payer for this run, resolved in `preprocessExecution`. Required
+   * by the v2 execute route; absent on every surface that does not expose the header.
+   */
+  billingPayerEmail?: string
   /** Pin execution to a specific deployment version (MCP bridge). */
   deploymentVersionId?: string
   includeFileBase64?: boolean
@@ -267,6 +272,7 @@ export async function executeWorkflowService(
     isPublicApiAccess = false,
     workflowRecord,
     upstreamBillingAttribution,
+    billingPayerEmail,
     deploymentVersionId,
     includeFileBase64 = true,
     base64MaxBytes,
@@ -401,6 +407,7 @@ export async function executeWorkflowService(
       useAuthenticatedUserAsActor,
       workflowRecord,
       billingAttribution: upstreamBillingAttribution,
+      billingPayerEmail,
       executionType: mode === 'async' ? 'async' : 'sync',
       requestedTimeoutSeconds,
     })
@@ -427,6 +434,7 @@ export async function executeWorkflowService(
     const actorUserId = preprocessResult.actorUserId
     const workflow = preprocessResult.workflowRecord
     const billingAttribution = preprocessResult.billingAttribution
+    const executionActor = preprocessResult.executionActor
     const workspaceId = workflow.workspaceId
     if (!workspaceId) {
       await releaseExecutionSlot(executionId)
@@ -445,6 +453,7 @@ export async function executeWorkflowService(
         principal,
         userId: actorUserId,
         billingAttribution,
+        executionActor,
         workspaceId,
         input,
         triggerType,
@@ -621,6 +630,7 @@ export async function executeWorkflowService(
               enforceCredentialAccess: useAuthenticatedUserAsActor,
               isPublicApiAccess,
               billingAttribution,
+              executionActor,
               largeValueKeys: [],
               fileKeys: [],
               includeThinking,
@@ -654,6 +664,7 @@ export async function executeWorkflowService(
       userId: actorUserId,
       principal,
       billingAttribution,
+      executionActor,
       workflowUserId: workflow.userId,
       triggerType,
       triggerBlockId,

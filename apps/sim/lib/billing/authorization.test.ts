@@ -15,8 +15,7 @@ import {
 import { schemaMock } from '@sim/testing/mocks/schema.mock'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockHasBlockingOrgCheckoutSubscription, mockAssertNoUnresolved } = vi.hoisted(() => ({
-  mockHasBlockingOrgCheckoutSubscription: vi.fn(),
+const { mockAssertNoUnresolved } = vi.hoisted(() => ({
   mockAssertNoUnresolved: vi.fn(),
 }))
 

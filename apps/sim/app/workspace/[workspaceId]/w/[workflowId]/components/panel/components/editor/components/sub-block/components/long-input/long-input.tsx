@@ -15,6 +15,7 @@ import {
   formatBindingsForUserInputWand,
   formatCompiledHonorForUserInputWand,
 } from '@/lib/arena-generative-ui/user-input-wand-prompt'
+import { useWorkflowScope } from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import { formatDisplayText } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/formatted-text'
 import {
   maskSecretText,
@@ -145,7 +146,9 @@ export function LongInput({
     }
   }, [apiBindingsRaw, config.wandConfig, localContent])
 
+  const { workspaceId } = useWorkflowScope()
   const wandHook = useWand({
+    workspaceId,
     wandConfig,
     currentValue: localContent,
     onStreamStart: () => {

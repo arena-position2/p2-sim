@@ -94,6 +94,19 @@ export function enrichCreateFileArgs(args: Record<string, unknown>): void {
     args.outputs = { files }
   }
 
+  if (args.outputs && typeof args.outputs === 'object' && !Array.isArray(args.outputs)) {
+    const files = (args.outputs as { files?: unknown }).files
+    if (Array.isArray(files)) {
+      for (const file of files) {
+        if (!file || typeof file !== 'object' || Array.isArray(file)) continue
+        const row = file as Record<string, unknown>
+        if (typeof row.path === 'string' && row.path.trim() && typeof row.mode !== 'string') {
+          row.mode = 'create'
+        }
+      }
+    }
+  }
+
   if (typeof args.fileName !== 'string' || !args.fileName.trim()) {
     if (typeof args.path === 'string' && args.path.trim()) {
       args.fileName = args.path.trim()

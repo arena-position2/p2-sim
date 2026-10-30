@@ -81,7 +81,7 @@ describe('buildSlackManifest - Agent View', () => {
       expect.arrayContaining(['action_assistant', 'action_send', 'trigger_app_home'])
     )
     expect(features.agent_view).toEqual({
-      agent_description: 'Test Bot — an AI agent powered by Sim.',
+      agent_description: 'Test Bot — an AI agent powered by Arena.',
     })
     expect(features.app_home).toEqual({
       home_tab_enabled: false,

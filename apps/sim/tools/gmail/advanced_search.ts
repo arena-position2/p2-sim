@@ -25,6 +25,10 @@ function decodeBase64Url(data: string): string {
   }
 }
 
+/**
+ * Extracts text content from message payload
+ * Falls back to HTML if plain text is not available
+ */
 function extractMessageContent(payload: any): string {
   let plainTextContent = ''
   let htmlContent = ''
@@ -219,7 +223,7 @@ async function processMessage(
             try {
               // Dynamic import to avoid client-side bundling of server-only modules
               const { uploadExecutionFile } = await import(
-                '@/lib/uploads/contexts/execution/execution-file-manager'
+                '@/lib/uploads/contexts/execution/file-manager'
               )
               userFile = await uploadExecutionFile(
                 execContext,

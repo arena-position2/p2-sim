@@ -4,6 +4,7 @@ import {
   isInternalServeUrl,
   resolveChatImageSourceUrl,
 } from '@/lib/chat/image-fetch-url'
+import { ensureFileNameExtension, getExtensionFromMimeType } from '@/lib/uploads/utils/file'
 
 export interface SelectedGeneratedImage extends AssistantGeneratedImage {
   messageId: string
@@ -77,6 +78,18 @@ function resolveImageMimeType(image: SelectedGeneratedImage, sourceUrl?: string)
   )
 }
 
+/**
+ * Chat labels generated images "Generated image". Upload validation allowlists by
+ * filename extension, so a display name with none is rejected before the edit runs.
+ */
+function toUploadFileName(name: string | undefined, type: string): string {
+  const trimmed = name?.trim()
+  if (!trimmed) {
+    return `generated-image.${getExtensionFromMimeType(type) ?? 'png'}`
+  }
+  return ensureFileNameExtension(trimmed, type)
+}
+
 export function toSelectedGeneratedImage(
   messageId: string,
   image: ToggleGeneratedImageInput
@@ -126,8 +139,7 @@ function materializeInlineDataUrlImage(
     bytes[index] = binary.charCodeAt(index)
   }
   const blob = new Blob([bytes], { type })
-  const extension = type.split('/')[1] || 'png'
-  const name = image.name?.trim() || `generated-image.${extension}`
+  const name = toUploadFileName(image.name, type)
   const file = new File([blob], name, { type })
 
   return {
@@ -155,8 +167,7 @@ export async function materializeSelectedGeneratedImage(
   if (isInternalServeUrl(sourceUrl)) {
     const fetchUrl = getChatImageFetchUrl(sourceUrl)
     const type = resolveImageMimeType(image, sourceUrl)
-    const extension = type.split('/')[1] || 'png'
-    const name = image.name?.trim() || `generated-image.${extension}`
+    const name = toUploadFileName(image.name, type)
     const size = resolveMaterializedFileSize(image)
     return {
       id: image.id,
@@ -174,8 +185,7 @@ export async function materializeSelectedGeneratedImage(
     if (isInternalServeUrl(serveUrl)) {
       const fetchUrl = getChatImageFetchUrl(serveUrl)
       const type = resolveImageMimeType(image, serveUrl)
-      const extension = type.split('/')[1] || 'png'
-      const name = image.name?.trim() || `generated-image.${extension}`
+      const name = toUploadFileName(image.name, type)
       const size = resolveMaterializedFileSize(image)
       return {
         id: image.id,
@@ -198,8 +208,7 @@ export async function materializeSelectedGeneratedImage(
   const type = isConcreteImageMimeType(blob.type)
     ? blob.type
     : resolveImageMimeType(image, sourceUrl)
-  const extension = type.split('/')[1] || 'png'
-  const name = image.name?.trim() || `generated-image.${extension}`
+  const name = toUploadFileName(image.name, type)
   const file = new File([blob], name, { type })
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()

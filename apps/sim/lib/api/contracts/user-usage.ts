@@ -81,6 +81,23 @@ export const userUsageAnalyticsResponseSchema = z.object({
       usage: usageMetricsSchema,
     })
   ),
+  /**
+   * API runs this user triggered in an organization they do not belong to.
+   * Kept apart from `byWorkspace`, which only sums their own workspaces.
+   */
+  byApi: z.array(
+    costBucketSchema.extend({
+      organizationId: z.string(),
+      organizationName: z.string(),
+      workspaceId: z.string(),
+      workspaceName: z.string(),
+      workflowId: z.string(),
+      workflowName: z.string().nullable(),
+      actorUserId: z.string().nullable(),
+      executionCount: z.number().int().nonnegative(),
+      usage: usageMetricsSchema,
+    })
+  ),
   byChargeType: z.array(
     costBucketSchema.extend({
       chargeType: usageChargeTypeSchema,

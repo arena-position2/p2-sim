@@ -1,9 +1,5 @@
 import { isUserFileDisplayMetadata, isUserFileWithMetadata } from '@/lib/core/utils/user-file'
-import {
-  extractStorageKey,
-  inferContextFromKey,
-  isInternalFileUrl,
-} from '@/lib/uploads/utils/file-utils'
+import { extractStorageKey, inferContextFromKey, isInternalFileUrl } from '@/lib/uploads/utils/file'
 
 export interface AssistantChatFile {
   id: string

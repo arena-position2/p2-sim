@@ -16,9 +16,9 @@ import { ChevronLeft } from '@sim/emcn/icons'
 import {
   getEffectiveBlockOutputType,
   getOutputPathsFromSchema,
-} from '@/lib/workflows/blocks/block-outputs'
-import { getBlockReferenceTags } from '@/lib/workflows/blocks/block-reference-tags'
-import { hasTriggerCapability } from '@/lib/workflows/triggers/trigger-utils'
+} from '@/lib/workflows/blocks/outputs'
+import { getBlockReferenceTags } from '@/lib/workflows/blocks/reference-tags'
+import { hasTriggerCapability } from '@/lib/workflows/triggers/utils'
 import { KeyboardNavigationHandler } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/tag-dropdown/components/keyboard-navigation-handler'
 import type {
   BlockTagGroup,
@@ -486,9 +486,7 @@ const FolderContentsInner: React.FC<FolderContentsProps> = ({
           >
             <OverflowText label={child.display} className='flex-1' />
             {childType && childType !== 'any' && (
-              <span className='ml-auto text-[var(--text-muted)] text-micro'>
-                {childType}
-              </span>
+              <span className='ml-auto text-[var(--text-muted)] text-micro'>{childType}</span>
             )}
           </PopoverItem>
         )
@@ -677,9 +675,7 @@ const NestedTagRenderer: React.FC<NestedTagRendererProps> = ({
     >
       <OverflowText label={nestedTag.display} className='flex-1' />
       {tagDescription && tagDescription !== 'any' && (
-        <span className='ml-auto text-[var(--text-muted)] text-micro'>
-          {tagDescription}
-        </span>
+        <span className='ml-auto text-[var(--text-muted)] text-micro'>{tagDescription}</span>
       )}
     </PopoverItem>
   )
@@ -750,9 +746,7 @@ const VariableTagItem: React.FC<{
         className='flex-1'
       />
       {variableInfo && (
-        <span className='ml-auto text-[var(--text-muted)] text-micro'>
-          {variableInfo.type}
-        </span>
+        <span className='ml-auto text-[var(--text-muted)] text-micro'>{variableInfo.type}</span>
       )}
     </PopoverItem>
   )

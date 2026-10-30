@@ -149,7 +149,7 @@ interface GmailDraftV2Response {
 export const gmailDraftV2Tool: InternalToolConfig<GmailSendParams, GmailDraftV2Response> = {
   id: 'gmail_draft_v2',
   name: 'Gmail Draft',
-  description: 'Draft emails using Gmail',
+  description: 'Draft emails using Gmail.',
   version: '2.0.0',
   oauth: gmailDraftTool.oauth,
   params: gmailDraftTool.params,

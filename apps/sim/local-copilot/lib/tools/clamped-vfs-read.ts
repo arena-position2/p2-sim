@@ -4,7 +4,7 @@ import {
   executeCopilotFileUseCase,
   resolveCopilotWorkspaceFileReference,
 } from '@/lib/mothership/application/execute-file-use-case'
-import { isImageFileType } from '@/lib/uploads/utils/file-utils'
+import { isImageFileType } from '@/lib/uploads/utils/file'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
 import { readWorkspaceFileContent } from '@/lib/workspace-files/application/read-workspace-file-content'
 import { clampReadResultForLocalModel } from '@/local-copilot/lib/tools/clamp-read-result'

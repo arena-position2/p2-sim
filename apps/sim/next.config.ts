@@ -9,6 +9,7 @@ const monorepoRoot = path.resolve(__dirname, '../..')
 import { DEFAULT_PRIVACY_URL, DEFAULT_TERMS_URL } from './lib/branding/defaults'
 import { isDev } from './lib/core/config/env-flags'
 import {
+  FILE_DELIVERY_CSP_PATH_PATTERN,
   getChatEmbedCSPPolicy,
   getMainCSPPolicy,
   getWorkflowExecutionCSPPolicy,
@@ -17,15 +18,18 @@ import { LANDING_ROUTES } from './lib/landing/routes'
 import { LIBRARY_MERGED_SLUGS, LIBRARY_MOVED_BLOG_SLUGS } from './lib/library/retired-slugs'
 
 /**
- * Dev-only escape hatch: when `SIM_DEV_MINIMAL_REGISTRY=1` (`bun run dev:minimal`),
- * swap the heavy block and tool registries for tiny curated variants via a
- * Turbopack/webpack resolve alias. The shared workspace layout drags the
- * ~247-tool registry (~2,074 modules) into every route via providers/utils →
- * tools/params, and the editor/executor pull all ~268 block configs; aliasing
- * both to minimal variants stops Turbopack from compiling those graphs, cutting
- * dev compile-time RAM (e.g. /logs ~16GB → ~5GB, 4.9min → ~15s). Only the
- * curated core blocks/tools work in this mode. Never enabled in production.
+ * `Accept` header patterns for Markdown negotiation. `text/markdown` must be one of the listed
+ * media ranges, and `q=0` (RFC 9110 §12.4.2: not acceptable) keeps the HTML page. Next anchors
+ * both patterns to the whole header.
  */
+const ACCEPTS_MARKDOWN = '(.*,)?\\s*text/markdown\\s*([;,].*)?'
+const REFUSES_MARKDOWN =
+  '(.*,)?\\s*text/markdown(\\s*;[^,]*?)?\\s*;\\s*q\\s*=\\s*0(\\.0{0,3})?\\s*(,.*)?'
+const MARKDOWN_REQUEST = {
+  has: [{ type: 'header' as const, key: 'accept', value: ACCEPTS_MARKDOWN }],
+  missing: [{ type: 'header' as const, key: 'accept', value: REFUSES_MARKDOWN }],
+}
+
 const useMinimalRegistry = isDev && process.env.SIM_DEV_MINIMAL_REGISTRY === '1'
 const minimalRegistryAlias: Record<string, string> = useMinimalRegistry
   ? {
@@ -214,6 +218,7 @@ const nextConfig: NextConfig = {
      */
     '/*': [
       './lib/execution/sandbox/bundles/*.cjs',
+      './dist/xlsx-worker.mjs',
       './node_modules/ws/**/*',
       '../../packages/sim-cli/dist/runtime.js',
     ],
@@ -343,6 +348,16 @@ const nextConfig: NextConfig = {
   ],
   async headers() {
     return [
+      {
+        /** `/` answers in HTML or Markdown by `Accept` (see the `beforeFiles` rewrite). */
+        source: '/',
+        headers: [{ key: 'Vary', value: 'Accept' }],
+      },
+      {
+        /** A library article answers in HTML or Markdown by `Accept` (see the `afterFiles` rewrites). */
+        source: '/library/:slug',
+        headers: [{ key: 'Vary', value: 'Accept' }],
+      },
       {
         // `/public`-served assets keep their path across deploys (no content
         // hash), so a shorter TTL + revalidation window bounds how long a
@@ -503,11 +518,12 @@ const nextConfig: NextConfig = {
             key: 'X-Frame-Options',
             value: 'SAMEORIGIN',
           },
-          {
-            key: 'Content-Security-Policy',
-            value: getMainCSPPolicy(),
-          },
         ],
+      },
+      {
+        // File routes preserve their representation CSP in withRouteHandler.
+        source: `/((?!workspace|chat|login|signup|${FILE_DELIVERY_CSP_PATH_PATTERN.slice(1)}$|$).*)`,
+        headers: [{ key: 'Content-Security-Policy', value: getMainCSPPolicy() }],
       },
     ]
   },
@@ -578,15 +594,9 @@ const nextConfig: NextConfig = {
       permanent: true,
     })
 
-    /**
-     * The marketing Academy course/lesson pages were removed; content is
-     * consolidated into the docs site instead. Old course/lesson slugs have
-     * no equivalent path there, so every sub-path collapses to the new
-     * landing page rather than forwarding to a path that may not exist.
-     */
     redirects.push({
       source: '/academy/:path*',
-      destination: 'https://docs.sim.ai/academy',
+      destination: 'https://docs.sim.ai/introduction',
       permanent: true,
     })
 
@@ -774,20 +784,37 @@ const nextConfig: NextConfig = {
     return redirects
   },
   async rewrites() {
-    return [
-      {
-        source: '/arena-ai-docs',
-        destination: '/arena-ai-docs/index.html',
-      },
-      {
-        source: '/favicon.ico',
-        destination: '/icon.svg',
-      },
-      {
-        source: '/r/:shortCode',
-        destination: 'https://go.trybeluga.ai/:shortCode',
-      },
-    ]
+    return {
+      /** `beforeFiles` so a Markdown client's `/` reaches `/index.md` ahead of the HTML page. */
+      beforeFiles: [{ source: '/', ...MARKDOWN_REQUEST, destination: '/index.md' }],
+      /**
+       * `afterFiles` so `/library/tags`, the feeds, and every other static library route keep
+       * their own responses; only the dynamic article route is shadowed.
+       */
+      afterFiles: [
+        { source: '/library/:slug.md', destination: '/library.md/:slug' },
+        { source: '/library/:slug', ...MARKDOWN_REQUEST, destination: '/library.md/:slug' },
+        {
+          source: '/favicon.ico',
+          destination: '/icon.svg',
+        },
+        {
+          source: '/r/:shortCode',
+          destination: 'https://go.trybeluga.ai/:shortCode',
+        },
+      ],
+      /**
+       * Fallback rewrites run only after every page and dynamic route has failed to match, so
+       * this answers a Markdown client's 404 in Markdown without shadowing any real route.
+       */
+      fallback: [
+        {
+          source: '/:path*',
+          ...MARKDOWN_REQUEST,
+          destination: '/markdown-not-found',
+        },
+      ],
+    }
   },
 }
 

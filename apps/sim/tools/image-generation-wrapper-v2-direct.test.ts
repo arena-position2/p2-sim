@@ -98,7 +98,7 @@ vi.mock('@/lib/core/rate-limiter/hosted-key', () => ({
   }),
 }))
 
-vi.mock('@/lib/uploads/contexts/workspace/workspace-file-manager', () => ({
+vi.mock('@/lib/uploads/contexts/workspace/file-manager', () => ({
   resolveWorkspaceFileReference: vi.fn(),
 }))
 

@@ -10,8 +10,10 @@ import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
+  resolveBillingAttributionForPayerUser,
+  resolveBillingPayerUserIdByEmail,
   resolveSystemBillingAttribution,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import type { HighestPrioritySubscription } from '@/lib/billing/core/plan'
 import { getHighestPrioritySubscription } from '@/lib/billing/core/subscription'
 import { checkExecutionUsageLimits } from '@/lib/billing/core/usage-gate-cache'
@@ -144,6 +146,16 @@ export interface PreprocessExecutionOptions {
    * the previously captured snapshot before calling preprocessing.
    */
   billingAttribution?: BillingAttributionSnapshot
+  /**
+   * Email of the Sim user who pays for this run instead of the workflow's
+   * workspace. Their organization (or personal plan) becomes the payer and
+   * they are recorded as the execution actor; the credential identity that
+   * resolves secrets and environment is unchanged. An email matching no user
+   * fails with {@link BILLING_EMAIL_NOT_FOUND_CODE}. Ignored when a serialized
+   * `billingAttribution` is supplied, since that snapshot already carries the
+   * decision.
+   */
+  billingPayerEmail?: string
   /** Attempt type used to size its reservation and return the applicable timeout. */
   executionType?: 'sync' | 'async'
   /** Async API-only request cap in seconds. */
@@ -164,6 +176,11 @@ export interface PreprocessExecutionError {
    */
   retryAfterMs?: number
   cause?: Record<string, unknown>
+  /**
+   * Set when the workflow's own state refused the run; see {@link isWorkflowStateRejection}.
+   * Internal: unlike `code`, no surface copies it onto a response.
+   */
+  workflowState?: 'not_found' | 'not_attached' | 'not_deployed'
 }
 
 /**
@@ -182,6 +199,21 @@ function retryAfterMsFrom(retryAfterSeconds: number | undefined): { retryAfterMs
 }
 
 export const WORKFLOW_NOT_DEPLOYED_CODE = 'WORKFLOW_NOT_DEPLOYED'
+export const BILLING_EMAIL_NOT_FOUND_CODE = 'BILLING_EMAIL_NOT_FOUND'
+
+/** A rate-limit quota denial, distinct from the retryable concurrency-slot 429. */
+export const RATE_LIMIT_EXCEEDED_CODE = 'RATE_LIMIT_EXCEEDED'
+
+/**
+ * Whether the workflow's own state refused the run: deleted or archived, not attached to a
+ * workspace, or not deployed. Produced only after a successful read (a failed read is a 5xx), and
+ * these rejections write no execution log by design, so callers need not wait for one.
+ */
+export function isWorkflowStateRejection(
+  error: Pick<PreprocessExecutionError, 'workflowState'>
+): boolean {
+  return error.workflowState !== undefined
+}
 
 export interface PreprocessExecutionSuccess {
   success: true
@@ -390,6 +422,7 @@ export async function preprocessExecution(
     userIdIsStoredReference = false,
     workflowRecord: prefetchedWorkflowRecord,
     billingAttribution: providedBillingAttribution,
+    billingPayerEmail,
     executionType = 'sync',
     requestedTimeoutSeconds,
     executionDeadlineAt,
@@ -476,6 +509,7 @@ export async function preprocessExecution(
           error: {
             message: 'Workflow not found',
             statusCode: 404,
+            workflowState: 'not_found',
           },
         }
       }
@@ -511,6 +545,7 @@ export async function preprocessExecution(
       error: {
         message: 'Workflow not found',
         statusCode: 404,
+        workflowState: 'not_found',
       },
     }
   } else {
@@ -524,6 +559,7 @@ export async function preprocessExecution(
         error: {
           message: 'Workflow not found',
           statusCode: 404,
+          workflowState: 'not_found',
         },
       }
     }
@@ -540,6 +576,7 @@ export async function preprocessExecution(
         message:
           'This workflow is not attached to a workspace. Personal workflows are deprecated and cannot execute.',
         statusCode: 403,
+        workflowState: 'not_attached',
       },
     }
   }
@@ -554,6 +591,7 @@ export async function preprocessExecution(
         message: 'Workflow is not deployed',
         statusCode: 403,
         code: WORKFLOW_NOT_DEPLOYED_CODE,
+        workflowState: 'not_deployed',
       },
     }
   }
@@ -651,6 +689,34 @@ export async function preprocessExecution(
 
     if (!billingAttribution) {
       billingAttribution = await admission.attributionFor(workspaceId)
+    }
+
+    if (billingPayerEmail && !providedBillingAttribution) {
+      const payerUserId = await withDatabaseReadRetry(
+        () => resolveBillingPayerUserIdByEmail(billingPayerEmail),
+        { label: 'resolveBillingPayerUserIdByEmail' }
+      )
+      if (!payerUserId) {
+        logger.warn(`[${requestId}] Billing email does not match any user`, { workflowId })
+        return {
+          success: false,
+          error: {
+            message: 'No Sim user matches the billing email header',
+            statusCode: 400,
+            code: BILLING_EMAIL_NOT_FOUND_CODE,
+          },
+        }
+      }
+      const payerInput = { actorUserId, workspaceId, payerUserId }
+      billingAttribution = await withDatabaseReadRetry(
+        () => resolveBillingAttributionForPayerUser(payerInput),
+        { label: 'resolveBillingAttributionForPayerUser' }
+      )
+      executionActor = { actorUserId: payerUserId, actorType: 'user' }
+      logger.info(`[${requestId}] Billing payer overridden by billing email`, {
+        payerUserId,
+        billingEntity: billingAttribution.billingEntity,
+      })
     }
   } catch (error) {
     logger.error(`[${requestId}] Error resolving billing attribution`, { error, workflowId })
@@ -817,7 +883,7 @@ export async function preprocessExecution(
                 statusCode: 402,
                 // An unreadable ledger fails closed; that is no verdict on the payer, so senders retry.
                 ...(usageCheck.reason === 'usage_unavailable'
-                  ? {}
+                  ? { retryable: true }
                   : { code: ADMISSION_REJECTION_CODE.USAGE_LIMIT_EXCEEDED }),
               },
             },
@@ -920,7 +986,7 @@ export async function preprocessExecution(
                * (`EXECUTION_CONCURRENCY_LIMIT`, retryable in seconds) — the two
                * need different caller behavior.
                */
-              code: 'RATE_LIMIT_EXCEEDED',
+              code: RATE_LIMIT_EXCEEDED_CODE,
               retryAfterMs: info.retryAfterMs ?? Math.max(0, info.resetAt.getTime() - Date.now()),
             },
           },
@@ -1018,7 +1084,8 @@ export async function preprocessExecution(
           ? {
               member: {
                 organizationId: billingAttribution.organizationId,
-                actorUserId: billingAttribution.actorUserId,
+                actorUserId:
+                  billingAttribution.cappedMemberUserId ?? billingAttribution.actorUserId,
                 currentUsage: usageSnapshot.memberUsage.currentUsage,
                 limit: usageSnapshot.memberUsage.limit,
               },

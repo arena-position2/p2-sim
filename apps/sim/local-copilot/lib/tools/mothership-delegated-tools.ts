@@ -34,7 +34,14 @@ import {
   toServerRegistryToolName,
 } from '@/local-copilot/lib/tools/resolve-tool-name-alias'
 import type { LocalCopilotStructuredContext } from '@/local-copilot/lib/types'
-import { assertWorkspaceFileLookBeforeWrite } from '@/local-copilot/lib/writes/look-before-write'
+import {
+  assertWorkspaceFileLookBeforeWrite,
+  clearLivePatchExcerptTokens,
+  rejectPatchSearchIgnoringLiveExcerpt,
+  rejectRepeatedPatchSearch,
+  rememberFailedPatchSearch,
+  rememberLivePatchExcerptTokens,
+} from '@/local-copilot/lib/writes/look-before-write'
 
 export {
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
@@ -426,6 +433,32 @@ export async function executeMothershipDelegatedTool(
 
   if (toolName === 'workspace_file') {
     enrichWorkspaceFileArgs(enrichedArgs)
+    ctx.failedPatchSearches ??= new Map()
+    ctx.livePatchExcerptTokens ??= new Map()
+    const repeated = rejectRepeatedPatchSearch({
+      args: enrichedArgs,
+      failedPatchSearches: ctx.failedPatchSearches,
+    })
+    if (repeated) {
+      return {
+        toolName,
+        success: false,
+        error: repeated.message,
+        result: repeated.result,
+      }
+    }
+    const ignoresLive = rejectPatchSearchIgnoringLiveExcerpt({
+      args: enrichedArgs,
+      livePatchExcerptTokens: ctx.livePatchExcerptTokens,
+    })
+    if (ignoresLive) {
+      return {
+        toolName,
+        success: false,
+        error: ignoresLive.message,
+        result: ignoresLive.result,
+      }
+    }
     const lookBefore = assertWorkspaceFileLookBeforeWrite({
       args: enrichedArgs,
       readVfsPaths: ctx.readVfsPaths,
@@ -467,6 +500,16 @@ export async function executeMothershipDelegatedTool(
     const result = await executeCopilotServerTool(toolName, enrichedArgs, ctx, workflowId)
     if (!result.success) {
       logger.warn('Copilot server tool failed', { toolName, serverToolName, error: result.error })
+    }
+    if (toolName === 'workspace_file') {
+      ctx.failedPatchSearches ??= new Map()
+      ctx.livePatchExcerptTokens ??= new Map()
+      if (!result.success) {
+        rememberFailedPatchSearch(ctx.failedPatchSearches, enrichedArgs, result.result)
+        rememberLivePatchExcerptTokens(ctx.livePatchExcerptTokens, enrichedArgs, result.result)
+      } else {
+        clearLivePatchExcerptTokens(ctx.livePatchExcerptTokens, enrichedArgs)
+      }
     }
     if (toolName === 'list_integration_tools' && result.success) {
       const { adaptListIntegrationToolsForLocal } = await import(

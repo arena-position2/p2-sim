@@ -81,6 +81,24 @@ export const organizationUsageAnalyticsResponseSchema = z.object({
       usage: usageMetricsSchema,
     })
   ),
+  /**
+   * API runs billed to this organization whose workflow lives in another
+   * organization. Kept apart from `byWorkspace`, which only sums rows that
+   * ran inside this organization's own workspaces.
+   */
+  byApi: z.array(
+    costBucketSchema.extend({
+      organizationId: z.string(),
+      organizationName: z.string(),
+      workspaceId: z.string(),
+      workspaceName: z.string(),
+      workflowId: z.string(),
+      workflowName: z.string().nullable(),
+      actorUserId: z.string().nullable(),
+      executionCount: z.number().int().nonnegative(),
+      usage: usageMetricsSchema,
+    })
+  ),
   byChargeType: z.array(
     costBucketSchema.extend({
       chargeType: usageChargeTypeSchema,
@@ -570,6 +588,29 @@ export const organizationUsageEventsResponseSchema = z.object({
   hasMore: z.boolean(),
 })
 export type OrganizationUsageEventPage = z.output<typeof organizationUsageEventsResponseSchema>
+
+const organizationUsageCalendarResponseSchema = z.object({
+  days: z
+    .array(
+      z.object({
+        date: z.iso.date(),
+        credits: z.number().int().nonnegative(),
+        hasCost: z.boolean(),
+      })
+    )
+    .length(365),
+})
+export type OrganizationUsageCalendar = z.output<typeof organizationUsageCalendarResponseSchema>
+
+export const getOrganizationUsageCalendarContract = defineRouteContract({
+  method: 'GET',
+  path: '/api/organizations/[id]/usage/calendar',
+  params: z.object({ id: organizationIdSchema }),
+  query: organizationUsageWindowQuerySchema
+    .pick({ timezone: true })
+    .extend(usageWorkspaceScopeShape),
+  response: { mode: 'json', schema: organizationUsageCalendarResponseSchema },
+})
 
 export const getOrganizationUsageOverviewContract = defineRouteContract({
   method: 'GET',

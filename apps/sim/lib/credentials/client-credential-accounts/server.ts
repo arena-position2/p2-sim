@@ -3,7 +3,9 @@ import {
   CLIENT_CREDENTIAL_ACCOUNT_SECRET_TYPE,
   type ClientCredentialAccountProviderId,
   FIVETRAN_SERVICE_ACCOUNT_PROVIDER_ID,
+  GREENHOUSE_SERVICE_ACCOUNT_PROVIDER_ID,
   getClientCredentialAccountDescriptor,
+  HELPSCOUT_SERVICE_ACCOUNT_PROVIDER_ID,
   isClientCredentialAccountProviderId,
   NETSUITE_SERVICE_ACCOUNT_PROVIDER_ID,
   ORACLE_EPM_SERVICE_ACCOUNT_PROVIDER_ID,
@@ -17,6 +19,8 @@ import {
 } from '@/lib/credentials/client-credential-accounts/descriptors'
 import { mintBoxServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/box'
 import { mintFivetranServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/fivetran'
+import { mintGreenhouseServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/greenhouse'
+import { mintHelpScoutServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/helpscout'
 import { mintNetSuiteServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/netsuite'
 import { mintOracleEpmServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/oracle-epm'
 import { mintOracleFusionServiceAccountToken } from '@/lib/credentials/client-credential-accounts/minters/oracle-fusion'
@@ -148,6 +152,8 @@ const CLIENT_CREDENTIAL_ACCOUNT_MINTERS: Record<
   [FIVETRAN_SERVICE_ACCOUNT_PROVIDER_ID]: mintFivetranServiceAccountToken,
   [ORACLE_FUSION_SERVICE_ACCOUNT_PROVIDER_ID]: mintOracleFusionServiceAccountToken,
   [ORACLE_EPM_SERVICE_ACCOUNT_PROVIDER_ID]: mintOracleEpmServiceAccountToken,
+  [GREENHOUSE_SERVICE_ACCOUNT_PROVIDER_ID]: mintGreenhouseServiceAccountToken,
+  [HELPSCOUT_SERVICE_ACCOUNT_PROVIDER_ID]: mintHelpScoutServiceAccountToken,
 }
 
 export function getClientCredentialAccountMinter(

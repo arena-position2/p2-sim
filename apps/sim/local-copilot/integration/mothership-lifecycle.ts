@@ -18,6 +18,7 @@ import {
   type FilePreviewAdapterState,
   processFilePreviewStreamEvent,
 } from '@/lib/mothership/request/go/file-preview-adapter'
+import { prepareStreamImages } from '@/lib/mothership/request/go/inline-images'
 import {
   handleSubagentRouting,
   sseHandlers,
@@ -28,11 +29,13 @@ import {
   flushThinkingBlock,
 } from '@/lib/mothership/request/handlers/types'
 import type { CopilotLifecycleOptions } from '@/lib/mothership/request/lifecycle/run'
+import { isExplicitUserStopError } from '@/lib/mothership/request/otel'
 import {
   isSubagentSpanStreamEvent,
   isToolCallStreamEvent,
   LOCAL_STATUS_PHASE,
 } from '@/lib/mothership/request/session'
+import { isExplicitStopReason } from '@/lib/mothership/request/session/abort-reason'
 import { handleResourceSideEffects } from '@/lib/mothership/request/tools/resources'
 import type {
   ExecutionContext,
@@ -157,6 +160,7 @@ function withStrippedFileToolArgs(event: StreamEvent): StreamEvent {
 interface LocalFilePreviewRuntime {
   adapterState: FilePreviewAdapterState
   createFileSessions: Set<string>
+  attemptedInlineImages: Set<string>
 }
 
 async function dispatchStreamEvent(
@@ -192,6 +196,13 @@ async function dispatchStreamEvent(
   })
 
   const clientEvent = withStrippedFileToolArgs(event)
+  await prepareStreamImages(
+    clientEvent,
+    context,
+    execContext,
+    filePreview.attemptedInlineImages,
+    execContext.abortSignal
+  )
   await options.onEvent?.(clientEvent)
 
   if (isSubagentSpanStreamEvent(clientEvent)) {
@@ -550,6 +561,10 @@ async function dispatchLocalCopilotEvent(
   }
 
   if (event.type === 'error') {
+    if (isExplicitStopReason(event.message)) {
+      context.wasAborted = true
+      return
+    }
     const safeMessage = stripIdsFromUserFacingText(event.message) || event.message
     context.errors.push(safeMessage)
     await dispatchStreamEvent(
@@ -593,6 +608,7 @@ export async function runLocalCopilotMothershipLifecycle(
   const filePreview: LocalFilePreviewRuntime = {
     adapterState: createFilePreviewAdapterState(),
     createFileSessions: new Set<string>(),
+    attemptedInlineImages: new Set<string>(),
   }
 
   if (!message) {
@@ -915,6 +931,18 @@ export async function runLocalCopilotMothershipLifecycle(
       }
     }
   } catch (error) {
+    if (isExplicitUserStopError(error) || isExplicitStopReason(options.abortSignal?.reason)) {
+      context.wasAborted = true
+      flushSubagentThinkingBlock(context)
+      flushThinkingBlock(context)
+      context.completionStatus = MothershipStreamV1CompletionStatus.cancelled
+      logger.info('Arena Copilot mothership lifecycle stopped by user', {
+        workspaceId,
+        workflowId: workflowId ?? null,
+        durationMs: Date.now() - startedAt,
+      })
+      return
+    }
     const messageText = getErrorMessage(error, 'Arena Copilot failed')
     logger.error('Arena Copilot mothership lifecycle failed', {
       error: messageText,

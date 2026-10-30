@@ -20,7 +20,7 @@ import {
   uploadsMetadataMockFns,
 } from '@sim/testing/mocks/uploads-metadata.mock'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/attribution'
 import type { ConnectorAccessMode } from '@/lib/knowledge/connectors/access-modes'
 import {
   beginListingCheckpoint,
@@ -28,10 +28,15 @@ import {
 } from '@/lib/knowledge/connectors/listing-checkpoint'
 import {
   routeWindowScans,
+  windowCount,
+  windowCounts,
   windowScan,
   windowScans,
 } from '@/lib/knowledge/connectors/reconciliation-window.test-helpers'
-import { runConnectorContentPass } from '@/lib/knowledge/connectors/sync-content-pass'
+import {
+  removeDisabledImages,
+  runConnectorContentPass,
+} from '@/lib/knowledge/connectors/sync-content-pass'
 import {
   SOURCE_CONTENT_ERROR,
   SOURCE_PERMISSION_ERROR,
@@ -221,15 +226,15 @@ describe('completed listing removal counts', () => {
       complete: true,
       listedCount: 8,
     }
-    queueTableRows(schemaMock.document, [
-      {
-        ownedCount: 10,
-        listedCount: 8,
-        aclCount: options.revoked?.length ?? 0,
-        softCount: soft.length,
-        hardCount: hard.length,
-      },
-    ])
+    windowCounts.push(
+      windowCount({
+        owned: 10,
+        listed: 8,
+        acl: options.revoked?.length ?? 0,
+        soft: soft.length,
+        hard: hard.length,
+      })
+    )
     /** A walk whose count is zero never scans. Each walk here fits in one partial window. */
     if (options.revoked?.length) {
       windowScans.push(windowScan(options.revoked))
@@ -263,6 +268,7 @@ describe('completed listing removal counts', () => {
       docsUnchanged: 0,
       docsSkipped: 0,
       docsFailed: 0,
+      processingDispatch: { requested: 0, accepted: 0, failed: 0 },
     }
     const pass = await runConnectorContentPass({
       connectorId: 'connector',
@@ -343,9 +349,7 @@ async function runPass(
   vi.clearAllMocks()
   resetDbChainMock()
   vi.setSystemTime(new Date(Date.now() + 60_000))
-  if (options.databaseTime) {
-    dbChainMockFns.execute.mockResolvedValue([{ startedAt: options.databaseTime.toISOString() }])
-  }
+  if (options.databaseTime) routeWindowScans(options.databaseTime)
   for (let index = 0; index < 16; index++) {
     queueTableRows(schemaMock.knowledgeConnector, [
       {
@@ -382,9 +386,7 @@ async function runPass(
       schemaMock.document,
       options.permissionStoredAfter ? [options.permissionStoredAfter] : []
     )
-  queueTableRows(schemaMock.document, [
-    { ownedCount: 1, listedCount: 1, softCount: 0, hardCount: 0 },
-  ])
+  windowCounts.push(windowCount({ owned: 1, listed: 1, soft: 0, hard: 0 }))
   for (let index = 0; index < 3; index++) queueTableRows(schemaMock.document, [])
   dbChainMockFns.returning.mockResolvedValue([{ id: 'document' }])
 
@@ -453,6 +455,42 @@ function contentWrite(): Record<string, unknown> {
   expect(call).toBeDefined()
   return call![0]
 }
+
+describe('disabled image removal', () => {
+  it('keeps walking past a page that removed nothing', async () => {
+    queueTableRows(schemaMock.document, [{ id: 'detached' }])
+    queueTableRows(schemaMock.document, [{ id: 'image' }])
+    queueTableRows(schemaMock.document, [])
+    mocks.hardDelete.mockResolvedValueOnce(0).mockResolvedValueOnce(1)
+    const result: SyncResult = {
+      docsAdded: 0,
+      docsUpdated: 0,
+      docsDeleted: 0,
+      docsUnchanged: 0,
+      docsSkipped: 0,
+      docsFailed: 0,
+      processingDispatch: { requested: 0, accepted: 0, failed: 0 },
+    }
+
+    const finished = await removeDisabledImages({
+      connectorId: 'connector',
+      connector: { knowledgeBaseId: 'kb', connectorType: 'confluence', imageRemovalPending: true },
+      lease: {
+        stillHeld: () => stillHoldsSyncLock('connector', 'run'),
+        beatIfDue: async () => undefined,
+        beatLive: async () => undefined,
+      },
+      leaseKind: 'content',
+      runId: 'run',
+      deadlineAt: Date.now() + 60_000,
+      result,
+    })
+
+    expect(finished).toBe(true)
+    expect(mocks.hardDelete.mock.calls.map((call) => call[0])).toEqual([['detached'], ['image']])
+    expect(result.docsDeleted).toBe(1)
+  })
+})
 
 describe('content pass checkpoint intent', () => {
   it('does not reconcile deletions after a user listing failed, even without the unsafe marker', async () => {

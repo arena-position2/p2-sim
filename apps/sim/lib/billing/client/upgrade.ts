@@ -10,7 +10,7 @@ import {
   listCreatorOrganizationsContract,
 } from '@/lib/api/contracts/organizations'
 import { subscriptionTransferContract } from '@/lib/api/contracts/user'
-import { client, useSession, useSubscription } from '@/lib/auth/auth-client'
+import { client, useSession, useSubscription } from '@/lib/auth/client'
 import {
   isBlockingOrgSubscription,
   isStripeUpgradeableSubscription,

@@ -177,7 +177,7 @@ export const searchTask: ToolConfig<SearchTaskQueryParams, SearchTaskResponse> =
       return q.length > 0 ? `${base}?${q.join('&')}` : base
     },
     method: 'GET',
-    headers: () => {
+    headers: (_params: SearchTaskQueryParams) => {
       return {
         Accept: 'application/json',
         'Content-Type': 'application/json',

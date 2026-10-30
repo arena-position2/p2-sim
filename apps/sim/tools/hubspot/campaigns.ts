@@ -132,6 +132,7 @@ export const hubspotListCampaignsTool: ToolConfig<
         'hs_start_date,hs_end_date,hs_color_hex,hs_notes,hs_audience,hs_goal,hs_owner,hs_currency_code,hs_created_by_user_id,hs_campaign_status,hs_object_id,hs_name,hs_utm,hs_budget_items_sum_amount,hs_spend_items_sum_amount'
       )
       const queryString = queryParams.toString()
+      logger.debug('HubSpot list campaigns query', { baseUrl, queryString })
       return queryString ? `${baseUrl}?${queryString}` : baseUrl
     },
     method: 'GET',
