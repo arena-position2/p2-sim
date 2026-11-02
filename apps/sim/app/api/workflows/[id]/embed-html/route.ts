@@ -1,6 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { V2_WORKFLOW_BILLING_EMAIL_HEADER } from '@/lib/api/contracts/v2/workflows'
 import { getSession } from '@/lib/auth'
 
 const logger = createLogger('WorkflowEmbedHtmlApi')
@@ -20,6 +21,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
   const session = await getSession()
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const userEmail = session.user.email?.trim()
+  if (!userEmail) {
+    return NextResponse.json({ error: 'Logged-in user email is required' }, { status: 400 })
   }
 
   const { id: workflowId } = await context.params
@@ -44,6 +49,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       headers: {
         'X-API-Key': apiKey,
         'Content-Type': 'application/json',
+        [V2_WORKFLOW_BILLING_EMAIL_HEADER]: userEmail,
       },
       body: JSON.stringify({ persona: body.persona }),
       cache: 'no-store',

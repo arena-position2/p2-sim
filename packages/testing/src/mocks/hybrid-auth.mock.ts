@@ -67,6 +67,22 @@ export const hybridAuthMock = {
     if (auth.authType === 'session') return auth.userId
     return auth.authType === 'api_key' && auth.apiKeyType === 'personal' ? auth.userId : null
   },
+  /**
+   * Same derivation as `apiKeyAttributionFromPrincipal`. A stub would drop the
+   * key id the execute route forwards into preprocessing.
+   */
+  apiKeyAttributionFromPrincipal: (principal?: {
+    kind?: string
+    keyId?: string
+  }): { apiKeyId?: string; apiKeyType?: 'personal' | 'workspace' } => {
+    if (principal?.kind === 'personal_api_key') {
+      return { apiKeyId: principal.keyId, apiKeyType: 'personal' }
+    }
+    if (principal?.kind === 'workspace_api_key') {
+      return { apiKeyId: principal.keyId, apiKeyType: 'workspace' }
+    }
+    return {}
+  },
   checkHybridAuth: hybridAuthMockFns.mockCheckHybridAuth,
   checkSessionOrInternalAuth: hybridAuthMockFns.mockCheckSessionOrInternalAuth,
   checkInternalAuth: hybridAuthMockFns.mockCheckInternalAuth,
