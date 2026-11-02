@@ -85,7 +85,7 @@ export function PreviewAuthorNotes({
             setCopied(false)
             setPanel('warnings')
           }}
-          className='text-[var(--gui-brand,#1a73e8)] hover:underline'
+          className='text-(--gui-brand,#1a73e8) hover:underline'
         >
           View warnings
         </button>
@@ -98,14 +98,14 @@ export function PreviewAuthorNotes({
             setCopied(false)
             setPanel('edit-instructions')
           }}
-          className='text-[var(--gui-brand,#1a73e8)] hover:underline'
+          className='text-(--gui-brand,#1a73e8) hover:underline'
         >
           View edit instructions
         </button>
       ) : null}
       {panel ? (
         <div
-          className='fixed inset-0 z-30 flex items-center justify-center bg-[rgb(44_45_51_/_40%)] p-4'
+          className='fixed inset-0 z-30 flex items-center justify-center bg-[rgb(44_45_51/40%)] p-4'
           data-testid='preview-author-notes-backdrop'
           onClick={() => setPanel(null)}
         >
@@ -115,14 +115,14 @@ export function PreviewAuthorNotes({
             aria-labelledby='preview-author-notes-title'
             data-testid='preview-author-notes'
             data-panel={panel}
-            className='flex max-h-[80vh] w-full max-w-lg flex-col rounded-[var(--gui-radius,12px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#ffffff)] shadow-[var(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))]'
+            className='flex max-h-[80vh] w-full max-w-lg flex-col rounded-(--gui-radius,12px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#ffffff) shadow-(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))'
             onClick={(event) => event.stopPropagation()}
             onKeyDown={onKeyDown}
           >
-            <div className='flex items-start justify-between gap-3 border-[var(--gui-border,#e2e3e5)] border-b px-4 py-3'>
+            <div className='flex items-start justify-between gap-3 border-(--gui-border,#e2e3e5) border-b px-4 py-3'>
               <h2
                 id='preview-author-notes-title'
-                className='font-medium text-[var(--gui-text,#2c2d33)] text-sm'
+                className='font-medium text-(--gui-text,#2c2d33) text-sm'
               >
                 {panel === 'warnings' ? 'Warnings' : 'Edit instructions'}
               </h2>
@@ -131,12 +131,12 @@ export function PreviewAuthorNotes({
                 autoFocus
                 data-testid='preview-author-notes-close'
                 onClick={() => setPanel(null)}
-                className='text-[var(--gui-text-muted,#8a8d99)] text-xs hover:underline'
+                className='text-(--gui-text-muted,#8a8d99) text-xs hover:underline'
               >
                 Close
               </button>
             </div>
-            <div className='min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[var(--gui-text,#2c2d33)] text-sm'>
+            <div className='min-h-0 flex-1 overflow-y-auto px-4 py-3 text-(--gui-text,#2c2d33) text-sm'>
               {panel === 'warnings' ? (
                 <WarningsBody
                   generateWarnings={generateWarnings}
@@ -144,16 +144,16 @@ export function PreviewAuthorNotes({
                   screenshotMatchNotes={screenshotMatchNotes}
                 />
               ) : (
-                <pre className='whitespace-pre-wrap break-words font-sans'>{editInstructions}</pre>
+                <pre className='whitespace-pre-wrap wrap-break-word font-sans'>{editInstructions}</pre>
               )}
             </div>
-            <div className='flex justify-end border-[var(--gui-border,#e2e3e5)] border-t px-4 py-3'>
+            <div className='flex justify-end border-(--gui-border,#e2e3e5) border-t px-4 py-3'>
               <button
                 type='button'
                 data-testid='preview-author-notes-copy'
                 onClick={copy}
                 className={cn(
-                  'rounded px-2 py-1 text-[var(--gui-brand,#1a73e8)] text-xs hover:underline'
+                  'rounded px-2 py-1 text-(--gui-brand,#1a73e8) text-xs hover:underline'
                 )}
               >
                 {copied
@@ -186,18 +186,18 @@ function WarningsBody({
     <div className='flex flex-col gap-4'>
       {adoptedChanges.length > 0 ? (
         <section>
-          <h3 className='mb-2 font-medium text-xs uppercase tracking-wide text-[var(--gui-text-muted,#8a8d99)]'>
+          <h3 className='mb-2 font-medium text-xs uppercase tracking-wide text-(--gui-text-muted,#8a8d99)'>
             Changes we applied
           </h3>
           <ul className='flex flex-col gap-3'>
             {adoptedChanges.map((change) => (
               <li key={`${change.code}:${change.asked}`}>
                 <p>
-                  <span className='text-[var(--gui-text-muted,#8a8d99)]'>Asked: </span>
+                  <span className='text-(--gui-text-muted,#8a8d99)'>Asked: </span>
                   {change.asked}
                 </p>
                 <p>
-                  <span className='text-[var(--gui-text-muted,#8a8d99)]'>Adopted: </span>
+                  <span className='text-(--gui-text-muted,#8a8d99)'>Adopted: </span>
                   {change.adopted}
                 </p>
               </li>
@@ -207,7 +207,7 @@ function WarningsBody({
       ) : null}
       {generateWarnings.length > 0 ? (
         <section>
-          <h3 className='mb-2 font-medium text-xs uppercase tracking-wide text-[var(--gui-text-muted,#8a8d99)]'>
+          <h3 className='mb-2 font-medium text-xs uppercase tracking-wide text-(--gui-text-muted,#8a8d99)'>
             Generate fallbacks
           </h3>
           <ul className='flex list-disc flex-col gap-1 pl-4'>
@@ -219,10 +219,10 @@ function WarningsBody({
       ) : null}
       {screenshot ? (
         <section>
-          <h3 className='mb-2 font-medium text-xs uppercase tracking-wide text-[var(--gui-text-muted,#8a8d99)]'>
+          <h3 className='mb-2 font-medium text-xs uppercase tracking-wide text-(--gui-text-muted,#8a8d99)'>
             Screenshot
           </h3>
-          <p className='whitespace-pre-wrap break-words'>{screenshot}</p>
+          <p className='whitespace-pre-wrap wrap-break-word'>{screenshot}</p>
         </section>
       ) : null}
     </div>

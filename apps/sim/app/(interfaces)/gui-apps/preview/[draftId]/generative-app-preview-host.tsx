@@ -189,12 +189,12 @@ export function GenerativeAppPreviewHost({
   })
 
   if (draftQuery.isLoading) {
-    return <p className='p-8 text-[var(--color-ds-grey-500,#8a8d99)] text-sm'>Loading…</p>
+    return <p className='p-8 text-(--color-ds-grey-500,#8a8d99) text-sm'>Loading…</p>
   }
 
   if (draftQuery.isError || !draftQuery.data || !manifest) {
     return (
-      <div className='p-8 text-center text-[var(--text-error)]'>
+      <div className='p-8 text-center text-(--text-error)'>
         {toError(draftQuery.error).message || 'Unable to load this draft'}
       </div>
     )
@@ -202,7 +202,7 @@ export function GenerativeAppPreviewHost({
 
   if (draftQuery.data.planStatus === 'planned') {
     return (
-      <div className='p-8 text-center text-[var(--text-secondary)] text-sm'>
+      <div className='p-8 text-center text-(--text-secondary) text-sm'>
         This draft is a product contract only. Confirm the plan in the Arena Generative UI block,
         then run Generate from Plan before Preview.
       </div>
@@ -244,7 +244,7 @@ export function GenerativeAppPreviewHost({
   return (
     <GenerativeAppThemeRoot theme={liveTheme}>
       <div className='min-h-screen'>
-        <div className='flex flex-wrap items-center justify-between gap-2 border-[var(--gui-border,#e2e3e5)] border-b bg-[var(--gui-canvas,#f7f8f9)] px-4 py-2 text-[var(--gui-text-muted,#8a8d99)] text-xs'>
+        <div className='flex flex-wrap items-center justify-between gap-2 border-(--gui-border,#e2e3e5) border-b bg-(--gui-canvas,#f7f8f9) px-4 py-2 text-(--gui-text-muted,#8a8d99) text-xs'>
           <span>Preview — not published. CTAs run against this draft.</span>
           <div className='flex flex-wrap items-center gap-3'>
             <PreviewAuthorNotes
@@ -264,7 +264,7 @@ export function GenerativeAppPreviewHost({
                   setCopiedPagePrompt(false)
                 }
               }}
-              className='text-[var(--gui-brand,#1a73e8)] hover:underline'
+              className='text-(--gui-brand,#1a73e8) hover:underline'
             >
               {copiedPagePrompt ? 'Copied' : 'Copy page edit prompt'}
             </button>

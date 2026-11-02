@@ -90,7 +90,7 @@ export function ChatComposer({
   return (
     <form
       data-testid='generative-chat'
-      className='flex w-full flex-col gap-2 rounded-[var(--gui-radius,12px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#fff)] p-3'
+      className='flex w-full flex-col gap-2 rounded-(--gui-radius,12px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#fff) p-3'
       onSubmit={(event) => {
         void handleSubmit(event)
       }}
@@ -101,28 +101,28 @@ export function ChatComposer({
         placeholder={placeholder}
         rows={3}
         disabled={pending}
-        className='min-h-[4.5rem] w-full resize-none bg-transparent text-[length:var(--gui-body-size,14px)] text-[var(--gui-text,#1a1c21)] outline-none placeholder:text-[var(--gui-text-muted,#575a66)]'
+        className='min-h-18 w-full resize-none bg-transparent text-(length:--gui-body-size,14px) text-(--gui-text,#1a1c21) outline-none placeholder:text-(--gui-text-muted,#575a66)'
       />
       {files.length > 0 ? (
         <ul className='flex flex-wrap gap-2'>
           {files.map((file) => (
             <li
               key={`${file.name}-${file.data.slice(-12)}`}
-              className='flex items-center gap-1 rounded-full bg-[var(--gui-border,#e2e3e5)] px-2 py-0.5 text-[12px]'
+              className='flex items-center gap-1 rounded-full bg-(--gui-border,#e2e3e5) px-2 py-0.5 text-caption'
             >
-              <span className='max-w-[10rem] truncate'>{file.name}</span>
+              <span className='max-w-40 truncate'>{file.name}</span>
               <button
                 type='button'
                 aria-label={`Remove ${file.name}`}
                 onClick={() => setFiles((current) => current.filter((item) => item !== file))}
               >
-                <X className='size-[12px] text-[var(--gui-text-muted,#575a66)]' />
+                <X className='size-[12px] text-(--gui-text-muted,#575a66)' />
               </button>
             </li>
           ))}
         </ul>
       ) : null}
-      {error ? <p className='text-[12px] text-[var(--gui-danger,#c62828)]'>{error}</p> : null}
+      {error ? <p className='text-caption text-(--gui-danger,#c62828)'>{error}</p> : null}
       <div className='flex items-center justify-between gap-2'>
         {allowFiles ? (
           <>
@@ -140,7 +140,7 @@ export function ChatComposer({
               aria-label='Attach files'
               disabled={pending}
               onClick={() => fileInputRef.current?.click()}
-              className='rounded-[var(--gui-radius-sm,8px)] p-1.5 text-[var(--gui-text-muted,#575a66)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+              className='rounded-(--gui-radius-sm,8px) p-1.5 text-(--gui-text-muted,#575a66) hover:bg-(--gui-canvas,#f7f8f9)'
             >
               <Paperclip className='size-[14px]' />
             </button>

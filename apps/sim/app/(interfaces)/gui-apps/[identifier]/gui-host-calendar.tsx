@@ -21,7 +21,7 @@ import {
 } from '@/lib/arena-generative-ui/gui-calendar'
 
 const DAY_BUTTON_CLASS =
-  'flex min-h-8 w-full flex-col items-center justify-center rounded-[var(--gui-radius-sm,8px)] text-[length:var(--gui-label-size,12px)] outline-none transition-[background-color,color] duration-100 focus-visible:shadow-[0_0_0_3px_var(--gui-focus,rgb(26_115_232_/_30%))]'
+  'flex min-h-8 w-full flex-col items-center justify-center rounded-(--gui-radius-sm,8px) text-(length:--gui-label-size,12px) outline-none transition-[background-color,color] duration-100 focus-visible:shadow-[0_0_0_3px_var(--gui-focus,rgb(26_115_232/30%))]'
 
 const BOUND_EMPTY_CLASS = GUI_BOUND_EMPTY_CLASS
 
@@ -53,18 +53,18 @@ export function GuiHostMonthGrid({
         <button
           type='button'
           aria-label='Previous month'
-          className='inline-flex size-8 items-center justify-center rounded-[var(--gui-radius-sm,8px)] text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+          className='inline-flex size-8 items-center justify-center rounded-(--gui-radius-sm,8px) text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
           onClick={() => onMoveMonth?.(-1)}
         >
           <ChevronLeft className='size-[14px]' />
         </button>
-        <p className='font-medium text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)]'>
+        <p className='font-medium text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33)'>
           {monthTitle(year, month)}
         </p>
         <button
           type='button'
           aria-label='Next month'
-          className='inline-flex size-8 items-center justify-center rounded-[var(--gui-radius-sm,8px)] text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+          className='inline-flex size-8 items-center justify-center rounded-(--gui-radius-sm,8px) text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
           onClick={() => onMoveMonth?.(1)}
         >
           <ChevronRight className='size-[14px]' />
@@ -74,7 +74,7 @@ export function GuiHostMonthGrid({
         {WEEKDAY_LABELS.map((label) => (
           <p
             key={label}
-            className='px-1 text-center font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'
+            className='px-1 text-center font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'
           >
             {label}
           </p>
@@ -116,16 +116,16 @@ function DayCell({
       className={cn(
         DAY_BUTTON_CLASS,
         'min-h-10 px-0.5 py-1',
-        day.inMonth ? 'text-[var(--gui-text,#2c2d33)]' : 'text-[var(--gui-text-tertiary,#8a8d99)]',
-        selected && 'bg-[var(--gui-brand-surface,#f3f8fe)] text-[var(--gui-brand,#1a73e8)]',
-        !selected && !disabled && 'hover:bg-[var(--gui-canvas,#f7f8f9)]',
+        day.inMonth ? 'text-(--gui-text,#2c2d33)' : 'text-(--gui-text-tertiary,#8a8d99)',
+        selected && 'bg-(--gui-brand-surface,#f3f8fe) text-(--gui-brand,#1a73e8)',
+        !selected && !disabled && 'hover:bg-(--gui-canvas,#f7f8f9)',
         disabled && 'cursor-not-allowed opacity-40'
       )}
       onClick={() => onSelect(day.iso)}
     >
       <span>{day.day}</span>
       {chips.length > 0 ? (
-        <span className='mt-0.5 line-clamp-1 w-full text-[10px] text-[var(--gui-brand,#1a73e8)]'>
+        <span className='mt-0.5 line-clamp-1 w-full text-micro text-(--gui-brand,#1a73e8)'>
           {chips[0]?.title}
         </span>
       ) : null}
@@ -233,7 +233,7 @@ export function GuiHostDateInput({
       {open ? (
         <div
           role='dialog'
-          className='absolute z-20 mt-1 w-[min(100%,20rem)] rounded-[var(--gui-radius,12px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#ffffff)] p-3 shadow-[var(--gui-shadow-lg,0px_4px_16px_rgba(44,45,51,0.12))]'
+          className='absolute z-20 mt-1 w-[min(100%,20rem)] rounded-(--gui-radius,12px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#ffffff) p-3 shadow-(--gui-shadow-lg,0px_4px_16px_rgba(44,45,51,0.12))'
         >
           <GuiHostMonthGrid
             year={cursor.year}
@@ -306,7 +306,7 @@ export function GuiHostCalendar({
     <button
       type='button'
       key={`${entry.index}-${entry.title}`}
-      className='w-full truncate rounded-[var(--gui-radius-sm,8px)] bg-[var(--gui-brand-surface,#f3f8fe)] px-1.5 py-0.5 text-left text-[length:var(--gui-label-size,12px)] text-[var(--gui-brand,#1a73e8)]'
+      className='w-full truncate rounded-(--gui-radius-sm,8px) bg-(--gui-brand-surface,#f3f8fe) px-1.5 py-0.5 text-left text-(length:--gui-label-size,12px) text-(--gui-brand,#1a73e8)'
       onClick={() => onSelectItem?.(entry.item, entry.index)}
     >
       {entry.title}
@@ -318,10 +318,10 @@ export function GuiHostCalendar({
       data-testid='gui-calendar'
       aria-busy={busy || undefined}
       aria-labelledby={headingId}
-      className='flex w-full flex-col gap-3 rounded-[var(--gui-radius,12px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#ffffff)] p-4'
+      className='flex w-full flex-col gap-3 rounded-(--gui-radius,12px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#ffffff) p-4'
     >
       <div className='flex flex-wrap items-center justify-between gap-2'>
-        <p id={headingId} className='font-medium text-[var(--gui-text,#2c2d33)]'>
+        <p id={headingId} className='font-medium text-(--gui-text,#2c2d33)'>
           {monthTitle(cursor.year, cursor.month)}
         </p>
         {allowViewToggle ? (
@@ -331,10 +331,10 @@ export function GuiHostCalendar({
                 key={next}
                 type='button'
                 className={cn(
-                  'rounded-[var(--gui-radius-sm,8px)] px-2 py-1 text-[length:var(--gui-label-size,12px)]',
+                  'rounded-(--gui-radius-sm,8px) px-2 py-1 text-(length:--gui-label-size,12px)',
                   view === next
-                    ? 'bg-[var(--gui-brand-surface,#f3f8fe)] text-[var(--gui-brand,#1a73e8)]'
-                    : 'text-[var(--gui-text-muted,#575a66)]'
+                    ? 'bg-(--gui-brand-surface,#f3f8fe) text-(--gui-brand,#1a73e8)'
+                    : 'text-(--gui-text-muted,#575a66)'
                 )}
                 onClick={() => setView(next)}
               >
@@ -368,7 +368,7 @@ export function GuiHostCalendar({
         <div className='grid grid-cols-7 gap-2'>
           {weekDays.map((day, index) => (
             <div key={day.iso} className='flex min-h-32 flex-col gap-1'>
-              <p className='text-center text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+              <p className='text-center text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                 {WEEKDAY_LABELS[index]} {day.day}
               </p>
               {(grouped.byDate.get(day.iso) ?? []).map(renderChip)}
@@ -379,9 +379,9 @@ export function GuiHostCalendar({
       {grouped.unscheduled.length > 0 ? (
         <div
           data-testid='unscheduled'
-          className='flex flex-col gap-1 border-[var(--gui-border,#e2e3e5)] border-t pt-3'
+          className='flex flex-col gap-1 border-(--gui-border,#e2e3e5) border-t pt-3'
         >
-          <p className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'>
+          <p className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'>
             Unscheduled
           </p>
           {grouped.unscheduled.map(renderChip)}

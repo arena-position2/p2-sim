@@ -637,9 +637,9 @@ function buttonClass(
 }
 
 const DELTA_TONE_CLASSES = {
-  positive: 'text-[var(--gui-success-text,#23784f)]',
-  negative: 'text-[var(--gui-error-text,#921010)]',
-  neutral: 'text-[var(--gui-text-muted,#575a66)]',
+  positive: 'text-(--gui-success-text,#23784f)',
+  negative: 'text-(--gui-error-text,#921010)',
+  neutral: 'text-(--gui-text-muted,#575a66)',
 } as const
 
 function deltaToneClass(value: unknown): string {
@@ -648,16 +648,16 @@ function deltaToneClass(value: unknown): string {
 }
 
 const HEADING_SIZE_CLASSES = {
-  h1: 'text-[length:var(--gui-heading-size,32px)] leading-[var(--gui-heading-leading,40px)]',
-  h2: 'text-[length:var(--gui-title-size,24px)] leading-[var(--gui-title-leading,32px)]',
-  h3: 'text-[length:var(--gui-section-size,18px)] leading-[var(--gui-section-leading,26px)]',
-  h4: 'text-[length:var(--gui-body-size,16px)] leading-[var(--gui-body-leading,24px)]',
+  h1: 'text-(length:--gui-heading-size,32px) leading-(--gui-heading-leading,40px)',
+  h2: 'text-(length:--gui-title-size,24px) leading-(--gui-title-leading,32px)',
+  h3: 'text-(length:--gui-section-size,18px) leading-(--gui-section-leading,26px)',
+  h4: 'text-(length:--gui-body-size,16px) leading-(--gui-body-leading,24px)',
 } as const
 
 const CARD_TITLE_FEATURED_CLASS =
-  'text-[length:var(--gui-title-size,24px)] leading-[var(--gui-title-leading,32px)]'
+  'text-(length:--gui-title-size,24px) leading-(--gui-title-leading,32px)'
 const CARD_TITLE_ITEM_CLASS =
-  'text-[length:var(--gui-section-size,18px)] leading-[var(--gui-section-leading,26px)]'
+  'text-(length:--gui-section-size,18px) leading-(--gui-section-leading,26px)'
 
 function sectionWidthClass(value: unknown, measureOnly = false): string {
   if (measureOnly && asString(value) !== 'full') return SECTION_WIDTHS.narrow
@@ -845,7 +845,7 @@ function ScalarValue({
     return (
       <a
         href={href}
-        className='font-medium text-[var(--gui-brand,#1a73e8)] underline-offset-2 hover:underline'
+        className='font-medium text-(--gui-brand,#1a73e8) underline-offset-2 hover:underline'
         rel='noreferrer'
       >
         {href}
@@ -895,18 +895,18 @@ function ProgressStepsView({ pending, steps, durationMs }: ProgressStepsViewProp
             className={cn(
               'flex items-center gap-2',
               step.nested && 'pl-6',
-              done && 'text-[var(--gui-text,#2c2d33)]',
-              current && 'font-medium text-[var(--gui-brand,#1a73e8)]',
-              !done && !current && 'text-[var(--gui-text-tertiary,#8a8d99)]'
+              done && 'text-(--gui-text,#2c2d33)',
+              current && 'font-medium text-(--gui-brand,#1a73e8)',
+              !done && !current && 'text-(--gui-text-tertiary,#8a8d99)'
             )}
           >
             <span
               className={cn(
                 'inline-flex size-5 items-center justify-center rounded-full border text-xs',
                 done &&
-                  'border-[var(--gui-brand,#1a73e8)] bg-[var(--gui-brand,#1a73e8)] text-[var(--gui-text-on-brand,#ffffff)]',
-                current && 'border-[var(--gui-brand,#1a73e8)] text-[var(--gui-brand,#1a73e8)]',
-                !done && !current && 'border-[var(--gui-border,#e2e3e5)]'
+                  'border-(--gui-brand,#1a73e8) bg-(--gui-brand,#1a73e8) text-(--gui-text-on-brand,#ffffff)',
+                current && 'border-(--gui-brand,#1a73e8) text-(--gui-brand,#1a73e8)',
+                !done && !current && 'border-(--gui-border,#e2e3e5)'
               )}
             >
               {done ? '✓' : current ? '…' : ''}
@@ -976,20 +976,20 @@ function WorkingCardView({
 
   return (
     <div className='flex w-full flex-col gap-4' data-testid='working-card'>
-      <div className='flex flex-col gap-4 rounded-[var(--gui-radius,12px)] border border-[var(--gui-info-border,#a3c7f6)] bg-[var(--gui-info-surface,#f3f8fe)] p-5'>
+      <div className='flex flex-col gap-4 rounded-(--gui-radius,12px) border border-(--gui-info-border,#a3c7f6) bg-(--gui-info-surface,#f3f8fe) p-5'>
         <div className='flex flex-wrap items-start justify-between gap-2'>
-          <p className='font-semibold text-[var(--gui-brand,#1a73e8)]'>
+          <p className='font-semibold text-(--gui-brand,#1a73e8)'>
             {title || steps[currentIndex]?.label || 'Working…'}
           </p>
           {meta ? (
-            <p className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-info-text,#10458b)]'>
+            <p className='text-(length:--gui-label-size,12px) text-(--gui-info-text,#10458b)'>
               {meta}
             </p>
           ) : null}
         </div>
         <div
           data-testid='working-card-bar'
-          className='h-1.5 w-full overflow-hidden rounded-full bg-[var(--gui-info-border,#a3c7f6)]'
+          className='h-1.5 w-full overflow-hidden rounded-full bg-(--gui-info-border,#a3c7f6)'
           role='progressbar'
           aria-valuemin={0}
           aria-valuemax={100}
@@ -997,7 +997,7 @@ function WorkingCardView({
         >
           <div
             className={cn(
-              'h-full rounded-full bg-[var(--gui-brand,#1a73e8)]',
+              'h-full rounded-full bg-(--gui-brand,#1a73e8)',
               percent === undefined ? 'w-1/3 animate-pulse' : 'transition-[width] duration-300'
             )}
             style={percent === undefined ? undefined : { width: `${percent}%` }}
@@ -1014,22 +1014,22 @@ function WorkingCardView({
                   className={cn(
                     'flex items-center gap-2.5 text-sm',
                     step.nested && 'pl-6',
-                    done && 'text-[var(--gui-info-text,#10458b)] line-through',
-                    current && 'font-semibold text-[var(--gui-brand-pressed,#10458b)]',
-                    !done && !current && 'text-[var(--gui-info-text,#10458b)]'
+                    done && 'text-(--gui-info-text,#10458b) line-through',
+                    current && 'font-semibold text-(--gui-brand-pressed,#10458b)',
+                    !done && !current && 'text-(--gui-info-text,#10458b)'
                   )}
                 >
                   {done ? (
-                    <span className='inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--gui-success-text,#23784f)] text-white'>
+                    <span className='inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-(--gui-success-text,#23784f) text-white'>
                       <Check className='size-3' aria-hidden />
                     </span>
                   ) : current ? (
                     <Loader2
-                      className='size-5 shrink-0 animate-spin text-[var(--gui-brand,#1a73e8)]'
+                      className='size-5 shrink-0 animate-spin text-(--gui-brand,#1a73e8)'
                       aria-hidden
                     />
                   ) : (
-                    <span className='size-5 shrink-0 rounded-full border border-[var(--gui-info-border,#a3c7f6)]' />
+                    <span className='size-5 shrink-0 rounded-full border border-(--gui-info-border,#a3c7f6)' />
                   )}
                   <span aria-current={current ? 'step' : undefined}>{step.label}</span>
                 </li>
@@ -1038,9 +1038,9 @@ function WorkingCardView({
           </ol>
         ) : null}
         {tip || onCancel ? (
-          <div className='flex flex-col gap-3 border-[var(--gui-info-border,#a3c7f6)] border-t pt-3'>
+          <div className='flex flex-col gap-3 border-(--gui-info-border,#a3c7f6) border-t pt-3'>
             {tip ? (
-              <p className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-info-text,#10458b)] italic'>
+              <p className='text-(length:--gui-label-size,12px) text-(--gui-info-text,#10458b) italic'>
                 {tip}
               </p>
             ) : null}
@@ -1068,7 +1068,7 @@ function WorkingCardView({
 }
 
 const SKELETON_BAR =
-  'animate-pulse rounded-[var(--gui-radius-sm,8px)] bg-[var(--gui-border,#e2e3e5)]'
+  'animate-pulse rounded-(--gui-radius-sm,8px) bg-(--gui-border,#e2e3e5)'
 
 const DEFAULT_SKELETON_LINES: Record<SkeletonVariant, number> = {
   text: 3,
@@ -1105,7 +1105,7 @@ function CircularLoader() {
       data-testid='circular-loader'
       className='flex w-full items-center justify-center py-8'
     >
-      <Loader2 className='size-8 animate-spin text-[var(--gui-brand,#1a73e8)]' />
+      <Loader2 className='size-8 animate-spin text-(--gui-brand,#1a73e8)' />
     </div>
   )
 }
@@ -1115,7 +1115,7 @@ function RefetchBusyChrome({ busy }: { busy: boolean }) {
   return (
     <p
       data-testid='refetch-busy'
-      className='flex items-center gap-1.5 text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'
+      className='flex items-center gap-1.5 text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'
     >
       <Loader2 className='size-3 animate-spin' aria-hidden />
       Updating
@@ -1302,19 +1302,19 @@ function StateTable({
   const footerSource = footerItems ?? items
   const showFooter = columnDefs.some((column) => column.aggregate)
   const headerClass =
-    'px-4 py-3 font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'
+    'px-4 py-3 font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'
 
   return (
     <div
       aria-busy={busy || undefined}
       className={cn(
-        'w-full overflow-x-auto rounded-[var(--gui-radius,12px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#ffffff)]',
+        'w-full overflow-x-auto rounded-(--gui-radius,12px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#ffffff)',
         busy && 'opacity-70'
       )}
       style={style}
     >
       <RefetchBusyChrome busy={Boolean(busy)} />
-      <table className='w-full border-collapse text-left text-[length:var(--gui-body-size,16px)] leading-[var(--gui-body-leading,24px)]'>
+      <table className='w-full border-collapse text-left text-(length:--gui-body-size,16px) leading-(--gui-body-leading,24px)'>
         {columnDefs.length > 0 ? (
           <thead>
             <tr className={GUI_TABLE_HEADER_ROW_CLASS}>
@@ -1380,7 +1380,7 @@ function StateTable({
                   onReorder?.(rowIndex, Math.min(items.length - 1, rowIndex + 1))
                 }
               }}
-              className='border-[var(--gui-border,#e2e3e5)] border-b last:border-b-0'
+              className='border-(--gui-border,#e2e3e5) border-b last:border-b-0'
               onClick={
                 onSelectRow
                   ? (event) => {
@@ -1396,7 +1396,7 @@ function StateTable({
                 <td className='px-2 py-3'>
                   <span
                     aria-pressed={false}
-                    className='inline-flex text-[var(--gui-text-tertiary,#8a8d99)]'
+                    className='inline-flex text-(--gui-text-tertiary,#8a8d99)'
                   >
                     <GripVertical className='size-[14px]' />
                   </span>
@@ -1405,7 +1405,7 @@ function StateTable({
               {columnDefs.map((column, cellIndex) => (
                 <td
                   key={`cell-${cellIndex}-${column.key}`}
-                  className='px-4 py-3 align-top text-[var(--gui-text,#2c2d33)]'
+                  className='px-4 py-3 align-top text-(--gui-text,#2c2d33)'
                 >
                   <ScalarValue
                     value={tableCellValue(item, column, rowIndex)}
@@ -1422,14 +1422,14 @@ function StateTable({
         </tbody>
         {showFooter ? (
           <tfoot>
-            <tr className='border-[var(--gui-border,#e2e3e5)] border-t bg-[var(--gui-canvas,#f7f8f9)] font-medium'>
+            <tr className='border-(--gui-border,#e2e3e5) border-t bg-(--gui-canvas,#f7f8f9) font-medium'>
               {reorderable ? <td className='px-2 py-3' /> : null}
               {columnDefs.map((column) => {
                 const total = aggregateTableColumn(footerSource, column)
                 return (
                   <td
                     key={`footer-${column.key}`}
-                    className='px-4 py-3 text-[var(--gui-text,#2c2d33)]'
+                    className='px-4 py-3 text-(--gui-text,#2c2d33)'
                   >
                     {total === undefined ? (
                       ''
@@ -1461,14 +1461,14 @@ function StateKeyValue({
   return (
     <dl
       aria-busy={busy || undefined}
-      className='grid w-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-6 gap-y-3 text-[length:var(--gui-body-size,16px)] leading-[var(--gui-body-leading,24px)]'
+      className='grid w-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-6 gap-y-3 text-(length:--gui-body-size,16px) leading-(--gui-body-leading,24px)'
     >
       {pairs.map(([key, value]) => (
         <Fragment key={key}>
-          <dt className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'>
+          <dt className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'>
             {key}
           </dt>
-          <dd className='min-w-0 text-[var(--gui-text,#2c2d33)]'>
+          <dd className='min-w-0 text-(--gui-text,#2c2d33)'>
             <KeyValueCell value={value} depth={depth} />
           </dd>
         </Fragment>
@@ -1480,7 +1480,7 @@ function StateKeyValue({
 function KeyValueCell({ value, depth }: { value: unknown; depth: number }) {
   if (depth > 4) return <ScalarValue value={value} />
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span className='text-[var(--gui-text-muted,#575a66)]'>—</span>
+    if (value.length === 0) return <span className='text-(--gui-text-muted,#575a66)'>—</span>
     const objectRows = value.every((item) => isPlainRecord(item))
     if (objectRows) {
       return <StateTable value={value} />
@@ -1567,10 +1567,10 @@ function ChatTranscript({ pinKey, children }: { pinKey: string; children: ReactN
 
 function chatTurnBubbleClass(role: 'user' | 'assistant'): string {
   return cn(
-    'max-w-[85%] rounded-[var(--gui-radius,12px)] px-3 py-2',
+    'max-w-[85%] rounded-(--gui-radius,12px) px-3 py-2',
     role === 'user'
-      ? 'self-end bg-[var(--gui-brand-surface,#f3f8fe)] text-[var(--gui-text,#2c2d33)]'
-      : 'self-start bg-[var(--gui-surface,#fff)] text-[var(--gui-text,#2c2d33)]'
+      ? 'self-end bg-(--gui-brand-surface,#f3f8fe) text-(--gui-text,#2c2d33)'
+      : 'self-start bg-(--gui-surface,#fff) text-(--gui-text,#2c2d33)'
   )
 }
 
@@ -1634,7 +1634,7 @@ function numbersFromSparklineProps(
 }
 
 const APP_HEADER_BAR_CLASS =
-  'sticky top-0 z-20 w-full border-[var(--gui-border,#e2e3e5)] border-b bg-[var(--gui-surface,#ffffff)]'
+  'sticky top-0 z-20 w-full border-(--gui-border,#e2e3e5) border-b bg-(--gui-surface,#ffffff)'
 
 function ArenaAppHeaderLogo() {
   return (
@@ -1714,11 +1714,11 @@ function resolvePageChrome(
 function CatalogIcon({ name, well }: { name: string; well: string }) {
   const Glyph = ICON_BY_NAME[name] ?? Search
   const wellClass =
-    well === 'circle' ? 'rounded-full' : well === 'square' ? 'rounded-[var(--gui-radius,12px)]' : ''
+    well === 'circle' ? 'rounded-full' : well === 'square' ? 'rounded-(--gui-radius,12px)' : ''
   const icon = (
     <Glyph
       aria-hidden
-      className={cn(well === 'none' ? 'size-5' : 'size-5', 'text-[var(--gui-brand,#1a73e8)]')}
+      className={cn(well === 'none' ? 'size-5' : 'size-5', 'text-(--gui-brand,#1a73e8)')}
     />
   )
   if (well === 'none') {
@@ -1728,7 +1728,7 @@ function CatalogIcon({ name, well }: { name: string; well: string }) {
     <span
       data-testid='icon-well'
       className={cn(
-        'inline-flex size-10 items-center justify-center bg-[var(--gui-brand-surface,#f3f8fe)]',
+        'inline-flex size-10 items-center justify-center bg-(--gui-brand-surface,#f3f8fe)',
         wellClass || 'rounded-full'
       )}
     >
@@ -1741,7 +1741,7 @@ function AvatarView({ src, initials }: AvatarModel) {
   return (
     <span
       data-testid='avatar'
-      className='inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--gui-brand-surface,#f3f8fe)] font-medium text-[var(--gui-brand,#1a73e8)] text-sm'
+      className='inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-(--gui-brand-surface,#f3f8fe) font-medium text-(--gui-brand,#1a73e8) text-sm'
     >
       {src ? <img src={src} alt='' className='size-full object-cover' /> : <span>{initials}</span>}
     </span>
@@ -1826,7 +1826,7 @@ function CatalogStepper({
         return (
           <li key={`${item.label}-${path}-${index}`} className='flex items-center gap-2'>
             {index > 0 ? (
-              <span className='text-[var(--gui-text-muted,#575a66)]' aria-hidden>
+              <span className='text-(--gui-text-muted,#575a66)' aria-hidden>
                 /
               </span>
             ) : null}
@@ -1836,10 +1836,10 @@ function CatalogStepper({
                 onClick={() => onNavigate(item.path)}
                 aria-current={isActive ? 'step' : undefined}
                 className={cn(
-                  'text-[length:var(--gui-label-size,12px)]',
+                  'text-(length:--gui-label-size,12px)',
                   isActive
-                    ? 'font-medium text-[var(--gui-brand,#1a73e8)]'
-                    : 'text-[var(--gui-text-muted,#575a66)] hover:text-[var(--gui-text,#2c2d33)]'
+                    ? 'font-medium text-(--gui-brand,#1a73e8)'
+                    : 'text-(--gui-text-muted,#575a66) hover:text-(--gui-text,#2c2d33)'
                 )}
               >
                 {index + 1}. {item.label}
@@ -1848,10 +1848,10 @@ function CatalogStepper({
               <span
                 aria-current={isActive ? 'step' : undefined}
                 className={cn(
-                  'text-[length:var(--gui-label-size,12px)]',
+                  'text-(length:--gui-label-size,12px)',
                   isActive
-                    ? 'font-medium text-[var(--gui-text,#2c2d33)]'
-                    : 'text-[var(--gui-text-muted,#575a66)]'
+                    ? 'font-medium text-(--gui-text,#2c2d33)'
+                    : 'text-(--gui-text-muted,#575a66)'
                 )}
               >
                 {index + 1}. {item.label}
@@ -1893,7 +1893,7 @@ function CatalogTabs({
 
   return (
     <nav
-      className='flex w-full flex-wrap items-center gap-1 border-[var(--gui-border,#e2e3e5)] border-b'
+      className='flex w-full flex-wrap items-center gap-1 border-(--gui-border,#e2e3e5) border-b'
       style={style}
     >
       {items.map((item, index) => {
@@ -1909,10 +1909,10 @@ function CatalogTabs({
             onClick={() => onNavigate(item.path)}
             onKeyDown={(event) => focusTab(event, index, event.key)}
             className={cn(
-              '-mb-px border-b-2 px-4 py-2.5 text-[length:var(--gui-body-size,16px)]',
+              '-mb-px border-b-2 px-4 py-2.5 text-(length:--gui-body-size,16px)',
               isActive
-                ? 'border-[var(--gui-brand,#1a73e8)] font-medium text-[var(--gui-brand,#1a73e8)]'
-                : 'border-transparent text-[var(--gui-text-muted,#575a66)] hover:text-[var(--gui-text,#2c2d33)]'
+                ? 'border-(--gui-brand,#1a73e8) font-medium text-(--gui-brand,#1a73e8)'
+                : 'border-transparent text-(--gui-text-muted,#575a66) hover:text-(--gui-text,#2c2d33)'
             )}
           >
             {item.label}
@@ -1941,7 +1941,7 @@ function CatalogImage({
         data-testid='image-fallback'
         role={alt ? 'img' : undefined}
         aria-label={alt || undefined}
-        className='flex min-h-16 items-center justify-center bg-[var(--gui-canvas,#f7f8f9)] text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'
+        className='flex min-h-16 items-center justify-center bg-(--gui-canvas,#f7f8f9) text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'
       >
         {alt}
       </div>
@@ -2023,7 +2023,7 @@ function CatalogOverlayShell({
           GUI_OVERLAY_DIALOG_CLASS,
           isDrawer
             ? cn('absolute top-0 bottom-0 w-[min(100%,24rem)]', drawerSide)
-            : 'relative z-10 w-full max-w-lg rounded-[var(--gui-radius,12px)]'
+            : 'relative z-10 w-full max-w-lg rounded-(--gui-radius,12px)'
         )}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
@@ -2043,14 +2043,14 @@ function CatalogOverlayShell({
           }
         }}
       >
-        <div className='flex items-center justify-between gap-3 border-[var(--gui-border,#e2e3e5)] border-b px-4 py-3'>
-          <h2 id={titleId} className='font-semibold text-[var(--gui-text,#2c2d33)] text-base'>
+        <div className='flex items-center justify-between gap-3 border-(--gui-border,#e2e3e5) border-b px-4 py-3'>
+          <h2 id={titleId} className='font-semibold text-(--gui-text,#2c2d33) text-base'>
             {title}
           </h2>
           <button
             type='button'
             data-testid={`${testId}-close`}
-            className='rounded-[var(--gui-radius,12px)] px-2 py-1 text-[var(--gui-text-muted,#575a66)] text-sm hover:bg-[var(--gui-surface-muted,#f7f8f9)]'
+            className='rounded-(--gui-radius,12px) px-2 py-1 text-(--gui-text-muted,#575a66) text-sm hover:bg-(--gui-surface-muted,#f7f8f9)'
             onClick={() => onCloseRef.current()}
           >
             Close
@@ -2122,7 +2122,7 @@ function CatalogToastView({ text, tone }: { text: string; tone: unknown }) {
     >
       <p
         className={cn(
-          'rounded-[var(--gui-radius,12px)] px-4 py-2 text-sm shadow-[var(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))]',
+          'rounded-(--gui-radius,12px) px-4 py-2 text-sm shadow-(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))',
           toneClass(tone, 'info')
         )}
       >
@@ -2562,7 +2562,7 @@ export function SpecRenderer({
           chrome.id && !chrome.nested ? childIds.filter((id) => id !== chrome.id) : childIds
         return (
           <div
-            className='relative min-h-full bg-[var(--gui-canvas,#f7f8f9)] text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] leading-[var(--gui-body-leading,24px)]'
+            className='relative min-h-full bg-(--gui-canvas,#f7f8f9) text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) leading-(--gui-body-leading,24px)'
             style={styleFromProps(props)}
           >
             {chromeNode}
@@ -2578,7 +2578,7 @@ export function SpecRenderer({
         return (
           <section
             className={cn(
-              'mx-auto flex w-full flex-col gap-[var(--gui-section-gap,24px)] px-6 py-6',
+              'mx-auto flex w-full flex-col gap-(--gui-section-gap,24px) px-6 py-6',
               sectionWidthClass(props.width, sectionIsMeasureOnly(elements, childIds))
             )}
             style={styleFromProps(props)}
@@ -2728,7 +2728,7 @@ export function SpecRenderer({
                   >
                     <span
                       aria-pressed={false}
-                      className='absolute top-3 left-2 z-10 text-[var(--gui-text-tertiary,#8a8d99)]'
+                      className='absolute top-3 left-2 z-10 text-(--gui-text-tertiary,#8a8d99)'
                     >
                       <GripVertical className='size-[14px]' />
                     </span>
@@ -2813,7 +2813,7 @@ export function SpecRenderer({
               <div className='flex min-w-0 items-center gap-2.5'>
                 <ArenaAppHeaderLogo />
                 {title ? (
-                  <p className='truncate font-semibold text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] leading-[var(--gui-body-leading,24px)]'>
+                  <p className='truncate font-semibold text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) leading-(--gui-body-leading,24px)'>
                     {title}
                   </p>
                 ) : null}
@@ -2833,8 +2833,8 @@ export function SpecRenderer({
         const title = (
           <h1
             className={cn(
-              'font-semibold text-[var(--gui-text,#2c2d33)] tracking-tight',
-              'text-[length:var(--gui-display-size,40px)] leading-[var(--gui-display-leading,48px)]'
+              'font-semibold text-(--gui-text,#2c2d33) tracking-tight',
+              'text-(length:--gui-display-size,40px) leading-(--gui-display-leading,48px)'
             )}
           >
             {asString(props.title)}
@@ -2848,7 +2848,7 @@ export function SpecRenderer({
             )}
           >
             {kicker ? (
-              <p className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-brand,#1a73e8)]'>
+              <p className='font-medium text-(length:--gui-label-size,12px) text-(--gui-brand,#1a73e8)'>
                 {kicker}
               </p>
             ) : null}
@@ -2856,7 +2856,7 @@ export function SpecRenderer({
             {subtitle ? (
               <p
                 className={cn(
-                  'max-w-[var(--gui-measure,40rem)] text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)] leading-[1.5]',
+                  'max-w-(--gui-measure,40rem) text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66) leading-normal',
                   isCenter && 'mx-auto'
                 )}
               >
@@ -3443,16 +3443,16 @@ export function SpecRenderer({
             style={styleFromProps(props)}
           >
             <RefetchBusyChrome busy={refetching} />
-            <span className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'>
+            <span className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'>
               {asString(props.label)}
             </span>
             <div className='flex flex-wrap items-baseline gap-2'>
               <span
                 className={cn(
-                  'font-semibold text-[var(--gui-text,#2c2d33)]',
+                  'font-semibold text-(--gui-text,#2c2d33)',
                   isDisplay
-                    ? 'text-[length:var(--gui-stat-size,40px)] leading-[var(--gui-stat-leading,48px)]'
-                    : 'text-[length:var(--gui-title-size,24px)] leading-[var(--gui-title-leading,32px)]'
+                    ? 'text-(length:--gui-stat-size,40px) leading-(--gui-stat-leading,48px)'
+                    : 'text-(length:--gui-title-size,24px) leading-(--gui-title-leading,32px)'
                 )}
               >
                 {value}
@@ -3464,7 +3464,7 @@ export function SpecRenderer({
               ) : null}
             </div>
             {asString(props.hint) ? (
-              <span className='text-[length:var(--gui-caption-size,12px)] text-[var(--gui-text-muted,#575a66)] leading-[var(--gui-caption-leading,20px)]'>
+              <span className='text-(length:--gui-caption-size,12px) text-(--gui-text-muted,#575a66) leading-(--gui-caption-leading,20px)'>
                 {asString(props.hint)}
               </span>
             ) : null}
@@ -3489,7 +3489,7 @@ export function SpecRenderer({
           >
             <RefetchBusyChrome busy={sparklineBusy} />
             {label ? (
-              <span className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+              <span className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                 {label}
               </span>
             ) : null}
@@ -3542,7 +3542,7 @@ export function SpecRenderer({
         return (
           <div
             data-testid='empty-state'
-            className='flex w-full max-w-[var(--gui-measure,40rem)] flex-col items-start gap-3 py-6'
+            className='flex w-full max-w-(--gui-measure,40rem) flex-col items-start gap-3 py-6'
             style={styleFromProps(props)}
           >
             {asString(props.icon) ? (
@@ -3550,11 +3550,11 @@ export function SpecRenderer({
             ) : (
               <CatalogIcon name='inbox' well='circle' />
             )}
-            <p className='font-semibold text-[length:var(--gui-title-size,24px)] text-[var(--gui-text,#2c2d33)] leading-[var(--gui-title-leading,32px)]'>
+            <p className='font-semibold text-(length:--gui-title-size,24px) text-(--gui-text,#2c2d33) leading-(--gui-title-leading,32px)'>
               {asString(props.title)}
             </p>
             {asString(props.body) ? (
-              <p className='text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)]'>
+              <p className='text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66)'>
                 {asString(props.body)}
               </p>
             ) : null}
@@ -3565,7 +3565,7 @@ export function SpecRenderer({
         return (
           <span
             className={cn(
-              'inline-flex items-center rounded-[var(--gui-radius-pill)] px-2 py-0.5 font-medium text-xs',
+              'inline-flex items-center rounded-(--gui-radius-pill) px-2 py-0.5 font-medium text-xs',
               toneClass(props.tone)
             )}
             style={styleFromProps(props)}
@@ -3660,13 +3660,13 @@ export function SpecRenderer({
               <AvatarView {...avatar} />
               <div className='flex min-w-0 flex-1 flex-col gap-2'>
                 <div className='flex flex-wrap items-center gap-2'>
-                  <h2 className='font-semibold text-[length:var(--gui-title-size,24px)] text-[var(--gui-text,#2c2d33)] leading-[var(--gui-title-leading,32px)]'>
+                  <h2 className='font-semibold text-(length:--gui-title-size,24px) text-(--gui-text,#2c2d33) leading-(--gui-title-leading,32px)'>
                     {asString(props.title)}
                   </h2>
                   {asString(props.badge) ? (
                     <span
                       className={cn(
-                        'inline-flex items-center rounded-[var(--gui-radius-pill)] px-2 py-0.5 font-medium text-xs',
+                        'inline-flex items-center rounded-(--gui-radius-pill) px-2 py-0.5 font-medium text-xs',
                         toneClass(props.badgeTone)
                       )}
                     >
@@ -3675,7 +3675,7 @@ export function SpecRenderer({
                   ) : null}
                 </div>
                 {asString(props.description) ? (
-                  <p className='max-w-[var(--gui-measure,40rem)] text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)] leading-[1.5]'>
+                  <p className='max-w-(--gui-measure,40rem) text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66) leading-normal'>
                     {asString(props.description)}
                   </p>
                 ) : null}
@@ -3685,7 +3685,7 @@ export function SpecRenderer({
                       <span
                         key={item}
                         className={cn(
-                          'inline-flex items-center rounded-[var(--gui-radius-pill)] px-3 py-1 font-medium text-sm',
+                          'inline-flex items-center rounded-(--gui-radius-pill) px-3 py-1 font-medium text-sm',
                           CHIP_TONE_CLASSES.muted
                         )}
                       >
@@ -3733,7 +3733,7 @@ export function SpecRenderer({
         return (
           <div
             data-testid='disclosure'
-            className='w-full border-[var(--gui-border,#e2e3e5)] border-b last:border-b-0'
+            className='w-full border-(--gui-border,#e2e3e5) border-b last:border-b-0'
             style={styleFromProps(props)}
           >
             <button
@@ -3743,22 +3743,22 @@ export function SpecRenderer({
               onClick={() => toggleDisclosure(rowKey, defaultOpen)}
             >
               <span className='min-w-0 flex-1'>
-                <span className='block font-medium text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] leading-[var(--gui-body-leading,24px)]'>
+                <span className='block font-medium text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) leading-(--gui-body-leading,24px)'>
                   {title}
                 </span>
                 {subtitle ? (
-                  <span className='mt-0.5 block text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+                  <span className='mt-0.5 block text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                     {subtitle}
                   </span>
                 ) : null}
               </span>
               <Chevron
                 aria-hidden
-                className='size-[14px] shrink-0 text-[var(--gui-text-muted,#575a66)]'
+                className='size-[14px] shrink-0 text-(--gui-text-muted,#575a66)'
               />
             </button>
             {open ? (
-              <div className='pb-3 text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] leading-[1.5]'>
+              <div className='pb-3 text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) leading-normal'>
                 {bodyIds.map((childId) => (
                   <Fragment key={childId}>
                     {renderNode(childId, scope, childWithinForm, nextFormActionId, childWithinCard)}
@@ -3782,7 +3782,7 @@ export function SpecRenderer({
                 <h2
                   title={title}
                   className={cn(
-                    'line-clamp-2 min-w-0 break-words font-semibold text-[var(--gui-text,#2c2d33)]',
+                    'line-clamp-2 min-w-0 wrap-break-word font-semibold text-(--gui-text,#2c2d33)',
                     scope ? CARD_TITLE_ITEM_CLASS : CARD_TITLE_FEATURED_CLASS
                   )}
                 >
@@ -3790,12 +3790,12 @@ export function SpecRenderer({
                 </h2>
               ) : null}
               {subtitle ? (
-                <p className='min-w-0 truncate text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)] leading-[var(--gui-body-leading,24px)]'>
+                <p className='min-w-0 truncate text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66) leading-(--gui-body-leading,24px)'>
                   {subtitle}
                 </p>
               ) : null}
               {description ? (
-                <p className='line-clamp-3 text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)] leading-[var(--gui-body-leading,24px)]'>
+                <p className='line-clamp-3 text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66) leading-(--gui-body-leading,24px)'>
                   {description}
                 </p>
               ) : null}
@@ -3817,7 +3817,7 @@ export function SpecRenderer({
             {footerText ? (
               <div
                 data-testid='card-footer'
-                className='border-[var(--gui-border,#e2e3e5)] border-t pt-4 text-[length:var(--gui-caption-size,12px)] text-[var(--gui-text-muted,#575a66)] leading-[var(--gui-caption-leading,20px)]'
+                className='border-(--gui-border,#e2e3e5) border-t pt-4 text-(length:--gui-caption-size,12px) text-(--gui-text-muted,#575a66) leading-(--gui-caption-leading,20px)'
               >
                 {footerText}
               </div>
@@ -3877,7 +3877,7 @@ export function SpecRenderer({
       case 'Alert':
         return (
           <div
-            className={cn('rounded-[var(--gui-radius-sm,8px)] px-4 py-3', toneClass(props.tone))}
+            className={cn('rounded-(--gui-radius-sm,8px) px-4 py-3', toneClass(props.tone))}
           >
             <MarkdownText content={asString(props.text)} />
           </div>
@@ -3941,7 +3941,7 @@ export function SpecRenderer({
       }
       case 'Spinner':
         return pending ? (
-          <p className='text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)]'>
+          <p className='text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66)'>
             {asString(props.label, 'Loading…')}
           </p>
         ) : null
@@ -4010,20 +4010,20 @@ export function SpecRenderer({
         return (
           <div className='flex w-full flex-col gap-2' style={styleFromProps(props)}>
             {label ? (
-              <span className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+              <span className='text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                 {label}
               </span>
             ) : null}
             <div
               data-testid='progress-bar'
-              className='h-2 w-full overflow-hidden rounded-full bg-[var(--gui-border,#e2e3e5)]'
+              className='h-2 w-full overflow-hidden rounded-full bg-(--gui-border,#e2e3e5)'
               role='progressbar'
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(percent)}
             >
               <div
-                className='h-full rounded-full bg-[var(--gui-brand,#1a73e8)] transition-[width] duration-300'
+                className='h-full rounded-full bg-(--gui-brand,#1a73e8) transition-[width] duration-300'
                 style={{ width: `${percent}%` }}
               />
             </div>
@@ -4085,7 +4085,7 @@ export function SpecRenderer({
                           {turn.error ? (
                             <p
                               data-testid='generative-chat-turn-error'
-                              className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-danger,#c62828)]'
+                              className='text-(length:--gui-label-size,12px) text-(--gui-danger,#c62828)'
                             >
                               {turn.error}
                             </p>
@@ -4155,7 +4155,7 @@ export function SpecRenderer({
         return wrapTaskSurface(
           <form
             className={cn(
-              'flex w-full min-w-0 flex-col gap-[var(--gui-gap,16px)]',
+              'flex w-full min-w-0 flex-col gap-(--gui-gap,16px)',
               alignItemsClass(props.align, 'stretch')
             )}
             onSubmit={handleSubmit}
@@ -4463,13 +4463,13 @@ export function SpecRenderer({
                   >
                     <span
                       className={cn(
-                        'relative inline-flex h-5 w-9 items-center rounded-[var(--gui-radius-pill)] transition-colors duration-100',
-                        checked ? 'bg-[var(--gui-brand,#1a73e8)]' : 'bg-[var(--gui-border,#e2e3e5)]'
+                        'relative inline-flex h-5 w-9 items-center rounded-(--gui-radius-pill) transition-colors duration-100',
+                        checked ? 'bg-(--gui-brand,#1a73e8)' : 'bg-(--gui-border,#e2e3e5)'
                       )}
                     >
                       <span
                         className={cn(
-                          'inline-block size-4 rounded-[var(--gui-radius-pill)] bg-[var(--gui-surface,#ffffff)] shadow-[var(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))] transition-transform',
+                          'inline-block size-4 rounded-(--gui-radius-pill) bg-(--gui-surface,#ffffff) shadow-(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1)) transition-transform',
                           checked ? 'translate-x-4' : 'translate-x-0.5'
                         )}
                       />
@@ -4700,7 +4700,7 @@ export function SpecRenderer({
         return (
           <button
             type='button'
-            className='inline-flex items-center gap-1 font-medium text-[length:var(--gui-body-size,16px)] text-[var(--gui-brand,#1a73e8)] underline-offset-2 hover:text-[var(--gui-brand-hover,#155cba)] hover:underline'
+            className='inline-flex items-center gap-1 font-medium text-(length:--gui-body-size,16px) text-(--gui-brand,#1a73e8) underline-offset-2 hover:text-(--gui-brand-hover,#155cba) hover:underline'
             title={asString(props.label) || undefined}
             onClick={() => requestNavigate(asString(props.to))}
           >
@@ -4711,7 +4711,7 @@ export function SpecRenderer({
         return (
           <a
             href={asString(props.href)}
-            className='font-medium text-[var(--gui-brand,#1a73e8)] underline-offset-2 hover:text-[var(--gui-brand-hover,#155cba)] hover:underline'
+            className='font-medium text-(--gui-brand,#1a73e8) underline-offset-2 hover:text-(--gui-brand-hover,#155cba) hover:underline'
             style={styleFromProps(props)}
             rel='noreferrer'
           >
@@ -4728,7 +4728,7 @@ export function SpecRenderer({
           />
         )
       case 'Divider':
-        return <hr className='border-[var(--gui-border,#e2e3e5)]' style={styleFromProps(props)} />
+        return <hr className='border-(--gui-border,#e2e3e5)' style={styleFromProps(props)} />
       case 'List': {
         const statePath = asString(props.statePath)
         if (!statePath) {

@@ -68,11 +68,11 @@ export function GuiFileInput({
         className={cn(
           GUI_FIELD_INPUT_CLASS,
           'inline-flex cursor-pointer items-center gap-2',
-          message && 'border-[var(--gui-danger,#f31a1a)]'
+          message && 'border-(--gui-danger,#f31a1a)'
         )}
       >
-        <Paperclip className='size-[14px] text-[var(--gui-text-muted,#575a66)]' aria-hidden />
-        <span className='truncate text-[var(--gui-text-muted,#575a66)]'>
+        <Paperclip className='size-[14px] text-(--gui-text-muted,#575a66)' aria-hidden />
+        <span className='truncate text-(--gui-text-muted,#575a66)'>
           {value.length > 0
             ? `${value.length} file${value.length === 1 ? '' : 's'} attached`
             : 'Choose file'}
@@ -94,13 +94,13 @@ export function GuiFileInput({
           {value.map((file) => (
             <li
               key={`${file.name}-${file.data.slice(0, 24)}`}
-              className='flex items-center justify-between gap-2 text-[length:var(--gui-label-size,12px)] text-[var(--gui-text,#2c2d33)]'
+              className='flex items-center justify-between gap-2 text-(length:--gui-label-size,12px) text-(--gui-text,#2c2d33)'
             >
               <span className='min-w-0 truncate'>{file.name}</span>
               <button
                 type='button'
                 aria-label={`Remove ${file.name}`}
-                className='rounded-[var(--gui-radius-sm,8px)] p-1 text-[var(--gui-text-muted,#575a66)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+                className='rounded-(--gui-radius-sm,8px) p-1 text-(--gui-text-muted,#575a66) hover:bg-(--gui-canvas,#f7f8f9)'
                 onClick={() => onChange(value.filter((item) => item !== file))}
               >
                 <X className='size-[14px]' aria-hidden />
@@ -109,7 +109,7 @@ export function GuiFileInput({
           ))}
         </ul>
       ) : null}
-      {message ? <p className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-danger,#f31a1a)]'>{message}</p> : null}
+      {message ? <p className='text-(length:--gui-label-size,12px) text-(--gui-danger,#f31a1a)'>{message}</p> : null}
     </div>
   )
 }

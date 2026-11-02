@@ -122,19 +122,19 @@ export function GuiHostMap({
       aria-labelledby={headingId}
       className={SURFACE_CLASS}
     >
-      <p id={headingId} className='font-medium text-[var(--gui-text,#2c2d33)]'>
+      <p id={headingId} className='font-medium text-(--gui-text,#2c2d33)'>
         {selected?.title ?? 'Map'}
       </p>
       {embed ? (
         <iframe
           title={selected?.title ?? 'Map'}
           src={embed}
-          className='h-64 w-full rounded-[var(--gui-radius-sm,8px)] border border-[var(--gui-border,#e2e3e5)]'
+          className='h-64 w-full rounded-(--gui-radius-sm,8px) border border-(--gui-border,#e2e3e5)'
           loading='lazy'
           referrerPolicy='no-referrer'
         />
       ) : (
-        <p className='py-2 text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)]'>
+        <p className='py-2 text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66)'>
           No coordinates to plot.
         </p>
       )}
@@ -161,8 +161,8 @@ export function GuiHostMap({
                 className={cn(
                   'absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full',
                   marker.index === selectedIndex
-                    ? 'bg-[var(--gui-brand,#1a73e8)]'
-                    : 'bg-[var(--gui-text-muted,#575a66)]'
+                    ? 'bg-(--gui-brand,#1a73e8)'
+                    : 'bg-(--gui-text-muted,#575a66)'
                 )}
                 style={{ top, left }}
                 onClick={() => selectMarker(marker)}
@@ -177,21 +177,21 @@ export function GuiHostMap({
             <button
               type='button'
               className={cn(
-                'w-full rounded-[var(--gui-radius-sm,8px)] px-2 py-1.5 text-left text-[length:var(--gui-body-size,16px)]',
+                'w-full rounded-(--gui-radius-sm,8px) px-2 py-1.5 text-left text-(length:--gui-body-size,16px)',
                 marker.index === selectedIndex
-                  ? 'bg-[var(--gui-brand-surface,#f3f8fe)] text-[var(--gui-brand,#1a73e8)]'
-                  : 'text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+                  ? 'bg-(--gui-brand-surface,#f3f8fe) text-(--gui-brand,#1a73e8)'
+                  : 'text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
               )}
               onClick={() => selectMarker(marker)}
             >
               <span className='block truncate'>{marker.title}</span>
               {marker.address && marker.address !== marker.title ? (
-                <span className='block truncate text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+                <span className='block truncate text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                   {marker.address}
                 </span>
               ) : null}
               {!markerHasCoordinates(marker) ? (
-                <span className='block text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+                <span className='block text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                   No location
                 </span>
               ) : null}
@@ -238,7 +238,7 @@ function TreeRow({
             type='button'
             aria-expanded={isOpen}
             aria-label={isOpen ? `Collapse ${node.title}` : `Expand ${node.title}`}
-            className='inline-flex size-6 items-center justify-center rounded-[var(--gui-radius-sm,8px)] text-[var(--gui-text-muted,#575a66)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+            className='inline-flex size-6 items-center justify-center rounded-(--gui-radius-sm,8px) text-(--gui-text-muted,#575a66) hover:bg-(--gui-canvas,#f7f8f9)'
             onClick={() => onToggle(node.id)}
           >
             {isOpen ? (
@@ -252,7 +252,7 @@ function TreeRow({
         )}
         <button
           type='button'
-          className='min-w-0 flex-1 truncate rounded-[var(--gui-radius-sm,8px)] px-2 py-1 text-left text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+          className='min-w-0 flex-1 truncate rounded-(--gui-radius-sm,8px) px-2 py-1 text-left text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
           onClick={() => onSelect(node)}
         >
           {node.title}
@@ -418,14 +418,14 @@ export function GuiHostCarousel({
       className={SURFACE_CLASS}
     >
       <div className='flex items-center justify-between gap-2'>
-        <p id={headingId} className='font-medium text-[var(--gui-text,#2c2d33)]'>
+        <p id={headingId} className='font-medium text-(--gui-text,#2c2d33)'>
           {caption || `Slide ${index + 1} of ${count}`}
         </p>
         <div className='flex items-center gap-1'>
           <button
             type='button'
             aria-label='Previous slide'
-            className='inline-flex size-8 items-center justify-center rounded-[var(--gui-radius-sm,8px)] text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+            className='inline-flex size-8 items-center justify-center rounded-(--gui-radius-sm,8px) text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
             onClick={() => go(index - 1)}
           >
             <ChevronLeft className='size-[14px]' />
@@ -433,14 +433,14 @@ export function GuiHostCarousel({
           <button
             type='button'
             aria-label='Next slide'
-            className='inline-flex size-8 items-center justify-center rounded-[var(--gui-radius-sm,8px)] text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+            className='inline-flex size-8 items-center justify-center rounded-(--gui-radius-sm,8px) text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
             onClick={() => go(index + 1)}
           >
             <ChevronRight className='size-[14px]' />
           </button>
         </div>
       </div>
-      <div className='overflow-hidden rounded-[var(--gui-radius-sm,8px)]'>
+      <div className='overflow-hidden rounded-(--gui-radius-sm,8px)'>
         {useBound ? (
           boundSlides[index]?.src ? (
             <img
@@ -449,7 +449,7 @@ export function GuiHostCarousel({
               className='max-h-80 w-full object-contain'
             />
           ) : (
-            <p className='px-4 py-16 text-center text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)]'>
+            <p className='px-4 py-16 text-center text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66)'>
               {caption}
             </p>
           )
@@ -468,8 +468,8 @@ export function GuiHostCarousel({
               className={cn(
                 'size-2 rounded-full',
                 slideIndex === index
-                  ? 'bg-[var(--gui-brand,#1a73e8)]'
-                  : 'bg-[var(--gui-border,#e2e3e5)]'
+                  ? 'bg-(--gui-brand,#1a73e8)'
+                  : 'bg-(--gui-border,#e2e3e5)'
               )}
               onClick={() => go(slideIndex)}
             />
@@ -517,25 +517,25 @@ export function GuiHostTimeline({
     <li key={`${entry.index}-${entry.title}`} className='relative pl-6'>
       <span
         aria-hidden
-        className='absolute top-2 left-0 size-2.5 rounded-full bg-[var(--gui-brand,#1a73e8)]'
+        className='absolute top-2 left-0 size-2.5 rounded-full bg-(--gui-brand,#1a73e8)'
       />
       <button
         type='button'
-        className='flex w-full flex-col items-start gap-0.5 rounded-[var(--gui-radius-sm,8px)] px-2 py-1.5 text-left hover:bg-[var(--gui-canvas,#f7f8f9)]'
+        className='flex w-full flex-col items-start gap-0.5 rounded-(--gui-radius-sm,8px) px-2 py-1.5 text-left hover:bg-(--gui-canvas,#f7f8f9)'
         onClick={() => onSelectItem?.(entry.item, entry.index)}
       >
         {entry.iso ? (
-          <span className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+          <span className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
             {formatBoundDateDisplay(entry.iso)}
           </span>
         ) : null}
-        <span className='text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)]'>
+        <span className='text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33)'>
           {entry.title}
         </span>
         {shortRecordLines(entry.item, new Set([resolvedDate, resolvedTitle])).map((line) => (
           <span
             key={line}
-            className='block truncate text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'
+            className='block truncate text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'
           >
             {line}
           </span>
@@ -554,12 +554,12 @@ export function GuiHostTimeline({
       <p id={headingId} className='sr-only'>
         Timeline
       </p>
-      <ol className='relative flex flex-col gap-1 border-[var(--gui-border,#e2e3e5)] border-l pl-0'>
+      <ol className='relative flex flex-col gap-1 border-(--gui-border,#e2e3e5) border-l pl-0'>
         {dated.map(renderEntry)}
       </ol>
       {undated.length > 0 ? (
-        <div data-testid='unscheduled' className='flex flex-col gap-1 border-[var(--gui-border,#e2e3e5)] border-t pt-3'>
-          <p className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'>
+        <div data-testid='unscheduled' className='flex flex-col gap-1 border-(--gui-border,#e2e3e5) border-t pt-3'>
+          <p className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'>
             Undated
           </p>
           <ul className='flex flex-col'>{undated.map(renderEntry)}</ul>
@@ -619,7 +619,7 @@ export function GuiHostKanban({
           data-testid='gui-kanban-column'
           className={cn(SURFACE_CLASS, 'w-64 shrink-0')}
         >
-          <p className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)] uppercase tracking-[0.25px]'>
+          <p className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66) uppercase tracking-[0.25px]'>
             {lane.title}
             <span className='ml-1 font-normal'>({lane.cards.length})</span>
           </p>
@@ -647,7 +647,7 @@ export function GuiHostKanban({
                 <button
                   type='button'
                   draggable={Boolean(onMoveCard)}
-                  className='w-full rounded-[var(--gui-radius-sm,8px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#ffffff)] px-3 py-2 text-left text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] hover:bg-[var(--gui-canvas,#f7f8f9)]'
+                  className='w-full rounded-(--gui-radius-sm,8px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#ffffff) px-3 py-2 text-left text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) hover:bg-(--gui-canvas,#f7f8f9)'
                   onDragStart={(event) => {
                     event.dataTransfer.setData('text/plain', String(card.index))
                     event.dataTransfer.effectAllowed = 'move'
@@ -658,7 +658,7 @@ export function GuiHostKanban({
                   {details.map((line) => (
                     <span
                       key={line}
-                      className='mt-1 block truncate text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'
+                      className='mt-1 block truncate text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'
                     >
                       {line}
                     </span>
@@ -719,14 +719,14 @@ export function GuiHostFilmstrip({
         <button
           key={slide.index}
           type='button'
-          className='w-28 shrink-0 rounded-[var(--gui-radius-sm,8px)] border border-[var(--gui-border,#e2e3e5)] bg-[var(--gui-surface,#ffffff)] px-3 py-2 text-left hover:bg-[var(--gui-canvas,#f7f8f9)]'
+          className='w-28 shrink-0 rounded-(--gui-radius-sm,8px) border border-(--gui-border,#e2e3e5) bg-(--gui-surface,#ffffff) px-3 py-2 text-left hover:bg-(--gui-canvas,#f7f8f9)'
           onClick={() => onSelectItem?.(slide.item, slide.index)}
         >
-          <span className='block truncate font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+          <span className='block truncate font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
             {slide.title}
           </span>
           {slide.subtitle ? (
-            <span className='mt-1 block truncate text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)]'>
+            <span className='mt-1 block truncate text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33)'>
               {slide.subtitle}
             </span>
           ) : null}
@@ -782,11 +782,11 @@ export function GuiHostCollectionList({
       {rows.map((row) => {
         const body = (
           <>
-            <span className='block truncate text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)]'>
+            <span className='block truncate text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33)'>
               {row.title}
             </span>
             {row.body ? (
-              <span className='mt-0.5 block truncate text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+              <span className='mt-0.5 block truncate text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                 {row.body}
               </span>
             ) : null}
@@ -797,7 +797,7 @@ export function GuiHostCollectionList({
             {onSelectItem ? (
               <button
                 type='button'
-                className='w-full rounded-[var(--gui-radius-sm,8px)] px-2 py-2 text-left hover:bg-[var(--gui-canvas,#f7f8f9)]'
+                className='w-full rounded-(--gui-radius-sm,8px) px-2 py-2 text-left hover:bg-(--gui-canvas,#f7f8f9)'
                 onClick={() => onSelectItem(row.item, row.index)}
               >
                 {body}

@@ -58,9 +58,9 @@ describe('MarkdownText', () => {
     expect(heading?.className).toContain('font-semibold')
     expect(heading?.className).toContain('gui-section-size')
     expect(heading?.className).not.toContain('gui-title-size')
-    expect(heading?.className).toContain('text-[var(--gui-text,#2c2d33)]')
+    expect(heading?.className).toContain('text-(--gui-text,#2c2d33)')
     expect(list?.className).toContain('space-y-2')
-    expect(list?.className).toContain('text-[var(--gui-text-muted,#575a66)]')
+    expect(list?.className).toContain('text-(--gui-text-muted,#575a66)')
     expect(list?.className).toContain('gui-body-size')
   })
 

@@ -66,7 +66,7 @@ export function GuiHostSearchField({
       {label ? (
         <label
           htmlFor={fieldId}
-          className='font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'
+          className='font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'
         >
           {label}
           {requiredMark}
@@ -79,8 +79,8 @@ export function GuiHostSearchField({
       <div
         data-testid='search-field'
         className={cn(
-          'flex h-12 items-center gap-2 rounded-full border bg-[var(--gui-surface,#ffffff)] pr-1.5 pl-5',
-          error ? 'border-[var(--gui-danger,#f31a1a)]' : 'border-[var(--gui-border,#e2e3e5)]'
+          'flex h-12 items-center gap-2 rounded-full border bg-(--gui-surface,#ffffff) pr-1.5 pl-5',
+          error ? 'border-(--gui-danger,#f31a1a)' : 'border-(--gui-border,#e2e3e5)'
         )}
       >
         <input
@@ -90,7 +90,7 @@ export function GuiHostSearchField({
           placeholder={placeholder || undefined}
           value={query}
           onChange={(event) => onValueChange(event.target.value)}
-          className='h-full min-w-0 flex-1 bg-transparent text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)] outline-none placeholder:text-[var(--gui-text-tertiary,#8a8d99)]'
+          className='h-full min-w-0 flex-1 bg-transparent text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33) outline-none placeholder:text-(--gui-text-tertiary,#8a8d99)'
         />
         <button
           type='submit'
@@ -105,7 +105,7 @@ export function GuiHostSearchField({
       {error ? (
         <p
           data-testid={`field-error-${name}`}
-          className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-danger,#f31a1a)]'
+          className='text-(length:--gui-label-size,12px) text-(--gui-danger,#f31a1a)'
         >
           {error}
         </p>
@@ -117,7 +117,7 @@ export function GuiHostSearchField({
               key={suggestion}
               type='button'
               className={cn(
-                'inline-flex items-center rounded-[var(--gui-radius-pill)] px-3 py-1.5 font-medium text-sm',
+                'inline-flex items-center rounded-(--gui-radius-pill) px-3 py-1.5 font-medium text-sm',
                 CHIP_TONE_CLASSES.muted
               )}
               onClick={() => onValueChange(suggestion)}

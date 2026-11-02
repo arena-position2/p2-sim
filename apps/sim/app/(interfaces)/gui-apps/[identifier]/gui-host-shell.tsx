@@ -71,7 +71,7 @@ export function GuiHostPagination({
       data-testid='gui-pagination'
       className='col-span-full mt-3 flex w-full flex-wrap items-center justify-between gap-3'
     >
-      <p className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+      <p className='text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
         Showing {paged.from}–{paged.to} of {paged.total}
       </p>
       <div className='flex gap-2'>
@@ -116,28 +116,28 @@ export function GuiHostBreadcrumb({ items, currentPath, onNavigate }: GuiHostBre
   if (items.length === 0) return null
   return (
     <nav data-testid='gui-breadcrumb' aria-label='Breadcrumb'>
-      <ol className='flex flex-wrap items-center gap-1 text-[length:var(--gui-label-size,12px)]'>
+      <ol className='flex flex-wrap items-center gap-1 text-(length:--gui-label-size,12px)'>
         {items.map((item, index) => {
           const last = index === items.length - 1
           const current = last || !item.path || item.path === currentPath
           return (
             <li key={`${item.label}:${item.path ?? index}`} className='flex items-center gap-1'>
               {index > 0 ? (
-                <span aria-hidden className='text-[var(--gui-text-muted,#575a66)]'>
+                <span aria-hidden className='text-(--gui-text-muted,#575a66)'>
                   /
                 </span>
               ) : null}
               {current ? (
                 <span
                   aria-current='page'
-                  className='font-medium text-[var(--gui-text,#2c2d33)]'
+                  className='font-medium text-(--gui-text,#2c2d33)'
                 >
                   {item.label}
                 </span>
               ) : (
                 <button
                   type='button'
-                  className='text-[var(--gui-brand,#1a73e8)] hover:underline'
+                  className='text-(--gui-brand,#1a73e8) hover:underline'
                   onClick={() => onNavigate(item.path as string)}
                 >
                   {item.label}
@@ -179,7 +179,7 @@ export function GuiHostTooltip({ text, label, children }: GuiHostTooltipProps) {
         <span
           id={tooltipId}
           role='tooltip'
-          className='absolute bottom-full left-1/2 z-20 mb-1 w-max max-w-xs -translate-x-1/2 rounded-[var(--gui-radius-sm,8px)] bg-[var(--gui-text,#2c2d33)] px-2 py-1 text-[length:var(--gui-label-size,12px)] text-[var(--gui-surface,#ffffff)]'
+          className='absolute bottom-full left-1/2 z-20 mb-1 w-max max-w-xs -translate-x-1/2 rounded-(--gui-radius-sm,8px) bg-(--gui-text,#2c2d33) px-2 py-1 text-(length:--gui-label-size,12px) text-(--gui-surface,#ffffff)'
         >
           {text}
         </span>
@@ -253,7 +253,7 @@ export function GuiHostPopover({
           className={cn(GUI_SURFACE_CARD, 'absolute top-full left-0 z-20 mt-1 min-w-56')}
         >
           {title ? (
-            <p className='mb-2 font-medium text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+            <p className='mb-2 font-medium text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
               {title}
             </p>
           ) : null}
@@ -369,7 +369,7 @@ export function GuiHostCommandPalette({
             />
             <ul className='mt-2 max-h-72 overflow-auto'>
               {visible.length === 0 ? (
-                <li className='px-2 py-2 text-[length:var(--gui-body-size,16px)] text-[var(--gui-text-muted,#575a66)]'>
+                <li className='px-2 py-2 text-(length:--gui-body-size,16px) text-(--gui-text-muted,#575a66)'>
                   No commands
                 </li>
               ) : (
@@ -377,13 +377,13 @@ export function GuiHostCommandPalette({
                   <li key={`${entry.kind}:${entry.target}:${entry.label}`}>
                     <button
                       type='button'
-                      className='flex w-full items-center justify-between rounded-[var(--gui-radius-sm,8px)] px-2 py-2 text-left hover:bg-[var(--gui-canvas,#f7f8f9)]'
+                      className='flex w-full items-center justify-between rounded-(--gui-radius-sm,8px) px-2 py-2 text-left hover:bg-(--gui-canvas,#f7f8f9)'
                       onClick={() => run(entry)}
                     >
-                      <span className='text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)]'>
+                      <span className='text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33)'>
                         {entry.label}
                       </span>
-                      <span className='text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+                      <span className='text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
                         {entry.kind === 'action' ? entry.target : entry.target}
                       </span>
                     </button>

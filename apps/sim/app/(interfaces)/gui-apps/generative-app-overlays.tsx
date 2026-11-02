@@ -33,7 +33,7 @@ export function ActionSuccessToast({ message, onDone }: ActionSuccessToastProps)
       data-testid='action-success-toast'
       className='pointer-events-none fixed inset-x-0 bottom-6 z-20 flex justify-center px-4'
     >
-      <p className='rounded-[var(--gui-radius,12px)] border border-[var(--gui-success-border,#b1e9ce)] bg-[var(--gui-success-surface,#f5fcf9)] px-4 py-2 text-[var(--gui-success-text,#23784f)] text-sm shadow-[var(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))]'>
+      <p className='rounded-(--gui-radius,12px) border border-(--gui-success-border,#b1e9ce) bg-(--gui-success-surface,#f5fcf9) px-4 py-2 text-(--gui-success-text,#23784f) text-sm shadow-(--gui-shadow-card,0px_2px_8px_rgba(44,45,51,0.1))'>
         {message}
       </p>
     </div>
@@ -98,17 +98,17 @@ export function DestructiveConfirmDialog({ onCancel, onConfirm }: DestructiveCon
         data-testid='destructive-confirm'
         className={cn(
           GUI_OVERLAY_DIALOG_CLASS,
-          'w-full max-w-sm rounded-[var(--gui-radius,12px)] p-4'
+          'w-full max-w-sm rounded-(--gui-radius,12px) p-4'
         )}
         onKeyDown={onKeyDown}
       >
         <h2
           id='destructive-confirm-title'
-          className='font-medium text-[length:var(--gui-body-size,16px)] text-[var(--gui-text,#2c2d33)]'
+          className='font-medium text-(length:--gui-body-size,16px) text-(--gui-text,#2c2d33)'
         >
           This cannot be undone
         </h2>
-        <p className='mt-1 text-[length:var(--gui-label-size,12px)] text-[var(--gui-text-muted,#575a66)]'>
+        <p className='mt-1 text-(length:--gui-label-size,12px) text-(--gui-text-muted,#575a66)'>
           Continue with this action?
         </p>
         <div className='mt-4 flex justify-end gap-2'>
@@ -155,7 +155,7 @@ export function ActionRefreshButton({ onRefresh, pending = false }: ActionRefres
         onClick={onRefresh}
       >
         {pending ? (
-          <Loader2 className='size-3 animate-spin text-[var(--gui-text-muted,#575a66)]' aria-hidden />
+          <Loader2 className='size-3 animate-spin text-(--gui-text-muted,#575a66)' aria-hidden />
         ) : null}
         Refresh
       </GuiButton>

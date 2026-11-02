@@ -40,16 +40,16 @@ export class SpecRenderErrorBoundary extends Component<
       <div
         role='alert'
         data-testid='spec-render-error'
-        className='p-8 text-[var(--gui-text,var(--text-error))] text-sm'
+        className='p-8 text-(--gui-text,var(--text-error)) text-sm'
       >
         <p className='font-medium'>{this.props.fallbackTitle ?? 'This page failed to render'}</p>
-        <p className='mt-2 text-[var(--gui-text-muted,var(--color-ds-grey-500,#8a8d99))]'>
+        <p className='mt-2 text-(--gui-text-muted,var(--color-ds-grey-500,#8a8d99))'>
           {this.state.message}
         </p>
         <button
           type='button'
           data-testid='spec-render-error-retry'
-          className='mt-4 font-medium text-[var(--gui-brand,#1a73e8)] hover:underline'
+          className='mt-4 font-medium text-(--gui-brand,#1a73e8) hover:underline'
           onClick={() => this.setState({ message: '' })}
         >
           Retry

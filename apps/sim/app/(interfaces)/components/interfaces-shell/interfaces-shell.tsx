@@ -34,7 +34,7 @@ export function InterfacesShell({ children }: InterfacesShellProps) {
   const pathname = usePathname() ?? ''
   if (isGuiAppsPath(pathname)) {
     return (
-      <div className='light desktop-title-bar-page relative flex flex-col bg-[var(--bg)] text-[var(--text-primary)]'>
+      <div className='light desktop-title-bar-page relative flex flex-col bg-(--bg) text-(--text-primary)'>
         <DesktopTitleBarLane />
         <main className='flex flex-1 flex-col'>{children}</main>
       </div>

@@ -9,7 +9,7 @@ import {
 export function GuiRequiredMark({ show }: { show: boolean }) {
   if (!show) return null
   return (
-    <span aria-hidden className='text-[var(--gui-danger,#f31a1a)]'>
+    <span aria-hidden className='text-(--gui-danger,#f31a1a)'>
       {' *'}
     </span>
   )

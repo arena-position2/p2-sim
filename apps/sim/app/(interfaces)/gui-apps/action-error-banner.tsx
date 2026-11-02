@@ -42,17 +42,17 @@ export function ActionErrorBanner({
       data-testid={isWarning ? 'action-warning-banner' : 'action-error-banner'}
       className={
         isWarning
-          ? 'flex w-full items-start gap-3 border-[var(--gui-warning-border,#fdcdb5)] border-b bg-[var(--gui-warning-surface,#fff9f5)] px-6 py-3 text-[var(--gui-warning-text,#974d29)] text-sm'
-          : 'flex w-full items-start gap-3 border-[var(--gui-error-border,#faa3a3)] border-b bg-[var(--gui-error-surface,#fff3f3)] px-6 py-3 text-[var(--gui-error-text,#921010)] text-sm'
+          ? 'flex w-full items-start gap-3 border-(--gui-warning-border,#fdcdb5) border-b bg-(--gui-warning-surface,#fff9f5) px-6 py-3 text-(--gui-warning-text,#974d29) text-sm'
+          : 'flex w-full items-start gap-3 border-(--gui-error-border,#faa3a3) border-b bg-(--gui-error-surface,#fff3f3) px-6 py-3 text-(--gui-error-text,#921010) text-sm'
       }
     >
-      <span className='flex-1 break-words'>{message}</span>
+      <span className='flex-1 wrap-break-word'>{message}</span>
       {onRetry && !isWarning ? (
         <button
           type='button'
           data-testid='action-error-retry'
           onClick={onRetry}
-          className='shrink-0 rounded-[var(--gui-radius-sm,8px)] px-2 py-0.5 font-medium text-[var(--gui-error-text,#921010)] hover:bg-[var(--gui-surface,#ffffff)]'
+          className='shrink-0 rounded-(--gui-radius-sm,8px) px-2 py-0.5 font-medium text-(--gui-error-text,#921010) hover:bg-(--gui-surface,#ffffff)'
         >
           Retry
         </button>
@@ -64,8 +64,8 @@ export function ActionErrorBanner({
         aria-label={isWarning ? 'Dismiss warning' : 'Dismiss error'}
         className={
           isWarning
-            ? 'shrink-0 rounded px-1 text-[var(--gui-warning-text,#974d29)] leading-none hover:text-[var(--gui-text,#2c2d33)]'
-            : 'shrink-0 rounded px-1 text-[var(--gui-error-text,#921010)] leading-none hover:text-[var(--gui-text,#2c2d33)]'
+            ? 'shrink-0 rounded px-1 text-(--gui-warning-text,#974d29) leading-none hover:text-(--gui-text,#2c2d33)'
+            : 'shrink-0 rounded px-1 text-(--gui-error-text,#921010) leading-none hover:text-(--gui-text,#2c2d33)'
         }
       >
         ×

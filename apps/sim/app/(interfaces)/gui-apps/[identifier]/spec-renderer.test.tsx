@@ -996,7 +996,7 @@ describe('SpecRenderer', () => {
     const { container } = render({ spec })
     expect(container.querySelector('section')?.className).toContain('max-w-2xl')
     expect(container.querySelector('section')?.className).not.toContain('max-w-[1280px]')
-    expect(container.querySelector('form')?.className).not.toContain('max-w-[var(--gui-measure')
+    expect(container.querySelector('form')?.className).not.toContain('max-w-(--gui-measure')
     expect(container.querySelector('form')?.className).toContain('w-full')
     expect(container.querySelector('[data-testid="task-surface"]')).toBeNull()
     expect(container.querySelector('input[name="url"]')?.parentElement?.className).toContain(
@@ -1124,7 +1124,7 @@ describe('SpecRenderer', () => {
     const { container } = render({ spec })
     const form = container.querySelector('form')
     expect(form?.className).toContain('w-full')
-    expect(form?.className).not.toContain('max-w-[var(--gui-measure')
+    expect(form?.className).not.toContain('max-w-(--gui-measure')
     const grid = container.querySelector('.grid') as HTMLElement
     expect(grid.className).toContain('md:grid-cols-2')
     expect(grid.style.gridTemplateColumns).toBe('')
@@ -2654,7 +2654,7 @@ describe('SpecRenderer', () => {
     expect(header.className).toContain('sticky')
     expect(header.className).toContain('top-0')
     expect(header.className).toContain('z-20')
-    expect(header.className).toContain('bg-[var(--gui-surface,#ffffff)]')
+    expect(header.className).toContain('bg-(--gui-surface,#ffffff)')
     expect(header.querySelector('[data-testid="app-header-logo"]')).toBeTruthy()
     expect(header.querySelector('[data-testid="app-header-mark"]')).toBeNull()
     const inner = header.firstElementChild as HTMLElement
@@ -2810,8 +2810,8 @@ describe('SpecRenderer', () => {
     const { container } = render({ spec })
     expect(container.textContent).toContain('+14.2%')
     const tones = Array.from(container.querySelectorAll('span')).map((node) => node.className)
-    expect(tones.some((name) => name.includes('text-[var(--gui-success-text,#23784f)]'))).toBe(true)
-    expect(tones.some((name) => name.includes('text-[var(--gui-error-text,#921010)]'))).toBe(true)
+    expect(tones.some((name) => name.includes('text-(--gui-success-text,#23784f)'))).toBe(true)
+    expect(tones.some((name) => name.includes('text-(--gui-error-text,#921010)'))).toBe(true)
   })
 
   it('renders a Sparkline from comma-separated values', () => {
@@ -3299,20 +3299,20 @@ describe('SpecRenderer', () => {
     it('defaults to the secondary variant so pages are not a wall of primaries', () => {
       const button = renderButton({ label: 'Export', navigateTo: 'report' })
       expect(button.className).toContain('border')
-      expect(button.className).not.toContain('bg-[var(--gui-brand,#1a73e8)]')
+      expect(button.className).not.toContain('bg-(--gui-brand,#1a73e8)')
     })
 
     it('renders the primary variant as a filled button', () => {
       const button = renderButton({ label: 'Run', actionId: 'run', variant: 'primary' })
-      expect(button.className).toContain('bg-[var(--gui-brand,#1a73e8)]')
+      expect(button.className).toContain('bg-(--gui-brand,#1a73e8)')
       expect(button.className).toContain('gui-text-on-brand')
     })
 
     it('renders the destructive variant as outline danger, not a filled CTA', () => {
       const button = renderButton({ label: 'Delete', actionId: 'del', variant: 'destructive' })
-      expect(button.className).toContain('border-[var(--gui-danger,#f31a1a)]')
-      expect(button.className).toContain('text-[var(--gui-danger,#f31a1a)]')
-      expect(button.className).not.toContain('bg-[var(--gui-danger,#f31a1a)]')
+      expect(button.className).toContain('border-(--gui-danger,#f31a1a)')
+      expect(button.className).toContain('text-(--gui-danger,#f31a1a)')
+      expect(button.className).not.toContain('bg-(--gui-danger,#f31a1a)')
     })
 
     it('asks the host to confirm a destructive action instead of navigating first', () => {
@@ -3381,9 +3381,9 @@ describe('SpecRenderer', () => {
 
     it('renders the ghost variant without a border or fill', () => {
       const button = renderButton({ label: 'Back', navigateTo: 'home', variant: 'ghost' })
-      expect(button.className).not.toContain('border-[var(--gui-border')
-      expect(button.className).not.toContain('bg-[var(--gui-danger,#f31a1a)]')
-      expect(button.className).not.toContain('bg-[var(--gui-brand,#1a73e8)]')
+      expect(button.className).not.toContain('border-(--gui-border')
+      expect(button.className).not.toContain('bg-(--gui-danger,#f31a1a)')
+      expect(button.className).not.toContain('bg-(--gui-brand,#1a73e8)')
     })
 
     it('renders the outline pill variant with a brand border', () => {
@@ -3393,9 +3393,9 @@ describe('SpecRenderer', () => {
         variant: 'outline',
         shape: 'pill',
       })
-      expect(button.className).toContain('border-[var(--gui-brand,#1a73e8)]')
-      expect(button.className).toContain('rounded-[var(--gui-radius-pill)]')
-      expect(button.className).not.toContain('bg-[var(--gui-brand,#1a73e8)]')
+      expect(button.className).toContain('border-(--gui-brand,#1a73e8)')
+      expect(button.className).toContain('rounded-(--gui-radius-pill)')
+      expect(button.className).not.toContain('bg-(--gui-brand,#1a73e8)')
     })
 
     it('applies the small size', () => {
@@ -4046,7 +4046,7 @@ describe('SpecRenderer', () => {
     const title = card.querySelector('h2') as HTMLElement
     const footer = card.querySelector('[data-testid="card-footer"]') as HTMLElement
     expect(title.className).toContain('line-clamp-2')
-    expect(title.className).toContain('break-words')
+    expect(title.className).toContain('wrap-break-word')
     expect(title.getAttribute('title')).toBe(longUrl)
     expect(title.className).toContain('min-w-0')
     expect(title.textContent).toBe(longUrl)
@@ -4303,8 +4303,8 @@ describe('SpecRenderer', () => {
     }
     const { container } = render({ spec })
     const card = container.querySelector('[data-testid="card"]') as HTMLElement
-    expect(card.className).toContain('border-[var(--gui-border,#e2e3e5)]')
-    expect(card.className).toContain('shadow-[var(--gui-shadow-card')
+    expect(card.className).toContain('border-(--gui-border,#e2e3e5)')
+    expect(card.className).toContain('shadow-(--gui-shadow-card')
   })
 
   it('renders Card variant muted with rest shadow and resolves padding tokens', () => {
@@ -4322,9 +4322,9 @@ describe('SpecRenderer', () => {
     const { container } = render({ spec })
     const card = container.querySelector('[data-testid="card"]') as HTMLElement
     expect(card.getAttribute('data-variant')).toBe('muted')
-    expect(card.className).toContain('border-[var(--gui-border,#e2e3e5)]')
+    expect(card.className).toContain('border-(--gui-border,#e2e3e5)')
     expect(card.className).toContain('gui-surface-muted')
-    expect(card.className).toContain('shadow-[var(--gui-shadow-card')
+    expect(card.className).toContain('shadow-(--gui-shadow-card')
     expect(card.style.padding).toBe('var(--gui-space-lg, 24px)')
   })
 
@@ -4496,9 +4496,9 @@ describe('SpecRenderer', () => {
     expect(submit?.className).not.toContain('w-full')
     const form = container.querySelector('form')
     expect(form?.className).toContain('w-full')
-    expect(form?.className).not.toContain('max-w-[var(--gui-measure')
+    expect(form?.className).not.toContain('max-w-(--gui-measure')
     const input = container.querySelector('input[name="name"]')
-    expect(input?.className).toContain('focus-visible:bg-[var(--gui-brand-surface,#f3f8fe)]')
+    expect(input?.className).toContain('focus-visible:bg-(--gui-brand-surface,#f3f8fe)')
   })
 
   it('shows busy chrome on a pending SearchField submit', () => {

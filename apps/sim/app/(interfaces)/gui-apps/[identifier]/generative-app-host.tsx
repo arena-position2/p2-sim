@@ -154,7 +154,7 @@ export function GenerativeAppHost({
   })
 
   if (configQuery.isLoading) {
-    return <p className='p-8 text-[var(--color-ds-grey-500,#8a8d99)] text-sm'>Loading…</p>
+    return <p className='p-8 text-(--color-ds-grey-500,#8a8d99) text-sm'>Loading…</p>
   }
 
   if (configQuery.data?.kind === 'auth') {
@@ -168,7 +168,7 @@ export function GenerativeAppHost({
       <div className='flex min-h-[50vh] items-center justify-center p-8 text-center'>
         <div>
           <h1 className='text-2xl'>Sign in required</h1>
-          <p className='mt-2 text-[var(--color-ds-grey-500,#8a8d99)]'>
+          <p className='mt-2 text-(--color-ds-grey-500,#8a8d99)'>
             This app uses SSO. Sign in and reload this page.
           </p>
         </div>
@@ -178,14 +178,14 @@ export function GenerativeAppHost({
 
   if (configQuery.isError || !configQuery.data || configQuery.data.kind !== 'config') {
     return (
-      <div className='p-8 text-center text-[var(--text-error)]'>
+      <div className='p-8 text-center text-(--text-error)'>
         {toError(configQuery.error).message || 'Unable to load this app'}
       </div>
     )
   }
 
   if (pageQuery.isLoading) {
-    return <p className='p-8 text-[var(--color-ds-grey-500,#8a8d99)] text-sm'>Loading page…</p>
+    return <p className='p-8 text-(--color-ds-grey-500,#8a8d99) text-sm'>Loading page…</p>
   }
 
   if (!pageQuery.data || !pageSpec || !isJsonRenderSpec(pageSpec)) {
@@ -281,7 +281,7 @@ function PasswordGate({ identifier }: { identifier: string }) {
         value={password}
         onChange={(event) => setPassword(event.target.value)}
       />
-      {error ? <p className='text-[var(--text-error)] text-sm'>{error}</p> : null}
+      {error ? <p className='text-(--text-error) text-sm'>{error}</p> : null}
       <Button type='submit' disabled={authenticate.isPending}>
         Continue
       </Button>
@@ -342,7 +342,7 @@ function EmailGate({ identifier }: { identifier: string }) {
           Send code
         </Button>
       )}
-      {error ? <p className='text-[var(--text-error)] text-sm'>{error}</p> : null}
+      {error ? <p className='text-(--text-error) text-sm'>{error}</p> : null}
     </div>
   )
 }
