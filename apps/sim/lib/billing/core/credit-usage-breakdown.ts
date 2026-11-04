@@ -18,6 +18,10 @@ import {
 } from '@/lib/billing/core/usage-log'
 import { apportionCredits, dollarsToCredits } from '@/lib/billing/credits/conversion'
 import { computeWeeklyRefreshConsumed } from '@/lib/billing/credits/weekly-refresh'
+import {
+  isOrgMemberUsageLimitTarget,
+  orgMemberUsagePersonCondition,
+} from '@/lib/billing/organizations/member-limits'
 import { getPlanWeeklyRefreshDollars, isPaid } from '@/lib/billing/plan-helpers'
 import { isOrgScopedSubscription } from '@/lib/billing/subscriptions/utils'
 import type { DbClient } from '@/lib/db/types'
@@ -87,11 +91,13 @@ function appendSourceFilter(conditions: SQL[], sources?: UsageLogSource | UsageL
 }
 
 /**
- * Sums billable `usage_log` cost for a user inside an organization's workspaces
+ * Sums billable `usage_log` cost for one person inside an organization's workspaces
  * within a wall-clock window (subscription period), optionally filtered by source.
  *
- * Uses occurred_at/created_at — not billing_period_* column equality — so runs that
- * appear in Activity detail also reduce Remaining credits even when period stamps drift.
+ * Uses the same person split as the member cap: the runner's own rows, including
+ * a deployed API call billed to this organization. Uses occurred_at/created_at —
+ * not billing_period_* column equality — so runs that appear in Activity detail
+ * also reduce Remaining credits even when period stamps drift.
  */
 async function sumOrgWorkspaceUsageBySource(
   organizationId: string,
@@ -101,7 +107,7 @@ async function sumOrgWorkspaceUsageBySource(
   executor: DbClient = dbReplica
 ): Promise<number> {
   const conditions = [
-    eq(usageLog.userId, userId),
+    orgMemberUsagePersonCondition(userId),
     eq(workspace.organizationId, organizationId),
     eq(usageLog.billable, true),
     ...ledgerWindowBounds(window),
@@ -150,7 +156,8 @@ async function sumOrganizationWorkspaceUsageBySource(
 async function sumExternalApiBilledToOrganization(
   organizationId: string,
   window: { start: Date; end: Date },
-  executor: DbClient
+  executor: DbClient,
+  userId?: string
 ): Promise<{ total: number; workflow: number }> {
   const [row] = await executor
     .select({
@@ -173,6 +180,7 @@ async function sumExternalApiBilledToOrganization(
         eq(usageLog.billable, true),
         isNotNull(workspace.organizationId),
         sql`${workspace.organizationId} <> ${organizationId}`,
+        userId ? orgMemberUsagePersonCondition(userId) : undefined,
         ...ledgerWindowBounds(window)
       )
     )
@@ -333,7 +341,7 @@ async function getPersonalCreditUsageSummary(
         ? { start: subscription.periodStart, end: subscription.periodEnd }
         : defaultBillingPeriod()
 
-    const [totalLedger, mothershipLedger, workflowLedger] = await Promise.all([
+    const [totalLedger, mothershipLedger, workflowLedger, externalApi] = await Promise.all([
       sumOrgWorkspaceUsageBySource(organizationId, userId, billingPeriod, undefined, executor),
       sumOrgWorkspaceUsageBySource(
         organizationId,
@@ -343,14 +351,15 @@ async function getPersonalCreditUsageSummary(
         executor
       ),
       sumOrgWorkspaceUsageBySource(organizationId, userId, billingPeriod, 'workflow', executor),
+      sumExternalApiBilledToOrganization(organizationId, billingPeriod, executor, userId),
     ])
 
     const dollarBreakdown = buildDollarBreakdown({
       totalBaseline: 0,
       copilotBaseline: 0,
-      totalLedger,
+      totalLedger: totalLedger + externalApi.total,
       mothershipLedger,
-      workflowLedger,
+      workflowLedger: workflowLedger + externalApi.workflow,
     })
 
     const orgPool = await getOrganizationPoolSnapshot(organizationId, executor)
@@ -570,7 +579,14 @@ export async function getCreditUsageSummary(params: {
         .limit(1)
 
       if (!membership) {
-        return getPersonalCreditUsageSummary(params.userId, null, executor)
+        const usesOrgWorkspace = await isOrgMemberUsageLimitTarget(organizationId, params.userId, {
+          executor,
+        })
+        return getPersonalCreditUsageSummary(
+          params.userId,
+          usesOrgWorkspace ? organizationId : null,
+          executor
+        )
       }
 
       if (isOrgAdminRole(membership.role) && !params.personal) {

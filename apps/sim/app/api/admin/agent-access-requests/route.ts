@@ -45,7 +45,8 @@ async function requirePlatformAdminEmail() {
  * Restricted to emails in `NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS`.
  */
 export const GET = withRouteHandler(async (request: NextRequest) => {
-  if (!(await requirePlatformAdminEmail())) {
+  const sessionEmail = await requirePlatformAdminEmail()
+  if (!sessionEmail) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -65,6 +66,7 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
     const workspaceId = parsed.data.query.workspaceId
     const result = await executeSimAgentWorkflow({
       workflowId,
+      userEmail: sessionEmail,
       input: workspaceId ? { workspace_id: workspaceId } : {},
       signal: request.signal,
     })
@@ -132,6 +134,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
 
     const result = await executeSimAgentWorkflow({
       workflowId,
+      userEmail: sessionEmail,
       input: {
         give_access_list: giveAccessList,
         approved_by: approvedBy,

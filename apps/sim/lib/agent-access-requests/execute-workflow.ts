@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { V2_WORKFLOW_BILLING_EMAIL_HEADER } from '@/lib/api/contracts/v2/workflows'
 import { env } from '@/lib/core/config/env'
 
 const logger = createLogger('AgentAccessRequestWorkflow')
@@ -9,6 +10,8 @@ export function buildSimWorkflowExecuteUrl(baseUrl: string, workflowId: string):
 
 interface ExecuteSimWorkflowInput {
   workflowId: string
+  /** Logged-in user. Sent as `X-Sim-Email` so the deployed workflow bills that person. */
+  userEmail: string
   input: Record<string, unknown>
   signal?: AbortSignal
 }
@@ -24,6 +27,7 @@ interface ExecuteSimWorkflowResult {
  */
 export async function executeSimAgentWorkflow({
   workflowId,
+  userEmail,
   input,
   signal,
 }: ExecuteSimWorkflowInput): Promise<
@@ -37,6 +41,11 @@ export async function executeSimAgentWorkflow({
       hasBaseUrl: Boolean(baseUrl),
     })
     return { ok: false, status: 500, error: 'Agent access request workflow is not configured' }
+  }
+
+  const billingEmail = userEmail.trim()
+  if (!billingEmail) {
+    return { ok: false, status: 400, error: 'Logged-in user email is required' }
   }
 
   const executeUrl = buildSimWorkflowExecuteUrl(baseUrl, workflowId)
@@ -54,6 +63,7 @@ export async function executeSimAgentWorkflow({
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': apiKey,
+        [V2_WORKFLOW_BILLING_EMAIL_HEADER]: billingEmail,
       },
       body: JSON.stringify(requestBody),
       signal,

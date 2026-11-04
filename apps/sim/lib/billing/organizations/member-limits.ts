@@ -8,7 +8,7 @@ import {
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
-import { and, eq, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
+import { and, eq, gte, isNull, ne, or, type SQL, sql } from 'drizzle-orm'
 import { ON_DEMAND_UNLIMITED } from '@/lib/billing/constants'
 import { getOrganizationSubscription } from '@/lib/billing/core/billing'
 import { defaultBillingPeriod } from '@/lib/billing/core/billing-period'
@@ -19,6 +19,7 @@ import type { UsageQueryPeriod } from '@/lib/billing/core/usage-log'
 import { dollarsToCredits } from '@/lib/billing/credits/conversion'
 import { toDecimal, toNumber } from '@/lib/billing/utils/decimal'
 import type { DbOrTx } from '@/lib/db/types'
+import { ledgerOccurredAt } from '@/lib/workspaces/usage/ledger-helpers'
 
 const logger = createLogger('OrgMemberLimits')
 
@@ -185,6 +186,42 @@ export async function setOrgMemberUsageLimit(
 }
 
 /**
+ * Editor and in-org runs stay on `user_id`. A deployed API call keeps the
+ * credential on `user_id` and the caller on `actor_user_id`.
+ */
+export function orgMemberUsagePersonCondition(userId: string): SQL {
+  return (
+    or(
+      and(
+        eq(usageLog.userId, userId),
+        or(
+          isNull(usageLog.actorUserId),
+          eq(usageLog.actorUserId, usageLog.userId),
+          isNull(usageLog.actorType),
+          ne(usageLog.actorType, 'user')
+        )
+      ),
+      and(
+        eq(usageLog.actorUserId, userId),
+        ne(usageLog.actorUserId, usageLog.userId),
+        eq(usageLog.actorType, 'user')
+      )
+    ) ?? sql`false`
+  )
+}
+
+/** Subscription window on the same clock the organization pool sums (`occurred_at`, else `created_at`). */
+function memberLedgerWindow(period: { start: Date; end: Date }): [SQL, SQL] {
+  const occurredAt = ledgerOccurredAt()
+  const startIso = period.start.toISOString()
+  const endIso = period.end.toISOString()
+  return [
+    sql`${occurredAt} >= ${startIso}::timestamptz`,
+    sql`${occurredAt} < ${endIso}::timestamptz`,
+  ]
+}
+
+/**
  * Sums an actor's usage against an immutable organization attribution snapshot
  * plus disjoint legacy rows that predate billing attribution.
  *
@@ -210,36 +247,19 @@ export async function getOrgMemberUsageForBillingPeriod(
       .leftJoin(workspace, eq(workspace.id, usageLog.workspaceId))
       .where(
         and(
-          or(
-            and(
-              eq(usageLog.userId, userId),
-              or(
-                isNull(usageLog.actorUserId),
-                eq(usageLog.actorUserId, usageLog.userId),
-                isNull(usageLog.actorType),
-                ne(usageLog.actorType, 'user')
-              )
-            ),
-            and(
-              eq(usageLog.actorUserId, userId),
-              ne(usageLog.actorUserId, usageLog.userId),
-              eq(usageLog.actorType, 'user')
-            )
-          ),
+          orgMemberUsagePersonCondition(userId),
           ...(billingPeriod.source === 'reporting'
             ? [
                 eq(usageLog.billingEntityType, 'organization'),
                 eq(usageLog.billingEntityId, organizationId),
-                gte(usageLog.createdAt, billingPeriod.start),
-                lt(usageLog.createdAt, billingPeriod.end),
+                ...memberLedgerWindow(billingPeriod),
               ]
             : [
                 or(
                   and(
                     eq(usageLog.billingEntityType, 'organization'),
                     eq(usageLog.billingEntityId, organizationId),
-                    eq(usageLog.billingPeriodStart, billingPeriod.start),
-                    eq(usageLog.billingPeriodEnd, billingPeriod.end)
+                    ...memberLedgerWindow(billingPeriod)
                   ),
                   and(
                     isNull(usageLog.billingEntityType),
@@ -249,8 +269,7 @@ export async function getOrgMemberUsageForBillingPeriod(
                       isNull(workspace.organizationAssignedAt),
                       gte(usageLog.createdAt, workspace.organizationAssignedAt)
                     ),
-                    gte(usageLog.createdAt, billingPeriod.start),
-                    lt(usageLog.createdAt, billingPeriod.end)
+                    ...memberLedgerWindow(billingPeriod)
                   )
                 ),
               ])

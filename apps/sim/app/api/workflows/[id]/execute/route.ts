@@ -8,6 +8,7 @@ import { generateId } from '@sim/utils/id'
 import type { BlockState } from '@sim/workflow-types/workflow'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { v2ExecuteWorkflowHeadersSchema } from '@/lib/api/contracts/v2/workflows'
 import {
   executeWorkflowBodySchema,
   executeWorkflowHeadersSchema,
@@ -76,6 +77,7 @@ import {
 import { containsLargeValueRef } from '@/lib/execution/payloads/large-value-ref'
 import { compactBlockLogs, compactExecutionPayload } from '@/lib/execution/payloads/serializer'
 import {
+  BILLING_EMAIL_NOT_FOUND_CODE,
   type PreprocessExecutionSuccess,
   preprocessExecution,
   WORKFLOW_NOT_DEPLOYED_CODE,
@@ -638,6 +640,25 @@ async function handleExecutePost(
       isPublicApiAccess = true
     } else {
       userId = auth.userId
+    }
+
+    // A deployed API call (key or public) names its payer. Session and internal
+    // hops keep today's actor: the editor Run button does not send this header.
+    const isDeployedApiCall =
+      isPublicApiAccess || (auth.success && auth.authType === AuthType.API_KEY)
+    let billingPayerEmail: string | undefined
+    if (isDeployedApiCall) {
+      const billingEmail = v2ExecuteWorkflowHeadersSchema
+        .pick({ 'x-sim-email': true })
+        .safeParse({ 'x-sim-email': req.headers.get('x-sim-email') ?? undefined })
+      if (!billingEmail.success) {
+        const message = billingEmail.error.issues[0]?.message ?? 'X-Sim-Email header is required'
+        reqLogger.warn('Rejected deployed API execution without a billing email', {
+          issues: billingEmail.error.issues,
+        })
+        return NextResponse.json({ error: message }, { status: 400 })
+      }
+      billingPayerEmail = billingEmail.data['x-sim-email']
     }
 
     let body: any = {}
@@ -1268,6 +1289,7 @@ async function handleExecutePost(
       apiKeyType: apiKeyAttribution.apiKeyType,
       workflowRecord: workflowAuthorization.workflow ?? undefined,
       billingAttribution: upstreamBillingAttribution,
+      ...(billingPayerEmail ? { billingPayerEmail } : {}),
       executionType: isAsyncMode ? 'async' : 'sync',
       requestedTimeoutSeconds,
       ...(inheritedExecutionDeadlineAt !== undefined
@@ -1286,7 +1308,9 @@ async function handleExecutePost(
         )
       }
       return NextResponse.json(
-        { error: preprocessError.message },
+        preprocessError.code === BILLING_EMAIL_NOT_FOUND_CODE
+          ? { error: preprocessError.message, code: preprocessError.code }
+          : { error: preprocessError.message },
         { status: preprocessError.statusCode }
       )
     }
