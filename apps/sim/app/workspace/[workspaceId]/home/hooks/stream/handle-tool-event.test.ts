@@ -175,6 +175,56 @@ describe('tool events (dispatch → model + side effects)', () => {
     expect(started).toEqual(['click-2'])
   })
 
+  it('does not start a workflow tool already finished server-side (Local Copilot go executor)', () => {
+    const { started, starters } = recordingStarters()
+    const ctx = createStreamLoopContext(makeStreamLoopDeps(starters))
+
+    dispatchStreamEvent(
+      ctx,
+      toolEnv({
+        phase: 'call',
+        executor: 'go',
+        mode: 'sync',
+        toolCallId: 'local-run',
+        toolName: 'run_workflow',
+        arguments: { workflowId: 'wf-1', workflow_input: { url: 'https://example.com' } },
+      })
+    )
+
+    expect(toolNode(ctx, 'local-run').status).toBe('running')
+    expect(started).toEqual([])
+  })
+
+  it('starts a workflow tool when the frame declares client execution', () => {
+    const { started, starters } = recordingStarters()
+    const ctx = createStreamLoopContext(makeStreamLoopDeps(starters))
+
+    dispatchCall(ctx, 'cloud-run', 'run_workflow', { workflowId: 'wf-1' })
+
+    expect(started).toEqual(['cloud-run'])
+  })
+
+  it('starts a workflow tool when ui.clientExecutable is set without executor client', () => {
+    const { started, starters } = recordingStarters()
+    const ctx = createStreamLoopContext(makeStreamLoopDeps(starters))
+
+    dispatchStreamEvent(
+      ctx,
+      toolEnv({
+        phase: 'call',
+        executor: 'sim',
+        mode: 'async',
+        toolCallId: 'ui-flag-run',
+        toolName: 'run_workflow',
+        arguments: { workflowId: 'wf-1' },
+        ui: { clientExecutable: true },
+        status: 'executing',
+      })
+    )
+
+    expect(started).toEqual(['ui-flag-run'])
+  })
+
   it('never starts a skipped terminal command', () => {
     const startClientTerminalTool = vi.fn()
     const ctx = createStreamLoopContext(makeStreamLoopDeps({ startClientTerminalTool }))

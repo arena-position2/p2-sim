@@ -19,6 +19,7 @@ import {
 import {
   isClientExecutedToolCall,
   isWorkflowToolName,
+  streamFrameRequestsClientExecution,
 } from '@/lib/mothership/tools/client-executed-tools'
 import { isDesktopToolCall } from '@/lib/mothership/tools/desktop-tools'
 import { invalidateResourceQueries } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-registry'
@@ -199,8 +200,11 @@ export function handleToolEvent(ctx: StreamLoopContext, parsed: ToolEvent): void
   // Every client tailing the chat sees the call. A client without the desktop app leaves desktop
   // tools to it: its answer could only be an error, and that error would beat the real result.
   // A turn a desktop's background executor runs belongs to that desktop: this view only shows it.
+  // Only frames that declare client execution may start — Local Copilot re-emits finished
+  // server-side workflow runs with executor `go`, which must not re-trigger the browser path.
   const isDesktopCall = isDesktopToolCall(name, args)
   const shouldStartClientTool =
+    streamFrameRequestsClientExecution(payload) &&
     isClientExecutedToolCall(name, args) &&
     (isDesktopApp() || !isDesktopCall) &&
     !(isDesktopCall && deps.options.desktopToolsOnDevice) &&

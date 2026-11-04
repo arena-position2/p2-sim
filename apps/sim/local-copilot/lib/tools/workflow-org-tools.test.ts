@@ -77,6 +77,65 @@ describe('executeWorkflowOrgTool', () => {
     expect(result.success).toBe(true)
     expect(result.output).toEqual({ workflowId: 'workflow-1', name: 'Orders v2' })
   })
+
+  it('rejects set_block_enabled without a boolean enabled flag', async () => {
+    const result = await executeWorkflowOrgTool(
+      'set_block_enabled',
+      { blockId: 'block-1', enabled: 'no' },
+      toolCtx()
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/enabled must be a boolean/i)
+    expect(executeCopilotWorkflowUseCase).not.toHaveBeenCalled()
+  })
+
+  it('toggles a block via read + replace instead of empty apply operations', async () => {
+    executeCopilotWorkflowUseCase
+      .mockResolvedValueOnce({
+        workflowId: 'workflow-1',
+        workspaceId,
+        blocks: {
+          'block-1': {
+            id: 'block-1',
+            type: 'agent',
+            name: 'Agent',
+            enabled: true,
+            subBlocks: {},
+            outputs: {},
+            position: { x: 0, y: 0 },
+            horizontalHandles: true,
+            height: 0,
+            data: {},
+          },
+        },
+        edges: [],
+        loops: {},
+        parallels: {},
+        variables: {},
+      })
+      .mockResolvedValueOnce({})
+
+    const result = await executeWorkflowOrgTool(
+      'set_block_enabled',
+      { blockId: 'block-1', enabled: false },
+      toolCtx()
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.output).toMatchObject({
+      workflowId: 'workflow-1',
+      blockId: 'block-1',
+      enabled: false,
+      changed: true,
+    })
+    expect(executeCopilotWorkflowUseCase).toHaveBeenCalledTimes(2)
+    expect(executeCopilotWorkflowUseCase.mock.calls[1][2]).toMatchObject({
+      workflowId: 'workflow-1',
+      blocks: {
+        'block-1': expect.objectContaining({ enabled: false }),
+      },
+    })
+  })
 })
 
 describe('executeLocalCopilotTool(rename_workflow)', () => {

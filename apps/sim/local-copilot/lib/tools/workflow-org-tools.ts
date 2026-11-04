@@ -5,17 +5,22 @@ import {
   executeCopilotWorkflowUseCase,
   messageForCopilotWorkflowError,
 } from '@/lib/mothership/application/execute-workflow-use-case'
-import { applyWorkflowOperations } from '@/lib/workflows/application/apply-workflow-operations'
 import { deleteWorkflow } from '@/lib/workflows/application/delete-workflow'
 import { moveWorkflowsBulk } from '@/lib/workflows/application/move-workflows-bulk'
+import { readWorkflowGraph } from '@/lib/workflows/application/read-workflow-graph'
+import { replaceWorkflowState } from '@/lib/workflows/application/replace-workflow-state'
 import { updateWorkflow } from '@/lib/workflows/application/update-workflow'
-import { applyWorkflowVariableOperations } from '@/lib/workflows/application/update-workflow-content'
+import {
+  applyWorkflowVariableOperations,
+  type WorkflowVariableOperation,
+} from '@/lib/workflows/application/update-workflow-content'
 import {
   createWorkflowFolder,
   deleteWorkflowFolder,
   listWorkflowFolders,
   relocateWorkflowFolder,
 } from '@/lib/workflows/application/workflow-folders'
+import { decideBlockEnablement } from '@/lib/workflows/editing/block-enablement'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'
 
@@ -277,20 +282,22 @@ async function executeSetGlobalWorkflowVariables(
     return { success: false, error: 'operations array is required' }
   }
 
-  const normalized = operations.flatMap((entry) => {
+  const normalized: WorkflowVariableOperation[] = []
+  for (const entry of operations) {
     const name = typeof entry.name === 'string' ? entry.name.trim() : ''
     const op = typeof entry.operation === 'string' ? entry.operation.trim().toLowerCase() : 'edit'
-    if (!name) return []
-    if (op === 'delete') return [{ operation: 'delete' as const, name }]
-    return [
-      {
-        operation: (op === 'add' ? 'add' : 'edit') as 'add' | 'edit',
-        name,
-        ...(typeof entry.type === 'string' ? { type: entry.type } : {}),
-        ...(entry.value !== undefined ? { value: entry.value } : {}),
-      },
-    ]
-  })
+    if (!name) continue
+    if (op === 'delete') {
+      normalized.push({ operation: 'delete', name })
+      continue
+    }
+    normalized.push({
+      operation: op === 'add' ? 'add' : 'edit',
+      name,
+      ...(typeof entry.type === 'string' ? { type: entry.type } : {}),
+      ...(entry.value !== undefined ? { value: entry.value } : {}),
+    })
+  }
   if (normalized.length === 0) {
     return { success: false, error: 'operations must include at least one named variable op' }
   }
@@ -317,12 +324,36 @@ async function executeSetBlockEnabled(
     return { success: false, error: 'enabled must be a boolean' }
   }
 
+  // Local-only path: `applyWorkflowOperations` rejects empty `operations`, and
+  // Cloud's set_block_enabled leaf is gone. Read → enablement decision → replace
+  // stays under local-copilot so Sim merges do not need to widen the apply gate.
   const toolContext = toCopilotServerToolContext(ctx)
-  const result = await executeCopilotWorkflowUseCase(toolContext, applyWorkflowOperations, {
+  const graph = await executeCopilotWorkflowUseCase(toolContext, readWorkflowGraph, {
     workflowId,
     assertedWorkspaceId: ctx.workspaceId,
-    operations: [],
-    blockEnabledChanges: [{ blockId, enabled: params.enabled }],
+  })
+  const decision = decideBlockEnablement(graph.blocks, blockId, params.enabled)
+  if (decision.outcome === 'refused') {
+    return { success: false, error: decision.refusal.message }
+  }
+  if (decision.outcome === 'unchanged') {
+    return {
+      success: true,
+      output: {
+        workflowId,
+        blockId,
+        enabled: params.enabled,
+        affectedBlockIds: decision.affectedBlockIds,
+        changed: false,
+      },
+    }
+  }
+
+  await executeCopilotWorkflowUseCase(toolContext, replaceWorkflowState, {
+    workflowId,
+    assertedWorkspaceId: ctx.workspaceId,
+    blocks: decision.blocks,
+    edges: graph.edges,
   })
 
   return {
@@ -331,7 +362,8 @@ async function executeSetBlockEnabled(
       workflowId,
       blockId,
       enabled: params.enabled,
-      success: result.success,
+      affectedBlockIds: decision.affectedBlockIds,
+      changed: true,
     },
   }
 }

@@ -21,6 +21,7 @@ import type { ToolExecutionContext, ToolExecutionResult } from '@/local-copilot/
 import {
   applyWorkflowIdToDelegatedArgs,
   buildMothershipDelegatedToolDefinitions,
+  delegatedToolSchemaAcceptsWorkflowId,
   isMothershipDelegatedTool,
   isWorkflowScopedDelegatedTool,
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
@@ -49,10 +50,10 @@ export {
   WORKFLOW_SCOPED_DELEGATED_TOOLS,
   type MothershipDelegatedToolName,
   applyWorkflowIdToDelegatedArgs,
+  delegatedToolSchemaAcceptsWorkflowId,
   isMothershipDelegatedTool,
   isWorkflowScopedDelegatedTool,
   buildMothershipDelegatedToolDefinitions,
-  type delegatedToolSchemaAcceptsWorkflowId,
 }
 
 const logger = createLogger('LocalCopilotMothershipDelegatedTools')
@@ -418,6 +419,24 @@ export async function executeMothershipDelegatedTool(
       ...buildMissingWorkflowIdError(ctx.structuredContext),
       toolName,
     }
+  }
+
+  // Arena-local leaves: Cloud still serves these from Go; Local intercepts after
+  // workflowId resolution so Sim merges do not need mothership handlers.
+  if (toolName === 'get_workflow_run_options') {
+    const { executeGetWorkflowRunOptions } = await import(
+      '@/local-copilot/lib/tools/get-workflow-run-options'
+    )
+    const resolvedWorkflowId =
+      (typeof enrichedArgs.workflowId === 'string' && enrichedArgs.workflowId.trim()) ||
+      workflowId ||
+      ''
+    return executeGetWorkflowRunOptions(enrichedArgs, ctx, resolvedWorkflowId)
+  }
+
+  if (toolName === 'user_table') {
+    const { executeUserTable } = await import('@/local-copilot/lib/tools/user-table')
+    return executeUserTable(enrichedArgs, ctx)
   }
 
   if (toolName === 'generate_image') {
