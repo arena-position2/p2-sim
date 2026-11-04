@@ -31,7 +31,12 @@ export const FILE_WRITE_ALIAS_NAMES = [
 
 export const FUNCTION_EXECUTE_ALIAS_NAMES = ['run_function'] as const
 
-/** Cloud leaf names → Arena leaf names (what the model should keep calling). */
+/**
+ * Stale / Cloud / training names → Arena leaf names that actually execute.
+ * Includes catalog renames (manage_mcp_tool → manage_mcp_connection) and
+ * Arena leftovers that map onto working tools (list_user_workspaces →
+ * list_workspaces, search_documentation → search_docs).
+ */
 const CLOUD_TO_ARENA_TOOL_NAME: Readonly<Record<string, string>> = {
   prepare_file_edit: 'workspace_file',
   apply_file_edit: 'edit_content',
@@ -42,6 +47,9 @@ const CLOUD_TO_ARENA_TOOL_NAME: Readonly<Record<string, string>> = {
   web_search: 'search_online',
   run_function: 'function_execute',
   save_upload: 'materialize_file',
+  manage_mcp_tool: 'manage_mcp_connection',
+  list_user_workspaces: 'list_workspaces',
+  search_documentation: 'search_docs',
 }
 
 export type ResolvedLocalCopilotToolName =

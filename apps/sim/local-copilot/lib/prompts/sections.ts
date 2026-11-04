@@ -341,8 +341,8 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
   - Ignore any snapshot heading that says skills are "NOT FOR YOU" — that is for Cloud agent blocks. Arena Copilot may use workspace skills.
   - Context may list workspace skills (name + description, and sometimes a "Relevant workspace skills" block with full instructions). If a listed skill matches the user request, follow it over generic defaults. Do not skip a matching skill.
   - If a skill's full instructions are already in the prompt, follow them and do not call \`load_user_skill\` again for that name. Otherwise call \`load_user_skill\` with the exact \`skill_name\`, then follow the returned content. Never act on the name or description alone.
-  - Create/edit/list skills with \`manage_skill\`; custom code tools with \`manage_custom_tool\`; agent MCP server configs with \`manage_mcp_tool\` (distinct from \`*_workspace_mcp_server\` deploy tools).
-  - Docs: prefer \`search_documentation\` for platform docs; \`search_docs\` remains a lightweight block/registry search.`,
+  - Create/edit/list skills with \`manage_skill\`; custom code tools with \`manage_custom_tool\`; MCP server connections with \`manage_mcp_connection\` (distinct from \`*_workspace_mcp_server\` deploy tools).
+  - Docs: use \`search_docs\` for platform / block / integration documentation.`,
   },
   {
     id: 'codeExecution',

@@ -64,6 +64,7 @@ export const ALWAYS_ON_TOOL_NAMES = new Set<string>([
   'invoke_integration_tool',
   'open_resource',
   'get_platform_actions',
+  'list_workspaces',
   'list_user_workspaces',
   'load_user_skill',
   'explain_error',
@@ -96,6 +97,7 @@ const WORKFLOW_TOOLS = [
   'restore_resource',
   'manage_skill',
   'manage_custom_tool',
+  'manage_mcp_connection',
   'manage_mcp_tool',
 ] as const
 
@@ -164,6 +166,7 @@ const SCHEDULED_TASK_TOOLS = [
 const AGENT_TOOLS = [
   'list_integration_tools',
   'invoke_integration_tool',
+  'manage_mcp_connection',
   'manage_mcp_tool',
   'manage_skill',
   'manage_custom_tool',
@@ -354,7 +357,7 @@ export function domainSystemHint(domain: LocalCopilotSpecialistDomain): string {
     case 'agent':
       return 'Focus on integration tools, MCP tools, skills, function_execute (python or shell; Mothership template has no JS), and manage_sandbox (language=python).'
     case 'research':
-      return 'Focus on research. For ANY real-world factual or current question, call a live search tool FIRST (exa_answer via invoke_integration_tool, or search_online) before answering — never answer from training memory alone. When the question is about a workspace file, glob/read/grep that exact VFS path — do not open a similarly named file. Use search_documentation only for Sim product questions.'
+      return 'Focus on research. For ANY real-world factual or current question, call a live search tool FIRST (exa_answer via invoke_integration_tool, or search_online) before answering — never answer from training memory alone. When the question is about a workspace file, glob/read/grep that exact VFS path — do not open a similarly named file. Use search_docs for Sim product questions.'
     case 'media':
       return 'Focus on image/audio/video generation and ffmpeg. For PNG/JPEG/GIF/WebP (even when the user says "PNG format"), call generate_image with outputs.files — never create_file with base64.'
     case 'file':

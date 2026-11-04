@@ -22,6 +22,7 @@ export const PARALLEL_READ_TOOL_NAMES = new Set<string>([
   'get_deployment_log',
   'check_deployment_status',
   'get_platform_actions',
+  'list_workspaces',
   'list_user_workspaces',
   'list_integration_tools',
   'list_workspace_mcp_servers',

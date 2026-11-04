@@ -29,6 +29,10 @@ import {
 } from '@/local-copilot/lib/tools/enrich-integration-params'
 import { ensureStartReservedInputFormatInEditOperations } from '@/local-copilot/lib/tools/ensure-start-reserved-input-format'
 import { injectWorkspaceEnvApiKeyIfNeeded } from '@/local-copilot/lib/tools/inject-workspace-env-api-key'
+import {
+  executeManageMcpConnection,
+  MANAGE_MCP_CONNECTION_TOOL_NAME,
+} from '@/local-copilot/lib/tools/manage-mcp-connection'
 import { executeManageSkill, MANAGE_SKILL_TOOL_NAME } from '@/local-copilot/lib/tools/manage-skill'
 import {
   executeMothershipDelegatedTool,
@@ -297,6 +301,32 @@ async function runManageSkill(
   }
 }
 
+/**
+ * Arena-local manage_mcp_connection: Cloud dropped the mothership handler.
+ * Accepts the legacy `manage_mcp_tool` leaf via resolveLocalCopilotToolName.
+ */
+async function runManageMcpConnection(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeManageMcpConnection(args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName: MANAGE_MCP_CONNECTION_TOOL_NAME,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName: MANAGE_MCP_CONNECTION_TOOL_NAME,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
 function reusedWorkflowResult(existing: CreatedWorkflowThisTurn): ToolExecutionResult {
   return {
     toolName: 'create_workflow',
@@ -443,6 +473,12 @@ async function executeLocalCopilotToolInner(
   if (toolName === MANAGE_SKILL_TOOL_NAME) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runManageSkill(args, ctx)
+  }
+
+  // manage_mcp_connection: same pattern — catalog advertises, Local executes.
+  if (toolName === MANAGE_MCP_CONNECTION_TOOL_NAME) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runManageMcpConnection(args, ctx)
   }
 
   // Cloud agents call load_integration_tool after listing; Arena uses invoke_integration_tool.

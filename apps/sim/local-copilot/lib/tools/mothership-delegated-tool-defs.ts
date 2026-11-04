@@ -121,15 +121,13 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
     'Adds, edits, or deletes global workflow variables. Pass operations: [{ operation: add|edit|delete, name, type?, value? }].',
   get_deployed_workflow_state:
     'Returns the live/deployed workflow state (blocks, edges) for comparison with the draft.',
-  list_user_workspaces: 'Lists workspaces the current user can access (id, name, permission).',
-  search_documentation:
-    'Searches platform documentation (blocks, integrations, product). Prefer this over the local search_docs heuristic when you need deeper docs. REQUIRED: query.',
+  list_workspaces: 'Lists workspaces the current user can access (id, name, permission).',
   manage_skill:
     'Adds, edits, lists, or deletes workspace agent skills (operation: add|edit|list|delete). After add/edit, users load them via load_user_skill.',
   manage_custom_tool:
     'Adds, edits, lists, or deletes custom code tools (operation: add|edit|list|delete). For add, pass OpenAI-style schema + JavaScript code body.',
-  manage_mcp_tool:
-    'Adds, edits, lists, or deletes MCP server configs used by agent blocks (operation: add|edit|list|delete). Distinct from workspace MCP deploy servers.',
+  manage_mcp_connection:
+    'Adds, edits, lists, or deletes MCP server connections used by agent blocks (operation: add|edit|list|delete). For add, pass config: { name, url, transport?, headers? }. Distinct from *_workspace_mcp_server deploy tools. Legacy name manage_mcp_tool is accepted.',
   generate_api_key:
     'Creates a workspace API key. REQUIRED: name (descriptive label). Returns the key once — share it carefully with the user.',
   restore_resource:
@@ -207,11 +205,10 @@ export const MOTHERSHIP_DELEGATED_TOOL_NAMES = [
   'set_block_enabled',
   'set_global_workflow_variables',
   'get_deployed_workflow_state',
-  'list_user_workspaces',
-  'search_documentation',
+  'list_workspaces',
   'manage_skill',
   'manage_custom_tool',
-  'manage_mcp_tool',
+  'manage_mcp_connection',
   'generate_api_key',
   'restore_resource',
   'get_platform_actions',
