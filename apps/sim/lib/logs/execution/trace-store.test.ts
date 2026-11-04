@@ -100,6 +100,65 @@ describe('execution data storage', () => {
       traceSpanCount: 2,
     })
   })
+
+  it('keeps chat file metadata inline when the externalized payload is unavailable', async () => {
+    const userAttachments = [
+      {
+        id: 'file-1',
+        key: 'execution/workspace-1/workflow-1/execution-1/notes.pdf',
+        filename: 'notes.pdf',
+        media_type: 'application/pdf',
+        size: 128,
+      },
+    ]
+    const generatedImages = [
+      {
+        id: 'img-1',
+        name: 'generated.png',
+        url: '/api/files/serve/agent-generated-images/workflow-1/user-1/generated.png',
+        type: 'image/png',
+      },
+    ]
+    const knowledgeRefs = [
+      { documentId: 'doc-1', documentName: 'Guide', workspaceId: 'workspace-1' },
+    ]
+    const ref = {
+      __simLargeValueRef: true,
+      version: 1,
+      id: 'lv_cccccccccccc',
+      kind: 'object',
+      size: 128,
+      key: 'execution/workspace-1/workflow-1/execution-1/large-value-lv_cccccccccccc.json',
+      executionId: 'execution-1',
+      preview: { unsafe: 'must-not-remain-inline' },
+    } as const
+    storeLargeValueMock.mockResolvedValue(ref)
+    materializeLargeValueRefMock.mockRejectedValue(new Error('object unavailable'))
+
+    const slim = await externalizeExecutionData(
+      {
+        secretProjectionVersion: SECRET_PROJECTION_VERSION,
+        hasTraceSpans: true,
+        traceSpanCount: 1,
+        finalOutput: { unsafe: 'must-not-remain-inline' },
+        userAttachments,
+        generatedImages,
+        knowledgeRefs,
+      },
+      CONTEXT
+    )
+
+    expect(slim.userAttachments).toEqual(userAttachments)
+    expect(slim.generatedImages).toEqual(generatedImages)
+    expect(slim.knowledgeRefs).toEqual(knowledgeRefs)
+    expect(slim).not.toHaveProperty('finalOutput')
+
+    await expect(materializeExecutionData(slim, CONTEXT)).resolves.toMatchObject({
+      userAttachments,
+      generatedImages,
+      knowledgeRefs,
+    })
+  })
 })
 
 describe('projectExecutionDataForDisplay', () => {

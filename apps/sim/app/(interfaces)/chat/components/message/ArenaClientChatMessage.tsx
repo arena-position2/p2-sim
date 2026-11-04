@@ -21,6 +21,7 @@ import {
   AgentStreamThinkingChrome,
   AgentStreamToolCallsChrome,
 } from '@/components/agent-stream/agent-stream-chrome'
+import { getDocumentIcon } from '@/components/icons/document-icons'
 import {
   resolveEChartsOptionsFromContent,
   stripEChartsJsonFromContent,
@@ -67,6 +68,47 @@ import {
 import ArenaCopilotMarkdownRenderer from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/copilot/components/copilot-message/components/arena-markdown-renderer'
 
 const arenaChatMessageLogger = createLogger('ArenaClientChatMessage')
+
+function formatAttachmentSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return ''
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${Math.round((bytes / 1024 ** index) * 10) / 10} ${units[index]}`
+}
+
+function servableAttachmentUrl(dataUrl: string | undefined): string | undefined {
+  const value = dataUrl?.trim()
+  if (!value || value.startsWith('data:')) return undefined
+  if (value.startsWith('/') || value.startsWith('http://') || value.startsWith('https://')) {
+    return value
+  }
+  return undefined
+}
+
+function DeployedUserFileChip({ attachment }: { attachment: ChatAttachment }) {
+  const Icon = getDocumentIcon(attachment.type || '', attachment.name || '')
+  const href = servableAttachmentUrl(attachment.dataUrl)
+  const sizeLabel = formatAttachmentSize(attachment.size)
+  const chip = (
+    <div className='flex h-16 min-w-[140px] max-w-[220px] items-center gap-2 rounded-2xl border border-[var(--border-1)] bg-[var(--surface-2)] px-3'>
+      <div className='flex size-10 shrink-0 items-center justify-center rounded bg-[var(--surface-3)] text-[var(--text-muted)]'>
+        <Icon className='size-5' />
+      </div>
+      <div className='min-w-0 flex-1'>
+        <div className='truncate text-[var(--text-primary)] text-xs'>{attachment.name}</div>
+        {sizeLabel ? <div className='text-[var(--text-muted)] text-micro'>{sizeLabel}</div> : null}
+      </div>
+    </div>
+  )
+
+  if (!href) return chip
+
+  return (
+    <a href={href} target='_blank' rel='noopener noreferrer' className='inline-flex'>
+      {chip}
+    </a>
+  )
+}
 
 const DEPLOYED_MARKDOWN_PROPS = {
   fontClassName: 'font-[family-name:var(--font-inter)] font-normal antialiased tracking-[0]',
@@ -953,7 +995,7 @@ export const ArenaClientChatMessage = memo(
               <div className='mb-2 flex justify-end'>
                 <div className='flex flex-wrap gap-2'>
                   {message.attachments.map((attachment, index) => {
-                    const isImage = attachment.type.startsWith('image/')
+                    const isImage = (attachment.type ?? '').startsWith('image/')
                     const isSelected = selectedGeneratedImageIds?.has(attachment.id) ?? false
                     return (
                       <div key={attachment.id}>
@@ -995,7 +1037,9 @@ export const ArenaClientChatMessage = memo(
                               />
                             </ImageWithViewFullOverlay>
                           </div>
-                        ) : null}
+                        ) : (
+                          <DeployedUserFileChip attachment={attachment} />
+                        )}
                       </div>
                     )
                   })}

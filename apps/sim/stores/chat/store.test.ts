@@ -36,7 +36,7 @@ vi.hoisted(() => {
   window.localStorage.setItem('chat-store', JSON.stringify(legacyNewestFirst))
 })
 
-import { useChatStore } from '@/stores/chat/store'
+import { persistedChatPreviewUrl, useChatStore } from '@/stores/chat/store'
 
 const migratedMessageIds = useChatStore.getState().messages.map((message) => message.id)
 
@@ -69,6 +69,58 @@ describe('chat store message ordering', () => {
 
       const types = useChatStore.getState().messages.map((m) => m.type)
       expect(types).toEqual(['user', 'workflow'])
+    })
+
+    it('keeps storage-backed attachment previews and drops session blob urls', () => {
+      expect(persistedChatPreviewUrl('/api/files/serve/execution%2Fnotes.pdf')).toBe(
+        '/api/files/serve/execution%2Fnotes.pdf'
+      )
+      expect(persistedChatPreviewUrl('blob:http://localhost/diagram')).toBeUndefined()
+      expect(persistedChatPreviewUrl('data:image/png;base64,abc')).toBeUndefined()
+
+      useChatStore.getState().addMessage({
+        content: 'see this',
+        workflowId: 'wf-1',
+        type: 'user',
+        attachments: [
+          {
+            id: 'file-1',
+            filename: 'notes.pdf',
+            media_type: 'application/pdf',
+            size: 12,
+            previewUrl: '/api/files/serve/execution%2Fnotes.pdf',
+          },
+          {
+            id: 'file-2',
+            filename: 'diagram.png',
+            media_type: 'image/png',
+            size: 12,
+            previewUrl: 'blob:http://localhost/diagram',
+          },
+        ],
+      })
+
+      const stored = JSON.parse(window.localStorage.getItem('chat-store') ?? '{}') as {
+        state?: {
+          messages?: Array<{ attachments?: Array<{ id: string; previewUrl?: string }> }>
+        }
+      }
+      const attachments = stored.state?.messages?.at(-1)?.attachments
+      expect(attachments).toEqual([
+        {
+          id: 'file-1',
+          filename: 'notes.pdf',
+          media_type: 'application/pdf',
+          size: 12,
+          previewUrl: '/api/files/serve/execution%2Fnotes.pdf',
+        },
+        {
+          id: 'file-2',
+          filename: 'diagram.png',
+          media_type: 'image/png',
+          size: 12,
+        },
+      ])
     })
 
     it('keeps only the most recent messages when trimming to the cap', () => {

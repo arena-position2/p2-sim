@@ -26,9 +26,12 @@ export const TRACE_STORE_REF_KEY = 'traceStoreRef'
  * The only metadata kept inline on the slim row (everything else lives in the
  * externalized object). Trace presence/count survives object expiry for log
  * diagnostics, while correlation preserves the server-issued binding used to
- * authenticate terminal Copilot workflow-tool executions. All other fields
- * (environment, trigger, tokens, models, truncation flags, and of course the
- * heavy payloads) are recovered from the stored object.
+ * authenticate terminal Copilot workflow-tool executions. Chat display metadata
+ * (`userAttachments`, `generatedImages`, `knowledgeRefs`) stays inline too: the
+ * public chat history reader needs those small records even when the trace
+ * object is unavailable. All other fields (environment, trigger, tokens, models,
+ * truncation flags, and of course the heavy payloads) are recovered from the
+ * stored object.
  *
  * {@link RESOLVED_SECRET_PROVENANCE_KEY} is deliberately absent: it rides in the
  * externalized object, and inlining it would put encrypted secret material back
@@ -39,6 +42,9 @@ const INLINE_MARKER_KEYS = [
   'hasTraceSpans',
   'traceSpanCount',
   'correlation',
+  'userAttachments',
+  'generatedImages',
+  'knowledgeRefs',
 ] as const
 
 /**

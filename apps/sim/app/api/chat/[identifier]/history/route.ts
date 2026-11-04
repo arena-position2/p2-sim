@@ -9,11 +9,38 @@ import {
   getPersistedHistoryAttachments,
 } from '@/lib/chat/history-persistence'
 import { generateRequestId } from '@/lib/core/utils/request'
+import { materializeExecutionData } from '@/lib/logs/execution/trace-store'
 import { getWorkspaceIdsForUser } from '@/lib/workspaces/permissions/utils'
 import { createErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 import { addCorsHeaders } from '../../utils'
 
 const logger = createLogger('ChatHistoryAPI')
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function toExecutionDataRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null
+}
+
+function readHistoryConversationId(executionData: Record<string, unknown>): string | null {
+  const traceSpans = executionData.traceSpans
+  const spanList = Array.isArray(traceSpans)
+    ? traceSpans
+    : isRecord(traceSpans) && Array.isArray(traceSpans.spans)
+      ? traceSpans.spans
+      : null
+  if (!spanList) return null
+
+  const workflowSpan = spanList.find((span) => isRecord(span) && span.type === 'workflow')
+  if (!isRecord(workflowSpan) || !Array.isArray(workflowSpan.children)) return null
+
+  const agentSpan = workflowSpan.children.find((child) => isRecord(child) && child.type === 'agent')
+  if (!isRecord(agentSpan) || !isRecord(agentSpan.input)) return null
+
+  return typeof agentSpan.input.conversationId === 'string' ? agentSpan.input.conversationId : null
+}
 
 /**
  * GET /api/chat/[identifier]/history
@@ -164,6 +191,7 @@ export async function GET(
         endedAt: workflowExecutionLogs.endedAt,
         totalDurationMs: workflowExecutionLogs.totalDurationMs,
         executionData: workflowExecutionLogs.executionData,
+        workspaceId: workflowExecutionLogs.workspaceId,
         initialInput: workflowExecutionLogs.initialInput,
         finalChatOutput: workflowExecutionLogs.finalChatOutput,
         createdAt: workflowExecutionLogs.createdAt,
@@ -206,78 +234,57 @@ export async function GET(
 
     const totalCount = totalCountResult[0]?.count || 0
 
-    // Format the response data
-    const formattedLogs = logs.map((log) => {
-      const executionData = log.executionData as any
-
-      // Get userInput directly from initialInput column
-      const userInput = log.initialInput || null
-
-      // Get modelOutput directly from finalChatOutput column
-      const modelOutput = log.finalChatOutput || null
-
-      // Extract conversationId from executionData for backward compatibility
-      // This is still needed as it's not stored in a dedicated column
-      let conversationId = null
-      if (executionData?.traceSpans) {
-        if (executionData.traceSpans.spans && Array.isArray(executionData.traceSpans.spans)) {
-          const workflowSpan = executionData.traceSpans.spans.find(
-            (span: any) => span.type === 'workflow'
-          )
-          if (workflowSpan?.children && Array.isArray(workflowSpan.children)) {
-            const agentSpans = workflowSpan.children.filter((child: any) => child.type === 'agent')
-            if (agentSpans.length > 0) {
-              conversationId = agentSpans[0].input?.conversationId || null
-            }
+    const formattedLogs = await Promise.all(
+      logs.map(async (log) => {
+        const executionData = await materializeExecutionData(
+          toExecutionDataRecord(log.executionData),
+          {
+            workspaceId: log.workspaceId,
+            workflowId: deploymentWorkflowId,
+            executionId: log.executionId,
           }
-        } else if (Array.isArray(executionData.traceSpans)) {
-          const workflowSpan = executionData.traceSpans.find(
-            (span: any) => span.type === 'workflow'
-          )
-          if (workflowSpan?.children && Array.isArray(workflowSpan.children)) {
-            const agentSpans = workflowSpan.children.filter((child: any) => child.type === 'agent')
-            if (agentSpans.length > 0) {
-              conversationId = agentSpans[0].input?.conversationId || null
-            }
-          }
-        }
-      }
+        )
 
-      const rawKnowledgeRefs = Array.isArray(executionData?.knowledgeRefs)
-        ? executionData.knowledgeRefs
-        : null
-      const attachments = getPersistedHistoryAttachments(executionData)
-      const generatedImages = getPersistedGeneratedImages(executionData)
-      const knowledgeRefs =
-        rawKnowledgeRefs == null
-          ? null
-          : userWorkspaceIds.length === 0
+        const userInput = log.initialInput || null
+        const modelOutput = log.finalChatOutput || null
+        const conversationId = readHistoryConversationId(executionData)
+
+        const rawKnowledgeRefs = Array.isArray(executionData.knowledgeRefs)
+          ? executionData.knowledgeRefs
+          : null
+        const attachments = getPersistedHistoryAttachments(executionData)
+        const generatedImages = getPersistedGeneratedImages(executionData)
+        const knowledgeRefs =
+          rawKnowledgeRefs == null
             ? null
-            : rawKnowledgeRefs.filter(
-                (ref: { workspaceId?: string | null }) =>
-                  ref.workspaceId != null && userWorkspaceIds.includes(ref.workspaceId)
-              )
+            : userWorkspaceIds.length === 0
+              ? null
+              : rawKnowledgeRefs.filter((ref) => {
+                  if (!isRecord(ref) || typeof ref.workspaceId !== 'string') return false
+                  return userWorkspaceIds.includes(ref.workspaceId)
+                })
 
-      return {
-        id: log.id,
-        executionId: log.executionId,
-        level: log.level,
-        trigger: log.trigger,
-        startedAt: log.startedAt.toISOString(),
-        endedAt: log.endedAt?.toISOString() || null,
-        totalDurationMs: log.totalDurationMs,
-        conversationId,
-        userInput,
-        attachments,
-        modelOutput,
-        generatedImages,
-        knowledgeRefs,
-        liked: likedByExecutionId.has(log.executionId)
-          ? likedByExecutionId.get(log.executionId)!
-          : null,
-        createdAt: log.createdAt.toISOString(),
-      }
-    })
+        return {
+          id: log.id,
+          executionId: log.executionId,
+          level: log.level,
+          trigger: log.trigger,
+          startedAt: log.startedAt.toISOString(),
+          endedAt: log.endedAt?.toISOString() || null,
+          totalDurationMs: log.totalDurationMs,
+          conversationId,
+          userInput,
+          attachments,
+          modelOutput,
+          generatedImages,
+          knowledgeRefs,
+          liked: likedByExecutionId.has(log.executionId)
+            ? likedByExecutionId.get(log.executionId)!
+            : null,
+          createdAt: log.createdAt.toISOString(),
+        }
+      })
+    )
 
     const response = {
       logs: formattedLogs,

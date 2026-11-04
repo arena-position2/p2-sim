@@ -18,6 +18,16 @@ const logger = createLogger('ChatStore')
 const MAX_MESSAGES = 500
 
 /**
+ * Keeps storage-backed attachment previews across reloads and drops blob or
+ * data URLs, which are either session-scoped or large enough to exhaust storage.
+ */
+export function persistedChatPreviewUrl(previewUrl: string | undefined): string | undefined {
+  if (!previewUrl) return undefined
+  if (previewUrl.startsWith('blob:') || previewUrl.startsWith('data:')) return undefined
+  return previewUrl
+}
+
+/**
  * Floating chat dimensions
  */
 const DEFAULT_WIDTH = 305
@@ -340,11 +350,11 @@ export const useChatStore = create<ChatState>()(
           return persistedState
         },
         /**
-         * Persist only the durable chat state — message history (with transient
-         * blob `previewUrl`s stripped since they are not valid across reloads),
-         * per-workflow output selections and conversation ids, and the floating
-         * chat's open state, position, and dimensions. Actions and any transient
-         * UI flags are intentionally excluded.
+         * Persist only the durable chat state — message history (storage-backed
+         * attachment previews kept, blob and data URLs dropped), per-workflow
+         * output selections and conversation ids, and the floating chat's open
+         * state, position, and dimensions. Actions and any transient UI flags
+         * are intentionally excluded.
          */
         partialize: (state) => ({
           isChatOpen: state.isChatOpen,
@@ -357,7 +367,7 @@ export const useChatStore = create<ChatState>()(
             ...msg,
             attachments: msg.attachments?.map((att) => ({
               ...att,
-              previewUrl: undefined,
+              previewUrl: persistedChatPreviewUrl(att.previewUrl),
             })),
           })),
         }),
