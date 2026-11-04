@@ -240,6 +240,52 @@ describe('convertMessagesToGemini', () => {
     })
     expect(contents[2]).toEqual({ role: 'user', parts: [{ text: 'follow up' }] })
   })
+
+  it('emits post-text-only system nudges as user so contents do not end on model', () => {
+    const { contents, systemInstruction } = convertMessagesToGemini([
+      { role: 'system', content: 'You are Copilot.' },
+      { role: 'user', content: 'build an agent' },
+      {
+        role: 'assistant',
+        content: 'I created the workflow. Next steps…',
+        geminiModelParts: [{ text: 'I created the workflow. Next steps…' }],
+      },
+      {
+        role: 'system',
+        content: '[System] Call edit_workflow NOW. Do not only narrate.',
+      },
+    ])
+
+    expect(systemInstruction).toBe('You are Copilot.')
+    expect(contents.at(-1)).toEqual({
+      role: 'user',
+      parts: [{ text: '[System] Call edit_workflow NOW. Do not only narrate.' }],
+    })
+    expect(contents.some((c) => c.role === 'model')).toBe(true)
+    expect(contents.at(-1)?.role).not.toBe('model')
+  })
+
+  it('keeps system nudges after tool results in systemInstruction', () => {
+    const { contents, systemInstruction } = convertMessagesToGemini([
+      { role: 'system', content: 'You are Copilot.' },
+      { role: 'user', content: 'inspect' },
+      {
+        role: 'assistant',
+        content: '',
+        geminiModelParts: [{ functionCall: { id: 'c1', name: 'grep', args: { query: 'x' } } }],
+        toolCalls: [{ id: 'c1', name: 'grep', arguments: '{"query":"x"}' }],
+      },
+      { role: 'tool', toolCallId: 'c1', content: '{"ok":true}' },
+      { role: 'system', content: '[System] Soft complete nudge.' },
+    ])
+
+    expect(contents.at(-1)?.role).toBe('user')
+    expect(contents.at(-1)?.parts?.[0]).toMatchObject({
+      functionResponse: { id: 'c1', name: 'grep' },
+    })
+    expect(systemInstruction).toContain('You are Copilot.')
+    expect(systemInstruction).toContain('[System] Soft complete nudge.')
+  })
 })
 
 describe('isGeminiResourceExhaustedError', () => {

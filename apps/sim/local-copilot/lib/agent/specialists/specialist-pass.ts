@@ -388,8 +388,10 @@ export async function executeSpecialistLoop(
           round < maxRounds - 1
         ) {
           forcedDebugExplanations += 1
+          // User role — Gemini rejects contents ending on a text-only model turn;
+          // system nudges are folded into systemInstruction and would leave that ending.
           messages.push({
-            role: 'system',
+            role: 'user',
             content: buildDebugExplanationContinuationMessage(),
           })
           logger.info('Arena Copilot specialist forcing debug-explanation continuation', {

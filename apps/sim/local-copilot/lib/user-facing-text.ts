@@ -324,7 +324,9 @@ export function isUnfulfilledMutationIntentNarration(text: string): boolean {
 }
 
 /**
- * System nudge when the model described a mutation without issuing the tool call.
+ * Continuation nudge when the model described a mutation without issuing the tool call.
+ * Callers must append this as a `user` message (not `system`) so Gemini `contents`
+ * do not end on a text-only model turn.
  */
 export function buildUnfulfilledIntentContinuationMessage(): string {
   return (

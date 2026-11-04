@@ -1481,6 +1481,8 @@ export async function* runLocalCopilotAgent(
           messages.push({ role: 'assistant', content: settledFollowUp })
           assistantText = ''
         }
+        // Continuations must be `user` (not `system`): Gemini folds system into
+        // systemInstruction, so a text-only model turn would end `contents` and 400.
         const continuation = buildFollowUpContinuationMessage(pendingFollowUps)
         messages.push({ role: 'user', content: continuation })
         logger.info('Arena Copilot forcing mandatory follow-up continuation', {
@@ -1508,7 +1510,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildUnfulfilledIntentContinuationMessage(),
         })
         logger.info('Arena Copilot forcing mutation-intent continuation', {
@@ -1536,7 +1538,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildResearchSearchContinuationMessage(),
         })
         logger.info('Arena Copilot forcing research live-search continuation', {
@@ -1566,7 +1568,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildDebugExplanationContinuationMessage(),
         })
         logger.info('Arena Copilot forcing debug-explanation continuation', {
@@ -1600,7 +1602,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildWorkflowBuildContinuationMessage(),
         })
         logger.info('Arena Copilot forcing workflow-build continuation', {
@@ -1634,7 +1636,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildIncompleteWorkflowPopulateContinuationMessage(),
         })
         logger.info('Arena Copilot forcing incomplete-workflow-populate continuation', {
@@ -1683,7 +1685,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildHtmlEditGrepNudgeMessage(htmlEditGrepTokens),
         })
         logger.info('Arena Copilot forcing HTML edit grep nudge', {
@@ -1717,7 +1719,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildHtmlEditWriteNudgeMessage({
             tokens: htmlEditGrepTokens,
             preferredPath: activeEditTarget.preferredPath,
@@ -1779,7 +1781,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildFileEditContinuationMessage(),
         })
         logger.info('Arena Copilot forcing file-edit continuation', {

@@ -378,12 +378,30 @@ function parseToolResponse(content: string | ChatMessageContentPart[]): Record<s
   }
 }
 
+function geminiContentHasFunctionCall(content: Content): boolean {
+  return (content.parts ?? []).some((part) => Boolean(part.functionCall))
+}
+
+/**
+ * True when the last Gemini content is a text-only model turn. Vertex/Gemini
+ * reject `generateContent` when `contents` end on such a turn
+ * ("Requests ending with a model turn are not supported").
+ */
+export function geminiContentsEndOnTextOnlyModelTurn(contents: Content[]): boolean {
+  const last = contents[contents.length - 1]
+  if (!last || last.role !== 'model') return false
+  return !geminiContentHasFunctionCall(last)
+}
+
 /**
  * Converts internal chat messages to Gemini `contents` + `systemInstruction`.
  * Tool results are batched into a single user turn with functionResponse parts.
  * When `geminiModelParts` is present on an assistant message, those parts
  * are echoed verbatim (including thought text and signatures) so later rounds
  * and follow-up user turns keep reasoning continuity.
+ *
+ * Mid-thread `system` nudges that arrive after a text-only model turn are
+ * emitted as `user` parts so follow-up rounds never end `contents` on `model`.
  */
 export function convertMessagesToGemini(messages: ChatMessage[]): GeminiConversionResult {
   const systemParts: string[] = []
@@ -395,7 +413,14 @@ export function convertMessagesToGemini(messages: ChatMessage[]): GeminiConversi
 
     if (message.role === 'system') {
       const text = getMessageContentText(message.content).trim()
-      if (text) systemParts.push(text)
+      if (!text) continue
+      // Folding a post-assistant nudge into systemInstruction leaves contents
+      // ending on model → Gemini 400. Emit it as a user turn instead.
+      if (geminiContentsEndOnTextOnlyModelTurn(contents)) {
+        contents.push({ role: 'user', parts: [{ text }] })
+      } else {
+        systemParts.push(text)
+      }
       continue
     }
 
@@ -471,8 +496,10 @@ export function convertMessagesToGemini(messages: ChatMessage[]): GeminiConversi
       continue
     }
 
-    const text = getMessageContentText(message.content)
-    contents.push({ role: 'model', parts: text ? [{ text }] : [] })
+    const text = getMessageContentText(message.content).trim()
+    if (text) {
+      contents.push({ role: 'model', parts: [{ text }] })
+    }
   }
 
   return {
