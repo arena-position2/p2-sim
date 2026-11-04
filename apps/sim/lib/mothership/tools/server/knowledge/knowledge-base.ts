@@ -5,6 +5,7 @@ import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
 } from '@/lib/billing/core/billing-attribution'
+import { projectConnectorType } from '@/lib/catalog/projection/connector-type'
 import { asOrchestrationError } from '@/lib/core/orchestration/types'
 import { PlatformEvents } from '@/lib/core/telemetry'
 import { getEffectiveEnvironmentSnapshot } from '@/lib/environment/utils'
@@ -25,6 +26,7 @@ import {
 import {
   bulkDeleteKnowledgeBases,
   createKnowledgeBase,
+  listKnowledgeBases,
   readKnowledgeBase,
   updateKnowledgeBaseOperation,
 } from '@/lib/knowledge/application/knowledge-bases'
@@ -55,6 +57,7 @@ import {
   type ServerToolContext,
 } from '@/lib/mothership/tools/server/base-tool'
 import { captureServerEvent } from '@/lib/posthog/server'
+import { CONNECTOR_META_REGISTRY } from '@/connectors/registry'
 import { projectResolvedSecretModelContent } from '@/executor/utils/resolved-secret-content-projection'
 
 const logger = createLogger('KnowledgeBaseServerTool')
@@ -367,6 +370,58 @@ export const knowledgeBaseServerTool: BaseServerTool<KnowledgeBaseArgs, Knowledg
               docCount: newKnowledgeBase.docCount,
               createdAt: newKnowledgeBase.createdAt,
             },
+          }
+        }
+
+        case 'list': {
+          assertNotAborted()
+          const listed = await executeCopilotKnowledgeUseCase(context, listKnowledgeBases, {
+            workspaceId,
+            search: typeof args.search === 'string' ? args.search : undefined,
+            limit: typeof args.limit === 'number' ? args.limit : 50,
+          })
+          assertNotAborted()
+          const knowledgeBases = listed.knowledgeBases.map(({ knowledgeBase, folderPath }) => ({
+            id: knowledgeBase.id,
+            name: knowledgeBase.name,
+            description: knowledgeBase.description,
+            docCount: knowledgeBase.docCount,
+            folderPath,
+            updatedAt: knowledgeBase.updatedAt,
+          }))
+          return {
+            success: true,
+            message:
+              knowledgeBases.length === 0
+                ? 'No knowledge bases in this workspace.'
+                : `Found ${knowledgeBases.length} knowledge base${knowledgeBases.length === 1 ? '' : 's'}.`,
+            data: { knowledgeBases },
+          }
+        }
+
+        case 'get_connector_schema': {
+          const connectorType =
+            typeof args.connectorType === 'string' ? args.connectorType.trim() : ''
+          if (!connectorType) {
+            return {
+              success: false,
+              message:
+                'connectorType is required for get_connector_schema (e.g. google_drive, notion, confluence).',
+            }
+          }
+          const meta = CONNECTOR_META_REGISTRY[connectorType]
+          if (!meta) {
+            const known = Object.keys(CONNECTOR_META_REGISTRY).sort().join(', ')
+            return {
+              success: false,
+              message: `Unknown connectorType "${connectorType}". Known types: ${known}`,
+            }
+          }
+          const schema = projectConnectorType(connectorType, meta)
+          return {
+            success: true,
+            message: `Connector schema for "${schema.name}" (${connectorType}). Use configFields / auth when calling add_connector — do not read knowledgebases/connectors via VFS.`,
+            data: schema,
           }
         }
 
@@ -1185,7 +1240,7 @@ export const knowledgeBaseServerTool: BaseServerTool<KnowledgeBaseArgs, Knowledg
         default:
           return {
             success: false,
-            message: `Unknown operation: ${operation}. Supported operations: create, get, query, add_file, update, delete, list_tags, create_tag, update_tag, delete_tag, get_tag_usage, add_connector, update_connector, delete_connector, sync_connector`,
+            message: `Unknown operation: ${operation}. Supported operations: create, list, get, query, add_file, update, delete, list_tags, create_tag, update_tag, delete_tag, get_tag_usage, get_connector_schema, add_connector, update_connector, delete_connector, sync_connector`,
           }
       }
     } catch (error) {

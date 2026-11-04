@@ -182,6 +182,7 @@ import {
   generatedImageChatMarkdown,
   isWorkflowRunToolName,
   shouldAppendWorkflowRunChatResult,
+  shouldEmitFileInspectionClosingAppendix,
   stripLeakedToolMarkers,
   synthesizeAssistantSummaryFromTools,
   type ToolTurnRecord,
@@ -226,6 +227,7 @@ import {
   buildWorkflowBuildCompleteSystemMessage,
   buildWorkflowBuildContinuationMessage,
   buildWorkflowBuildSoftCompleteSystemMessage,
+  contentLooksLikeCompletion,
   createAssistantRoundTextStreamer,
   editResultNeedsFollowUp,
   emptyAssistantTurnFallback,
@@ -3057,13 +3059,22 @@ export async function* runLocalCopilotAgent(
     }
   }
 
-  // Hard guarantee: file inspection without a write must not settle on empty Thinking….
-  if (turnHasFileInspectionTools(turnToolRecords) && !turnHasFileMutationTools(turnToolRecords)) {
+  // Hard guarantee: unfinished file edits must not settle on empty Thinking….
+  // Skip when domain work already succeeded or a substantive Done reply streamed
+  // (KB sync turns often grep/read for connector schema and must not get a
+  // workspace_file nag after "Done — knowledge base is set up").
+  {
     const visible = stripIdsFromUserFacingText(
       stripOptionsTagsForDisplay(streamedUserFacingText, false)
     ).trim()
-    const looksEmpty = !visible || isFileInspectionBridgeNarration(visible)
-    if (looksEmpty) {
+    if (
+      shouldEmitFileInspectionClosingAppendix({
+        records: turnToolRecords,
+        visibleText: visible,
+        isFileInspectionBridgeNarration,
+        contentLooksLikeCompletion,
+      })
+    ) {
       const guaranteed =
         buildFileInspectionChatAppendix(turnToolRecords) ??
         synthesizeAssistantSummaryFromTools(turnToolRecords) ??

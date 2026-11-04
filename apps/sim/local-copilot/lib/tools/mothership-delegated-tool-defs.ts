@@ -31,7 +31,7 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   user_table:
     'Creates, reads, and updates workspace tables — operations include create, get, get_schema, insert_row, batch_insert_rows, query_rows, update_row, add_column, import_file, create_from_file.',
   knowledge_base:
-    'Manages knowledge bases — operations include create, get, list, query (semantic search), add_file (ingest document), update, delete, add_connector, sync_connector.',
+    'Manages knowledge bases — operations: create, list, get, query, add_file, update, delete, get_connector_schema, add_connector, update_connector, delete_connector, sync_connector. After create, keep data.id for follow-ups. Use list (optional search) to recover ids. Before add_connector call get_connector_schema with connectorType (e.g. google_drive) — do not read knowledgebases/connectors via VFS. delete requires knowledgeBaseId or knowledgeBaseIds and only when the user asked.',
   open_resource: 'Opens a workspace resource (workflow, file, table, knowledge base) in the UI.',
   materialize_file:
     'Saves chat uploads (`uploads/...`) into workspace `files/...` (or imports). Required before function_execute can open uploaded spreadsheets/docs — uploads/ paths are not sandbox-mounted.',
@@ -296,6 +296,95 @@ export function isMothershipDelegatedTool(
  * Builds LLM tool definitions from generated schemas only — does not import
  * server tool handlers or register-handlers (those load on first execution).
  */
+/**
+ * Patches Cloud `manage_knowledge_base` parameters so Local Copilot advertises
+ * list / delete / get_connector_schema and points connector config at the tool
+ * instead of the unsupported `knowledgebases/connectors/*.json` VFS path.
+ */
+export function patchKnowledgeBaseToolParameters(
+  baseParameters: Record<string, unknown>
+): Record<string, unknown> {
+  const existingProperties = (baseParameters.properties as Record<string, unknown>) ?? {}
+  const operationProp = (existingProperties.operation as Record<string, unknown> | undefined) ?? {
+    type: 'string',
+  }
+  const existingEnum = Array.isArray(operationProp.enum)
+    ? operationProp.enum.filter((value): value is string => typeof value === 'string')
+    : []
+  const operationEnum = [
+    ...new Set([
+      ...existingEnum,
+      'list',
+      'delete',
+      'get_connector_schema',
+      'create',
+      'get',
+      'query',
+      'add_file',
+      'update',
+      'add_connector',
+      'update_connector',
+      'delete_connector',
+      'sync_connector',
+    ]),
+  ]
+
+  const knowledgeBaseIdProp = (existingProperties.knowledgeBaseId as
+    | Record<string, unknown>
+    | undefined) ?? { type: 'string' }
+  const connectorTypeProp = (existingProperties.connectorType as
+    | Record<string, unknown>
+    | undefined) ?? { type: 'string' }
+  const sourceConfigProp = (existingProperties.sourceConfig as
+    | Record<string, unknown>
+    | undefined) ?? { type: 'object' }
+
+  return {
+    ...baseParameters,
+    properties: {
+      ...existingProperties,
+      operation: {
+        ...operationProp,
+        type: 'string',
+        description:
+          'Operation to perform. Use list to recover knowledge base ids by name; get_connector_schema before add_connector; delete only on explicit user request.',
+        enum: operationEnum,
+      },
+      knowledgeBaseId: {
+        ...knowledgeBaseIdProp,
+        type: 'string',
+        description:
+          'Knowledge base ID (required for get, query, add_file, update, delete, add_connector, list_tags, …). After create, reuse data.id — or call list / search if it was cleared from context.',
+      },
+      knowledgeBaseIds: {
+        type: 'array',
+        description: 'Knowledge base IDs for batch delete.',
+        items: { type: 'string' },
+      },
+      search: {
+        type: 'string',
+        description: 'Optional name filter for list (case-insensitive substring).',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max rows for list (default 50).',
+      },
+      connectorType: {
+        ...connectorTypeProp,
+        type: 'string',
+        description:
+          "Connector type from the registry (e.g. 'google_drive', 'notion', 'confluence'). Required for get_connector_schema and add_connector. Call get_connector_schema first — do not read knowledgebases/connectors via VFS.",
+      },
+      sourceConfig: {
+        ...sourceConfigProp,
+        type: 'object',
+        description:
+          'Connector-specific configuration matching configFields from get_connector_schema (e.g. google_drive folderId).',
+      },
+    },
+  }
+}
+
 export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefinition[] {
   return MOTHERSHIP_DELEGATED_TOOL_NAMES.map((name) => {
     // Arena leaf names (create_file) share Cloud JSON schemas (create_empty_file).
@@ -352,6 +441,12 @@ export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefin
         },
         required: ['serverId'],
       }
+    }
+
+    // Cloud catalog omits list/delete/get_connector_schema from the operation enum
+    // even though the server handler supports them — advertise the full Arena surface.
+    if (name === 'knowledge_base' && baseParameters.type === 'object') {
+      parameters = patchKnowledgeBaseToolParameters(baseParameters)
     }
 
     if (name === 'create_file' && baseParameters.type === 'object') {

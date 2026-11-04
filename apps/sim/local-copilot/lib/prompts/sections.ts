@@ -102,7 +102,7 @@ export const LOCAL_COPILOT_PROMPT_SECTIONS: readonly LocalCopilotPromptSection[]
 - Prefer specialist tools for multi-step domain work: workflow, run, deploy, auth, knowledge, table, scheduled_task, agent, research, media, file, superagent.
 - File / office / docs: call \`create_file\` → \`workspace_file\` → \`edit_content\` directly (or the \`file\` specialist for a long multi-step job). Those leaf tools are always in the catalog — never say they are "not found" / "not accessible", never require the file specialist first, never fall back to sandbox/python-pptx for decks.
 - Knowledge bases (CRITICAL naming):
-  - Copilot chat tool \`knowledge_base\` = create / query / add_file **in chat** (or call the \`knowledge\` specialist). To seed a KB, \`create_file\` the docs then \`knowledge_base\` create + add_file.
+  - Copilot chat tool \`knowledge_base\` = create / list / get / query / add_file / update / delete / get_connector_schema / add_connector / sync_connector **in chat** (or call the \`knowledge\` specialist). Keep \`data.id\` from create for follow-ups; call \`list\` (optional search) if the id was cleared. Before Drive/Notion connectors call \`get_connector_schema\` — never read \`knowledgebases/connectors\` via VFS. \`delete\` only when the user explicitly asked.
   - Workflow that searches/summarizes a KB: attach catalog block \`knowledge\` on the Agent's \`tools\` array (never \`type: "knowledge_base"\` there). See edit_workflow Agent tools rules.
 - Keep leaf tools for simple single calls. Do not re-run research/auth already present in pre-pass findings unless stale or failed.
 - Use \`superagent\` for third-party integration actions; \`agent\` for listing/invoking tools and skills; \`auth\` when credentials are missing.

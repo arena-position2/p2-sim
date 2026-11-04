@@ -85,6 +85,29 @@ const FILE_MUTATION_TOOL_NAMES = new Set([
   'move_file',
 ])
 
+/**
+ * Successful non-file domain work means VFS read/grep/glob was discovery, not an
+ * unfinished HTML/file edit — never nag about workspace_file after those.
+ */
+const DOMAIN_COMPLETION_TOOL_NAMES = new Set([
+  'knowledge_base',
+  'manage_knowledge_base',
+  'create_workflow',
+  'edit_workflow',
+  'propose_workflow_patch',
+  'user_table',
+  'manage_mcp_connection',
+  'manage_custom_tool',
+  'manage_skill',
+  'deploy_api',
+  'deploy_chat',
+  'deploy_mcp',
+  'redeploy',
+  'redeploy_workflow',
+  'create_workspace_mcp_server',
+  'list_workspace_mcp_servers',
+])
+
 const RECOVERABLE_WORKSPACE_FILE_PATCH_ERROR_TYPES = new Set([
   'search_not_found',
   'search_ambiguous',
@@ -282,10 +305,48 @@ export function turnHasFileMutationTools(records: ToolTurnRecord[]): boolean {
 }
 
 /**
+ * True when the turn already completed domain work (KB, workflow, deploy, …)
+ * so file inspection was incidental discovery.
+ */
+export function turnHasDomainCompletionTools(records: ToolTurnRecord[]): boolean {
+  return records.some((record) => DOMAIN_COMPLETION_TOOL_NAMES.has(record.name) && record.success)
+}
+
+/**
+ * Product rule: only emit the workspace_file / edit_content closing nag when the
+ * turn looks like an unfinished file edit. Skip when:
+ * - a file mutation already ran
+ * - domain tools (knowledge_base, create_workflow, …) already succeeded
+ * - the assistant already streamed a substantive / completion-shaped Done reply
+ *
+ * Mid-turn "let me check the schema" phrases must not flip a finished Done reply
+ * into this appendix (substring false-positive on isFileInspectionBridgeNarration).
+ */
+export function shouldEmitFileInspectionClosingAppendix(options: {
+  records: ToolTurnRecord[]
+  visibleText: string
+  isFileInspectionBridgeNarration: (text: string) => boolean
+  contentLooksLikeCompletion: (text: string) => boolean
+}): boolean {
+  const { records, visibleText } = options
+  if (!turnHasFileInspectionTools(records) || turnHasFileMutationTools(records)) return false
+  if (turnHasDomainCompletionTools(records)) return false
+
+  const visible = visibleText.replace(/\s+/g, ' ').trim()
+  if (!visible) return true
+  if (options.contentLooksLikeCompletion(visible)) return false
+  // Substantive replies are Done for the user — do not append a file-edit nag
+  // just because an earlier bridge sentence matched "let me check".
+  if (visible.length > 220) return false
+  return options.isFileInspectionBridgeNarration(visible)
+}
+
+/**
  * Closing prose when file inspection finished without an edit or reply.
  */
 export function buildFileInspectionChatAppendix(records: ToolTurnRecord[]): string | null {
   if (!turnHasFileInspectionTools(records) || turnHasFileMutationTools(records)) return null
+  if (turnHasDomainCompletionTools(records)) return null
   const inspected = records
     .filter((record) => FILE_INSPECTION_TOOL_NAMES.has(record.name))
     .map((record) => record.name.replace(/_/g, ' '))

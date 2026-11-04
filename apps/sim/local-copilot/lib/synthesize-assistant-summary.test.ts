@@ -8,6 +8,7 @@ import {
   buildFileInspectionChatAppendix,
   formatDebugInspectionChatResult,
   generatedImageChatMarkdown,
+  shouldEmitFileInspectionClosingAppendix,
   synthesizeAssistantSummaryFromTools,
   type ToolTurnRecord,
   turnHasDebugInspectionTools,
@@ -354,6 +355,58 @@ describe('file inspection continuation', () => {
         { name: 'load_copilot_artifact', success: true, result: {} },
       ])
     ).toMatch(/did not finish applying the fix/i)
+  })
+
+  it('does not synthesize a file-edit nag after successful knowledge_base work', () => {
+    expect(
+      buildFileInspectionChatAppendix([
+        { name: 'grep', success: true, result: {} },
+        { name: 'knowledge_base', success: true, result: { id: 'kb-1' } },
+      ])
+    ).toBeNull()
+  })
+})
+
+describe('shouldEmitFileInspectionClosingAppendix', () => {
+  it('skips when a Done reply already streamed despite earlier let-me-check phrasing', () => {
+    expect(
+      shouldEmitFileInspectionClosingAppendix({
+        records: [
+          { name: 'read', success: true, result: {} },
+          { name: 'grep', success: true, result: {} },
+          { name: 'glob', success: true, result: {} },
+        ],
+        visibleText:
+          'Now let me check the connector schema. Done — your Drive-synced knowledge base is set up and the first sync has already kicked off. Knowledge base created and ready with the Google Drive connector attached to that folder, and daily auto-refresh is enabled.',
+        isFileInspectionBridgeNarration: () => true,
+        contentLooksLikeCompletion: () => false,
+      })
+    ).toBe(false)
+  })
+
+  it('skips when knowledge_base already succeeded', () => {
+    expect(
+      shouldEmitFileInspectionClosingAppendix({
+        records: [
+          { name: 'grep', success: true, result: {} },
+          { name: 'knowledge_base', success: true, result: {} },
+        ],
+        visibleText: '',
+        isFileInspectionBridgeNarration: () => true,
+        contentLooksLikeCompletion: () => false,
+      })
+    ).toBe(false)
+  })
+
+  it('emits for short empty file-edit settles', () => {
+    expect(
+      shouldEmitFileInspectionClosingAppendix({
+        records: [{ name: 'read', success: true, result: {} }],
+        visibleText: '',
+        isFileInspectionBridgeNarration: () => true,
+        contentLooksLikeCompletion: () => false,
+      })
+    ).toBe(true)
   })
 })
 
