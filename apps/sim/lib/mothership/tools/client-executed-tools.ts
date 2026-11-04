@@ -28,11 +28,10 @@ export function isClientExecutedToolCall(
 /**
  * Whether this call frame is asking the browser to run the tool.
  *
- * Name alone is not enough: Arena Local Copilot already runs workflow tools
- * server-side and re-emits them with `executor: go` so the chat UI can render the
- * call. Those frames must not trigger `executeRunToolOnClient` — no
- * `copilot_async_tool_calls` row was persisted, so the execute route answers with
- * `COPILOT_WORKFLOW_TOOL_BINDING_UNKNOWN`.
+ * Name alone is not enough: Local Copilot re-emits finished *server-side* tools
+ * with `executor: go` for chat UI only. Those frames must not trigger
+ * `executeRunToolOnClient`. Workflow tools use `executor: client` (and persist
+ * an async tool row) so the browser can fill canvas Logs live, same as Cloud.
  */
 export function streamFrameRequestsClientExecution(frame: {
   executor?: string

@@ -852,6 +852,7 @@ export async function* runLocalCopilotAgent(
     workspaceId: params.workspaceId,
     workflowId: resolvedWorkflowId ?? params.workflowId,
     chatId: params.chatId,
+    ...(params.runId ? { runId: params.runId } : {}),
     messageId: usageTurnId,
     abortSignal: params.signal,
     userPermission: params.userPermission,

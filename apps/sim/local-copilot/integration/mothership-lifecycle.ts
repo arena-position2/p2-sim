@@ -76,6 +76,11 @@ import {
   formatLocalWorkflowPatchTag,
 } from '@/local-copilot/lib/security/tool-confirmation-policy'
 import { formatTrustedControl } from '@/local-copilot/lib/security/trusted-controls'
+import {
+  localClientWorkflowToolCallFrame,
+  persistLocalClientWorkflowToolCall,
+  shouldRunLocalWorkflowToolOnClient,
+} from '@/local-copilot/lib/tools/client-workflow-run'
 import type { LocalCopilotStreamEvent } from '@/local-copilot/lib/types'
 import { stripIdsFromUserFacingText } from '@/local-copilot/lib/user-facing-text'
 import type {
@@ -229,6 +234,7 @@ async function dispatchLocalCopilotEvent(
   execContext: ExecutionContext,
   options: CopilotLifecycleOptions,
   toolArgsByCallId: Map<string, Record<string, unknown>>,
+  clientWorkflowCallIds: Set<string>,
   filePreview: LocalFilePreviewRuntime,
   specialistSpans: SpecialistSpanTracker,
   liveStatusDedupe: { lastMessage: string | null }
@@ -254,13 +260,49 @@ async function dispatchLocalCopilotEvent(
   }
 
   if (event.type === 'tool_call_start') {
-    toolArgsByCallId.set(event.toolCallId, event.args ?? {})
+    let callArgs = event.args ?? {}
+    const runId = options.runId ?? execContext.runId
+    const clientWorkflow = shouldRunLocalWorkflowToolOnClient(event.toolName) && Boolean(runId)
+    if (shouldRunLocalWorkflowToolOnClient(event.toolName) && !runId) {
+      logger.warn('Local workflow tool missing runId; cannot bind a browser-owned run', {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+      })
+    }
+    if (clientWorkflow && runId) {
+      try {
+        callArgs = await persistLocalClientWorkflowToolCall({
+          runId,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          args: callArgs,
+          userId: execContext.userId,
+          workflowId: execContext.workflowId,
+          registry: execContext.resolvedSecretTraceRegistry,
+        })
+      } catch (error) {
+        logger.warn('Failed to persist Local client workflow tool call', {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          error: getErrorMessage(error),
+        })
+      }
+    }
+    toolArgsByCallId.set(event.toolCallId, callArgs)
+    if (clientWorkflow) clientWorkflowCallIds.add(event.toolCallId)
     const dispatchFrame = specialistSpans.pushDispatch(event.toolCallId, event.toolName)
     const nestedScope = dispatchFrame ? undefined : specialistSpans.scopeForNested()
-    await dispatchStreamEvent(
-      {
-        type: MothershipStreamV1EventType.tool,
-        payload: {
+    const callPayload = clientWorkflow
+      ? {
+          phase: MothershipStreamV1ToolPhase.call,
+          ...localClientWorkflowToolCallFrame({
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: callArgs,
+            ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
+          }),
+        }
+      : {
           phase: MothershipStreamV1ToolPhase.call,
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -269,9 +311,13 @@ async function dispatchLocalCopilotEvent(
           // in the built-in tools registry.
           executor: MothershipStreamV1ToolExecutor.go,
           mode: MothershipStreamV1ToolMode.sync,
-          arguments: event.args,
+          arguments: callArgs,
           ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
-        },
+        }
+    await dispatchStreamEvent(
+      {
+        type: MothershipStreamV1EventType.tool,
+        payload: callPayload,
         ...(nestedScope ? { scope: nestedScope } : {}),
       },
       context,
@@ -311,6 +357,8 @@ async function dispatchLocalCopilotEvent(
       )
     }
 
+    const clientWorkflow = clientWorkflowCallIds.has(event.toolCallId)
+    clientWorkflowCallIds.delete(event.toolCallId)
     await dispatchStreamEvent(
       {
         type: MothershipStreamV1EventType.tool,
@@ -318,8 +366,10 @@ async function dispatchLocalCopilotEvent(
           phase: MothershipStreamV1ToolPhase.result,
           toolCallId: event.toolCallId,
           toolName: event.toolName,
-          executor: MothershipStreamV1ToolExecutor.go,
-          mode: MothershipStreamV1ToolMode.sync,
+          executor: clientWorkflow
+            ? MothershipStreamV1ToolExecutor.client
+            : MothershipStreamV1ToolExecutor.go,
+          mode: clientWorkflow ? MothershipStreamV1ToolMode.async : MothershipStreamV1ToolMode.sync,
           success: event.success,
           output: event.output,
           ...(event.error ? { error: event.error } : {}),
@@ -678,6 +728,7 @@ export async function runLocalCopilotMothershipLifecycle(
 
   const startedAt = Date.now()
   const toolArgsByCallId = new Map<string, Record<string, unknown>>()
+  const clientWorkflowCallIds = new Set<string>()
   const specialistSpans = createSpecialistSpanTracker()
   /** Workflow created this turn — re-activated at end so KB/file upserts do not steal the right panel. */
   let createdWorkflowResource: { id: string; title: string } | undefined
@@ -833,6 +884,7 @@ export async function runLocalCopilotMothershipLifecycle(
         execContext,
         options,
         toolArgsByCallId,
+        clientWorkflowCallIds,
         filePreview,
         specialistSpans,
         liveStatusDedupe

@@ -134,6 +134,11 @@ export interface ToolExecutionContext {
   workspaceId: string
   workflowId?: string
   chatId?: string
+  /**
+   * Copilot run id for this turn. Required to persist and wait on
+   * browser-owned workflow tools (`run_workflow*`).
+   */
+  runId?: string
   /** Scopes workspace_file → edit_content intents for this user turn. */
   messageId?: string
   abortSignal?: AbortSignal

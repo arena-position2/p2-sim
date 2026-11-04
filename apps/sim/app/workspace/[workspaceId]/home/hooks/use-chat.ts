@@ -1809,8 +1809,8 @@ export function useChat(
 
   const recoverPendingClientWorkflowTools = useCallback(
     async (nextMessages: ChatMessage[]) => {
-      // Arena Copilot runs workflow tools on the server and never leaves a client binding.
-      if (getCopilotBackendRef.current?.() === 'local') return
+      // Local Copilot now uses the same client-owned workflow path as Cloud
+      // (`executor: client` + async tool binding) so canvas Logs stay live.
       const pending: ToolCallInfo[] = []
 
       for (const message of nextMessages) {

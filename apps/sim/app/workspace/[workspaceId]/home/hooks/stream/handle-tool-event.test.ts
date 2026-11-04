@@ -175,7 +175,7 @@ describe('tool events (dispatch → model + side effects)', () => {
     expect(started).toEqual(['click-2'])
   })
 
-  it('does not start a workflow tool already finished server-side (Local Copilot go executor)', () => {
+  it('does not start a workflow tool re-emitted with go (finished server-side / no client bind)', () => {
     const { started, starters } = recordingStarters()
     const ctx = createStreamLoopContext(makeStreamLoopDeps(starters))
 

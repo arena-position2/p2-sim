@@ -439,6 +439,21 @@ export async function executeMothershipDelegatedTool(
     return executeUserTable(enrichedArgs, ctx)
   }
 
+  // Cloud parity: browser owns the run so canvas Logs / Output update live.
+  // The lifecycle already persisted `copilot_async_tool_calls` and streamed
+  // `executor: client`; wait here instead of headless `executeRunWorkflow`.
+  if (
+    toolName === 'run_workflow' ||
+    toolName === 'run_workflow_until_block' ||
+    toolName === 'run_block' ||
+    toolName === 'run_from_block'
+  ) {
+    const { waitForLocalClientWorkflowTool } = await import(
+      '@/local-copilot/lib/tools/client-workflow-run'
+    )
+    return waitForLocalClientWorkflowTool({ toolName, args: enrichedArgs, ctx })
+  }
+
   if (toolName === 'generate_image') {
     enrichGenerateImagePrompt(enrichedArgs, ctx.lastUserMessage)
   }
