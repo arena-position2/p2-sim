@@ -176,10 +176,13 @@ import {
 import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
+  buildKnowledgeBaseConnectorWrapUpMessage,
   buildToolFailureEvidenceLines,
   buildWorkflowBuildChatAppendix,
   buildWorkflowRunChatAppendix,
   generatedImageChatMarkdown,
+  isKnowledgeBaseConnectorWrapUpOperation,
+  isKnowledgeBaseToolName,
   isWorkflowRunToolName,
   shouldAppendWorkflowRunChatResult,
   shouldEmitFileInspectionClosingAppendix,
@@ -187,6 +190,7 @@ import {
   synthesizeAssistantSummaryFromTools,
   type ToolTurnRecord,
   turnHasDebugInspectionTools,
+  turnHasDomainCompletionTools,
   turnHasFileInspectionTools,
   turnHasFileMutationTools,
   turnHasWorkflowDiscoveryTools,
@@ -1772,6 +1776,7 @@ export async function* runLocalCopilotAgent(
         maxToolRounds,
         hasFileInspectionTools: turnHasFileInspectionTools(turnToolRecords),
         hasFileMutationTools: hasFileMutations,
+        hasDomainCompletionTools: turnHasDomainCompletionTools(turnToolRecords),
         streamedUserFacingText,
         roundDisplayText: intentDisplay,
       })
@@ -2732,6 +2737,25 @@ export async function* runLocalCopilotAgent(
           content:
             '[System] Auth links for this response will be shown together as one Connect control. Stop. Do not call more tools or restate the completion.',
         })
+      }
+
+      // KB create + Drive/Notion connector path: after attach/sync, force a
+      // text-only wrap-up so incidental VFS discovery cannot keep the loop alive.
+      if (toolResult.success && isKnowledgeBaseToolName(call.name)) {
+        const operation =
+          typeof parsedArgs.operation === 'string' ? parsedArgs.operation.trim() : ''
+        if (isKnowledgeBaseConnectorWrapUpOperation(operation)) {
+          postBuildToolMode = 'final_only'
+          deferredSystemMessages.push({
+            role: 'system',
+            content: buildKnowledgeBaseConnectorWrapUpMessage(),
+          })
+          logger.info('Arena Copilot knowledge-base connector wrap-up', {
+            round,
+            operation,
+            toolName: call.name,
+          })
+        }
       }
 
       // Mid-turn progress for create and a clean populate edit so the panel is

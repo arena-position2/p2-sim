@@ -312,6 +312,31 @@ export function turnHasDomainCompletionTools(records: ToolTurnRecord[]): boolean
   return records.some((record) => DOMAIN_COMPLETION_TOOL_NAMES.has(record.name) && record.success)
 }
 
+/** Arena leaf + Cloud registry names for the knowledge base tool. */
+export function isKnowledgeBaseToolName(toolName: string): boolean {
+  return toolName === 'knowledge_base' || toolName === 'manage_knowledge_base'
+}
+
+/**
+ * After a successful connector attach/sync the KB goal is done — wrap the turn
+ * to a text-only closing round instead of more discovery tools.
+ */
+export function isKnowledgeBaseConnectorWrapUpOperation(operation: string): boolean {
+  return operation === 'add_connector' || operation === 'sync_connector'
+}
+
+/**
+ * System nudge for the text-only wrap-up after add_connector / sync_connector.
+ */
+export function buildKnowledgeBaseConnectorWrapUpMessage(): string {
+  return (
+    '[System] The knowledge base connector is attached (or sync was triggered). ' +
+    'STOP calling tools (including read/grep/glob, get_connector_schema, and workspace_file). ' +
+    'Reply once with a short Done summary: knowledge base name, connector, sync status. ' +
+    'Do not invent a file-edit follow-up.'
+  )
+}
+
 /**
  * Product rule: only emit the workspace_file / edit_content closing nag when the
  * turn looks like an unfinished file edit. Skip when:

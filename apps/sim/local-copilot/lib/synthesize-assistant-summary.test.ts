@@ -6,8 +6,11 @@ import { MAX_FILE_EDIT_CONTINUATION_ROUNDS } from '@/local-copilot/lib/agent/lim
 import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
+  buildKnowledgeBaseConnectorWrapUpMessage,
   formatDebugInspectionChatResult,
   generatedImageChatMarkdown,
+  isKnowledgeBaseConnectorWrapUpOperation,
+  isKnowledgeBaseToolName,
   shouldEmitFileInspectionClosingAppendix,
   synthesizeAssistantSummaryFromTools,
   type ToolTurnRecord,
@@ -322,6 +325,41 @@ describe('file inspection continuation', () => {
     expect(message).toMatch(/single fat edit|one targeted patch/i)
   })
 
+  it('does not force after domain tools like knowledge_base already succeeded', () => {
+    expect(
+      shouldForceFileEditContinuation({
+        postBuildToolMode: 'all',
+        forcedFileEditContinuations: 0,
+        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
+        round: 2,
+        maxToolRounds: 10,
+        hasFileInspectionTools: true,
+        hasFileMutationTools: false,
+        hasDomainCompletionTools: true,
+        streamedUserFacingText: 'Let me check the connector schema.',
+        roundDisplayText: '',
+      })
+    ).toBe(false)
+  })
+
+  it('does not force after a substantive Done reply already streamed', () => {
+    expect(
+      shouldForceFileEditContinuation({
+        postBuildToolMode: 'all',
+        forcedFileEditContinuations: 0,
+        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
+        round: 2,
+        maxToolRounds: 10,
+        hasFileInspectionTools: true,
+        hasFileMutationTools: false,
+        hasDomainCompletionTools: false,
+        streamedUserFacingText:
+          'Now let me check the connector. Done — your Drive-synced knowledge base is set up and the first sync has already kicked off with daily auto-refresh enabled for that folder, so new and changed files will flow into the knowledge base automatically.',
+        roundDisplayText: '',
+      })
+    ).toBe(false)
+  })
+
   it('does not force after workspace_file / edit_content already ran', () => {
     expect(
       shouldForceFileEditContinuation({
@@ -407,6 +445,28 @@ describe('shouldEmitFileInspectionClosingAppendix', () => {
         contentLooksLikeCompletion: () => false,
       })
     ).toBe(true)
+  })
+})
+
+describe('knowledge base connector wrap-up', () => {
+  it('recognizes arena and cloud knowledge tool names', () => {
+    expect(isKnowledgeBaseToolName('knowledge_base')).toBe(true)
+    expect(isKnowledgeBaseToolName('manage_knowledge_base')).toBe(true)
+    expect(isKnowledgeBaseToolName('grep')).toBe(false)
+  })
+
+  it('wraps up only after add_connector or sync_connector', () => {
+    expect(isKnowledgeBaseConnectorWrapUpOperation('add_connector')).toBe(true)
+    expect(isKnowledgeBaseConnectorWrapUpOperation('sync_connector')).toBe(true)
+    expect(isKnowledgeBaseConnectorWrapUpOperation('create')).toBe(false)
+    expect(isKnowledgeBaseConnectorWrapUpOperation('get_connector_schema')).toBe(false)
+  })
+
+  it('wrap-up nudge tells the model to stop tools and reply Done', () => {
+    const message = buildKnowledgeBaseConnectorWrapUpMessage()
+    expect(message).toMatch(/STOP calling tools/i)
+    expect(message).toMatch(/Done summary/i)
+    expect(message).toMatch(/workspace_file/i)
   })
 })
 

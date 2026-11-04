@@ -474,8 +474,23 @@ export function buildFileEditContinuationMessage(): string {
 }
 
 /**
+ * True when streamed assistant prose is already a real Done reply — long enough
+ * or completion-shaped — so file-edit nudges must not force another tool round.
+ */
+export function isSubstantiveAssistantDoneReply(text: string): boolean {
+  const visible = stripOptionsTagsForDisplay(text, false).replace(/\s+/g, ' ').trim()
+  if (!visible) return false
+  if (contentLooksLikeCompletion(visible)) return true
+  return visible.length > 220
+}
+
+/**
  * True when file inspection ran without a write and the model stopped with no
  * real reply — force another round so toggle/HTML fixes do not stall on Thinking….
+ *
+ * Same product gate as the finish-turn file appendix: skip when domain tools
+ * (knowledge_base, workflow, …) already succeeded or a substantive Done reply
+ * already streamed — incidental VFS discovery must not revive workspace_file.
  */
 export function shouldForceFileEditContinuation(options: {
   postBuildToolMode: PostBuildToolMode
@@ -485,18 +500,23 @@ export function shouldForceFileEditContinuation(options: {
   maxToolRounds: number
   hasFileInspectionTools: boolean
   hasFileMutationTools: boolean
+  /** Successful knowledge_base / workflow / deploy / … this turn. */
+  hasDomainCompletionTools?: boolean
   streamedUserFacingText: string
   roundDisplayText: string
 }): boolean {
   if (options.postBuildToolMode !== 'all') return false
   if (!options.hasFileInspectionTools || options.hasFileMutationTools) return false
+  if (options.hasDomainCompletionTools) return false
   if (options.forcedFileEditContinuations >= options.maxForcedFileEditContinuations) return false
   if (options.round >= options.maxToolRounds - 1) return false
 
   const streamed = stripOptionsTagsForDisplay(options.streamedUserFacingText, false).trim()
+  if (isSubstantiveAssistantDoneReply(streamed)) return false
   if (streamed && !isFileInspectionBridgeNarration(streamed)) return false
 
   const roundDisplay = stripOptionsTagsForDisplay(options.roundDisplayText, false).trim()
+  if (isSubstantiveAssistantDoneReply(roundDisplay)) return false
   if (roundDisplay && !isFileInspectionBridgeNarration(roundDisplay)) return false
 
   return true
