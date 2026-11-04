@@ -246,6 +246,46 @@ export function isWorkflowScopedDelegatedTool(toolName: string): boolean {
   return WORKFLOW_SCOPED_DELEGATED_TOOLS.has(toolName as MothershipDelegatedToolName)
 }
 
+/**
+ * Whether the tool's generated JSON schema lists `workflowId` as a parameter.
+ * Used so Local Copilot only pins a resolved workflow id onto args when the
+ * payload contract accepts it — `open_resource` and other strict schemas reject
+ * unknown keys and fail with "Unrecognized key: workflowId".
+ */
+export function delegatedToolSchemaAcceptsWorkflowId(toolName: string): boolean {
+  const schema = TOOL_RUNTIME_SCHEMAS[toServerRegistryToolName(toolName)]?.parameters as
+    | { properties?: Record<string, unknown> }
+    | undefined
+  return Boolean(schema?.properties && 'workflowId' in schema.properties)
+}
+
+/**
+ * Pins a resolved workflow id onto delegated tool args when the tool accepts
+ * it; strips a stray `workflowId` when the schema does not (e.g. open_resource).
+ * Workflow-scoped tools still require a workflow id — callers must handle the
+ * missing-id error when this returns `{ pinned: false, required: true }`.
+ */
+export function applyWorkflowIdToDelegatedArgs(params: {
+  toolName: string
+  args: Record<string, unknown>
+  workflowId: string | undefined
+}): { args: Record<string, unknown>; required: boolean; pinned: boolean } {
+  const required = isWorkflowScopedDelegatedTool(params.toolName)
+  const accepts = required || delegatedToolSchemaAcceptsWorkflowId(params.toolName)
+  const args = { ...params.args }
+
+  if (accepts) {
+    if (params.workflowId) {
+      args.workflowId = params.workflowId
+      return { args, required, pinned: true }
+    }
+    return { args, required, pinned: false }
+  }
+
+  const { workflowId: _ignored, ...stripped } = args
+  return { args: stripped, required: false, pinned: false }
+}
+
 export function isMothershipDelegatedTool(
   toolName: string
 ): toolName is MothershipDelegatedToolName {
@@ -267,6 +307,53 @@ export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefin
     }) as Record<string, unknown>
 
     let parameters = baseParameters
+
+    // Cloud dropped `deploy_mcp` from generated schemas; Arena still advertises it.
+    if (name === 'deploy_mcp') {
+      parameters = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          serverId: {
+            type: 'string',
+            description:
+              'Required: server ID from list_workspace_mcp_servers (create one with create_workspace_mcp_server first when none exists).',
+          },
+          workflowId: {
+            type: 'string',
+            description: 'Workflow ID to publish (defaults to the current workflow in context).',
+          },
+          action: {
+            type: 'string',
+            enum: ['deploy', 'undeploy'],
+            description:
+              'Whether to publish or unpublish the workflow as an MCP tool. Default: deploy.',
+          },
+          toolName: {
+            type: 'string',
+            description: 'Optional MCP tool name override (defaults to the workflow name).',
+          },
+          toolDescription: {
+            type: 'string',
+            description: 'Optional MCP tool description override.',
+          },
+          parameterDescriptions: {
+            type: 'array',
+            description:
+              'Optional per-parameter description overlays as [{ name, description }] for the published tool schema.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+              },
+            },
+          },
+        },
+        required: ['serverId'],
+      }
+    }
+
     if (name === 'create_file' && baseParameters.type === 'object') {
       const existingProperties = (baseParameters.properties as Record<string, unknown>) ?? {}
       const fileNameProp = existingProperties.fileName as Record<string, unknown> | undefined

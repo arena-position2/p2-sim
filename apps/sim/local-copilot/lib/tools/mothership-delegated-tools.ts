@@ -19,6 +19,7 @@ import {
 } from '@/local-copilot/lib/tools/enrich-file-tool-args'
 import type { ToolExecutionContext, ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
 import {
+  applyWorkflowIdToDelegatedArgs,
   buildMothershipDelegatedToolDefinitions,
   isMothershipDelegatedTool,
   isWorkflowScopedDelegatedTool,
@@ -47,9 +48,11 @@ export {
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
   WORKFLOW_SCOPED_DELEGATED_TOOLS,
   type MothershipDelegatedToolName,
+  applyWorkflowIdToDelegatedArgs,
   isMothershipDelegatedTool,
   isWorkflowScopedDelegatedTool,
   buildMothershipDelegatedToolDefinitions,
+  type delegatedToolSchemaAcceptsWorkflowId,
 }
 
 const logger = createLogger('LocalCopilotMothershipDelegatedTools')
@@ -383,7 +386,7 @@ export async function executeMothershipDelegatedTool(
 ): Promise<ToolExecutionResult> {
   const serverToolNames = await ensureCopilotToolRuntime()
 
-  const enrichedArgs = { ...args }
+  let enrichedArgs = { ...args }
   let workflowId = resolveWorkflowIdForDelegatedTool(enrichedArgs, ctx)
 
   const languageError = enforceLocalCopilotSandboxLanguages(toolName, enrichedArgs)
@@ -396,9 +399,16 @@ export async function executeMothershipDelegatedTool(
     workflowId = await resolveWorkflowIdFromDatabase(ctx.workspaceId, enrichedArgs)
   }
 
-  if (workflowId) {
-    enrichedArgs.workflowId = workflowId
-  } else if (WORKFLOW_SCOPED_DELEGATED_TOOLS.has(toolName)) {
+  // Only pin workflowId onto args when the tool schema accepts it. Unconditional
+  // injection broke open_resource (strict Zod: Unrecognized key "workflowId")
+  // after create_workflow set ctx.workflowId.
+  const workflowPin = applyWorkflowIdToDelegatedArgs({
+    toolName,
+    args: enrichedArgs,
+    workflowId,
+  })
+  enrichedArgs = workflowPin.args
+  if (workflowPin.required && !workflowPin.pinned) {
     logger.warn('Delegated workflow tool missing workflowId', {
       toolName,
       workspaceId: ctx.workspaceId,
