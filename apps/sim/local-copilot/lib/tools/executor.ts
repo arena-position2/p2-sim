@@ -22,6 +22,10 @@ import { coerceLocalEditAgentTools } from '@/local-copilot/lib/tools/coerce-edit
 import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
+import {
+  executeDeploymentTool,
+  isDeploymentToolName,
+} from '@/local-copilot/lib/tools/deployment-tools'
 import { canonicalCreateFilePath } from '@/local-copilot/lib/tools/enrich-file-tool-args'
 import {
   enrichLocalIntegrationToolParams,
@@ -29,6 +33,10 @@ import {
 } from '@/local-copilot/lib/tools/enrich-integration-params'
 import { ensureStartReservedInputFormatInEditOperations } from '@/local-copilot/lib/tools/ensure-start-reserved-input-format'
 import { injectWorkspaceEnvApiKeyIfNeeded } from '@/local-copilot/lib/tools/inject-workspace-env-api-key'
+import {
+  executeManageCustomTool,
+  MANAGE_CUSTOM_TOOL_NAME,
+} from '@/local-copilot/lib/tools/manage-custom-tool'
 import {
   executeManageMcpConnection,
   MANAGE_MCP_CONNECTION_TOOL_NAME,
@@ -41,6 +49,10 @@ import {
   resolveWorkflowIdFromDatabase,
 } from '@/local-copilot/lib/tools/mothership-delegated-tools'
 import { normalizeLocalEditConnections } from '@/local-copilot/lib/tools/normalize-edit-connections'
+import {
+  isRemainingDelegatedStubToolName,
+  remainingDelegatedStubMessage,
+} from '@/local-copilot/lib/tools/remaining-delegated-stubs'
 import {
   normalizeBlockIdsArgs,
   resolveBlockIdsArg,
@@ -56,6 +68,10 @@ import {
   runCreateWorkflowTool,
   runEditWorkflowTool,
 } from '@/local-copilot/lib/tools/workflow-mutations'
+import {
+  executeWorkflowOrgTool,
+  isWorkflowOrgToolName,
+} from '@/local-copilot/lib/tools/workflow-org-tools'
 import {
   executeWorkspaceMcpDeployTool,
   isWorkspaceMcpDeployToolName,
@@ -332,6 +348,99 @@ async function runManageMcpConnection(
   }
 }
 
+async function runManageCustomTool(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeManageCustomTool(args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName: MANAGE_CUSTOM_TOOL_NAME,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName: MANAGE_CUSTOM_TOOL_NAME,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
+async function runDeploymentTool(
+  toolName:
+    | 'check_deployment_status'
+    | 'deploy_api'
+    | 'deploy_chat'
+    | 'redeploy'
+    | 'get_deployment_log'
+    | 'diff_workflows'
+    | 'load_deployment'
+    | 'promote_to_live'
+    | 'update_deployment_version',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeDeploymentTool(toolName, args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  const result: ToolExecutionResult = {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+
+  if (toolSupportsIdempotency(toolName) && ctx.mutationIdempotency) {
+    rememberIdempotentResult(
+      ctx.mutationIdempotency,
+      buildIdempotencyKey(toolName, args, ctx.activeToolCallId),
+      result
+    )
+  }
+
+  return result
+}
+
+async function runWorkflowOrgTool(
+  toolName:
+    | 'rename_workflow'
+    | 'move_workflow'
+    | 'delete_workflow'
+    | 'manage_folder'
+    | 'set_global_workflow_variables'
+    | 'set_block_enabled',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeWorkflowOrgTool(toolName, args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
 /**
  * Arena-local glob / grep / read. Catalog still advertises these as delegated
  * mothership tools; handlers no longer exist in Cloud, so execute here.
@@ -560,6 +669,11 @@ async function executeLocalCopilotToolInner(
     return runManageMcpConnection(args, ctx)
   }
 
+  if (toolName === MANAGE_CUSTOM_TOOL_NAME) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runManageCustomTool(args, ctx)
+  }
+
   // glob / grep / read: Cloud deleted WorkspaceVFS handlers; Arena runs a
   // files-/uploads-focused path under local-copilot (merge-safe).
   if (isLocalVfsToolName(toolName)) {
@@ -572,6 +686,32 @@ async function executeLocalCopilotToolInner(
   if (isWorkspaceMcpDeployToolName(toolName)) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runWorkspaceMcpDeployTool(toolName, args, ctx)
+  }
+
+  if (isDeploymentToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runDeploymentTool(toolName, args, ctx)
+  }
+
+  if (isWorkflowOrgToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runWorkflowOrgTool(toolName, args, ctx)
+  }
+
+  // Remaining catalog leaves with no Cloud handler and no Arena executor yet —
+  // fail closed with guidance instead of mothership "Tool not found".
+  if (isRemainingDelegatedStubToolName(toolName)) {
+    const message = remainingDelegatedStubMessage(toolName)
+    logger.info('Arena Copilot stubbed missing mothership tool', {
+      toolName,
+      workflowId: ctx.workflowId,
+    })
+    return {
+      toolName,
+      success: false,
+      error: message,
+      result: { error: message },
+    }
   }
 
   // Cloud agents call load_integration_tool after listing; Arena uses invoke_integration_tool.
