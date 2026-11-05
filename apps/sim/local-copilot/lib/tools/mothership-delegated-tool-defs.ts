@@ -31,10 +31,10 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   user_table:
     'Creates, reads, and updates workspace tables — operations include create, get, get_schema, insert_row, batch_insert_rows, query_rows, update_row, add_column, import_file, create_from_file.',
   knowledge_base:
-    'Manages knowledge bases — operations: create, list, get, query, add_file, update, delete, get_connector_schema, add_connector, update_connector, delete_connector, sync_connector. After create, keep data.id for follow-ups. Use list (optional search) to recover ids. Before add_connector call get_connector_schema with connectorType (e.g. google_drive) — do not read knowledgebases/connectors via VFS. delete requires knowledgeBaseId or knowledgeBaseIds and only when the user asked.',
+    'Manages knowledge bases — operations: create, list, get, query, add_file, update, delete, get_connector_schema, add_connector, update_connector, delete_connector, sync_connector. After create, keep data.id for follow-ups. Use list (optional search) to recover ids. add_file takes canonical files/ paths of the original file (PDF and other allowed types included), never uploads/ and never a markdown transcript of a binary file. Materialize a chat upload into files/ first. Before add_connector call get_connector_schema with connectorType (e.g. google_drive) — do not read knowledgebases/connectors via VFS. delete requires knowledgeBaseId or knowledgeBaseIds and only when the user asked.',
   open_resource: 'Opens a workspace resource (workflow, file, table, knowledge base) in the UI.',
   materialize_file:
-    'Saves chat uploads (`uploads/...`) into workspace `files/...` (or imports). Required before function_execute can open uploaded spreadsheets/docs — uploads/ paths are not sandbox-mounted.',
+    'Copies chat uploads (`uploads/...`) into workspace `files/...` without changing bytes or type. Required before function_execute (uploads/ are not sandbox-mounted) and before knowledge_base add_file (add_file only accepts files/ paths).',
   generate_image:
     'Generates an image from a text prompt (no workflow). Uses hosted/workspace keys automatically. Pass the user full request in `prompt`, including variation counts (e.g. "3 variations"). Optional outputs.files path to save under files/.',
   search_online:
@@ -380,6 +380,15 @@ export function patchKnowledgeBaseToolParameters(
         type: 'object',
         description:
           'Connector-specific configuration matching configFields from get_connector_schema (e.g. google_drive folderId).',
+      },
+      filePaths: {
+        ...((existingProperties.filePaths as Record<string, unknown> | undefined) ?? {
+          type: 'array',
+        }),
+        type: 'array',
+        description:
+          'Canonical files/ paths to ingest as themselves for add_file, e.g. ["files/Docs/handbook.pdf"]. Not uploads/ paths. Do not substitute a markdown extract of a PDF or DOCX.',
+        items: { type: 'string' },
       },
     },
   }

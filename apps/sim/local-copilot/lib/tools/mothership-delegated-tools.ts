@@ -541,9 +541,21 @@ export async function executeMothershipDelegatedTool(
         result: { success: false, message },
       }
     }
-    const result = await executeCopilotServerTool(toolName, enrichedArgs, ctx, workflowId)
+    let result = await executeCopilotServerTool(toolName, enrichedArgs, ctx, workflowId)
     if (!result.success) {
       logger.warn('Copilot server tool failed', { toolName, serverToolName, error: result.error })
+    }
+    if (toolName === 'knowledge_base' && enrichedArgs.operation === 'add_file' && result.success) {
+      const { kickLocalKnowledgeIndexing } = await import(
+        '@/local-copilot/lib/tools/kick-knowledge-indexing'
+      )
+      result = {
+        ...result,
+        result: await kickLocalKnowledgeIndexing({
+          output: result.result,
+          billingAttribution: ctx.billingAttribution,
+        }),
+      }
     }
     if (toolName === 'workspace_file') {
       ctx.failedPatchSearches ??= new Map()

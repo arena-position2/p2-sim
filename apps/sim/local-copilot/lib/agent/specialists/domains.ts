@@ -349,7 +349,7 @@ export function domainSystemHint(domain: LocalCopilotSpecialistDomain): string {
     case 'auth':
       return 'Focus on credentials, OAuth links, and API keys.'
     case 'knowledge':
-      return 'Query, create, and ingest knowledge bases (knowledge_base get / list / query / create / add_file). To seed a new KB with content: create_file markdown/text under files/ (full body in content), then knowledge_base operation=create, then add_file with those VFS paths. Do not finish after research alone — write the files and ingest them.'
+      return 'Query, create, and ingest knowledge bases (knowledge_base get / list / query / create / add_file). Ingest the original file, never a transcript of it. A chat upload (uploads/…) must be materialize_file into files/… first, keeping the same bytes and type (PDF, DOCX, and the other allowed types). A file already under files/ (create_file, office edit_content, or outputs.files) is added as that path. Then knowledge_base add_file with those files/ paths. Use an existing knowledgeBases id when the user named one or asked to add to it; create only when they asked for a new base, and pass data.id to add_file. Do not read or function_execute a file just to paste it into markdown for the knowledge base. Research notes become a markdown file only when the user asked for a write-up. Do not finish after research alone — write or materialize the files and ingest them.'
     case 'table':
       return 'Create and manage tables, rows, schemas, and enrichments (user_table).'
     case 'scheduled_task':
