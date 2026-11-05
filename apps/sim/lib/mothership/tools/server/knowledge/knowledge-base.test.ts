@@ -25,6 +25,7 @@ const {
   mockCreateKnowledgeConnector,
   mockCreateKnowledgeTag,
   mockListKnowledgeTags,
+  mockListKnowledgeBases,
   mockIsKnowledgeMemberAccessAvailable,
   knowledgeOperations,
 } = vi.hoisted(() => {
@@ -59,6 +60,7 @@ const {
     mockCreateKnowledgeConnector: vi.fn(),
     mockCreateKnowledgeTag: vi.fn(),
     mockListKnowledgeTags: vi.fn(),
+    mockListKnowledgeBases: vi.fn(),
     mockIsKnowledgeMemberAccessAvailable: vi.fn(),
     knowledgeOperations: {
       addWorkspaceFiles: defineOperation('knowledge.documents.add_workspace_files', 'write'),
@@ -70,6 +72,7 @@ const {
       createTag: defineOperation('knowledge.tags.create', 'write'),
       deleteConnector: defineOperation('knowledge.connectors.delete', 'write'),
       deleteTag: defineOperation('knowledge.tags.delete', 'write'),
+      list: defineOperation('knowledge.list', 'read'),
       listTags: defineOperation('knowledge.tags.list', 'read'),
       read: defineOperation('knowledge.read', 'read'),
       readTagUsage: defineOperation('knowledge.tags.read_usage', 'read'),
@@ -122,6 +125,10 @@ vi.mock('@/lib/knowledge/application/knowledge-bases', () => ({
   createKnowledgeBase: {
     operation: knowledgeOperations.create,
     execute: mockCreateKnowledgeBase,
+  },
+  listKnowledgeBases: {
+    operation: knowledgeOperations.list,
+    execute: mockListKnowledgeBases,
   },
   readKnowledgeBase: { operation: knowledgeOperations.read, execute: mockReadKnowledgeBase },
   updateKnowledgeBaseOperation: {
@@ -246,6 +253,12 @@ describe('manage_knowledge_base trusted application delegation', () => {
     mockReadKnowledgeBase.mockResolvedValue({ knowledgeBase: KNOWLEDGE_BASE, folderPath: '/' })
     mockCreateKnowledgeBase.mockResolvedValue({ knowledgeBase: KNOWLEDGE_BASE, folderPath: '/' })
     mockUpdateKnowledgeBase.mockResolvedValue({ knowledgeBase: KNOWLEDGE_BASE, folderPath: '/' })
+    mockListKnowledgeBases.mockResolvedValue({
+      knowledgeBases: [{ knowledgeBase: KNOWLEDGE_BASE, folderPath: '/' }],
+      nextCursorKeys: null,
+      sortBy: 'createdAt',
+      sortOrder: 'asc',
+    })
     mockBulkDeleteKnowledgeBases.mockResolvedValue({
       deleted: [{ id: KNOWLEDGE_BASE.id, name: KNOWLEDGE_BASE.name }],
       notFound: [],
@@ -320,6 +333,41 @@ describe('manage_knowledge_base trusted application delegation', () => {
       )
     ).rejects.toThrow(message)
     expect(mockReadKnowledgeBase).not.toHaveBeenCalled()
+  })
+
+  it('lists knowledge bases in the trusted workspace', async () => {
+    const result = await knowledgeBaseServerTool.execute({ operation: 'list', args: {} }, CONTEXT)
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        knowledgeBases: [{ id: KNOWLEDGE_BASE.id, name: KNOWLEDGE_BASE.name }],
+      },
+    })
+    const call = mockListKnowledgeBases.mock.calls[0][0]
+    expectDelegatedPrincipal(call)
+    expect(call.input).toMatchObject({
+      workspaceId: 'workspace-paid',
+      limit: 50,
+    })
+  })
+
+  it('returns google_drive connector schema without VFS', async () => {
+    const result = await knowledgeBaseServerTool.execute(
+      { operation: 'get_connector_schema', args: { connectorType: 'google_drive' } },
+      CONTEXT
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.data).toMatchObject({
+      connectorType: 'google_drive',
+      name: 'Google Drive',
+    })
+    expect(Array.isArray(result.data?.configFields)).toBe(true)
+    expect(result.data.configFields.some((field: { id: string }) => field.id === 'folderId')).toBe(
+      true
+    )
+    expect(result.message).toMatch(/do not read knowledgebases\/connectors via VFS/i)
   })
 
   it('creates in the trusted workspace and ignores a model workspace field', async () => {

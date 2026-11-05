@@ -92,6 +92,31 @@ describe('convertMessagesToBedrock', () => {
     ])
   })
 
+  it('normalizes oversized toolUseId so toolUse and toolResult stay paired', () => {
+    const longId = `toolu_bdrk_${'a'.repeat(80)}`
+    const { messages } = convertMessagesToBedrock([
+      { role: 'user', content: 'go' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: longId, name: 'grep', arguments: '{}' }],
+      },
+      { role: 'tool', toolCallId: longId, content: 'ok' },
+    ])
+
+    const useId = messages
+      .flatMap((message) => message.content ?? [])
+      .find((block) => 'toolUse' in block && block.toolUse)?.toolUse?.toolUseId
+    const resultId = messages
+      .flatMap((message) => message.content ?? [])
+      .find((block) => 'toolResult' in block && block.toolResult)?.toolResult?.toolUseId
+
+    expect(useId).toBeDefined()
+    expect(useId).toBe(resultId)
+    expect(useId!.length).toBeLessThanOrEqual(64)
+    expect(useId).toMatch(/^[a-zA-Z0-9_-]+$/)
+  })
+
   it('echoes signed reasoning on text-only assistant turns', () => {
     const { messages } = convertMessagesToBedrock([
       { role: 'user', content: 'hi' },

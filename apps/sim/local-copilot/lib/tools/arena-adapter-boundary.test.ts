@@ -92,4 +92,19 @@ describe('Level B Arena adapter boundary', () => {
     expect(registered.has('materialize_file')).toBe(false)
     expect(toServerRegistryToolName('materialize_file')).toBe('save_upload')
   })
+
+  it('registers user_memory and list_workspaces for Local Copilot delegation', () => {
+    const registered = new Set(getRegisteredServerToolNames())
+    expect(registered.has('user_memory')).toBe(true)
+    expect(registered.has('list_workspaces')).toBe(true)
+  })
+
+  it('advertises manage_mcp_connection (not the stale manage_mcp_tool id)', () => {
+    const defs = buildMothershipDelegatedToolDefinitions()
+    expect(defs.some((def) => def.name === 'manage_mcp_connection')).toBe(true)
+    expect(defs.some((def) => def.name === 'manage_mcp_tool')).toBe(false)
+    expect(defs.some((def) => def.name === 'list_workspaces')).toBe(true)
+    expect(defs.some((def) => def.name === 'list_user_workspaces')).toBe(false)
+    expect(defs.some((def) => def.name === 'search_documentation')).toBe(false)
+  })
 })

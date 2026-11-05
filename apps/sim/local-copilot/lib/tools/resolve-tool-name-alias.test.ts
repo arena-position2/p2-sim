@@ -40,6 +40,9 @@ describe('resolveLocalCopilotToolName', () => {
       ['web_search', 'search_online'],
       ['run_function', 'function_execute'],
       ['save_upload', 'materialize_file'],
+      ['manage_mcp_tool', 'manage_mcp_connection'],
+      ['list_user_workspaces', 'list_workspaces'],
+      ['search_documentation', 'search_docs'],
     ] as const) {
       expect(resolveLocalCopilotToolName(cloud)).toEqual({ kind: 'ok', name: arena })
     }

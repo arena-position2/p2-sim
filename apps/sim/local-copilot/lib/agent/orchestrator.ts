@@ -176,16 +176,21 @@ import {
 import {
   buildDebugInspectionChatAppendix,
   buildFileInspectionChatAppendix,
+  buildKnowledgeBaseConnectorWrapUpMessage,
   buildToolFailureEvidenceLines,
   buildWorkflowBuildChatAppendix,
   buildWorkflowRunChatAppendix,
   generatedImageChatMarkdown,
+  isKnowledgeBaseConnectorWrapUpOperation,
+  isKnowledgeBaseToolName,
   isWorkflowRunToolName,
   shouldAppendWorkflowRunChatResult,
+  shouldEmitFileInspectionClosingAppendix,
   stripLeakedToolMarkers,
   synthesizeAssistantSummaryFromTools,
   type ToolTurnRecord,
   turnHasDebugInspectionTools,
+  turnHasDomainCompletionTools,
   turnHasFileInspectionTools,
   turnHasFileMutationTools,
   turnHasWorkflowDiscoveryTools,
@@ -226,6 +231,7 @@ import {
   buildWorkflowBuildCompleteSystemMessage,
   buildWorkflowBuildContinuationMessage,
   buildWorkflowBuildSoftCompleteSystemMessage,
+  contentLooksLikeCompletion,
   createAssistantRoundTextStreamer,
   editResultNeedsFollowUp,
   emptyAssistantTurnFallback,
@@ -846,6 +852,7 @@ export async function* runLocalCopilotAgent(
     workspaceId: params.workspaceId,
     workflowId: resolvedWorkflowId ?? params.workflowId,
     chatId: params.chatId,
+    ...(params.runId ? { runId: params.runId } : {}),
     messageId: usageTurnId,
     abortSignal: params.signal,
     userPermission: params.userPermission,
@@ -1481,6 +1488,8 @@ export async function* runLocalCopilotAgent(
           messages.push({ role: 'assistant', content: settledFollowUp })
           assistantText = ''
         }
+        // Continuations must be `user` (not `system`): Gemini folds system into
+        // systemInstruction, so a text-only model turn would end `contents` and 400.
         const continuation = buildFollowUpContinuationMessage(pendingFollowUps)
         messages.push({ role: 'user', content: continuation })
         logger.info('Arena Copilot forcing mandatory follow-up continuation', {
@@ -1508,7 +1517,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildUnfulfilledIntentContinuationMessage(),
         })
         logger.info('Arena Copilot forcing mutation-intent continuation', {
@@ -1536,7 +1545,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildResearchSearchContinuationMessage(),
         })
         logger.info('Arena Copilot forcing research live-search continuation', {
@@ -1566,7 +1575,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildDebugExplanationContinuationMessage(),
         })
         logger.info('Arena Copilot forcing debug-explanation continuation', {
@@ -1600,7 +1609,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildWorkflowBuildContinuationMessage(),
         })
         logger.info('Arena Copilot forcing workflow-build continuation', {
@@ -1634,7 +1643,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildIncompleteWorkflowPopulateContinuationMessage(),
         })
         logger.info('Arena Copilot forcing incomplete-workflow-populate continuation', {
@@ -1683,7 +1692,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildHtmlEditGrepNudgeMessage(htmlEditGrepTokens),
         })
         logger.info('Arena Copilot forcing HTML edit grep nudge', {
@@ -1717,7 +1726,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildHtmlEditWriteNudgeMessage({
             tokens: htmlEditGrepTokens,
             preferredPath: activeEditTarget.preferredPath,
@@ -1768,6 +1777,7 @@ export async function* runLocalCopilotAgent(
         maxToolRounds,
         hasFileInspectionTools: turnHasFileInspectionTools(turnToolRecords),
         hasFileMutationTools: hasFileMutations,
+        hasDomainCompletionTools: turnHasDomainCompletionTools(turnToolRecords),
         streamedUserFacingText,
         roundDisplayText: intentDisplay,
       })
@@ -1779,7 +1789,7 @@ export async function* runLocalCopilotAgent(
           assistantText = ''
         }
         messages.push({
-          role: 'system',
+          role: 'user',
           content: buildFileEditContinuationMessage(),
         })
         logger.info('Arena Copilot forcing file-edit continuation', {
@@ -2730,6 +2740,25 @@ export async function* runLocalCopilotAgent(
         })
       }
 
+      // KB create + Drive/Notion connector path: after attach/sync, force a
+      // text-only wrap-up so incidental VFS discovery cannot keep the loop alive.
+      if (toolResult.success && isKnowledgeBaseToolName(call.name)) {
+        const operation =
+          typeof parsedArgs.operation === 'string' ? parsedArgs.operation.trim() : ''
+        if (isKnowledgeBaseConnectorWrapUpOperation(operation)) {
+          postBuildToolMode = 'final_only'
+          deferredSystemMessages.push({
+            role: 'system',
+            content: buildKnowledgeBaseConnectorWrapUpMessage(),
+          })
+          logger.info('Arena Copilot knowledge-base connector wrap-up', {
+            round,
+            operation,
+            toolName: call.name,
+          })
+        }
+      }
+
       // Mid-turn progress for create and a clean populate edit so the panel is
       // not left blank if the final model round is empty/aborted.
       if (toolResult.success && call.name === 'create_workflow') {
@@ -3055,13 +3084,22 @@ export async function* runLocalCopilotAgent(
     }
   }
 
-  // Hard guarantee: file inspection without a write must not settle on empty Thinking….
-  if (turnHasFileInspectionTools(turnToolRecords) && !turnHasFileMutationTools(turnToolRecords)) {
+  // Hard guarantee: unfinished file edits must not settle on empty Thinking….
+  // Skip when domain work already succeeded or a substantive Done reply streamed
+  // (KB sync turns often grep/read for connector schema and must not get a
+  // workspace_file nag after "Done — knowledge base is set up").
+  {
     const visible = stripIdsFromUserFacingText(
       stripOptionsTagsForDisplay(streamedUserFacingText, false)
     ).trim()
-    const looksEmpty = !visible || isFileInspectionBridgeNarration(visible)
-    if (looksEmpty) {
+    if (
+      shouldEmitFileInspectionClosingAppendix({
+        records: turnToolRecords,
+        visibleText: visible,
+        isFileInspectionBridgeNarration,
+        contentLooksLikeCompletion,
+      })
+    ) {
       const guaranteed =
         buildFileInspectionChatAppendix(turnToolRecords) ??
         synthesizeAssistantSummaryFromTools(turnToolRecords) ??

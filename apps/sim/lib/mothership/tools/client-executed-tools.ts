@@ -1,3 +1,5 @@
+import { toRecordOrNull } from '@sim/utils/object'
+import { MothershipStreamV1ToolExecutor } from '@/lib/mothership/generated/mothership-stream-v1'
 import { isDesktopToolCall } from '@/lib/mothership/tools/desktop-tools'
 
 const WORKFLOW_TOOL_NAMES = new Set<string>([
@@ -21,4 +23,20 @@ export function isClientExecutedToolCall(
   args: Record<string, unknown> | undefined
 ): boolean {
   return isWorkflowToolName(name) || isDesktopToolCall(name, args)
+}
+
+/**
+ * Whether this call frame is asking the browser to run the tool.
+ *
+ * Name alone is not enough: Local Copilot re-emits finished *server-side* tools
+ * with `executor: go` for chat UI only. Those frames must not trigger
+ * `executeRunToolOnClient`. Workflow tools use `executor: client` (and persist
+ * an async tool row) so the browser can fill canvas Logs live, same as Cloud.
+ */
+export function streamFrameRequestsClientExecution(frame: {
+  executor?: string
+  ui?: unknown
+}): boolean {
+  if (frame.executor === MothershipStreamV1ToolExecutor.client) return true
+  return toRecordOrNull(frame.ui)?.clientExecutable === true
 }

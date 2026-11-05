@@ -1285,7 +1285,10 @@ export async function handleUnifiedChatPost(req: NextRequest) {
                     },
                   }
                 : {}),
-              model: branch.titleModel,
+              // Arena Local persists the picker catalog id (e.g. bedrock-claude-fable-5-1),
+              // not the hosted workspace titleModel default (claude-opus-4-8 → claude).
+              model:
+                copilotBackend === 'local' && localCatalogId ? localCatalogId : branch.titleModel,
               type: branch.kind === 'workflow' ? 'copilot' : 'mothership',
             }),
           activeOtelRoot.context
@@ -1622,6 +1625,7 @@ export async function handleUnifiedChatPost(req: NextRequest) {
             // The effort this turn actually runs at, so the stored pick is always one it can use.
             effortChoice: effortChoice && body.effort,
             desktopDeviceId: backgroundExecutorDeviceId(body),
+            ...(copilotBackend === 'local' && localCatalogId ? { chatModel: localCatalogId } : {}),
           },
         })
         // Admission committed. A failure to attach this HTTP sink must leave the turn recoverable.

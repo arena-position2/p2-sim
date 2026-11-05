@@ -22,6 +22,10 @@ import { coerceLocalEditAgentTools } from '@/local-copilot/lib/tools/coerce-edit
 import { coerceLocalEditDropdownInputs } from '@/local-copilot/lib/tools/coerce-edit-dropdown-inputs'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { getToolDefinition } from '@/local-copilot/lib/tools/definitions'
+import {
+  executeDeploymentTool,
+  isDeploymentToolName,
+} from '@/local-copilot/lib/tools/deployment-tools'
 import { canonicalCreateFilePath } from '@/local-copilot/lib/tools/enrich-file-tool-args'
 import {
   enrichLocalIntegrationToolParams,
@@ -29,6 +33,14 @@ import {
 } from '@/local-copilot/lib/tools/enrich-integration-params'
 import { ensureStartReservedInputFormatInEditOperations } from '@/local-copilot/lib/tools/ensure-start-reserved-input-format'
 import { injectWorkspaceEnvApiKeyIfNeeded } from '@/local-copilot/lib/tools/inject-workspace-env-api-key'
+import {
+  executeManageCustomTool,
+  MANAGE_CUSTOM_TOOL_NAME,
+} from '@/local-copilot/lib/tools/manage-custom-tool'
+import {
+  executeManageMcpConnection,
+  MANAGE_MCP_CONNECTION_TOOL_NAME,
+} from '@/local-copilot/lib/tools/manage-mcp-connection'
 import { executeManageSkill, MANAGE_SKILL_TOOL_NAME } from '@/local-copilot/lib/tools/manage-skill'
 import {
   executeMothershipDelegatedTool,
@@ -37,6 +49,10 @@ import {
   resolveWorkflowIdFromDatabase,
 } from '@/local-copilot/lib/tools/mothership-delegated-tools'
 import { normalizeLocalEditConnections } from '@/local-copilot/lib/tools/normalize-edit-connections'
+import {
+  isRemainingDelegatedStubToolName,
+  remainingDelegatedStubMessage,
+} from '@/local-copilot/lib/tools/remaining-delegated-stubs'
 import {
   normalizeBlockIdsArgs,
   resolveBlockIdsArg,
@@ -47,10 +63,19 @@ import {
   executeLoadUserSkill,
   LOAD_USER_SKILL_TOOL_NAME,
 } from '@/local-copilot/lib/tools/user-skills'
+import { executeLocalVfsTool, isLocalVfsToolName } from '@/local-copilot/lib/tools/vfs-read-tools'
 import {
   runCreateWorkflowTool,
   runEditWorkflowTool,
 } from '@/local-copilot/lib/tools/workflow-mutations'
+import {
+  executeWorkflowOrgTool,
+  isWorkflowOrgToolName,
+} from '@/local-copilot/lib/tools/workflow-org-tools'
+import {
+  executeWorkspaceMcpDeployTool,
+  isWorkspaceMcpDeployToolName,
+} from '@/local-copilot/lib/tools/workspace-mcp-deploy-tools'
 import type { LocalCopilotStructuredContext, WorkflowPatch } from '@/local-copilot/lib/types'
 import {
   buildEditWorkflowDryRunResult,
@@ -109,6 +134,11 @@ export interface ToolExecutionContext {
   workspaceId: string
   workflowId?: string
   chatId?: string
+  /**
+   * Copilot run id for this turn. Required to persist and wait on
+   * browser-owned workflow tools (`run_workflow*`).
+   */
+  runId?: string
   /** Scopes workspace_file → edit_content intents for this user turn. */
   messageId?: string
   abortSignal?: AbortSignal
@@ -297,6 +327,199 @@ async function runManageSkill(
   }
 }
 
+/**
+ * Arena-local manage_mcp_connection: Cloud dropped the mothership handler.
+ * Accepts the legacy `manage_mcp_tool` leaf via resolveLocalCopilotToolName.
+ */
+async function runManageMcpConnection(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeManageMcpConnection(args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName: MANAGE_MCP_CONNECTION_TOOL_NAME,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName: MANAGE_MCP_CONNECTION_TOOL_NAME,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
+async function runManageCustomTool(
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeManageCustomTool(args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName: MANAGE_CUSTOM_TOOL_NAME,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName: MANAGE_CUSTOM_TOOL_NAME,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
+async function runDeploymentTool(
+  toolName:
+    | 'check_deployment_status'
+    | 'deploy_api'
+    | 'deploy_chat'
+    | 'redeploy'
+    | 'get_deployment_log'
+    | 'diff_workflows'
+    | 'load_deployment'
+    | 'promote_to_live'
+    | 'update_deployment_version',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeDeploymentTool(toolName, args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  const result: ToolExecutionResult = {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+
+  if (toolSupportsIdempotency(toolName) && ctx.mutationIdempotency) {
+    rememberIdempotentResult(
+      ctx.mutationIdempotency,
+      buildIdempotencyKey(toolName, args, ctx.activeToolCallId),
+      result
+    )
+  }
+
+  return result
+}
+
+async function runWorkflowOrgTool(
+  toolName:
+    | 'rename_workflow'
+    | 'move_workflow'
+    | 'delete_workflow'
+    | 'manage_folder'
+    | 'set_global_workflow_variables'
+    | 'set_block_enabled',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeWorkflowOrgTool(toolName, args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  return {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
+/**
+ * Arena-local glob / grep / read. Catalog still advertises these as delegated
+ * mothership tools; handlers no longer exist in Cloud, so execute here.
+ */
+async function runLocalVfsTool(
+  toolName: 'glob' | 'grep' | 'read',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeLocalVfsTool(toolName, args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  if (toolName === 'read') {
+    rememberReadVfsPath(ctx, args)
+  }
+
+  return {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
+/**
+ * Arena-local workspace MCP deploy tools. Catalog still advertises them;
+ * Cloud mothership handlers are gone, so execute against workflow-deployment
+ * use cases here.
+ */
+async function runWorkspaceMcpDeployTool(
+  toolName:
+    | 'list_workspace_mcp_servers'
+    | 'create_workspace_mcp_server'
+    | 'update_workspace_mcp_server'
+    | 'delete_workspace_mcp_server'
+    | 'deploy_mcp',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeWorkspaceMcpDeployTool(toolName, args, ctx)
+
+  if (!executed.success) {
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: { error: executed.error },
+    }
+  }
+
+  const result: ToolExecutionResult = {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+
+  if (toolSupportsIdempotency(toolName) && ctx.mutationIdempotency) {
+    rememberIdempotentResult(
+      ctx.mutationIdempotency,
+      buildIdempotencyKey(toolName, args, ctx.activeToolCallId),
+      result
+    )
+  }
+
+  return result
+}
+
 function reusedWorkflowResult(existing: CreatedWorkflowThisTurn): ToolExecutionResult {
   return {
     toolName: 'create_workflow',
@@ -443,6 +666,57 @@ async function executeLocalCopilotToolInner(
   if (toolName === MANAGE_SKILL_TOOL_NAME) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runManageSkill(args, ctx)
+  }
+
+  // manage_mcp_connection: same pattern — catalog advertises, Local executes.
+  if (toolName === MANAGE_MCP_CONNECTION_TOOL_NAME) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runManageMcpConnection(args, ctx)
+  }
+
+  if (toolName === MANAGE_CUSTOM_TOOL_NAME) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runManageCustomTool(args, ctx)
+  }
+
+  // glob / grep / read: Cloud deleted WorkspaceVFS handlers; Arena runs a
+  // files-/uploads-focused path under local-copilot (merge-safe).
+  if (isLocalVfsToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runLocalVfsTool(toolName, args, ctx)
+  }
+
+  // Workspace MCP deploy family (publish workflows as MCP servers). Distinct
+  // from manage_mcp_connection (external MCP connections agents call).
+  if (isWorkspaceMcpDeployToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runWorkspaceMcpDeployTool(toolName, args, ctx)
+  }
+
+  if (isDeploymentToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runDeploymentTool(toolName, args, ctx)
+  }
+
+  if (isWorkflowOrgToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runWorkflowOrgTool(toolName, args, ctx)
+  }
+
+  // Remaining catalog leaves with no Cloud handler and no Arena executor yet —
+  // fail closed with guidance instead of mothership "Tool not found".
+  if (isRemainingDelegatedStubToolName(toolName)) {
+    const message = remainingDelegatedStubMessage(toolName)
+    logger.info('Arena Copilot stubbed missing mothership tool', {
+      toolName,
+      workflowId: ctx.workflowId,
+    })
+    return {
+      toolName,
+      success: false,
+      error: message,
+      result: { error: message },
+    }
   }
 
   // Cloud agents call load_integration_tool after listing; Arena uses invoke_integration_tool.

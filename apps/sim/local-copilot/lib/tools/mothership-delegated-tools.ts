@@ -19,7 +19,9 @@ import {
 } from '@/local-copilot/lib/tools/enrich-file-tool-args'
 import type { ToolExecutionContext, ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
 import {
+  applyWorkflowIdToDelegatedArgs,
   buildMothershipDelegatedToolDefinitions,
+  delegatedToolSchemaAcceptsWorkflowId,
   isMothershipDelegatedTool,
   isWorkflowScopedDelegatedTool,
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
@@ -47,6 +49,8 @@ export {
   MOTHERSHIP_DELEGATED_TOOL_NAMES,
   WORKFLOW_SCOPED_DELEGATED_TOOLS,
   type MothershipDelegatedToolName,
+  applyWorkflowIdToDelegatedArgs,
+  delegatedToolSchemaAcceptsWorkflowId,
   isMothershipDelegatedTool,
   isWorkflowScopedDelegatedTool,
   buildMothershipDelegatedToolDefinitions,
@@ -383,7 +387,7 @@ export async function executeMothershipDelegatedTool(
 ): Promise<ToolExecutionResult> {
   const serverToolNames = await ensureCopilotToolRuntime()
 
-  const enrichedArgs = { ...args }
+  let enrichedArgs = { ...args }
   let workflowId = resolveWorkflowIdForDelegatedTool(enrichedArgs, ctx)
 
   const languageError = enforceLocalCopilotSandboxLanguages(toolName, enrichedArgs)
@@ -396,9 +400,16 @@ export async function executeMothershipDelegatedTool(
     workflowId = await resolveWorkflowIdFromDatabase(ctx.workspaceId, enrichedArgs)
   }
 
-  if (workflowId) {
-    enrichedArgs.workflowId = workflowId
-  } else if (WORKFLOW_SCOPED_DELEGATED_TOOLS.has(toolName)) {
+  // Only pin workflowId onto args when the tool schema accepts it. Unconditional
+  // injection broke open_resource (strict Zod: Unrecognized key "workflowId")
+  // after create_workflow set ctx.workflowId.
+  const workflowPin = applyWorkflowIdToDelegatedArgs({
+    toolName,
+    args: enrichedArgs,
+    workflowId,
+  })
+  enrichedArgs = workflowPin.args
+  if (workflowPin.required && !workflowPin.pinned) {
     logger.warn('Delegated workflow tool missing workflowId', {
       toolName,
       workspaceId: ctx.workspaceId,
@@ -408,6 +419,39 @@ export async function executeMothershipDelegatedTool(
       ...buildMissingWorkflowIdError(ctx.structuredContext),
       toolName,
     }
+  }
+
+  // Arena-local leaves: Cloud still serves these from Go; Local intercepts after
+  // workflowId resolution so Sim merges do not need mothership handlers.
+  if (toolName === 'get_workflow_run_options') {
+    const { executeGetWorkflowRunOptions } = await import(
+      '@/local-copilot/lib/tools/get-workflow-run-options'
+    )
+    const resolvedWorkflowId =
+      (typeof enrichedArgs.workflowId === 'string' && enrichedArgs.workflowId.trim()) ||
+      workflowId ||
+      ''
+    return executeGetWorkflowRunOptions(enrichedArgs, ctx, resolvedWorkflowId)
+  }
+
+  if (toolName === 'user_table') {
+    const { executeUserTable } = await import('@/local-copilot/lib/tools/user-table')
+    return executeUserTable(enrichedArgs, ctx)
+  }
+
+  // Cloud parity: browser owns the run so canvas Logs / Output update live.
+  // The lifecycle already persisted `copilot_async_tool_calls` and streamed
+  // `executor: client`; wait here instead of headless `executeRunWorkflow`.
+  if (
+    toolName === 'run_workflow' ||
+    toolName === 'run_workflow_until_block' ||
+    toolName === 'run_block' ||
+    toolName === 'run_from_block'
+  ) {
+    const { waitForLocalClientWorkflowTool } = await import(
+      '@/local-copilot/lib/tools/client-workflow-run'
+    )
+    return waitForLocalClientWorkflowTool({ toolName, args: enrichedArgs, ctx })
   }
 
   if (toolName === 'generate_image') {
@@ -497,9 +541,21 @@ export async function executeMothershipDelegatedTool(
         result: { success: false, message },
       }
     }
-    const result = await executeCopilotServerTool(toolName, enrichedArgs, ctx, workflowId)
+    let result = await executeCopilotServerTool(toolName, enrichedArgs, ctx, workflowId)
     if (!result.success) {
       logger.warn('Copilot server tool failed', { toolName, serverToolName, error: result.error })
+    }
+    if (toolName === 'knowledge_base' && enrichedArgs.operation === 'add_file' && result.success) {
+      const { kickLocalKnowledgeIndexing } = await import(
+        '@/local-copilot/lib/tools/kick-knowledge-indexing'
+      )
+      result = {
+        ...result,
+        result: await kickLocalKnowledgeIndexing({
+          output: result.result,
+          billingAttribution: ctx.billingAttribution,
+        }),
+      }
     }
     if (toolName === 'workspace_file') {
       ctx.failedPatchSearches ??= new Map()

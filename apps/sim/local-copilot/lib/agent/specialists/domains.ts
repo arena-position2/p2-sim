@@ -64,6 +64,7 @@ export const ALWAYS_ON_TOOL_NAMES = new Set<string>([
   'invoke_integration_tool',
   'open_resource',
   'get_platform_actions',
+  'list_workspaces',
   'list_user_workspaces',
   'load_user_skill',
   'explain_error',
@@ -96,6 +97,7 @@ const WORKFLOW_TOOLS = [
   'restore_resource',
   'manage_skill',
   'manage_custom_tool',
+  'manage_mcp_connection',
   'manage_mcp_tool',
 ] as const
 
@@ -164,6 +166,7 @@ const SCHEDULED_TASK_TOOLS = [
 const AGENT_TOOLS = [
   'list_integration_tools',
   'invoke_integration_tool',
+  'manage_mcp_connection',
   'manage_mcp_tool',
   'manage_skill',
   'manage_custom_tool',
@@ -346,7 +349,7 @@ export function domainSystemHint(domain: LocalCopilotSpecialistDomain): string {
     case 'auth':
       return 'Focus on credentials, OAuth links, and API keys.'
     case 'knowledge':
-      return 'Query, create, and ingest knowledge bases (knowledge_base get / list / query / create / add_file). To seed a new KB with content: create_file markdown/text under files/ (full body in content), then knowledge_base operation=create, then add_file with those VFS paths. Do not finish after research alone — write the files and ingest them.'
+      return 'Query, create, and ingest knowledge bases (knowledge_base get / list / query / create / add_file). Ingest the original file, never a transcript of it. A chat upload (uploads/…) must be materialize_file into files/… first, keeping the same bytes and type (PDF, DOCX, and the other allowed types). A file already under files/ (create_file, office edit_content, or outputs.files) is added as that path. Then knowledge_base add_file with those files/ paths. Use an existing knowledgeBases id when the user named one or asked to add to it; create only when they asked for a new base, and pass data.id to add_file. Do not read or function_execute a file just to paste it into markdown for the knowledge base. Research notes become a markdown file only when the user asked for a write-up. Do not finish after research alone — write or materialize the files and ingest them.'
     case 'table':
       return 'Create and manage tables, rows, schemas, and enrichments (user_table).'
     case 'scheduled_task':
@@ -354,7 +357,7 @@ export function domainSystemHint(domain: LocalCopilotSpecialistDomain): string {
     case 'agent':
       return 'Focus on integration tools, MCP tools, skills, function_execute (python or shell; Mothership template has no JS), and manage_sandbox (language=python).'
     case 'research':
-      return 'Focus on research. For ANY real-world factual or current question, call a live search tool FIRST (exa_answer via invoke_integration_tool, or search_online) before answering — never answer from training memory alone. When the question is about a workspace file, glob/read/grep that exact VFS path — do not open a similarly named file. Use search_documentation only for Sim product questions.'
+      return 'Focus on research. For ANY real-world factual or current question, call a live search tool FIRST (exa_answer via invoke_integration_tool, or search_online) before answering — never answer from training memory alone. When the question is about a workspace file, glob/read/grep that exact VFS path — do not open a similarly named file. Use search_docs for Sim product questions.'
     case 'media':
       return 'Focus on image/audio/video generation and ffmpeg. For PNG/JPEG/GIF/WebP (even when the user says "PNG format"), call generate_image with outputs.files — never create_file with base64.'
     case 'file':

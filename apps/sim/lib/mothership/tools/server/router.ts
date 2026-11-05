@@ -32,6 +32,7 @@ import { ffmpegServerTool } from '@/lib/mothership/tools/server/media/ffmpeg'
 import { generateAudioServerTool } from '@/lib/mothership/tools/server/media/generate-audio'
 import { generateVideoServerTool } from '@/lib/mothership/tools/server/media/generate-video'
 import { openResourceServerTool } from '@/lib/mothership/tools/server/open-resource'
+import { userMemoryServerTool } from '@/lib/mothership/tools/server/other/user-memory'
 import { organizationSearchSourcesServerTool } from '@/lib/mothership/tools/server/search-sources'
 import { settingsServerTool } from '@/lib/mothership/tools/server/settings'
 import { testsServerTool } from '@/lib/mothership/tools/server/tests'
@@ -86,6 +87,8 @@ const baseServerToolRegistry: Record<string, BaseServerTool> = {
   [ffmpegServerTool.name]: ffmpegServerTool,
   // Not agent-reachable: the internal credentials route dispatches this directly.
   [getCredentialsServerTool.name]: getCredentialsServerTool,
+  // Arena Local Copilot advertises user_memory; implementation lived unregistered.
+  [userMemoryServerTool.name]: userMemoryServerTool,
 }
 
 function getServerToolRegistry(): Record<string, BaseServerTool> {

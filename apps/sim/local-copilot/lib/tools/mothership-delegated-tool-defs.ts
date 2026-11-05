@@ -31,10 +31,10 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   user_table:
     'Creates, reads, and updates workspace tables — operations include create, get, get_schema, insert_row, batch_insert_rows, query_rows, update_row, add_column, import_file, create_from_file.',
   knowledge_base:
-    'Manages knowledge bases — operations include create, get, list, query (semantic search), add_file (ingest document), update, delete, add_connector, sync_connector.',
+    'Manages knowledge bases — operations: create, list, get, query, add_file, update, delete, get_connector_schema, add_connector, update_connector, delete_connector, sync_connector. After create, keep data.id for follow-ups. Use list (optional search) to recover ids. add_file takes canonical files/ paths of the original file (PDF and other allowed types included), never uploads/ and never a markdown transcript of a binary file. Materialize a chat upload into files/ first. Before add_connector call get_connector_schema with connectorType (e.g. google_drive) — do not read knowledgebases/connectors via VFS. delete requires knowledgeBaseId or knowledgeBaseIds and only when the user asked.',
   open_resource: 'Opens a workspace resource (workflow, file, table, knowledge base) in the UI.',
   materialize_file:
-    'Saves chat uploads (`uploads/...`) into workspace `files/...` (or imports). Required before function_execute can open uploaded spreadsheets/docs — uploads/ paths are not sandbox-mounted.',
+    'Copies chat uploads (`uploads/...`) into workspace `files/...` without changing bytes or type. Required before function_execute (uploads/ are not sandbox-mounted) and before knowledge_base add_file (add_file only accepts files/ paths).',
   generate_image:
     'Generates an image from a text prompt (no workflow). Uses hosted/workspace keys automatically. Pass the user full request in `prompt`, including variation counts (e.g. "3 variations"). Optional outputs.files path to save under files/.',
   search_online:
@@ -121,15 +121,13 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
     'Adds, edits, or deletes global workflow variables. Pass operations: [{ operation: add|edit|delete, name, type?, value? }].',
   get_deployed_workflow_state:
     'Returns the live/deployed workflow state (blocks, edges) for comparison with the draft.',
-  list_user_workspaces: 'Lists workspaces the current user can access (id, name, permission).',
-  search_documentation:
-    'Searches platform documentation (blocks, integrations, product). Prefer this over the local search_docs heuristic when you need deeper docs. REQUIRED: query.',
+  list_workspaces: 'Lists workspaces the current user can access (id, name, permission).',
   manage_skill:
     'Adds, edits, lists, or deletes workspace agent skills (operation: add|edit|list|delete). After add/edit, users load them via load_user_skill.',
   manage_custom_tool:
     'Adds, edits, lists, or deletes custom code tools (operation: add|edit|list|delete). For add, pass OpenAI-style schema + JavaScript code body.',
-  manage_mcp_tool:
-    'Adds, edits, lists, or deletes MCP server configs used by agent blocks (operation: add|edit|list|delete). Distinct from workspace MCP deploy servers.',
+  manage_mcp_connection:
+    'Adds, edits, lists, or deletes MCP server connections used by agent blocks (operation: add|edit|list|delete). For add, pass config: { name, url, transport?, headers? }. Distinct from *_workspace_mcp_server deploy tools. Legacy name manage_mcp_tool is accepted.',
   generate_api_key:
     'Creates a workspace API key. REQUIRED: name (descriptive label). Returns the key once — share it carefully with the user.',
   restore_resource:
@@ -207,11 +205,10 @@ export const MOTHERSHIP_DELEGATED_TOOL_NAMES = [
   'set_block_enabled',
   'set_global_workflow_variables',
   'get_deployed_workflow_state',
-  'list_user_workspaces',
-  'search_documentation',
+  'list_workspaces',
   'manage_skill',
   'manage_custom_tool',
-  'manage_mcp_tool',
+  'manage_mcp_connection',
   'generate_api_key',
   'restore_resource',
   'get_platform_actions',
@@ -249,6 +246,46 @@ export function isWorkflowScopedDelegatedTool(toolName: string): boolean {
   return WORKFLOW_SCOPED_DELEGATED_TOOLS.has(toolName as MothershipDelegatedToolName)
 }
 
+/**
+ * Whether the tool's generated JSON schema lists `workflowId` as a parameter.
+ * Used so Local Copilot only pins a resolved workflow id onto args when the
+ * payload contract accepts it — `open_resource` and other strict schemas reject
+ * unknown keys and fail with "Unrecognized key: workflowId".
+ */
+export function delegatedToolSchemaAcceptsWorkflowId(toolName: string): boolean {
+  const schema = TOOL_RUNTIME_SCHEMAS[toServerRegistryToolName(toolName)]?.parameters as
+    | { properties?: Record<string, unknown> }
+    | undefined
+  return Boolean(schema?.properties && 'workflowId' in schema.properties)
+}
+
+/**
+ * Pins a resolved workflow id onto delegated tool args when the tool accepts
+ * it; strips a stray `workflowId` when the schema does not (e.g. open_resource).
+ * Workflow-scoped tools still require a workflow id — callers must handle the
+ * missing-id error when this returns `{ pinned: false, required: true }`.
+ */
+export function applyWorkflowIdToDelegatedArgs(params: {
+  toolName: string
+  args: Record<string, unknown>
+  workflowId: string | undefined
+}): { args: Record<string, unknown>; required: boolean; pinned: boolean } {
+  const required = isWorkflowScopedDelegatedTool(params.toolName)
+  const accepts = required || delegatedToolSchemaAcceptsWorkflowId(params.toolName)
+  const args = { ...params.args }
+
+  if (accepts) {
+    if (params.workflowId) {
+      args.workflowId = params.workflowId
+      return { args, required, pinned: true }
+    }
+    return { args, required, pinned: false }
+  }
+
+  const { workflowId: _ignored, ...stripped } = args
+  return { args: stripped, required: false, pinned: false }
+}
+
 export function isMothershipDelegatedTool(
   toolName: string
 ): toolName is MothershipDelegatedToolName {
@@ -259,6 +296,104 @@ export function isMothershipDelegatedTool(
  * Builds LLM tool definitions from generated schemas only — does not import
  * server tool handlers or register-handlers (those load on first execution).
  */
+/**
+ * Patches Cloud `manage_knowledge_base` parameters so Local Copilot advertises
+ * list / delete / get_connector_schema and points connector config at the tool
+ * instead of the unsupported `knowledgebases/connectors/*.json` VFS path.
+ */
+export function patchKnowledgeBaseToolParameters(
+  baseParameters: Record<string, unknown>
+): Record<string, unknown> {
+  const existingProperties = (baseParameters.properties as Record<string, unknown>) ?? {}
+  const operationProp = (existingProperties.operation as Record<string, unknown> | undefined) ?? {
+    type: 'string',
+  }
+  const existingEnum = Array.isArray(operationProp.enum)
+    ? operationProp.enum.filter((value): value is string => typeof value === 'string')
+    : []
+  const operationEnum = [
+    ...new Set([
+      ...existingEnum,
+      'list',
+      'delete',
+      'get_connector_schema',
+      'create',
+      'get',
+      'query',
+      'add_file',
+      'update',
+      'add_connector',
+      'update_connector',
+      'delete_connector',
+      'sync_connector',
+    ]),
+  ]
+
+  const knowledgeBaseIdProp = (existingProperties.knowledgeBaseId as
+    | Record<string, unknown>
+    | undefined) ?? { type: 'string' }
+  const connectorTypeProp = (existingProperties.connectorType as
+    | Record<string, unknown>
+    | undefined) ?? { type: 'string' }
+  const sourceConfigProp = (existingProperties.sourceConfig as
+    | Record<string, unknown>
+    | undefined) ?? { type: 'object' }
+
+  return {
+    ...baseParameters,
+    properties: {
+      ...existingProperties,
+      operation: {
+        ...operationProp,
+        type: 'string',
+        description:
+          'Operation to perform. Use list to recover knowledge base ids by name; get_connector_schema before add_connector; delete only on explicit user request.',
+        enum: operationEnum,
+      },
+      knowledgeBaseId: {
+        ...knowledgeBaseIdProp,
+        type: 'string',
+        description:
+          'Knowledge base ID (required for get, query, add_file, update, delete, add_connector, list_tags, …). After create, reuse data.id — or call list / search if it was cleared from context.',
+      },
+      knowledgeBaseIds: {
+        type: 'array',
+        description: 'Knowledge base IDs for batch delete.',
+        items: { type: 'string' },
+      },
+      search: {
+        type: 'string',
+        description: 'Optional name filter for list (case-insensitive substring).',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max rows for list (default 50).',
+      },
+      connectorType: {
+        ...connectorTypeProp,
+        type: 'string',
+        description:
+          "Connector type from the registry (e.g. 'google_drive', 'notion', 'confluence'). Required for get_connector_schema and add_connector. Call get_connector_schema first — do not read knowledgebases/connectors via VFS.",
+      },
+      sourceConfig: {
+        ...sourceConfigProp,
+        type: 'object',
+        description:
+          'Connector-specific configuration matching configFields from get_connector_schema (e.g. google_drive folderId).',
+      },
+      filePaths: {
+        ...((existingProperties.filePaths as Record<string, unknown> | undefined) ?? {
+          type: 'array',
+        }),
+        type: 'array',
+        description:
+          'Canonical files/ paths to ingest as themselves for add_file, e.g. ["files/Docs/handbook.pdf"]. Not uploads/ paths. Do not substitute a markdown extract of a PDF or DOCX.',
+        items: { type: 'string' },
+      },
+    },
+  }
+}
+
 export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefinition[] {
   return MOTHERSHIP_DELEGATED_TOOL_NAMES.map((name) => {
     // Arena leaf names (create_file) share Cloud JSON schemas (create_empty_file).
@@ -270,6 +405,59 @@ export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefin
     }) as Record<string, unknown>
 
     let parameters = baseParameters
+
+    // Cloud dropped `deploy_mcp` from generated schemas; Arena still advertises it.
+    if (name === 'deploy_mcp') {
+      parameters = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          serverId: {
+            type: 'string',
+            description:
+              'Required: server ID from list_workspace_mcp_servers (create one with create_workspace_mcp_server first when none exists).',
+          },
+          workflowId: {
+            type: 'string',
+            description: 'Workflow ID to publish (defaults to the current workflow in context).',
+          },
+          action: {
+            type: 'string',
+            enum: ['deploy', 'undeploy'],
+            description:
+              'Whether to publish or unpublish the workflow as an MCP tool. Default: deploy.',
+          },
+          toolName: {
+            type: 'string',
+            description: 'Optional MCP tool name override (defaults to the workflow name).',
+          },
+          toolDescription: {
+            type: 'string',
+            description: 'Optional MCP tool description override.',
+          },
+          parameterDescriptions: {
+            type: 'array',
+            description:
+              'Optional per-parameter description overlays as [{ name, description }] for the published tool schema.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+              },
+            },
+          },
+        },
+        required: ['serverId'],
+      }
+    }
+
+    // Cloud catalog omits list/delete/get_connector_schema from the operation enum
+    // even though the server handler supports them — advertise the full Arena surface.
+    if (name === 'knowledge_base' && baseParameters.type === 'object') {
+      parameters = patchKnowledgeBaseToolParameters(baseParameters)
+    }
+
     if (name === 'create_file' && baseParameters.type === 'object') {
       const existingProperties = (baseParameters.properties as Record<string, unknown>) ?? {}
       const fileNameProp = existingProperties.fileName as Record<string, unknown> | undefined
