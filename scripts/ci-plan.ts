@@ -44,12 +44,22 @@ try {
     throw new Error('No comparison base; push and unscoped dispatch run the full suite')
   if (!/^[0-9a-f]{40}$/.test(sourceBase))
     throw new Error('Comparison base must be a full commit SHA')
-  try {
-    command('git', ['cat-file', '-e', `${sourceBase}^{commit}`])
-  } catch {
-    command('git', ['fetch', '--quiet', '--depth=2', 'origin', sourceBase])
+  if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
+    if (!/^refs\/pull\/[1-9]\d*\/merge$/.test(process.env.GITHUB_REF ?? ''))
+      throw new Error('PR attribution requires the GitHub merge ref')
+    if (process.env.GITHUB_SHA !== command('git', ['rev-parse', 'HEAD']))
+      throw new Error('PR attribution requires the checked-out GitHub merge SHA')
+    const parents = command('git', ['show', '--no-patch', '--format=%P', 'HEAD']).split(' ')
+    if (parents.length !== 2) throw new Error('PR attribution requires a two-parent merge')
+    base = parents[0]
+  } else {
+    try {
+      command('git', ['cat-file', '-e', `${sourceBase}^{commit}`])
+    } catch {
+      command('git', ['fetch', '--quiet', '--depth=2', 'origin', sourceBase])
+    }
+    base = command('git', ['merge-base', sourceBase, 'HEAD'])
   }
-  base = command('git', ['merge-base', sourceBase, 'HEAD'])
   files = command('git', ['diff', '--no-renames', '--name-only', '-z', base, 'HEAD'])
     .split('\0')
     .filter(Boolean)
@@ -98,6 +108,13 @@ const http = suites.http.filter((suite) => affected(suite.task))
 const production = suites.production.filter((suite) => affected(suite.task))
 const desktopLive = affected('ci:desktop-live')
 const appTest = affected('test')
+const docsSite = fallback !== undefined || selected.has('docs#build')
+const docsPlatform = affected('ci:e2e-docs-platform')
+const docsGroups = docsSite
+  ? ['http', 'corpus', 'chromium', 'webkit']
+  : docsPlatform
+    ? ['platform']
+    : []
 function taskPackages(name: string, omitApp = false): string[] {
   return fallback
     ? ['*']
@@ -112,6 +129,9 @@ function taskPackages(name: string, omitApp = false): string[] {
 const packages = taskPackages('test', true)
 const typecheckPackages = taskPackages('type-check')
 const flags = {
+  docs: docsSite || docsPlatform,
+  docs_site: docsSite,
+  docs_platform: docsPlatform,
   integration: affected('ci:integration'),
   http: http.length > 0,
   production: production.length > 0,
@@ -128,6 +148,7 @@ const outputs = {
   test_matrix: JSON.stringify({ shard: appTest ? [1, 2] : [1] }),
   test_packages: JSON.stringify(packages),
   typecheck_packages: JSON.stringify(typecheckPackages),
+  docs_matrix: JSON.stringify({ include: docsGroups.map((group) => ({ group })) }),
 }
 const report = {
   base,
@@ -140,6 +161,7 @@ const report = {
   production,
   testPackages: packages,
   typecheckPackages,
+  docsGroups,
 }
 if (process.env.CI_PLAN_PATH)
   writeFileSync(process.env.CI_PLAN_PATH, `${JSON.stringify(report, null, 2)}\n`)

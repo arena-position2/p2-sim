@@ -17,7 +17,7 @@ const FEATURE_FLAGS_PROFILE = 'feature-flags'
  * `adminEnabled` for platform admins. An absent clause never matches. Shape shared with the other
  * AppConfig gating documents via {@link AppConfigGateRule}.
  */
-export type FeatureFlagRule = AppConfigGateRule
+type FeatureFlagRule = AppConfigGateRule
 
 export type FeatureFlagsConfig = Record<string, FeatureFlagRule>
 
@@ -57,12 +57,6 @@ const FEATURE_FLAGS = {
       'personal workspaces follow the global switch. Each device must also opt in.',
     fallback: 'MSHIP_COMPUTER_USE',
   },
-  'mothership-search-integration-tools': {
-    description:
-      'Give Search Assistant read-only integration discovery, calls, and matching prompt ' +
-      'instructions. Global AppConfig on/off only; disabled by default with no env fallback.',
-    fallback: null,
-  },
   'workflow-tests': {
     description:
       'Enable workflow tests: the workspace Tests page, tests/<name>.test.js files, and the Sim tests tool. Supports global and organization rollout; disabled by default.',
@@ -72,6 +66,16 @@ const FEATURE_FLAGS = {
     description:
       'Enable the workspace Changelog: the Changelog page, changelog/<id>.md release bodies, and the Sim changelog tool. Supports global and organization rollout; disabled by default.',
     fallback: 'CHANGELOG',
+  },
+  'sim-links': {
+    description:
+      'Enable organization links: the Links page and sim/<name> and go/<name> redirects. Supports organization rollout; disabled by default.',
+    fallback: 'SIM_LINKS',
+  },
+  people: {
+    description:
+      'Enable the organization People directory, org chart, profile imports, and directory sync. Supports organization rollout; disabled by default.',
+    fallback: 'PEOPLE',
   },
   'mothership-model-selector': {
     description:

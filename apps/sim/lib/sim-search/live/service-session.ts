@@ -30,6 +30,8 @@ import { CONNECTOR_META_REGISTRY } from '@/connectors/registry'
 interface LiveServiceSession {
   policy: LiveSearchPolicy
   partial: boolean
+  /** True when verification also spends requests from the member client's budget. */
+  spendsMemberBudget?: boolean
   verify(document: Pick<NativeDocument, 'id' | 'container' | 'kind'>): Promise<boolean>
   scopeSearch?(input: NativeSearchInput): NativeSearchInput | null
 }
@@ -144,6 +146,7 @@ export async function createLiveServiceSession(input: {
         const query =
           search.native?.query ??
           (search.query ? confluenceTextClause(search.query, search.textMatch) : '')
+        if (query === undefined) return null
         return {
           ...search,
           native: { provider, ...search.native, query: scopeAtlassianQuery(query, scope) },

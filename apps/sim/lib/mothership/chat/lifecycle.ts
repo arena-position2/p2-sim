@@ -6,6 +6,7 @@ import {
   authorizeWorkflowByWorkspacePermission,
   getActiveWorkflowRecord,
 } from '@sim/platform-authz/workflow'
+import { isValidUuid } from '@sim/utils/id'
 import { and, asc, desc, eq, isNull, type SQL, sql } from 'drizzle-orm'
 import { preciseTimestampText } from '@/lib/api/list-query'
 import { asOrchestrationError } from '@/lib/core/orchestration/types'
@@ -127,12 +128,19 @@ export async function loadCopilotChatMessages(
   const rows = await db
     .select({
       content: options?.projection === 'display' ? displayMessageContent : copilotMessages.content,
+      streamId: copilotMessages.streamId,
     })
     .from(copilotMessages)
     .where(and(eq(copilotMessages.chatId, chatId), isNull(copilotMessages.deletedAt)))
     .orderBy(...TRANSCRIPT_ORDER)
   // Also strip on read: rows written before the backfill still carry outputs.
-  return rows.map((row) => stripToolResultOutput(row.content as PersistedMessage))
+  return rows.map((row) =>
+    stripToolResultOutput(
+      options?.projection === 'display'
+        ? { ...(row.content as PersistedMessage), streamId: row.streamId ?? undefined }
+        : (row.content as PersistedMessage)
+    )
+  )
 }
 
 /** Messages in the newest window the chat UI opens on. */
@@ -178,9 +186,10 @@ async function loadCopilotChatTranscriptPage(
     createdAt: preciseTimestampText(copilotMessages.createdAt),
     role: copilotMessages.role,
     content: displayMessageContent,
+    streamId: copilotMessages.streamId,
   }
 
-  let rows: Array<TranscriptPosition & { role: string; content: unknown }>
+  let rows: Array<TranscriptPosition & { role: string; content: unknown; streamId: string | null }>
   let hasOlder: boolean
   if (window.kind === 'from') {
     const [page, older] = await Promise.all([
@@ -219,7 +228,12 @@ async function loadCopilotChatTranscriptPage(
       : window.position
   const windowStartCursor = windowStart ? encodeTranscriptCursor(windowStart) : null
   return {
-    messages: rows.map((row) => stripToolResultOutput(row.content as PersistedMessage)),
+    messages: rows.map((row) =>
+      stripToolResultOutput({
+        ...(row.content as PersistedMessage),
+        streamId: row.streamId ?? undefined,
+      })
+    ),
     olderCursor: hasOlder ? windowStartCursor : null,
     windowStartCursor,
   }
@@ -278,7 +292,9 @@ export async function loadChatMcpServerIds(chatId: string): Promise<string[]> {
 
 /**
  * Ownership + liveness predicate shared by the accessible-chat loaders:
- * the chat must belong to the user and not be soft-deleted.
+ * the chat must belong to the user and not be soft-deleted. Loaders check the id
+ * is a UUID first: a malformed one (a URL pasted with trailing punctuation) can
+ * match no chat, and Postgres would reject it with 22P02 instead of no row.
  */
 function ownedLiveChatWhere(chatId: string, userId: string) {
   return and(
@@ -438,6 +454,7 @@ async function loadAccessibleCopilotChatAuth(
     | typeof authorizeOrganizationChat
     | typeof authorizeOrganizationChatCancellation
 ): Promise<CopilotChatAuthRow | null> {
+  if (!isValidUuid(chatId)) return null
   const [chat] = await db
     .select(copilotChatAuthColumns)
     .from(copilotChats)
@@ -458,6 +475,7 @@ async function getAccessibleCopilotChatDetail(
   userId: string,
   principal?: Principal
 ): Promise<CopilotChatDetail | null> {
+  if (!isValidUuid(chatId)) return null
   const [chat] = await db
     .select(copilotChatDetailColumns)
     .from(copilotChats)

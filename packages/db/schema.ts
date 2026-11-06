@@ -938,6 +938,38 @@ export const organizationSecret = pgTable(
   ]
 )
 
+/**
+ * An organization's Sim links (go links): `sim/<name>` redirects members to `url`. Names match
+ * case- and punctuation-insensitively through `normalized_name`. `{*}` in `url`
+ * marks a variable link filled from the path after the name, and `default_url`
+ * serves a variable link opened without values. `visit_count` counts redirects.
+ */
+export const simLink = pgTable(
+  'sim_link',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    url: text('url').notNull(),
+    defaultUrl: text('default_url'),
+    description: text('description'),
+    unlisted: boolean('unlisted').notNull().default(false),
+    restrictEdit: boolean('restrict_edit').notNull().default(false),
+    visitCount: integer('visit_count').notNull().default(0),
+    lastVisitedAt: timestamp('last_visited_at'),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('sim_link_organization_name_unique').on(table.organizationId, table.normalizedName),
+    index('sim_link_created_by_idx').on(table.createdBy),
+  ]
+)
+
 export const workspaceEnvironment = pgTable(
   'workspace_environment',
   {
@@ -1949,6 +1981,148 @@ export const member = pgTable(
 )
 
 /**
+ * A member's place in their organization, from an admin's people-data import or edit: the facts
+ * behind the People page, profiles and reporting lines. At most one row per member, deleted with
+ * the membership; `manager_member_id` is cleared when the manager's membership ends. Both members
+ * belong to the same organization, which every writer checks.
+ */
+export const memberProfile = pgTable(
+  'member_profile',
+  {
+    memberId: text('member_id')
+      .primaryKey()
+      .references(() => member.id, { onDelete: 'cascade' }),
+    title: text('title'),
+    department: text('department'),
+    location: text('location'),
+    startDate: date('start_date'),
+    managerMemberId: text('manager_member_id').references((): AnyPgColumn => member.id, {
+      onDelete: 'set null',
+    }),
+    updatedBy: text('updated_by').references(() => user.id, { onDelete: 'set null' }),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('member_profile_manager_member_id_idx').on(table.managerMemberId),
+    index('member_profile_updated_by_idx').on(table.updatedBy),
+    check('member_profile_not_own_manager', sql`${table.managerMemberId} <> ${table.memberId}`),
+  ]
+)
+
+/** The single authoritative People source and its fenced synchronization lease for one organization. */
+export const peopleDirectorySync = pgTable(
+  'people_directory_sync',
+  {
+    organizationId: text('organization_id')
+      .primaryKey()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    source: text('source').$type<'okta' | 'entra' | 'scim'>().notNull(),
+    sourceTarget: text('source_target').notNull(),
+    clientId: text('client_id'),
+    encryptedCredential: text('encrypted_credential'),
+    configuredBy: text('configured_by').references(() => user.id, { onDelete: 'set null' }),
+    leaseToken: text('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    runId: text('run_id'),
+    runStartedAt: timestamp('run_started_at'),
+    phase: text('phase').$type<'users' | 'relationships' | 'publish'>(),
+    cursor: text('cursor'),
+    usersRead: integer('users_read').notNull().default(0),
+    retryCount: integer('retry_count').notNull().default(0),
+    nextSyncAt: timestamp('next_sync_at').notNull().defaultNow(),
+    lastAttemptAt: timestamp('last_attempt_at'),
+    lastSuccessAt: timestamp('last_success_at'),
+    lastFailedAt: timestamp('last_failed_at'),
+    lastError: text('last_error'),
+  },
+  (table) => [index('people_directory_sync_due_idx').on(table.nextSyncAt)]
+)
+
+/** Coalesces provisioning changes independently of the worker's long-held publication lock. */
+export const peopleDirectoryScimChange = pgTable(
+  'people_directory_scim_change',
+  {
+    organizationId: text('organization_id')
+      .primaryKey()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    changedAt: timestamp('changed_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('people_directory_scim_change_due_idx').on(table.changedAt, table.organizationId),
+  ]
+)
+
+/** Source identities live independently of accounts, memberships, seats, and access grants. */
+export const peopleDirectoryEntry = pgTable(
+  'people_directory_entry',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => peopleDirectorySync.organizationId, { onDelete: 'cascade' }),
+    source: text('source').$type<'okta' | 'entra' | 'scim'>().notNull(),
+    externalId: text('external_id').notNull(),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    title: text('title'),
+    department: text('department'),
+    location: text('location'),
+    managerExternalId: text('manager_external_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('people_directory_entry_source_id_idx').on(table.organizationId, table.externalId),
+    index('people_directory_entry_email_idx').on(table.organizationId, table.email),
+    index('people_directory_entry_manager_idx').on(table.organizationId, table.managerExternalId),
+  ]
+)
+
+/** A private working generation. Only a complete generation may replace the public People entries. */
+export const peopleDirectoryStage = pgTable(
+  'people_directory_stage',
+  {
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => peopleDirectorySync.organizationId, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull(),
+    externalId: text('external_id').notNull(),
+    proposedId: text('proposed_id').notNull(),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    title: text('title'),
+    department: text('department'),
+    location: text('location'),
+    managerExternalId: text('manager_external_id'),
+    reportsCursor: text('reports_cursor'),
+    reportsComplete: boolean('reports_complete').notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.runId, table.externalId] }),
+    uniqueIndex('people_directory_stage_email_idx').on(
+      table.organizationId,
+      table.runId,
+      table.email
+    ),
+    index('people_directory_stage_pending_idx')
+      .on(table.organizationId, table.runId, table.externalId)
+      .where(sql`NOT ${table.reportsComplete}`),
+  ]
+)
+
+/** Stores hashes of processed user-list and direct-report cursors to detect replays. */
+export const peopleDirectoryPage = pgTable(
+  'people_directory_page',
+  {
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => peopleDirectorySync.organizationId, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull(),
+    pageHash: text('page_hash').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.runId, table.pageHash] })]
+)
+
+/**
  * Per-member usage limit (in dollars) scoped to a single organization.
  *
  * Keyed by `(organizationId, userId)` so it covers both organization members
@@ -2110,6 +2284,21 @@ export const workspaceModeEnum = pgEnum('workspace_mode', [
 
 export type WorkspaceMode = (typeof workspaceModeEnum.enumValues)[number]
 
+/**
+ * A development push that bootstraps Projects first pushes this column nullable, so the columns
+ * `0032_project_membership` reads exist before it fills the column and enforces NOT NULL; the
+ * push that follows uses the required column. Every other push and generation reads it required,
+ * including one that inherits a stray bootstrap flag outside a development push.
+ */
+function workspaceProjectIdColumn() {
+  const column = text('project_id').references((): AnyPgColumn => project.id, {
+    onDelete: 'restrict',
+  })
+  return process.env.SIM_DEV_DB_PUSH === '1' && process.env.SIM_DB_PUSH_PROJECT_BOOTSTRAP === '1'
+    ? (column as ReturnType<typeof column.notNull>)
+    : column.notNull()
+}
+
 export const workspace = pgTable(
   'workspace',
   {
@@ -2137,9 +2326,7 @@ export const workspace = pgTable(
     organizationScopeKey: text('organization_scope_key').generatedAlwaysAs(
       sql`CASE WHEN organization_id IS NULL THEN 'personal' ELSE 'organization:' || organization_id END`
     ),
-    projectId: text('project_id')
-      .notNull()
-      .references((): AnyPgColumn => project.id, { onDelete: 'restrict' }),
+    projectId: workspaceProjectIdColumn(),
     workspaceMode: workspaceModeEnum('workspace_mode').notNull().default('grandfathered_shared'),
     billedAccountUserId: text('billed_account_user_id')
       .notNull()
@@ -4393,7 +4580,8 @@ export const embedding = pgTable(
 /**
  * Candidate projection. Keeping identities and half-precision vectors apart from content prevents
  * candidate scans from fetching full-precision TOAST values. Application writers only change
- * `embedding`: its trigger writes this projection in the writer's transaction. A chunk write that
+ * `embedding`: its trigger writes this projection in the writer's transaction, and deletes the row
+ * instead for a chunk of a retired Search knowledge base (`isSearchIndex`). A chunk write that
  * skipped the trigger, as releases that deferred projection did, is written by the knowledge
  * projector after the commit (see {@link knowledgeProjectionDirty}).
  */
@@ -4889,6 +5077,12 @@ export type CopilotAsyncToolStatus = (typeof copilotAsyncToolStatusEnum.enumValu
 export type CopilotToolPermissionDecision =
   (typeof copilotToolPermissionDecisionEnum.enumValues)[number]
 
+export interface AssistantActionBinding {
+  operationVersion: number
+  effect: 'read' | 'write'
+  credentialId: string
+}
+
 /** Stop may arrive before chat creation. Its actor/workspace scope cannot cancel another request. */
 export const copilotRequestStops = pgTable(
   'copilot_request_stops',
@@ -5050,19 +5244,27 @@ export const copilotAsyncToolCalls = pgTable(
     toolCallId: text('tool_call_id').notNull(),
     toolName: text('tool_name').notNull(),
     args: jsonb('args').notNull().default('{}'),
+    /** Canonical dispatch identity; null only on calls recorded before invocation binding. */
+    executableName: text('executable_name'),
+    targetWorkspaceId: text('target_workspace_id'),
+    /** Validated user edits, committed once with the decision; original args stay immutable. */
+    approvedArgs: jsonb('approved_args'),
+    /** Server-resolved authority sealed with the original proposal, never supplied by the worker. */
+    assistantAction: jsonb('assistant_action').$type<AssistantActionBinding>(),
+    /** External writes without a provider idempotency key must never be replayed after a crash. */
+    executionRetryable: boolean('execution_retryable').notNull().default(true),
     status: copilotAsyncToolStatusEnum('status').notNull().default('pending'),
     result: jsonb('result'),
     error: text('error'),
     /**
-     * Set only for tools declaring requiresApproval in the mothership tool catalog. A null decision
-     * on such a tool means the prompt is still outstanding, which is what lets it survive a reload.
+     * A null decision on a gated call means its prompt is still outstanding after a reload.
      */
     permissionDecision: copilotToolPermissionDecisionEnum('permission_decision'),
     permissionDecidedAt: timestamp('permission_decided_at'),
     /**
      * Set when this call was held for the user's decision. Whether a call is gated depends on the
      * turn (the feature flag, the tool's arguments, the user's allow lists), so the row records it:
-     * a desktop claim refuses a gated call until `permissionDecision` allows it.
+     * every execution claim refuses a gated call until `permissionDecision` allows it.
      */
     permissionRequestedAt: timestamp('permission_requested_at'),
     /**
@@ -6101,9 +6303,28 @@ export const usageLog = pgTable(
         (${table.billingEntityType} IS NOT NULL AND ${table.billingEntityId} IS NOT NULL AND ${table.billingPeriodStart} IS NOT NULL AND ${table.billingPeriodEnd} IS NOT NULL AND ${table.billingPeriodStart} < ${table.billingPeriodEnd})
       )`
     ),
-    workspaceCreatedAtIdx: index('usage_log_workspace_created_at_idx').on(
+    /**
+     * Serves the Workspaces drill-down index-only: an analytics read narrowed to one
+     * workspace over a `created_at` window (entity + `workspace_id` + the window)
+     * reads its totals, series, and member, source and workflow rankings from here,
+     * and skips the workspace's rows billed to another entity without a heap fetch.
+     * A Stripe-period drill-down matches the period stamps, which are not here.
+     *
+     * `workspace_id` and `created_at` lead so the scan is bounded by the
+     * workspace's rows in the window rather than its organization's, and so the
+     * reads that name only the workspace keep their order: the `workspace_id`
+     * foreign key's `ON DELETE SET NULL`, and the ledger list filtered to a
+     * workspace. The entity and everything after it are payload.
+     */
+    workspaceCreatedAtCostIdx: index('usage_log_workspace_created_at_cost_idx').on(
       table.workspaceId,
-      table.createdAt
+      table.createdAt,
+      table.billingEntityType,
+      table.billingEntityId,
+      table.userId,
+      table.source,
+      table.cost,
+      table.workflowId
     ),
     executionIdIdx: index('usage_log_execution_id_idx').on(table.executionId),
   })
@@ -6137,6 +6358,8 @@ export interface ManagedMcpToolSnapshot {
   name: string
   description?: string
   inputSchema: Record<string, unknown>
+  /** Absent when the tool declares no output schema, and on snapshots taken before it was kept. */
+  outputSchema?: Record<string, unknown>
 }
 
 /** contract-pending(after all GitLab tokens migrate and workspace-token writers are retired): drop credential_personal_token_identity_unique; only the index is retired. */
@@ -6553,6 +6776,40 @@ export const credentialGroupEnrollment = pgTable(
       'credential_group_enrollment_invitation_token_hash_length_check',
       sql`length(${table.invitationTokenHash}) = 64`
     ),
+  })
+)
+
+/** Personal Assistant preferences never confer access to another account or override organization policy. */
+export const assistantToolPermission = pgTable(
+  'assistant_tool_permission',
+  {
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => credential.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull().default(1),
+    readPolicy: text('read_policy').$type<'allow' | 'ask' | 'block'>().notNull().default('allow'),
+    writePolicy: text('write_policy').$type<'allow' | 'ask' | 'block'>().notNull().default('ask'),
+    overrides: jsonb('overrides')
+      .$type<Record<string, { version: number; policy: 'allow' | 'ask' | 'block' }>>()
+      .notNull()
+      .default({}),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.organizationId, table.userId, table.credentialId] }),
+    credentialIdx: index('assistant_tool_permission_credential_idx').on(table.credentialId),
+    userIdx: index('assistant_tool_permission_user_idx').on(table.userId),
+    policyCheck: check(
+      'assistant_tool_permission_policy_check',
+      sql`${table.readPolicy} IN ('allow', 'ask', 'block') AND ${table.writePolicy} IN ('allow', 'ask', 'block')`
+    ),
+    revisionCheck: check('assistant_tool_permission_revision_check', sql`${table.revision} > 0`),
   })
 )
 

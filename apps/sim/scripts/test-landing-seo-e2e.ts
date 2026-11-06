@@ -13,8 +13,11 @@ import {
   dustProfile,
   gumloopProfile,
   langflowProfile,
+  microsoftCopilotProfile,
   n8nProfile,
+  openaiAgentkitProfile,
   openClawProfile,
+  type Prose,
   pipedreamProfile,
   vellumProfile,
 } from '@/lib/compare/data'
@@ -326,6 +329,34 @@ async function run() {
     assert.deepEqual(failures, [])
   })
 
+  await check(
+    'legacy Sim aliases preserve queries without redirecting the Sim Links entry',
+    async () => {
+      const entry = await get('/sim')
+      assert.equal(entry.status, 307)
+      assert(entry.location, 'The Sim Links entry must offer sign-in')
+      const login = new URL(entry.location, baseUrl)
+      assert.equal(login.pathname, '/login')
+      assert.equal(login.searchParams.get('callbackUrl'), '/sim')
+      for (const path of ['/Sim', '/SIM', '/sIm']) {
+        const { status, location } = await get(`${path}?home&utm_source=legacy`)
+        assert.equal(status, 308, path)
+        assert(location, `${path}: expected the legacy homepage redirect`)
+        const target = new URL(location, baseUrl)
+        assert.equal(target.origin, baseUrl.origin, path)
+        assert.equal(target.pathname, '/', path)
+        assert.deepEqual(
+          [...target.searchParams],
+          [
+            ['home', ''],
+            ['utm_source', 'legacy'],
+          ],
+          path
+        )
+      }
+    }
+  )
+
   await check('integration sitemap dates are per integration, not one catalog date', async () => {
     const mismatches: string[] = []
     for (const integration of integrations) {
@@ -401,6 +432,7 @@ async function run() {
       langflowProfile,
       pipedreamProfile,
       openClawProfile,
+      openaiAgentkitProfile,
     ]) {
       const { status, body } = await get(`/comparisons/${profile.id}`)
       if (status !== 200) {
@@ -419,9 +451,95 @@ async function run() {
       if (expected.length === 0 || questions.join('|') !== expected.join('|')) {
         failures.push(`${profile.id}: FAQPage does not open with the profile FAQs`)
       }
+      const migration = profile.migration
+      if (migration) {
+        const comparisonAt = text.indexOf('feature-by-feature comparison')
+        if (comparisonAt < 0) {
+          failures.push(`${profile.id}: feature-by-feature comparison heading missing`)
+        } else if (
+          [migration.heading, migration.stepsHeading].some((heading) => {
+            const at = text.indexOf(heading)
+            return at < 0 || at > comparisonAt
+          })
+        ) {
+          failures.push(`${profile.id}: migration section missing or below the feature comparison`)
+        }
+      }
     }
     assert.deepEqual(failures, [])
   })
+
+  await check(
+    'a comparison page answering its buyer questions in place keeps their order',
+    async () => {
+      const profile = microsoftCopilotProfile
+      const { status, body } = await get(`/comparisons/${profile.id}`)
+      assert.equal(status, 200)
+      const text = decodeHtml(body)
+      const { intro = [], glance = [], closing = [] } = profile.questions ?? {}
+      assert(
+        profile.leadQuestion && intro.length && glance.length && closing.length,
+        'profile no longer exercises every question position'
+      )
+      const questions = [
+        profile.leadQuestion,
+        ...[...intro, ...glance, ...closing].map((q) => q.question),
+      ]
+      assert.deepEqual(faqQuestions(body), questions, 'FAQPage lists the page questions in order')
+
+      const headings = [
+        profile.leadQuestion,
+        ...intro.map((q) => q.question),
+        `Sim vs ${profile.name}: at a glance`,
+        ...glance.map((q) => q.question),
+        'feature-by-feature comparison',
+        ...closing.map((q) => q.question),
+        'Bottom line',
+      ]
+      const positions = headings.map((heading) => text.indexOf(`${heading}</h2>`))
+      assert(
+        positions.every((at) => at >= 0),
+        `missing heading: ${headings[positions.indexOf(-1)]}`
+      )
+      assert.deepEqual(
+        [...positions].sort((a, b) => a - b),
+        positions,
+        'question sections are out of reading order'
+      )
+      assert(!text.includes('Frequently asked questions</h2>'), 'generated FAQ block still renders')
+      for (const row of profile.glance ?? []) {
+        assert(text.includes(`${row.label}</th>`), `at-a-glance row missing: ${row.label}`)
+      }
+
+      const visibleText = decodeHtml(
+        body
+          .replace(/<script\b[\s\S]*?<\/script>/g, '')
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/<[^>]+>/g, '')
+      )
+      const proseText = (prose: Prose) =>
+        prose.map((part) => (typeof part === 'string' ? part : part.text)).join('')
+      const expectedProse = [
+        ...(profile.leadAnswer ? [profile.leadAnswer] : []),
+        ...[...intro, ...glance, ...closing].map((q) => q.answer),
+        ...(profile.glance ?? []).flatMap((row) => [row.sim, row.competitor]),
+      ]
+      for (const prose of expectedProse) {
+        const expected = proseText(prose)
+        assert(visibleText.includes(expected), `page text missing: ${expected.slice(0, 80)}`)
+      }
+
+      const relatedStart = text.indexOf('Related reading</h2>')
+      const relatedEnd = text.indexOf('More comparisons</h2>')
+      assert(relatedStart >= 0 && relatedEnd > relatedStart, 'related reading section missing')
+      const relatedSlugs = new Set(
+        [...text.slice(relatedStart, relatedEnd).matchAll(/href="\/library\/([^"/?#]+)"/g)].map(
+          (match) => match[1]
+        )
+      )
+      assert.deepEqual([...relatedSlugs], profile.relatedReading)
+    }
+  )
 
   await check('rebuilt integration pages render their comparison and FAQs', async () => {
     const failures: string[] = []

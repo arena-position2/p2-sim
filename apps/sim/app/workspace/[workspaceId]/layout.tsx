@@ -16,9 +16,11 @@ import {
 import { isMothershipModelSelectorEnabled, isPlanModeEnabled } from '@/lib/mothership/feature-flags'
 import { resolveOrganizationEntryPath } from '@/lib/navigation/resolve-app-entry'
 import { isProjectsEnabled } from '@/lib/projects/rollout.server'
+import { resolveSimLinkOrganization } from '@/lib/sim-links/application/organization'
 import { isWorkflowTestsEnabled } from '@/lib/workflow-tests/feature-flag'
 import { ApplicationLoading } from '@/app/_shell/application-loading'
 import { getQueryClient } from '@/app/_shell/providers/get-query-client'
+import { SimLinkOrganizationProvider } from '@/app/o/[organizationId]/links/sim-link-organization-provider'
 import { ImpersonationBanner } from '@/app/workspace/[workspaceId]/components/impersonation-banner'
 import { SessionExpired } from '@/app/workspace/[workspaceId]/components/session-expired'
 import { WorkspaceAccessDenied } from '@/app/workspace/[workspaceId]/components/workspace-access-denied'
@@ -37,6 +39,7 @@ import { CustomBlocksLoader } from '@/app/workspace/[workspaceId]/providers/cust
 import { DesktopOAuthConnectListener } from '@/app/workspace/[workspaceId]/providers/desktop-oauth-connect-listener'
 import { FeatureFlagsProvider } from '@/app/workspace/[workspaceId]/providers/feature-flags-provider'
 import { GlobalCommandsProvider } from '@/app/workspace/[workspaceId]/providers/global-commands-provider'
+import { InFlightUploadGuard } from '@/app/workspace/[workspaceId]/providers/in-flight-upload-guard'
 import { ProviderModelsLoader } from '@/app/workspace/[workspaceId]/providers/provider-models-loader'
 import { SettingsLoader } from '@/app/workspace/[workspaceId]/providers/settings-loader'
 import { WorkspaceHostProvider } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
@@ -133,6 +136,7 @@ async function WorkspaceContent({
     desktopExecutorRegistered,
     computerUseEnabled,
     projectsEnabled,
+    simLinkOrganizationId,
   ] = await Promise.all([
     cookies(),
     orgSettings,
@@ -152,6 +156,7 @@ async function WorkspaceContent({
     hasDesktopBackgroundExecutor(session.user.id),
     isComputerUseAvailable(hostContext.hostOrganizationId),
     isProjectsEnabled(),
+    resolveSimLinkOrganization(principal),
     prefetchWorkspaceAccess(queryClient, workspaceId, principal),
     prefetchWorkspaceForkAvailability(queryClient, workspaceId, principal, hostContext),
   ])
@@ -171,42 +176,45 @@ async function WorkspaceContent({
         }}
       >
         <WorkspaceHostProvider workspaceId={workspaceId} initialContext={hostContext}>
-          <BrandingProvider
-            hostOrganizationId={hostContext.hostOrganizationId}
-            viewerIsHostOrganizationMember={hostContext.viewer.isHostOrganizationMember}
-            initialOrgSettings={initialOrgSettings}
-          >
-            <DesktopOAuthConnectListener />
-            <SettingsLoader />
-            <ProviderModelsLoader />
-            <CustomBlocksLoader />
-            <BlockVisibilityLoader />
-            <GlobalCommandsProvider>
-              <WorkspaceViewport>
-                <ImpersonationBanner />
-                <SessionExpired />
-                <WorkspacePermissionsProvider>
-                  <WorkspaceScopeSync />
-                  <SettingsNavigationProvider>
-                    <WorkspaceChrome
-                      sidebar={
-                        <Sidebar
-                          organizationHref={organizationHref}
-                          desktopExecutor={{
-                            available: isDesktopBackgroundExecutorAvailable(),
-                            registered: desktopExecutorRegistered,
-                          }}
-                        />
-                      }
-                      initialSidebarCollapsed={initialSidebarCollapsed}
-                    >
-                      {children}
-                    </WorkspaceChrome>
-                  </SettingsNavigationProvider>
-                </WorkspacePermissionsProvider>
-              </WorkspaceViewport>
-            </GlobalCommandsProvider>
-          </BrandingProvider>
+          <SimLinkOrganizationProvider organizationId={simLinkOrganizationId}>
+            <BrandingProvider
+              hostOrganizationId={hostContext.hostOrganizationId}
+              viewerIsHostOrganizationMember={hostContext.viewer.isHostOrganizationMember}
+              initialOrgSettings={initialOrgSettings}
+            >
+              <DesktopOAuthConnectListener />
+              <InFlightUploadGuard />
+              <SettingsLoader />
+              <ProviderModelsLoader />
+              <CustomBlocksLoader />
+              <BlockVisibilityLoader />
+              <GlobalCommandsProvider>
+                <WorkspaceViewport>
+                  <ImpersonationBanner />
+                  <SessionExpired />
+                  <WorkspacePermissionsProvider>
+                    <WorkspaceScopeSync />
+                    <SettingsNavigationProvider>
+                      <WorkspaceChrome
+                        sidebar={
+                          <Sidebar
+                            organizationHref={organizationHref}
+                            desktopExecutor={{
+                              available: isDesktopBackgroundExecutorAvailable(),
+                              registered: desktopExecutorRegistered,
+                            }}
+                          />
+                        }
+                        initialSidebarCollapsed={initialSidebarCollapsed}
+                      >
+                        {children}
+                      </WorkspaceChrome>
+                    </SettingsNavigationProvider>
+                  </WorkspacePermissionsProvider>
+                </WorkspaceViewport>
+              </GlobalCommandsProvider>
+            </BrandingProvider>
+          </SimLinkOrganizationProvider>
         </WorkspaceHostProvider>
       </FeatureFlagsProvider>
     </HydrationBoundary>

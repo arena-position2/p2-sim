@@ -141,6 +141,7 @@ export const env = createEnv({
     SIGNUP_MX_VALIDATION_ENABLED:          z.boolean().optional(),                 // Opt-in: validate the email's MX backend at signup (blocks no-MX domains and denylisted shared spam backends). Off by default; enable on hosted/abuse-targeted deployments.
     BLOCKED_EMAIL_MX_HOSTS:                z.string().optional(),                  // Comma-separated MX-host substrings blocked from signing up; matched against the domain's resolved MX backend to catch throwaway domains that share a mail backend. No defaults — operators supply their own list. Only used when SIGNUP_MX_VALIDATION_ENABLED is set.
     TRUSTED_ORIGINS:                       z.string().optional(),                  // Comma-separated additional origins to trust for auth (e.g., "https://app.example.com,https://www.example.com"). Merged into Better Auth trustedOrigins.
+    BROWSER_EXTENSION_IDS:                 z.string().optional(),
     TURNSTILE_SECRET_KEY:                  z.string().min(1).optional(),           // Cloudflare Turnstile secret key for captcha verification
     ENCRYPTION_KEY:                        z.string().min(32),                     // Key for encrypting sensitive data
     API_ENCRYPTION_KEY:                    z.string().min(32).optional(),          // Dedicated key for encrypting API keys (optional for OSS)
@@ -345,6 +346,7 @@ export const env = createEnv({
     TRIGGER_PROJECT_ID:                    z.string().optional(),                  // Trigger.dev project ID
     TRIGGER_SECRET_KEY:                    z.string().min(1).optional(),           // Trigger.dev secret key for background jobs
     TRIGGER_DEV_ENABLED:                   z.boolean().optional(),                 // Toggle to enable/disable Trigger.dev for async jobs
+    TRIGGER_ENV_SYNC_TARGETS:              z.string().optional(),                  // Deploy-time only: comma-separated Trigger.dev environments (prod,staging,preview) synced from the app's env-vars secret
     CRON_SECRET:                           z.string().optional(),                  // Secret for authenticating cron job requests
     SCHEDULE_EXECUTION_CONCURRENCY_LIMIT:  z.string().optional().default('30'),
     WORKFLOW_EXECUTION_CONCURRENCY_LIMIT:  z.string().optional().default('75'),
@@ -363,6 +365,7 @@ export const env = createEnv({
     AWS_REGION:                            z.string().optional(),                  // AWS region for S3 buckets
     AWS_ACCESS_KEY_ID:                     z.string().optional(),                  // AWS access key ID
     AWS_SECRET_ACCESS_KEY:                 z.string().optional(),                  // AWS secret access key
+    TRIGGER_AWS_ROLE_ARN:                  z.string().optional(),                  // Role Trigger.dev runs assume through workload identity, instead of static keys
     S3_BUCKET_NAME:                        z.string().optional(),                  // S3 bucket for general file storage
     S3_KB_BUCKET_NAME:                     z.string().optional(),                  // S3 bucket for knowledge base files
     S3_EXECUTION_FILES_BUCKET_NAME:        z.string().optional(),                  // S3 bucket for workflow execution files
@@ -608,6 +611,8 @@ export const env = createEnv({
     MSHIP_COMPUTER_USE: z.boolean().optional(),
     WORKFLOW_TESTS:                        z.boolean().optional(),                 // Fallback for the `workflow-tests` feature flag off AppConfig
     CHANGELOG:                             z.boolean().optional(),                 // Fallback for the `changelog` feature flag off AppConfig
+    SIM_LINKS:                             z.boolean().optional(),                 // Fallback for the `sim-links` feature flag off AppConfig
+    PEOPLE:                                z.boolean().optional(),                 // Fallback for the `people` feature flag off AppConfig
     MSHIP_MODEL_SELECTOR: z.boolean().optional(),
     INBOX_ENABLED:                         z.boolean().optional(),                 // Enable inbox (Sim Mailer) on self-hosted (bypasses hosted requirements)
     SANDBOXES_ENABLED:                     z.boolean().optional(),                 // Enable custom sandboxes on self-hosted (bypasses hosted requirements)

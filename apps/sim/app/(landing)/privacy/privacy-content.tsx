@@ -44,7 +44,7 @@ function richText(content: string): ReactNode {
 export const PRIVACY_CONFIG: LegalPageConfig = {
   title: 'Privacy Policy',
   description: 'Sim Studio, Inc. · Operating the Sim platform (sim.ai)',
-  lastUpdated: 'October 13, 2026',
+  lastUpdated: 'November 4, 2026',
   intro: [
     {
       kind: 'paragraph',
@@ -795,6 +795,70 @@ export const PRIVACY_CONFIG: LegalPageConfig = {
           kind: 'paragraph',
           content: richText(
             'Prompts and outputs are retained according to the data category and context in which they are processed. Account and workflow content follows the Account Data period in the retention table in section 10; Google Data, Usage Logs, and Transaction Records follow their respective periods in that table. Questions about AI processing may be sent to privacy@sim.ai.'
+          ),
+        },
+      ],
+    },
+    {
+      id: 'browser-extension',
+      heading: '10B. Sim Browser Extension',
+      blocks: [
+        {
+          kind: 'paragraph',
+          content: richText(
+            'When You click the microphone and grant browser permission, Sim streams microphone audio to ElevenLabs for transcription into Your editable message draft. Opening the panel does not start recording, and this feature does not capture tab audio. Stopping voice input ends microphone capture; sending a message or changing conversations cancels unfinished transcription. Submitted transcripts become conversation content under the retention and processing rules below.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'When You ask Sim to attach a page or selection, or open Sim from its toolbar button or keyboard shortcut with Reference current page off, the browser extension reads the requested text from the top frame of that page and transfers it, the page title, and a normalized page address to the hosted Sim composer. URL credentials, query parameters, and fragments are removed. The extractor skips form inputs, editable fields, scripts, embedded frames, and elements it detects as hidden. Page text, including text in collapsed sections, may still contain personal or sensitive information, such as personal communications or health, financial, or authentication information.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'Reference current page is an optional setting stored in Your Chrome profile. When it is on, sending a message from the sidebar includes a snapshot of the active tab unless You have attached a page or selection Yourself. Opening the panel or switching tabs does not trigger this capture. If Chrome has not granted access, Your draft stays in the composer. You can grant browser access and send again, or turn the setting off. Page access can be granted across HTTP and HTTPS websites. You can revoke or restrict access in Chrome settings. Incognito capture is disabled.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'Manually attaching a page transfers the snapshot to the hosted composer before You send a message. Captured text is held in memory and is not persisted in Chrome extension storage. Short-lived extension session records contain capture intent metadata and a one-way digest of the source address, not captured text or the raw address. You can review or remove a manually attached snapshot before sending it. Dropping an image file onto the sidebar uploads it using the same attachment flow as Sim Chat.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'When You send a message, submitted content is processed and retained as part of Your Sim conversation under this Privacy Policy and applicable Account or organization controls. Sim infrastructure and the AI providers or integrations used for Your requested conversation may process that content as described in sections 6 and 10A. Removing a draft attachment or uninstalling the extension does not delete previously submitted conversations. Access and deletion controls are described in section 14.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'The hosted chat uses Your normal Sim Account and authenticated session, together with the operational diagnostics and consent controls described in this Privacy Policy. The extension document and its page attachments are excluded from session replay. Captured page content is not used for advertising.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'When You use the sim address-bar keyword, the extension sends the typed link name, before any path values or query, to Sim with Your authenticated session to suggest Your organization’s links. Suggestions are cached in memory and are not written to extension storage. Opening a sim/ or go/ shortcut sends its path and query to Sim to resolve the destination, then opens that destination. Sim records each link’s visit count and last-visited time. These requests also use the operational diagnostics described in this Privacy Policy. Choosing Create link in Sim from the browser menu opens a draft with the selected link’s address, omitting query parameters and fragments. The destination becomes an organization link only when You confirm creation. The extension does not read Your browser history or unrelated address-bar input.'
+          ),
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            'When Links are available for Your organization, the extension opens sim/ and go/ about once a week in background tabs that close themselves, so Chrome recognizes these shortcuts in the address bar. Those tabs load Sim’s link page with Your session, send no browsing data, and appear in Your browser history.'
+          ),
+        },
+        {
+          kind: 'subheading',
+          text: 'Chrome Web Store Limited Use',
+        },
+        {
+          kind: 'paragraph',
+          content: richText(
+            "Sim's use and transfer of data obtained through the browser extension complies with the [Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq), including its [Limited Use requirements](https://developer.chrome.com/docs/webstore/program-policies/limited-use). This data is used only to provide or improve the extension's disclosed user-facing features. It is not sold, used or transferred for personalized advertising, or used to determine creditworthiness or for lending purposes. Transfers are limited to providing or improving those features, security needs, compliance with applicable laws, or a merger, acquisition, or asset sale as permitted by that policy. Human access is limited to specific user consent, necessary security or legal purposes, or aggregated and anonymized internal operations permitted by that policy."
           ),
         },
       ],

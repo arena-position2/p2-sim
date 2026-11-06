@@ -289,6 +289,14 @@ interface DownloadOutputOptions {
   force?: boolean
 }
 
+/**
+ * Where an embedded caller refused binary bytes on stdout should go instead. A model that asked
+ * for a file's content usually wanted its metadata, so the refusal names the command that has it.
+ */
+interface DownloadRefusalHint {
+  metadataCommand?: string
+}
+
 type DownloadOperation =
   | 'downloadFile'
   | 'downloadFileVersion'
@@ -307,7 +315,8 @@ async function downloadToOutput<Operation extends DownloadOperation>(
   pathParams: Record<string, string>,
   options: DownloadOutputOptions,
   scope: 'workspace' | 'owner',
-  requestInput: Pick<RequestOptions, 'query' | 'body'> = {}
+  requestInput: Pick<RequestOptions, 'query' | 'body'> = {},
+  { metadataCommand }: DownloadRefusalHint = {}
 ): Promise<void> {
   const target = options.outputFile
   const writesToStdout = target === undefined || target === '-'
@@ -332,7 +341,7 @@ async function downloadToOutput<Operation extends DownloadOperation>(
       await response.body.cancel()
       throw new SimApiError(
         embedded
-          ? `Refusing to put ${contentType ?? 'unknown content'} in a text result. Use --output-file <path>.`
+          ? `Refusing to put ${contentType ?? 'unknown content'} in a text result. Use --output-file <path>${metadataCommand ? `, or run \`sim ${metadataCommand}\` for its metadata` : ''}.`
           : `Refusing to write ${contentType ?? 'unknown content'} to an interactive terminal. Use --output-file <path> or pipe stdout.`,
         0
       )
@@ -343,8 +352,10 @@ async function downloadToOutput<Operation extends DownloadOperation>(
   }
 
   const savedTarget = await saveToFile(response.body, target, Boolean(options.force))
+  // A VFS path names the file but is not its id, and the download response carries none.
+  const fileId = pathParams.fileId?.startsWith('files/') ? undefined : pathParams.fileId
   printProtocolResult(profile.output, {
-    ...(pathParams.fileId ? { id: pathParams.fileId } : {}),
+    ...(fileId ? { id: fileId } : {}),
     path: savedTarget,
     status: 'saved',
   })
@@ -420,13 +431,24 @@ export function attachProjectFileSnapshotExport(files: Command): void {
 export function attachFileGet(files: Command): void {
   const [command, connect] = apiCommand(files, 'get', ['downloadFile'])
   command
-    .argument('<fileId>', 'File whose content to read')
+    .argument(
+      '<fileId>',
+      'File whose content to read: its id, or its `files/<folder>/<name>` VFS path'
+    )
     .allowExcessArguments(false)
     .description('Download a file’s content to stdout or a local file')
     .option('-o, --output-file <path>', 'Write content to a file instead of stdout')
     .option('--force', 'Overwrite --output-file if it already exists')
     .action((fileId: string, options: DownloadOutputOptions) =>
-      downloadToOutput(connect, 'downloadFile', { fileId }, options, 'workspace')
+      downloadToOutput(
+        connect,
+        'downloadFile',
+        { fileId },
+        options,
+        'workspace',
+        {},
+        { metadataCommand: `files describe ${fileId}` }
+      )
     )
 }
 

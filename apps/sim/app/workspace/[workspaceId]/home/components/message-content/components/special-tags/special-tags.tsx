@@ -30,12 +30,9 @@ import {
 } from '@sim/emcn/icons'
 import { isRecordLike, omit } from '@sim/utils/object'
 import { useParams } from 'next/navigation'
-import { getOrganizationSettingsHref } from '@/components/settings/navigation'
 import { useSession } from '@/lib/auth/client'
-import { buildHostedUpgradeUrl, HOSTED_BILLING_SETTINGS_URL } from '@/lib/billing/upgrade-reasons'
-import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
+import { CHAT_PLAN_REQUIRED_REASON } from '@/lib/billing/chat-plan'
 import { isBrowserAgentAvailable, sendBrowserPanelAction } from '@/lib/browser-agent/transport'
-import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
 import { isSafeHttpUrl } from '@/lib/core/utils/urls'
 import { readLatestOAuthChatAttempt } from '@/lib/credentials/oauth-chat-attempt'
 import { getDesktopBridge } from '@/lib/desktop'
@@ -58,7 +55,6 @@ import { OAUTH_PROVIDERS } from '@/lib/oauth/oauth'
 import { getServiceConfigByProviderId } from '@/lib/oauth/utils'
 import { organizationSecretNameSchema } from '@/lib/organization-secrets/validation'
 import { finishTerminalHandoff, isTerminalAvailable } from '@/lib/terminal/transport'
-import { useOptionalOrganizationContext } from '@/app/o/[organizationId]/providers/organization-provider'
 import { useChatSurface } from '@/app/workspace/[workspaceId]/home/components/chat-surface-context'
 import { ContextMentionIcon } from '@/app/workspace/[workspaceId]/home/components/context-mention-icon'
 import {
@@ -87,6 +83,7 @@ import {
 } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/use-oauth-chip-connection'
 import { usePersonalCredentialConnection } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags/use-personal-credential-connection'
 import { ResourceWorkspaceHost } from '@/app/workspace/[workspaceId]/home/components/resource-workspace-host'
+import { usePlanUpgradeLink } from '@/app/workspace/[workspaceId]/home/hooks/use-plan-upgrade-link'
 import type {
   ChatMessageContext,
   MothershipResource,
@@ -115,7 +112,6 @@ import { useTablesList } from '@/hooks/queries/tables'
 import { useWorkflows } from '@/hooks/queries/workflows'
 import { useWorkspaceFileAtPath, useWorkspaceFileLookup } from '@/hooks/queries/workspace-files'
 import { useWorkspaceUsageGate } from '@/hooks/queries/workspace-usage'
-import { useSettingsNavigation } from '@/hooks/use-settings-navigation'
 
 export interface OptionsItemData {
   title: string
@@ -3490,37 +3486,18 @@ interface PlanUsageLimitDisplayProps {
   data: UsageUpgradeTagData
 }
 
-/** The payer's plan limit: the card links to where the plan or the limit can change. */
+/**
+ * The payer's plan limit, or a free plan that does not include Chat: the card links to where
+ * the plan or the limit can change, and a workspace's plan to its upgrade page.
+ */
 function PlanUsageLimitDisplay({ data }: PlanUsageLimitDisplayProps) {
-  const { data: session } = useSession()
   const hostContext = useOptionalWorkspaceHostContext()
-  const organizationContext = useOptionalOrganizationContext()
-  const { getSettingsHref } = useSettingsNavigation()
-  const { hosted } = useDeploymentShape()
-  const buttonLabel = data.action === 'upgrade_plan' ? 'Upgrade Plan' : 'Increase Limit'
-
-  // Self-hosted plan and limit both live on the hosted account, so local
-  // workspace billing roles say nothing about who may change them.
-  const href = hosted
-    ? organizationContext
-      ? getOrganizationSettingsHref(organizationContext.organization.id, 'billing')
-      : getSettingsHref({ section: 'billing' })
-    : data.action === 'upgrade_plan'
-      ? buildHostedUpgradeUrl()
-      : HOSTED_BILLING_SETTINGS_URL
-  const canManageBilling =
-    !hosted ||
-    (organizationContext
-      ? organizationContext.viewer.isAdmin
-      : Boolean(hostContext && canManageWorkspaceBilling(hostContext, session?.user?.id)))
+  const { href, opensInNewTab, buttonLabel, canManageBilling, unavailableMessage } =
+    usePlanUpgradeLink(data)
+  const planRequired = data.reason === CHAT_PLAN_REQUIRED_REASON
   const usageGate = useWorkspaceUsageGate(
     data.action === 'increase_limit' && !canManageBilling ? hostContext?.workspace.id : undefined
   )
-  const unavailableMessage = organizationContext
-    ? 'Contact an organization admin to manage usage limits.'
-    : hostContext?.hostOrganizationId
-      ? 'Contact an organization admin to manage this workspace’s usage limits.'
-      : 'Only the workspace owner can manage this workspace’s usage limits.'
 
   return (
     <InteractionCard
@@ -3530,7 +3507,7 @@ function PlanUsageLimitDisplay({ data }: PlanUsageLimitDisplayProps) {
             aria-hidden
             className='size-[14px] shrink-0 text-[var(--badge-amber-text)]'
           />
-          Usage Limit Reached
+          {planRequired ? 'Paid Plan Required' : 'Usage Limit Reached'}
         </span>
       }
     >
@@ -3541,10 +3518,10 @@ function PlanUsageLimitDisplay({ data }: PlanUsageLimitDisplayProps) {
             href={href}
             onNavigate={() => rememberSettingsReturnUrl(href)}
             variant='border'
-            rightIcon={hosted ? ArrowRight : SquareArrowUpRight}
-            target={hosted ? undefined : '_blank'}
-            rel={hosted ? undefined : 'noopener noreferrer'}
-            aria-label={hosted ? undefined : `${buttonLabel} (opens in a new tab)`}
+            rightIcon={opensInNewTab ? SquareArrowUpRight : ArrowRight}
+            target={opensInNewTab ? '_blank' : undefined}
+            rel={opensInNewTab ? 'noopener noreferrer' : undefined}
+            aria-label={opensInNewTab ? `${buttonLabel} (opens in a new tab)` : undefined}
             className='mt-2'
           >
             {buttonLabel}

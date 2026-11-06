@@ -8,6 +8,7 @@ import {
   DropdownMenuItemLabel,
   DropdownMenuLabel,
   DropdownMenuSearchInput,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   dropdownMenuRowClass,
   OverflowText,
@@ -97,8 +98,10 @@ function isNativeResourceGroup({ type }: { type: MothershipResourceType }): bool
 
 const EMPTY_BROWSER_TABS = [] as const
 const EMPTY_TERMINAL_TABS = [] as const
+const MENU_ITEM_SELECTOR = '[role="menuitem"], [role="menuitemcheckbox"]'
 
 interface PlusMenuDropdownProps {
+  actions?: React.ReactNode
   workspaceId: string
   organizationId?: string
   /**
@@ -123,6 +126,7 @@ export const PlusMenuDropdown = React.memo(
   React.forwardRef<PlusMenuHandle, PlusMenuDropdownProps>(function PlusMenuDropdown(
     {
       workspaceId,
+      actions,
       organizationId,
       warm,
       onResourceSelect,
@@ -338,7 +342,7 @@ export const PlusMenuDropdown = React.memo(
 
     const getVisibleMenuItems = (): HTMLElement[] =>
       Array.from(
-        contentRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []
+        contentRef.current?.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR) ?? []
       ).filter((el) => el.offsetParent !== null)
 
     const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -372,7 +376,7 @@ export const PlusMenuDropdown = React.memo(
         }
       } else if (e.key === 'Tab') {
         const focused = document.activeElement as HTMLElement | null
-        if (focused?.getAttribute('role') === 'menuitem') {
+        if (focused?.matches(MENU_ITEM_SELECTOR)) {
           e.preventDefault()
           focused.click()
         }
@@ -434,7 +438,8 @@ export const PlusMenuDropdown = React.memo(
           avoidCollisions
           collisionPadding={8}
           className={cn(
-            'flex flex-col overflow-hidden',
+            'flex flex-col',
+            actions && filteredItems === null ? 'overflow-y-auto' : 'overflow-hidden',
             RESOURCE_MENU_WIDTH_CLASS,
             isMention && MENTION_MAX_HEIGHT_CLASS
           )}
@@ -453,7 +458,18 @@ export const PlusMenuDropdown = React.memo(
               onKeyDown={handleSearchKeyDown}
             />
           )}
-          <div className='min-h-0 flex-1 overflow-y-auto overscroll-none'>
+          {actions && (
+            <div hidden={filteredItems !== null} className='shrink-0'>
+              {actions}
+              <DropdownMenuSeparator />
+            </div>
+          )}
+          <div
+            className={cn(
+              'min-h-0 flex-1 overflow-y-auto overscroll-none',
+              actions && filteredItems === null && 'has-[[role=menuitem]]:min-h-11'
+            )}
+          >
             {/* Always-mounted; swapping this subtree with filtered results makes Radix's
                   menu FocusScope steal focus from the search input back to the content root. */}
             <div hidden={filteredItems !== null}>

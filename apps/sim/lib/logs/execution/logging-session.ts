@@ -232,6 +232,10 @@ export class LoggingSession {
   private lastCompletionError: string | null = null
   /** Set once the run's workspace or workflow is found deleted; nothing is left to record. */
   private deletedScope: ExecutionScope | null = null
+  private markLogStarted: () => void = () => {}
+  private readonly logStarted = new Promise<void>((resolve) => {
+    this.markLogStarted = resolve
+  })
 
   constructor(
     workflowId: string,
@@ -305,11 +309,13 @@ export class LoggingSession {
 
   private async projectRawTraceSpans(
     traceSpans: TraceSpan[],
-    registry = this.resolvedSecretTraceRegistry
+    registry = this.resolvedSecretTraceRegistry,
+    phase?: 'live'
   ): Promise<TraceSpan[]> {
     return projectTraceSpansForSecrets(traceSpans, {
       registry,
       store: this.getSecretProjectionStore(),
+      phase,
     })
   }
 
@@ -361,7 +367,8 @@ export class LoggingSession {
             output: envelope,
           },
         ],
-        registry
+        registry,
+        'live'
       )
       const projected = this.readProjectedDisplayContent(projectedSpan?.output)
       return this.shouldClearLiveDisplay(registry)
@@ -422,7 +429,8 @@ export class LoggingSession {
               ...(log.childTraceSpans ? { children: log.childTraceSpans } : {}),
             },
           ],
-          registry
+          registry,
+          'live'
         )
         const display = this.readProjectedDisplayContent(projectedLog?.output)
         displayLogs.push({
@@ -1327,11 +1335,25 @@ export class LoggingSession {
   }
 
   /**
+   * Resolves once {@link safeStart} has written the run's log, from which point the run can be
+   * found by its id; never, when no log could be started.
+   */
+  whenLogStarted(): Promise<void> {
+    return this.logStarted
+  }
+
+  /**
    * Starts the run's log, falling back to a minimal log when the full start fails. `false` when
    * no log could be started; {@link getDeletedScope} then tells whether the run's workspace or
    * workflow is gone, in which case its admission slot is already released.
    */
   async safeStart(params: SessionStartParams): Promise<boolean> {
+    const started = await this.startOrFallback(params)
+    if (started) this.markLogStarted()
+    return started
+  }
+
+  private async startOrFallback(params: SessionStartParams): Promise<boolean> {
     if (this.deletedScope) return false
     try {
       await this.start(params)
@@ -1485,7 +1507,7 @@ export class LoggingSession {
    * structure with no content rather than unprojected values.
    */
   async projectTraceSpansForLiveDisplay(traceSpans: TraceSpan[]): Promise<TraceSpan[]> {
-    return this.projectRawTraceSpans(traceSpans)
+    return this.projectRawTraceSpans(traceSpans, undefined, 'live')
   }
 
   async safeComplete(params: SessionCompleteParams = {}): Promise<void> {

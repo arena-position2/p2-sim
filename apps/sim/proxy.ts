@@ -7,7 +7,9 @@ import { getSessionCookie } from 'better-auth/cookies'
 import { type NextRequest, NextResponse } from 'next/server'
 import { resolveSimMcpHostPath } from '@/lib/api/mcp/host-routing'
 import { SIM_MCP_ROUTE_PATH } from '@/lib/api/mcp/urls'
+import { getBrowserExtensionOrigins } from '@/lib/core/security/extension'
 import { isMarketingPath } from '@/lib/landing/routes'
+import { isAuthSurfacePath } from '@/lib/navigation/auth-surfaces'
 import { APP_ENTRY_PATH, isAppSurfacePath, isNoindexPath } from '@/lib/navigation/paths'
 import { isOAuthAuthorizationCallback, resolveAuthRedirect } from '@/app/(auth)/auth-redirect'
 import { getEnv } from './lib/core/config/env'
@@ -231,13 +233,19 @@ const SUSPICIOUS_UA_PATTERNS = [
 ] as const
 
 /**
- * Handles authentication-based redirects for root paths
+ * Resolves legacy homepage aliases and authentication-based root redirects.
  */
 function handleRootPathRedirects(
   request: NextRequest,
   hasActiveSession: boolean
 ): NextResponse | null {
   const url = request.nextUrl
+
+  if (url.pathname !== '/sim' && url.pathname.toLowerCase() === '/sim') {
+    const destination = url.clone()
+    destination.pathname = '/'
+    return NextResponse.redirect(destination, 308)
+  }
 
   if (url.pathname !== '/' || url.searchParams.has('home')) {
     return null
@@ -405,6 +413,19 @@ export function proxy(request: NextRequest) {
     return applyIndexingPolicy(request, NextResponse.next())
   }
 
+  if (url.pathname === '/extension' || url.pathname.startsWith('/extension/')) {
+    const response = NextResponse.next()
+    response.headers.set(
+      'Content-Security-Policy',
+      generateRuntimeCSP(getBrowserExtensionOrigins())
+    )
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    response.headers.set('Cache-Control', 'private, no-store')
+    response.headers.set('Referrer-Policy', 'no-referrer')
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow')
+    return response
+  }
+
   if (isAppSurfacePath(url.pathname)) {
     if (!hasActiveSession) {
       return applyIndexingPolicy(request, NextResponse.redirect(new URL('/login', request.url)))
@@ -457,6 +478,7 @@ function applyIndexingPolicy(request: NextRequest, response: NextResponse): Next
   if (
     isNonCanonicalSimHost(host) ||
     isNoindexPath(pathname) ||
+    isAuthSurfacePath(pathname) ||
     (!isHosted && isMarketingPath(pathname))
   ) {
     response.headers.set('X-Robots-Tag', 'noindex, nofollow')

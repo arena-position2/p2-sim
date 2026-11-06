@@ -90,6 +90,10 @@ import {
   readTrustedSandboxOutputCost,
 } from '@/lib/execution/remote-sandbox/output-limits'
 import { MAX_BLOCK_MOUNTED_FILES, SANDBOX_OUTPUT_DIR } from '@/lib/execution/remote-sandbox/paths'
+import {
+  describeSandboxTimeoutProgress,
+  SandboxExecutionTimeoutError,
+} from '@/lib/execution/remote-sandbox/timeout'
 import type {
   SandboxCollectedFile,
   SandboxFile,
@@ -2827,6 +2831,7 @@ export async function executeFunctionRequest(
         collectedFiles: shellCollectedFiles,
         cost: shellCost,
         sandboxSession: shellSandboxSession,
+        phaseMs: shellPhaseMs,
       } = await executeShellInSandbox({
         code: resolvedCode,
         envs: shellEnvs,
@@ -2851,6 +2856,8 @@ export async function executeFunctionRequest(
         sandboxId,
         succeeded: !shellError,
         executionTime,
+        sandboxSession: shellSandboxSession,
+        phaseMs: shellPhaseMs,
       })
 
       if (shellError) {
@@ -2981,6 +2988,7 @@ export async function executeFunctionRequest(
           collectedFiles: jsCollectedFiles,
           cost: sandboxCost,
           sandboxSession: jsSandboxSession,
+          phaseMs: jsPhaseMs,
         } = await executeInSandbox({
           code: codeForE2B,
           language: CodeLanguage.JavaScript,
@@ -3006,6 +3014,9 @@ export async function executeFunctionRequest(
         logger.info(`[${requestId}] E2B JS sandbox`, {
           sandboxId,
           succeeded: !e2bError,
+          executionTime,
+          sandboxSession: jsSandboxSession,
+          phaseMs: jsPhaseMs,
         })
 
         if (e2bError) {
@@ -3110,6 +3121,7 @@ export async function executeFunctionRequest(
         collectedFiles: pythonCollectedFiles,
         cost: sandboxCost,
         sandboxSession: pythonSandboxSession,
+        phaseMs: pythonPhaseMs,
       } = await executeInSandbox({
         code: codeForE2B,
         language: CodeLanguage.Python,
@@ -3134,6 +3146,9 @@ export async function executeFunctionRequest(
       logger.info(`[${requestId}] E2B Py sandbox`, {
         sandboxId,
         succeeded: !e2bError,
+        executionTime,
+        sandboxSession: pythonSandboxSession,
+        phaseMs: pythonPhaseMs,
       })
 
       if (e2bError) {
@@ -3350,12 +3365,24 @@ export async function executeFunctionRequest(
         isTimeoutAbortReason(req.signal.reason) ||
         isTimeoutAbortReason(error?.cause ?? error) ||
         (executionDeadlineAt !== undefined && Date.now() >= executionDeadlineAt)
+      const timeoutMessage = `Function execution timed out${timeoutForError ? ` after ${timeoutForError}ms` : ''}`
+      // Only a route context carries the secret provenance that partial output must cross with.
+      const progress =
+        timedOut && routeContext && error instanceof SandboxExecutionTimeoutError
+          ? error.progress
+          : undefined
       const abortResponse = {
         success: false,
-        error: timedOut
-          ? `Function execution timed out${timeoutForError ? ` after ${timeoutForError}ms` : ''}`
-          : 'Function execution was cancelled',
-        output: { result: null, stdout: cleanStdout(stdout), executionTime },
+        error: !timedOut
+          ? 'Function execution was cancelled'
+          : progress
+            ? `${timeoutMessage}.${describeSandboxTimeoutProgress(progress)}`
+            : timeoutMessage,
+        output: {
+          result: null,
+          stdout: cleanStdout(progress ? progress.output : stdout),
+          executionTime,
+        },
       }
       logger.warn(`[${requestId}] Function execution ${timedOut ? 'timed out' : 'was cancelled'}`, {
         executionTime,
