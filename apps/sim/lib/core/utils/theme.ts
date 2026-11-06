@@ -26,3 +26,12 @@ export function syncThemeToNextThemes(theme: 'light' | 'dark' | 'system') {
     )
   }
 }
+
+/**
+ * Reads the visitor color scheme from the account-synced `sim-theme` key.
+ * A missing value and `system` resolve to light, matching the generative-app host.
+ */
+export function getThemeFromNextThemes(): 'light' | 'dark' {
+  if (typeof window === 'undefined') return 'light'
+  return localStorage.getItem('sim-theme') === 'dark' ? 'dark' : 'light'
+}
