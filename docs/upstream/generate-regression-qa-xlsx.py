@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Generate the Arena QA workbooks from this plan and the markdown checklist.
+"""Generate the Arena regression workbook from the checklist rows in this file.
 
-- manual-regression-checklist-qa.xlsx — deduped rows with steps and expected behaviour
-- manual-regression-checklist-updated.xlsx — one row per markdown checkbox
+One file: manual-regression-checklist.xlsx. Category is Gate, Customized,
+Arena-only, Upstream removal, or Stock.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -15,9 +14,28 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-OUT = Path(__file__).with_name("manual-regression-checklist-qa.xlsx")
-UPDATED = Path(__file__).with_name("manual-regression-checklist-updated.xlsx")
-MARKDOWN = Path(__file__).with_name("manual-regression-checklist.md")
+OUT = Path(__file__).with_name("manual-regression-checklist.xlsx")
+
+SECTION_CATEGORY = {
+    "0": "Gate",
+    "1": "Customized",
+    "2": "Arena-only",
+    "3": "Stock",
+}
+
+# Sim removed the handler. Arena still calls the tool, so Local runs it.
+UPSTREAM_REMOVAL_ITEMS = {
+    "Local Copilot creates, lists, edits, and deletes a workspace skill",
+    "Local Copilot keeps Start reserved input fields",
+    "Local Copilot writes Agent knowledge search as type knowledge",
+    "Local Copilot reads and searches a workspace file",
+    "Local Copilot discovers run options and runs a workflow",
+    "Local Copilot creates and lists a custom tool",
+    "Local Copilot lists or adds an MCP connection",
+    "Local Copilot creates a table and adds a row",
+    "Local Copilot checks whether a workflow is deployed",
+    "Local Copilot block references and run logs",
+}
 
 SECTION_NAMES = {
     "0": "0. Post-sync gates (P0)",
@@ -340,9 +358,10 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "Local model picker persists; session memory inspector",
         "1. Change the Local model picker; reload.\n"
         "2. On a longer Local thread, open the session memory inspector if shown.\n"
-        "3. Confirm Claude Fable 5.1, GPT-6 Astra, and GPT-5.5 are listed. Send with one of them.",
+        "3. Confirm Claude Fable 5.1, GPT-6 Astra, GPT-5.5, a Gemini model, and a Bedrock model are listed.\n"
+        "4. Send once with a Gemini model and once with a Bedrock model.",
         "Picker selection persists as the user default. Session memory inspector appears on longer Local threads. "
-        "Those three models are listed and the chosen one returns a reply.",
+        "Gemini and Bedrock each return a reply.",
     ),
     (
         "1",
@@ -675,6 +694,109 @@ ROWS: list[tuple[str, str, str, str, str, str]] = [
         "1. Configure user access / user memory for Local.\n"
         "2. Send a follow-up turn that should use that memory/access.",
         "Next turn respects user access and user memory.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot creates, lists, edits, and deletes a workspace skill",
+        "1. On Local, ask Copilot to create a workspace skill with a distinctive name and a short instruction.\n"
+        "2. Ask it to list skills and confirm the new skill is in the reply.\n"
+        "3. Open the workspace skills page and confirm the same skill is there.\n"
+        "4. Ask Copilot to edit the description, then delete the skill.\n"
+        "5. Confirm the skills page no longer lists it.",
+        "Create, list, edit, and delete each succeed. Copilot does not reply “Tool not found”. "
+        "The skills page matches the chat. This is the Local Copilot tool, not the section 3 skills-page check. "
+        "Upstream has no manage_skill handler; Cloud uses sim skills.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot keeps Start reserved input fields",
+        "1. On Local, ask Copilot to add a custom field on the Start block.\n"
+        "2. Open the Start block input format.",
+        "Start inputFormat still includes the reserved fields input, conversationId, and files (file[]), plus the custom field. Copilot does not drop the reserved three.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot writes Agent knowledge search as type knowledge",
+        "1. On Local, ask Copilot to make an Agent search or summarize a knowledge base.\n"
+        "2. Open that Agent's tools.",
+        "The tools entry uses type knowledge, operation search, and the knowledge base id. "
+        "It is not type knowledge_base, and Copilot does not add a canvas block named knowledge_base. "
+        "The chat tool knowledge_base stays for creating or querying a knowledge base in chat. "
+        "This is not the section 3 knowledge-page check.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot reads and searches a workspace file",
+        "1. On Local, ask Copilot to read a workspace file at files/<name>/content.\n"
+        "2. Ask it to search that file for a word you know is in it.",
+        "The reply includes text from the file. Copilot does not reply “Tool not found”.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot discovers run options and runs a workflow",
+        "1. On Local, ask Copilot to run an existing workflow.\n"
+        "2. Read the reply and the workflow logs.",
+        "Copilot discovers run options, runs the workflow, and summarizes the run. "
+        "Copilot does not reply “Tool not found”.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot creates and lists a custom tool",
+        "1. On Local, ask Copilot to create a small custom code tool.\n"
+        "2. Ask it to list custom tools.",
+        "The new tool appears in the list and in workspace custom tools. "
+        "Copilot does not reply “Tool not found”.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot lists or adds an MCP connection",
+        "1. On Local, ask Copilot to list MCP connections.\n"
+        "2. If a server URL is available, ask it to add that connection.",
+        "The list returns. An add succeeds when a URL is available. "
+        "Copilot does not reply “Tool not found”.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot creates a table and adds a row",
+        "1. On Local, ask Copilot to create a table.\n"
+        "2. Ask it to add one row.\n"
+        "3. Open the table.",
+        "The table shows that row. Copilot does not reply “Tool not found”.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot checks whether a workflow is deployed",
+        "1. On Local, ask Copilot whether a known workflow is deployed.",
+        "The reply says deployed or not. Copilot does not reply “Tool not found”.",
+    ),
+    (
+        "2",
+        "Local copilot runtime",
+        "P0",
+        "Local Copilot block references and run logs",
+        "1. On Local, ask Copilot which outputs a block can reference before wiring an input.\n"
+        "2. After a finished run, ask Copilot to inspect that run’s logs.",
+        "Reference tags come back, and the run’s block outputs come back. "
+        "“Not available” or “Tool not found” is a fail. "
+        "get_block_upstream_references is still stubbed and query_logs still has no handler on version-6.2-main.",
     ),
     # --- Arena task block ---
     (
@@ -1437,6 +1559,12 @@ def autosize(ws, widths: dict[int, int]) -> None:
         ws.column_dimensions[get_column_letter(col)].width = width
 
 
+def category_for(section_key: str, item: str) -> str:
+    if item in UPSTREAM_REMOVAL_ITEMS:
+        return "Upstream removal"
+    return SECTION_CATEGORY[section_key]
+
+
 def write_checklist(wb: Workbook) -> None:
     ws = wb.active
     ws.title = "Checklist"
@@ -1444,6 +1572,7 @@ def write_checklist(wb: Workbook) -> None:
         "#",
         "Section",
         "Area",
+        "Category",
         "Priority",
         "Item",
         "Steps to test",
@@ -1456,7 +1585,9 @@ def write_checklist(wb: Workbook) -> None:
 
     for i, (section_key, area, priority, item, steps, expected) in enumerate(ROWS, start=1):
         section = SECTION_NAMES[section_key]
-        ws.append([i, section, area, priority, item, steps, expected, "", ""])
+        ws.append(
+            [i, section, area, category_for(section_key, item), priority, item, steps, expected, "", ""]
+        )
 
     wrap = Alignment(wrap_text=True, vertical="top")
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=9):
@@ -1464,7 +1595,7 @@ def write_checklist(wb: Workbook) -> None:
             cell.alignment = wrap
 
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:I{ws.max_row}"
+    ws.auto_filter.ref = f"A1:J{ws.max_row}"
     ws.row_dimensions[1].height = 22
     for r in range(2, ws.max_row + 1):
         ws.row_dimensions[r].height = 90
@@ -1473,14 +1604,15 @@ def write_checklist(wb: Workbook) -> None:
         ws,
         {
             1: 5,
-            2: 10,
+            2: 36,
             3: 28,
-            4: 10,
-            5: 42,
-            6: 55,
-            7: 50,
-            8: 12,
-            9: 24,
+            4: 20,
+            5: 10,
+            6: 42,
+            7: 55,
+            8: 50,
+            9: 12,
+            10: 24,
         },
     )
 
@@ -1488,16 +1620,18 @@ def write_checklist(wb: Workbook) -> None:
     dv.error = "Choose Pass, Fail, or N/A"
     dv.errorTitle = "Invalid result"
     ws.add_data_validation(dv)
-    dv.add(f"H2:H{ws.max_row}")
+    dv.add(f"I2:I{ws.max_row}")
 
 
 def write_run_info(wb: Workbook) -> None:
     ws = wb.create_sheet("Run info")
-    ws["A1"] = "Arena vs Sim manual regression checklist (QA workbook)"
+    ws["A1"] = "Arena vs Sim manual regression checklist"
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = (
-        "Mark Result Pass / Fail / N/A. Failures in sections 1–2 are Arena regressions; "
-        "section 3 is stock Sim. Duplicates from the markdown checklist were collapsed — see Dedup log."
+        "One workbook. Mark Result Pass / Fail / N/A. "
+        "Category: Gate, Customized, Arena-only, Upstream removal (Sim deleted the handler; Arena still calls it), or Stock. "
+        "Failures in sections 1–2 are Arena regressions; section 3 is stock Sim. "
+        "Duplicates from the markdown checklist were collapsed — see Dedup log."
     )
     ws["A2"].alignment = Alignment(wrap_text=True)
 
@@ -1564,102 +1698,35 @@ def write_dedup_log(wb: Workbook) -> None:
     autosize(ws, {1: 55, 2: 55, 3: 50})
 
 
-def parse_markdown_checklist(path: Path) -> list[tuple[str, str, str, str]]:
-    """Return (section, area, priority, item) for each markdown checkbox."""
-    section = ""
-    area = ""
-    priority = "P2"
-    rows: list[tuple[str, str, str, str]] = []
-    for line in path.read_text().splitlines():
-        if line.startswith("## "):
-            section = line[3:].strip()
-            area = section
-            match = re.search(r"\((P[012])\)", section)
-            if match:
-                priority = match.group(1)
-            continue
-        if line.startswith("### "):
-            area = line[4:].strip()
-            match = re.search(r"\((P[012])\)", area)
-            if match:
-                priority = match.group(1)
-            continue
-        if line.startswith("- [ ] ") and section and not section.startswith("Suggested"):
-            rows.append((section, area, priority, line[6:].strip()))
-    return rows
-
-
-def write_markdown_checklist(rows: list[tuple[str, str, str, str]]) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Checklist"
-    headers = ["#", "Section", "Area", "Priority", "Checklist item", "Result", "Notes"]
-    ws.append(headers)
-    style_header(ws, len(headers))
-    for index, (section, area, priority, item) in enumerate(rows, start=1):
-        ws.append([index, section, area, priority, item, "", ""])
-
-    wrap = Alignment(wrap_text=True, vertical="top")
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=7):
-        for cell in row:
-            cell.alignment = wrap
-        ws.row_dimensions[row[0].row].height = 48
-
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:G{ws.max_row}"
-    ws.row_dimensions[1].height = 22
-    autosize(ws, {1: 5, 2: 36, 3: 42, 4: 10, 5: 90, 6: 12, 7: 30})
-
-    dv = DataValidation(type="list", formula1='"Pass,Fail,N/A"', allow_blank=True)
-    dv.error = "Choose Pass, Fail, or N/A"
-    dv.errorTitle = "Invalid result"
-    ws.add_data_validation(dv)
-    dv.add(f"F2:F{ws.max_row}")
-
-    summary = wb.create_sheet("Summary")
-    summary.append(["Priority", "Item count"])
-    style_header(summary, 2)
+def write_summary(wb: Workbook) -> None:
+    ws = wb.create_sheet("Summary", 1)
+    ws.append(["Category", "Item count"])
+    style_header(ws, 2)
+    counts: dict[str, int] = {}
+    priorities: dict[str, int] = {}
+    for section_key, _area, priority, item, _steps, _expected in ROWS:
+        category = category_for(section_key, item)
+        counts[category] = counts.get(category, 0) + 1
+        priorities[priority] = priorities.get(priority, 0) + 1
+    for label in ("Gate", "Customized", "Arena-only", "Upstream removal", "Stock"):
+        ws.append([label, counts.get(label, 0)])
+    ws.append([])
+    ws.append(["Priority", "Item count"])
     for label in ("P0", "P1", "P2"):
-        summary.append([label, sum(1 for row in rows if row[2] == label)])
-    summary.append([])
-    summary.append(["Total", len(rows)])
-    autosize(summary, {1: 14, 2: 14})
-
-    info = wb.create_sheet("Run info")
-    info["A1"] = "Arena vs Sim manual regression checklist"
-    info["A1"].font = Font(bold=True, size=14)
-    info["A2"] = (
-        "One row per checkbox in docs/upstream/manual-regression-checklist.md. "
-        "Steps and expected behaviour are in manual-regression-checklist-qa.xlsx."
-    )
-    info["A2"].alignment = Alignment(wrap_text=True)
-    info["A4"] = "Field"
-    info["B4"] = "Value"
-    header_fill = PatternFill("solid", fgColor="1F4E79")
-    header_font = Font(color="FFFFFF", bold=True)
-    for cell in (info["A4"], info["B4"]):
-        cell.fill = header_fill
-        cell.font = header_font
-    for index, field in enumerate(
-        ["Date", "Environment URL", "Org", "Plan", "User role", "Tester"], start=5
-    ):
-        info.cell(index, 1, field)
-    autosize(info, {1: 28, 2: 80})
-    info.row_dimensions[2].height = 32
-
-    wb.save(UPDATED)
+        ws.append([label, priorities.get(label, 0)])
+    ws.append([])
+    ws.append(["Total", len(ROWS)])
+    autosize(ws, {1: 22, 2: 14})
 
 
 def main() -> None:
     wb = Workbook()
     write_checklist(wb)
+    write_summary(wb)
     write_run_info(wb)
     write_dedup_log(wb)
     wb.save(OUT)
-    markdown_rows = parse_markdown_checklist(MARKDOWN)
-    write_markdown_checklist(markdown_rows)
     print(f"Wrote {OUT} with {len(ROWS)} checklist rows and {len(DEDUP_LOG)} dedup entries")
-    print(f"Wrote {UPDATED} with {len(markdown_rows)} markdown checkbox rows")
 
 
 if __name__ == "__main__":

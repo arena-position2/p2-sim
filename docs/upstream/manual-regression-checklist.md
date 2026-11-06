@@ -8,6 +8,8 @@ Updated 2026-10-28 for fixes on `upstream-sync/2026-10-14` after the 2026-10-14 
 
 Updated 2026-10-29: Local Copilot “Fork in new chat” still opens the new chat when the cloud worker has no conversation for that chat. The 2026-10-14 sync made that worker copy mandatory.
 
+Updated 2026-11-06: One workbook, [manual-regression-checklist.xlsx](manual-regression-checklist.xlsx). Local Copilot rows cover the tools Sim removed and Arena still runs: skills, Start reserved inputs, Agent `knowledge` tools, file read, run options, custom tools, MCP connections, tables, and deployment status. Block references and `query_logs` are still open on this branch. Gemini and Bedrock each return a Local reply.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -58,7 +60,7 @@ These exist upstream. Verify the Arena change still works, and that the original
 - [ ] A user with no saved theme loads light mode. Dark mode still applies when chosen. In dark mode, the workflow editor env-var dropdown, tag dropdown, and messages-input popover use dark surfaces and readable text.
 - [ ] “Back to Arena agents” returns to the Arena hub.
 - [ ] Help menu stays hidden.
-- [ ] `/workspace/arena-general-settings` opens user preferences without a workspace id. Workspace `/settings/general` is unchanged.
+- [ ] `/workspace/arena-general-settings` opens user preferences without a workspace id. The column is centered, with the General title, Home page / Sign out / Reset password in the header, and Privacy and Account at the bottom. Profile stays hidden on this route. Workspace `/settings/general` still shows the profile and is otherwise unchanged.
 - [ ] Home empty state does not show the CreditsChip (billing remains under Usage / org admin paths).
 
 ### Sign-in and OAuth (P0)
@@ -90,7 +92,7 @@ The public chat page uses `ArenaDeployedChat`, not upstream `ChatClient`.
 - [ ] Workspace home chat streams a reply (theme, charts, and usage attribution still present).
 - [ ] Allowlisted users see the Local / Cloud switch on workspace home and on the workflow Copilot tab.
 - [ ] Local send uses Arena Copilot (local model reply). Cloud send uses Mothership when `COPILOT_API_KEY` is configured.
-- [ ] Local model picker selection persists as the user default; session memory inspector appears on longer Local threads. The picker includes Claude Fable 5.1, GPT-6 Astra, and GPT-5.5, and one of those models returns a reply.
+- [ ] Local model picker selection persists as the user default; session memory inspector appears on longer Local threads. The picker includes Claude Fable 5.1, GPT-6 Astra, GPT-5.5, a Gemini model, and a Bedrock model. One Gemini model and one Bedrock model each return a reply.
 - [ ] Cloud: finish one turn, then send another after the chat has been idle. The second turn completes. The user does not see “Run not found”. A Local turn that reconnects stays on Local and also does not show “Run not found”.
 - [ ] On Local, fork a finished reply (“Fork in new chat”). The new chat opens, its title starts with `Fork |`, and it contains the messages up to that reply. There is no “Failed to fork chat” toast. On Cloud, with `COPILOT_API_KEY` set, the same action still succeeds.
 - [ ] After a Copilot reply finishes, scrolling the thread does not turn ordinary `*` characters or unfinished markdown into bold.
@@ -152,6 +154,16 @@ Covered in section 1 for the chat switch. Also verify:
 
 - [ ] Tool calls, patches, and audit history persist across reload.
 - [ ] User access and user memory apply to the next turn.
+- [ ] On Local, ask Copilot to create a workspace skill, then list it. The skill appears in that reply and on the workspace skills page. Ask Copilot to edit it, then delete it. Copilot does not reply “Tool not found”. This is not the skills-page check in section 3: upstream dropped the `manage_skill` handler, and Local runs it here. Cloud uses `sim skills`.
+- [ ] On Local, ask Copilot to add a custom field on the Start block. The Start `inputFormat` still includes the reserved fields `input`, `conversationId`, and `files` (`file[]`), plus the custom field. Copilot does not drop the reserved three.
+- [ ] On Local, ask Copilot to make an Agent search or summarize a knowledge base. The Agent `tools` entry uses type `knowledge` (operation search) and the knowledge base id. It is not type `knowledge_base`, and Copilot does not add a canvas block named `knowledge_base`. The chat tool `knowledge_base` is only for creating or querying a knowledge base in chat. This is not the section 3 knowledge-page check.
+- [ ] On Local, ask Copilot to read a workspace file (`files/.../content`) and search it. The reply includes text from that file. Copilot does not reply “Tool not found”.
+- [ ] On Local, ask Copilot to run an existing workflow. It discovers run options, runs the workflow, and the reply summarizes the run. Copilot does not reply “Tool not found”.
+- [ ] On Local, ask Copilot to create a custom code tool and then list custom tools. The new tool appears. Copilot does not reply “Tool not found”.
+- [ ] On Local, ask Copilot to list MCP connections. Copilot does not reply “Tool not found”. Adding a connection succeeds when a URL is available.
+- [ ] On Local, ask Copilot to create a table and add a row. The table shows that row. Copilot does not reply “Tool not found”.
+- [ ] On Local, ask Copilot whether a workflow is deployed. The reply says deployed or not. Copilot does not reply “Tool not found”.
+- [ ] On Local, ask Copilot which outputs a block can reference, then ask it to inspect a finished run. Reference tags come back, and the run’s block outputs come back. “Not available” or “Tool not found” is a fail. `get_block_upstream_references` is still stubbed and `query_logs` still has no handler on this branch.
 
 ### Arena task block (P0)
 

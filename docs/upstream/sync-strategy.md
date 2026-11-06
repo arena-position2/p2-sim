@@ -55,7 +55,7 @@ The product sync merges `origin/main` into the integration branch. `origin/main`
 | 5. Behavioral conflict | Upstream contradicts a required product behavior | Keep the required behavior. Take unrelated upstream improvements |
 | 6. Obsolete customization | Upstream fully covers the requirement | Remove the custom code after checking that no required behavior is lost |
 
-On files only upstream changed since the merge-base, take upstream. Exclusive Arena trees come back as new files. Registries (`apps/sim/blocks/registry-maps.ts`, `apps/sim/tools/registry.ts`, `integrations.json`, and the Mothership server router `apps/sim/lib/mothership/tools/server/router.ts`) take upstream, then re-register exclusive entries. For that router, take upstream's `baseServerToolRegistry` and re-attach `arenaServerToolRegistry` only inside `getServerToolRegistry`. Do not add Arena keys inside the object.
+On files only upstream changed since the merge-base, take upstream. That does not check callers in other files. [Step 7](#7-diff-upstream-removals-arena-still-calls) does. Exclusive Arena trees come back as new files. Registries (`apps/sim/blocks/registry-maps.ts`, `apps/sim/tools/registry.ts`, `integrations.json`, and the Mothership server router `apps/sim/lib/mothership/tools/server/router.ts`) take upstream, then re-register exclusive entries. For that router, take upstream's `baseServerToolRegistry` and re-attach `arenaServerToolRegistry` only inside `getServerToolRegistry`. Do not add Arena keys inside the object.
 
 ## Workflow
 
@@ -85,7 +85,7 @@ Use the fetched tips. Inspect the upstream range before resolving overlaps: comm
 
 ### 4. Identify Arena customizations
 
-Use history, commit messages, tests, project config, and `git log -S` / `git log -G` before changing a difference you do not understand. A difference that is not documented can still be intentional.
+Use history, commit messages, tests, project config, and `git log -S` / `git log -G` before changing a difference you do not understand. A difference that is not documented can still be intentional. Re-apply the [standing Arena seams](#standing-arena-seams) even when Git reports no conflict. Those routes sit outside upstream files.
 
 ### 5. Resolve the smallest possible region
 
@@ -128,13 +128,37 @@ bun run apps/sim/scripts/check-block-registry.ts version-6.2-main
 
 Record subblock id failures in the same report section as output contract changes.
 
-### 7. Verify
+### 7. Diff upstream removals Arena still calls
+
+A clean merge does not mean Arena can still call what it called before. Upstream can delete a handler, or stop registering one, in a file this fork never edited, so Git reports no conflict. Local Copilot still names the tool, and the call returns "Tool not found". `manage_skill` was that case: mothership v1 deleted `apps/sim/lib/copilot/tools/handlers/management/manage-skill.ts`, the catalog entry stayed, and [mothership-delegated-tool-defs.ts](../../apps/sim/local-copilot/lib/tools/mothership-delegated-tool-defs.ts) still delegated it.
+
+After the tree resolves, diff deletions on the integration branch against the pre-sync product tip:
+
+```bash
+git diff --diff-filter=D --name-only origin/version-6.2-main...HEAD
+```
+
+Search the [Local Copilot caller list](#local-copilot-callers) for those basenames and for exports the upstream range removed (`git diff -G` on the same range). The caller list is:
+
+- `MOTHERSHIP_DELEGATED_TOOL_NAMES` and the descriptions beside them in `apps/sim/local-copilot/lib/tools/mothership-delegated-tool-defs.ts`
+- tool names in `apps/sim/local-copilot/lib/prompts/sections.ts`
+- imports of `@/lib/mothership` and `@/lib/copilot` from `apps/sim/local-copilot` and `apps/sim/ee`
+
+A name that is still referenced, whose implementation was deleted or whose export disappeared, is a hit. Classify it with the table above. Do not add a category:
+
+- **Port** onto upstream's replacement when one exists. `manage_skill` would be `sim skills` via `sim_cli`.
+- **Keep a local wrapper** when Arena must keep the old call. `apps/sim/local-copilot/lib/tools/manage-skill.ts` is that wrapper.
+- **Accept the drop** only by removing the Arena caller and the prompt line that names it.
+
+A hit with no decision blocks the sync, the same way a breaking output path does. Record every hit under "Upstream removals Arena still calls". When the behavior stays, add a row to [manual-regression-checklist.md](manual-regression-checklist.md) in the same sync.
+
+### 8. Verify
 
 Use `bun` and `bunx`. Run `bun run type-check`, `bun run check:api-validation`, and the tests that cover each affected customization. Run the build and integration or e2e tests when the sync touches those paths.
 
 When a test fails, decide whether the cause is an upstream behavior change, a bad merge, obsolete Arena code, a dependency change, or an intentional product difference. Do not edit a test so that it passes. Tests that encode required product behavior stay.
 
-### 8. Report
+### 9. Report
 
 Write the sync report below before calling the sync done. Merge the integration branch into `version-6.2-main` only after that report and the verification above.
 
@@ -145,6 +169,34 @@ Write the sync report below before calling the sync done. Merge the integration 
 - **APIs.** Adapt Arena code to the new upstream API. Keep a compatibility surface when an external consumer still depends on the old one.
 - **UI.** Take upstream's component structure. Re-apply Arena as the minimum: labels, a hub return link, an org-admin gate, and behavior that whitelabeling cannot express.
 - **Generated files.** Do not hand-merge them.
+
+## Standing Arena seams
+
+These are required Arena behavior that lives outside upstream files. A clean merge will not surface them. Re-apply each one if the sync edits the shared file it calls. Record the decision in the sync report.
+
+### General settings embed
+
+`/workspace/arena-general-settings` is the Arena embed for user preferences. It does not take a workspace id. Workspace `/settings/general` stays the upstream page and must still show the profile.
+
+| Piece | Keep |
+|---|---|
+| `apps/sim/app/workspace/arena-general-settings/**` | Exclusive route. Do not delete it or move it under `[workspaceId]`. |
+| `arena-general-settings-shell.tsx` | Full-width column (`flex h-screen w-full flex-col`, inner pane `min-h-0 w-full flex-1`). Pass account General meta into `SettingsHeaderShell` and `SettingsSectionProvider`. Do not restore a row flex parent or `meta={{ label: '', description: '' }}`. That shrinks the shell to the form, so the centered `max-w-[48rem]` column, the header actions (Home page, Sign out, Reset password), and Privacy and Account all sit on the left edge. |
+| `page.tsx` | Renders the shared `General` component with `hideProfile`. |
+| `general.tsx` `hideProfile` | Arena prop on an upstream component. Re-apply it when taking upstream's General. The embed hides Profile. `/settings/general` does not. |
+| Theme | `useArenaEmbedTheme` (`?theme=`) and `ArenaThemeSync` stay on this shell. The route is a sibling of `[workspaceId]` and does not inherit that layout's theme listener. |
+
+Take upstream `settings-header.tsx` and `settings-panel.tsx`. If their chrome API moves, port this shell onto the new one. Do not copy the workspace settings layout over this route.
+
+### Local Copilot callers
+
+Local Copilot is its own tree, and it still calls upstream tools and modules by name. A clean merge will not show that a handler or export disappeared. Run [step 7](#7-diff-upstream-removals-arena-still-calls) on every sync, including when Git reports no conflict in these files.
+
+| Piece | Keep |
+|---|---|
+| `apps/sim/local-copilot/lib/tools/mothership-delegated-tool-defs.ts` (`MOTHERSHIP_DELEGATED_TOOL_NAMES`) | Every name resolves to a registered mothership handler, a local wrapper under `apps/sim/local-copilot/lib/tools/`, or an explicit drop in the sync report. |
+| `apps/sim/local-copilot/lib/prompts/sections.ts` | Prompt lines that tell the model to call those tools. Remove a line only when the report accepts the drop. |
+| Imports of `@/lib/mothership` and `@/lib/copilot` from `apps/sim/local-copilot` and `apps/sim/ee` | Re-point or wrap them when the upstream export moves or disappears. |
 
 ## Before removing Arena behavior
 
@@ -171,6 +223,7 @@ Files changed:
 Conflicts:
 Output contract breaks:
 Subblock id breaks:
+Upstream removals Arena still calls:
 
 ### Customizations affected
 | Customization | Upstream impact | Decision | Reason |
@@ -184,6 +237,12 @@ Decision is `alias` (old key still written), `accept` (no saved workflow referen
 
 ### Subblock id changes
 List ids removed without a SUBBLOCK_ID_MIGRATIONS entry, and the migration added for each.
+
+### Upstream removals Arena still calls
+| Symbol | Arena caller | Upstream change | Decision | Reason |
+|---|---|---|---|---|
+
+Decision is `port` (Arena now calls upstream's replacement), `wrapper` (local module still performs the old call), or `drop` (caller and prompt line removed). An empty decision is `blocked`.
 
 ### Important changes
 Upstream changes that can affect the product.
@@ -202,6 +261,7 @@ Integration tests:
 E2E tests:
 Output contract diff:
 Subblock id check:
+Upstream removal check:
 
 ### Manual review required
 Anything that is not resolved.
@@ -217,8 +277,8 @@ Stop and ask before:
 - force pushing or rewriting shared history
 - resolving a large conflict by taking only one side
 - removing a customization whose purpose is unclear
-- shipping a sync that still has a breaking output path or an unmapped subblock id
+- shipping a sync that still has a breaking output path, an unmapped subblock id, or an unclassified upstream removal Arena still calls
 
 ## Done
 
-A sync is done when the required upstream changes are in, required Arena behavior still holds, obsolete duplicates are gone, new upstream behavior was adopted where it fits, tests pass, output and subblock contracts are either compatible or explicitly accepted, and the remaining differences are listed in the report. The result should be easier to sync next time.
+A sync is done when the required upstream changes are in, required Arena behavior still holds, obsolete duplicates are gone, new upstream behavior was adopted where it fits, tests pass, output and subblock contracts are either compatible or explicitly accepted, every upstream removal Arena still calls is `port`, `wrapper`, or `drop`, and the remaining differences are listed in the report. The result should be easier to sync next time.

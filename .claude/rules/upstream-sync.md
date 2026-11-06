@@ -31,6 +31,8 @@ bun run apps/sim/scripts/diff-block-output-contracts.ts diff /tmp/output-contrac
 
 A removed path or a type change blocks the sync until an alias still writes the old key, or the sync report records that no saved workflow references it. Run `bun run apps/sim/scripts/check-block-registry.ts version-6.2-main` for subblock id removals.
 
+Also diff deleted files (`git diff --diff-filter=D --name-only origin/version-6.2-main...HEAD`) against Local Copilot callers: `MOTHERSHIP_DELEGATED_TOOL_NAMES`, the copilot prompt, and `@/lib/mothership` / `@/lib/copilot` imports from `apps/sim/local-copilot` and `apps/sim/ee`. A name Arena still calls whose implementation disappeared blocks the sync until the report records `port`, `wrapper`, or `drop`. That check is step 7 of the strategy.
+
 ## Any other task
 
 Do not treat `main` as the product branch. Do not overwrite Arena behavior while editing an upstream file.
