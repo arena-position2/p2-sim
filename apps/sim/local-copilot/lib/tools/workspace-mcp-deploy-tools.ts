@@ -152,7 +152,6 @@ async function executeCreateWorkspaceMcpServer(
         mcpServerUrl: buildWorkflowMcpServerUrl(result.server.id),
       },
       addedTools: result.addedTools.map((tool) => ({
-        id: tool.id,
         toolName: tool.toolName,
         workflowId: tool.workflowId,
       })),

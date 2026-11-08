@@ -81,7 +81,7 @@ export function getS3ClientForRegion(region: string): S3Client {
     region,
     endpoint: S3_CONFIG.endpoint,
     forcePathStyle: S3_CONFIG.forcePathStyle,
-    credentials: getAwsCredentialsFromEnv(),
+    credentials: getAwsCredentials(),
   })
   _s3ClientsByRegion.set(region, client)
   return client

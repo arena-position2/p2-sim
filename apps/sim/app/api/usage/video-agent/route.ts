@@ -82,7 +82,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
 
   let apiKey: string
   try {
-    apiKey = getFalApiKey()
+    apiKey = getFalApiKey().apiKey
   } catch (error) {
     logger.error('Fal API key is not configured for video-agent usage', { error })
     return NextResponse.json({ error: 'Fal pricing is not configured.' }, { status: 500 })

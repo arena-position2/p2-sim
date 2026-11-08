@@ -1778,9 +1778,9 @@ export class ExecutionLogger {
 
       if (!workflowRecord) {
         if (await isWorkspaceDeleted(workspaceId)) {
-          statsLog.info("Skipped usage recording: the run's workspace was deleted")
+          logger.info("Skipped usage recording: the run's workspace was deleted")
         } else {
-          statsLog.error('Workflow not found for usage recording')
+          logger.error('Workflow not found for usage recording')
         }
         return NO_USAGE_RECORDED
       }

@@ -12,6 +12,7 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { isRecordLike } from '@sim/utils/object'
 import Ajv from 'ajv/dist/2020'
 import { videoToolBodySchema } from '@/lib/api/contracts/tools/media/video'
+import type { VideoGenerationInput } from '@/lib/internal/video/client'
 import { buildFalVideoRequest, getFalAIValidationError } from '@/lib/internal/video/fal-request'
 import { falVideoModels, getFalVideoModel } from '@/lib/media/fal-video-catalog'
 import { evaluateSubBlockCondition } from '@/lib/workflows/subblocks/visibility'
@@ -121,7 +122,11 @@ async function checkModel(id: string) {
       provider: 'falai',
     })
     const parsed = videoToolBodySchema.parse(toolInput)
-    const request = { ...parsed, provider: 'falai' } as const
+    const request: VideoGenerationInput = {
+      ...parsed,
+      provider: 'falai',
+      apiKey: parsed.apiKey ?? base.apiKey,
+    }
     assert.equal(getFalAIValidationError(request), undefined)
     const { body, endpoint } = buildFalVideoRequest(request)
     assert.equal(endpoint, model?.endpoint)

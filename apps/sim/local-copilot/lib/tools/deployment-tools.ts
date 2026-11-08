@@ -20,6 +20,7 @@ import {
 import { listWorkflowVersions } from '@/lib/workflows/application/list-workflow-versions'
 import { readWorkflowDefinition } from '@/lib/workflows/application/read-workflow-definition'
 import { generateWorkflowDiffSummary } from '@/lib/workflows/comparison'
+import type { DeploymentAttemptResult } from '@/lib/workflows/orchestration/deploy'
 import { getWorkflowDeploymentVersion } from '@/lib/workflows/persistence/utils'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import {
@@ -537,13 +538,20 @@ async function executeUpdateDeploymentVersion(
   }
 }
 
+function formatDeploymentReadiness(
+  readiness: DeploymentAttemptResult['readiness'] | undefined
+): string | null {
+  if (!readiness) return null
+  return `webhooks=${readiness.webhooks}, schedules=${readiness.schedules}, mcp=${readiness.mcp}`
+}
+
 function buildApiDeployOutput(
   workflowId: string,
   isDeployed: boolean,
   result: {
     deployedAt?: Date | string | null
     version?: number
-    latestDeploymentAttempt?: { status?: string; readiness?: string; error?: string } | null
+    latestDeploymentAttempt?: DeploymentAttemptResult | null
     warnings?: string[]
   } | null
 ) {
@@ -555,8 +563,8 @@ function buildApiDeployOutput(
     deployedAt: result?.deployedAt ?? null,
     version: result?.version,
     lifecycleStatus: result?.latestDeploymentAttempt?.status ?? null,
-    readiness: result?.latestDeploymentAttempt?.readiness ?? null,
-    error: result?.latestDeploymentAttempt?.error ?? null,
+    readiness: formatDeploymentReadiness(result?.latestDeploymentAttempt?.readiness),
+    error: result?.latestDeploymentAttempt?.error?.message ?? null,
     warnings: result?.warnings ?? [],
     apiEndpoint,
     baseUrl,

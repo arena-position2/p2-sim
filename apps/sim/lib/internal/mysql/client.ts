@@ -1,4 +1,5 @@
 import net from 'node:net'
+import type { ExecuteValues } from 'mysql2'
 import mysql from 'mysql2/promise'
 import { validateDatabaseHost } from '@/lib/core/security/input-validation.server'
 
@@ -102,7 +103,7 @@ export async function executeMysqlCommand<TResult extends mysql.QueryResult>(
 
   try {
     assertMysqlExecuteValues(values)
-    const [result] = await connection.execute<TResult>(query, values)
+    const [result] = await connection.execute<TResult>(query, values as ExecuteValues | undefined)
     signal?.throwIfAborted()
     return result
   } catch (error) {

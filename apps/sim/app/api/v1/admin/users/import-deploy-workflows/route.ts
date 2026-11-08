@@ -10,6 +10,7 @@ import { hashApiKey } from '@/lib/api-key/crypto'
 import { getUserOrganization } from '@/lib/billing/organizations/membership'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
+import { createProjectRecord } from '@/lib/projects/membership'
 import {
   type ChatOutputConfigInput,
   DEFAULT_CHAT_AUTH_TYPE,
@@ -193,8 +194,14 @@ async function getOrCreatePersonalWorkspace(params: {
   const workspaceName = firstName ? `${firstName}'s Workspace` : 'My Workspace'
 
   await db.transaction(async (tx) => {
+    const projectId = await createProjectRecord(tx, {
+      name: workspaceName,
+      organizationId: membership.organizationId,
+      ownerId: params.userId,
+    })
     await tx.insert(workspace).values({
       id: workspaceId,
+      projectId,
       name: workspaceName,
       color: getRandomWorkspaceColor(),
       ownerId: params.userId,

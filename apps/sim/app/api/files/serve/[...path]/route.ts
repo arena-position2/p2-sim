@@ -494,7 +494,7 @@ export const GET = withRouteHandler(
               cloudKey,
               authResult.userId,
               executionOptions,
-              request.signal,
+              request,
               'execution',
               knowledgeAccess
             )
@@ -503,7 +503,7 @@ export const GET = withRouteHandler(
             cloudKey,
             authResult.userId,
             executionOptions,
-            request.signal,
+            request,
             'execution',
             knowledgeAccess
           )

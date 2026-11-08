@@ -957,7 +957,7 @@ export async function compileDoc(args: CompileArgs): Promise<CompiledDocResult> 
  * source-keyed artifact. That fallback preserves already-public documents even when their
  * original inputs no longer resolve; it only reads an existing binary and never executes source.
  */
-async function loadCompiledDocByExt(
+export async function loadCompiledDocByExt(
   workspaceId: string,
   source: string,
   ext: string,

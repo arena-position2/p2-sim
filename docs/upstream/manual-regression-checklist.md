@@ -10,6 +10,8 @@ Updated 2026-10-29: Local Copilot “Fork in new chat” still opens the new cha
 
 Updated 2026-11-06: One workbook, [manual-regression-checklist.xlsx](manual-regression-checklist.xlsx). Local Copilot rows cover the tools Sim removed and Arena still runs: skills, Start reserved inputs, Agent `knowledge` tools, file read, run options, custom tools, MCP connections, tables, and deployment status. Block references and `query_logs` are still open on this branch. Gemini and Bedrock each return a Local reply.
 
+Updated 2026-11-08: `upstream-sync/2026-11-06` keeps the general-settings embed, `user_memory` on the Arena tool registry, and image-generator reference fields. New workspace chats take the upstream Mothership default model. Output type changes for Cloudflare, Tailscale, and Circleback are still blocked.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -46,6 +48,10 @@ From [sync-2026-10-07.md](./sync-2026-10-07.md) and [sync-2026-10-14.md](./sync-
 - [ ] Google Ads search on API v26: downstream blocks consume `results` as an array.
 - [ ] Shopify list/get workflows still map outputs, including restored `success` where used.
 - [ ] Integration detail pages for `arena`, `bing_ads`, `figma`, `image_fusion`, `p2_docs`, `spyfu` either show usable meta or an accepted empty state for this release.
+- [ ] `/workspace/arena-general-settings` is full width, hides Profile, and follows `?theme=`. Workspace `/settings/general` still shows the profile.
+- [ ] Local Copilot `user_memory` still reads and writes. `manage_skill` still runs through the local wrapper.
+- [ ] An existing Image Generator workflow still accepts reference images on `image_generator_v2` and `<Image Generator.images>` still resolves.
+- [ ] A new Mothership chat uses the upstream default model (`claude-opus-4-6`), not the previous local default (`claude-sonnet-4-6`).
 
 ---
 

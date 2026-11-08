@@ -944,6 +944,8 @@ interface CoalescedRefreshOptions {
   userId?: string
   /** HubSpot shared-tenant alias for per-portal OAuth app credentials. */
   alias?: string
+  /** Workspace organization, used to resolve a custom OAuth app on refresh. */
+  organizationId?: string
   privacyMode?: 'selector'
 }
 
@@ -1328,6 +1330,7 @@ async function performCoalescedRefresh({
   requestId,
   userId,
   alias,
+  organizationId,
   privacyMode,
 }: CoalescedRefreshOptions): Promise<RefreshOutcome | null> {
   if (providerId === 'shopify') return tokenOutcome(await refreshShopifyInstallation(accountId))
@@ -1451,7 +1454,7 @@ async function performCoalescedRefresh({
             }
             const result = quickBooksClientConfig
               ? await refreshOAuthToken(providerId, refreshTokenToUse, quickBooksClientConfig)
-              : await refreshOAuthToken(providerId, refreshTokenToUse, alias)
+              : await refreshOAuthToken(providerId, refreshTokenToUse, alias, organizationId)
 
             if (!result.ok) {
               const { errorCode } = result
@@ -1846,7 +1849,8 @@ export async function refreshAccessTokenIfNeeded(
 export async function refreshTokenIfNeeded(
   requestId: string,
   credential: any,
-  credentialId: string
+  credentialId: string,
+  organizationId?: string
 ): Promise<{ accessToken: string; refreshed: boolean }> {
   const result = await resolveStoredAccessToken(credential, {
     accountId: credential.resolvedCredentialId ?? credentialId,
@@ -1856,6 +1860,7 @@ export async function refreshTokenIfNeeded(
     requestId,
     userId: credential.userId,
     alias: resolveHubSpotRefreshAlias(credential),
+    organizationId,
   })
   if (result.kind === 'unrefreshable') {
     throw new Error('OAuth access token expired and cannot be refreshed; reconnect the account')

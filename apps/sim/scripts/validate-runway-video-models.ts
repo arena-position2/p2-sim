@@ -90,7 +90,11 @@ for (const mode of ['text', 'image'] as const) {
         const input = videoToolBodySchema.parse(
           runwayVideoTool.operation.input({ ...base, ...mapped })
         )
-        const request = buildDirectVideoRequest({ ...input, provider: 'runway' })
+        const request = buildDirectVideoRequest({
+          ...input,
+          provider: 'runway',
+          apiKey: input.apiKey ?? 'schema-validation',
+        })
         assert.equal(request.url, `https://api.dev.runwayml.com${path}`)
         if (mode === 'image') request.body.promptImage = 'data:image/png;base64,iVBORw0KGgo='
         assert(validate(request.body), JSON.stringify(validate.errors))

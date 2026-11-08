@@ -40,10 +40,11 @@ export function coerceLocalEditAgentTools(operations: unknown[]): unknown[] {
     const params = asRecord(op.params)
     if (!params) return item
     const inputs = asRecord(params.inputs)
-    if (!inputs || !Array.isArray(inputs.tools)) return item
+    const tools = inputs?.tools
+    if (!inputs || !Array.isArray(tools)) return item
 
-    const coercedTools = inputs.tools.map((tool) => coerceAgentToolEntry(tool))
-    const toolsChanged = coercedTools.some((tool, index) => tool !== inputs.tools[index])
+    const coercedTools = tools.map((tool) => coerceAgentToolEntry(tool))
+    const toolsChanged = coercedTools.some((tool, index) => tool !== tools[index])
     if (!toolsChanged) return item
 
     changed = true

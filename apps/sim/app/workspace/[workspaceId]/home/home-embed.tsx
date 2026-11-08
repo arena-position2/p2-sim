@@ -305,7 +305,7 @@ export function HomeEmbed({ chatId, embedBackHref }: HomeEmbedProps = {}) {
     (context: ChatContext) => {
       const resolved = resolveResourceFromContext(context)
       if (!resolved) return
-      removeResource(resolved.type, resolved.id)
+      removeResource(resolved)
     },
     [resolveResourceFromContext, removeResource]
   )

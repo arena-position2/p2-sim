@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/command'
 import { getArenaToken } from '@/lib/arena-utils/cookie-utils'
 import { getEnv } from '@/lib/core/config/env'
+import { useWorkflowScope } from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import { arenaSiblingSubBlockStoreKey } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/arena/arena-dependency-helpers'
 import { formatDisplayText } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/formatted-text'
 import { SubBlockInputController } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/sub-block-input-controller'
@@ -401,8 +402,9 @@ export function ArenaCommentInput({
   const projectId =
     typeof projectValue === 'string' ? projectValue : (projectValue as { sysId?: string })?.sysId
 
-  // Wand functionality
+  const { workspaceId } = useWorkflowScope()
   const wandHook = useWand({
+    workspaceId,
     wandConfig: config.wandConfig,
     currentValue: htmlContent,
     onStreamStart: () => {

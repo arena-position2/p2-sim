@@ -278,6 +278,8 @@ interface ListWorkspaceFilesOptions {
   scope?: WorkspaceFileScope
   folders?: WorkspaceFileFolderRecord[]
   hydrateFolderPaths?: boolean
+  /** Cap the listing. Callers that only need a sample must not load every file. */
+  limit?: number
   /** Propagate storage errors when an incomplete list would be unsafe. */
   throwOnError?: boolean
 }
@@ -1829,11 +1831,12 @@ export async function listWorkspaceFiles(
   options?: ListWorkspaceFilesOptions
 ): Promise<WorkspaceFileRecord[]> {
   try {
-    const files = await db
+    const filesQuery = db
       .select(workspaceFileListColumns)
       .from(workspaceFiles)
       .where(workspaceFileScopeCondition(workspaceId, options?.scope ?? 'active'))
       .orderBy(workspaceFiles.uploadedAt, workspaceFiles.id)
+    const files = await (options?.limit == null ? filesQuery : filesQuery.limit(options.limit))
 
     return await hydrateWorkspaceFilePaths(files, workspaceId, options)
   } catch (error) {

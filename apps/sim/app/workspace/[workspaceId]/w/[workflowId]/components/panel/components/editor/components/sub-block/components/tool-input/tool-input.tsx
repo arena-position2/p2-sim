@@ -116,6 +116,7 @@ import {
   formatParameterLabel,
   getSubBlocksForToolInput,
   getToolIdForOperation,
+  isUserFacingToolParam,
   type SubBlocksForToolInput,
 } from '@/tools/params'
 

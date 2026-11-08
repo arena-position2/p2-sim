@@ -28,7 +28,7 @@ export interface IsolatedVMWorkerProcess {
   send(message: unknown): boolean
   kill(): boolean
   on(event: 'message', listener: (message: unknown) => void): unknown
-  on(event: 'exit', listener: () => void): unknown
+  on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown
   off(event: 'message', listener: (message: unknown) => void): unknown
   readonly stderr?: NodeJS.ReadableStream | null
   /** Why a remote worker closed, for the pool's startup-failure message. */
@@ -40,6 +40,54 @@ export interface RemoteWorkerOptions {
   token: string
   /** Worker settings the app owns (limits, timezone, locale), so a remote worker matches a local one. */
   workerEnv: Record<string, string | undefined>
+}
+
+class RemoteIsolatedVMWorker implements IsolatedVMWorkerProcess {
+  constructor(
+    private readonly socket: WebSocket,
+    private readonly emitter: EventEmitter,
+    private readonly terminateWorker: (reason: string, closeCode?: number) => void,
+    private readonly readExitReason: () => string | undefined
+  ) {}
+
+  /**
+   * Throws {@link WorkerConnectionClosedError} once the connection is closing, so the pool can
+   * tell a message that never left this process from one the host may have acted on.
+   */
+  send(message: unknown): boolean {
+    if (this.socket.readyState !== WebSocket.OPEN) throw new WorkerConnectionClosedError()
+    this.socket.send(JSON.stringify(message))
+    return true
+  }
+
+  kill(): boolean {
+    // A normal closure, so the pool retiring an idle or recycled worker isn't logged as a failure.
+    this.terminateWorker('Remote isolated-vm worker closed by the app', 1000)
+    return true
+  }
+
+  on(event: 'message', listener: (message: unknown) => void): this
+  on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
+  on(
+    event: 'message' | 'exit',
+    listener:
+      | ((message: unknown) => void)
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+  ): this {
+    this.emitter.on(event, listener)
+    return this
+  }
+
+  off(event: 'message', listener: (message: unknown) => void): this {
+    this.emitter.off(event, listener)
+    return this
+  }
+
+  readonly stderr = null
+
+  get exitReason(): string | undefined {
+    return this.readExitReason()
+  }
 }
 
 /**
@@ -74,7 +122,7 @@ export function connectRemoteWorker(options: RemoteWorkerOptions): IsolatedVMWor
     exited = true
     exitReason ??= reason
     if (silenceTimer) clearTimeout(silenceTimer)
-    emitter.emit('exit')
+    emitter.emit('exit', null, null)
   }
 
   /** Exits on a later tick, as a killed child does, so the pool never re-enters its own cleanup. */
@@ -123,32 +171,5 @@ export function connectRemoteWorker(options: RemoteWorkerOptions): IsolatedVMWor
     emitExit(`Remote isolated-vm worker closed (code ${event.code}${detail})`)
   })
 
-  return {
-    /**
-     * Throws {@link WorkerConnectionClosedError} once the connection is closing, so the pool can
-     * tell a message that never left this process from one the host may have acted on.
-     */
-    send(message) {
-      if (socket.readyState !== WebSocket.OPEN) throw new WorkerConnectionClosedError()
-      socket.send(JSON.stringify(message))
-      return true
-    },
-    kill() {
-      // A normal closure, so the pool retiring an idle or recycled worker isn't logged as a failure.
-      terminate('Remote isolated-vm worker closed by the app', 1000)
-      return true
-    },
-    on(event: 'message' | 'exit', listener: (message: unknown) => void) {
-      emitter.on(event, listener)
-      return this
-    },
-    off(event, listener) {
-      emitter.off(event, listener)
-      return this
-    },
-    stderr: null,
-    get exitReason() {
-      return exitReason
-    },
-  }
+  return new RemoteIsolatedVMWorker(socket, emitter, terminate, () => exitReason)
 }

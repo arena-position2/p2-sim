@@ -1181,12 +1181,13 @@ export async function* runLocalCopilotAgent(
       break
     }
 
-    const pendingToolCalls: Array<{
+    type RoundToolCall = {
       id: string
       name: string
       arguments: string
       thoughtSignature?: string
-    }> = []
+    }
+    const pendingToolCalls: RoundToolCall[] = []
     let roundInputTokens = 0
     let roundOutputTokens = 0
     let roundCacheReadTokens: number | undefined
@@ -1831,7 +1832,7 @@ export async function* runLocalCopilotAgent(
       break
     }
 
-    const orderedToolCalls = sortToolCallsForExecution(
+    const orderedToolCalls: RoundToolCall[] = sortToolCallsForExecution(
       postBuildToolMode === 'oauth_only'
         ? pendingToolCalls.filter((call) => call.name === 'oauth_get_auth_link')
         : pendingToolCalls
@@ -2065,7 +2066,10 @@ export async function* runLocalCopilotAgent(
 
         if (parallelCalls.length >= 2) {
           const { executeLocalCopilotTool } = await getToolExecutor()
-          const prepared = parallelCalls.map((parallelCall) => {
+          const prepared: Array<{
+            call: RoundToolCall
+            parsedArgs: Record<string, unknown>
+          }> = parallelCalls.map((parallelCall) => {
             let args: Record<string, unknown> = {}
             try {
               args = JSON.parse(parallelCall.arguments || '{}') as Record<string, unknown>
@@ -2102,7 +2106,10 @@ export async function* runLocalCopilotAgent(
 
           for (const extra of parallelCalls.slice(1)) roundToolNames.push(extra.name)
 
-          const executable: typeof prepared = []
+          const executable: Array<{
+            call: RoundToolCall
+            parsedArgs: Record<string, unknown>
+          }> = []
           const rejectedDiscovery: Array<{
             call: (typeof prepared)[number]['call']
             parsedArgs: Record<string, unknown>

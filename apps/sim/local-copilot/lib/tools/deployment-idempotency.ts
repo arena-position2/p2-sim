@@ -1,9 +1,6 @@
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'
 
-type DeploymentToolContext = Pick<
-  ToolExecutionContext,
-  'executionId' | 'messageId' | 'runId' | 'activeToolCallId'
->
+type DeploymentToolContext = Pick<ToolExecutionContext, 'messageId' | 'runId' | 'activeToolCallId'>
 
 interface DeploymentAttemptCurrentState {
   isCurrent?: boolean
@@ -17,7 +14,7 @@ export function getCopilotDeploymentIdempotencyKey(
   context: DeploymentToolContext,
   operation: string
 ): string | undefined {
-  const executionScope = context.executionId ?? context.runId ?? context.messageId
+  const executionScope = context.runId ?? context.messageId
   if (executionScope) return `copilot:${executionScope}:operation:${operation}`
   return context.activeToolCallId
     ? `copilot:tool-call:${context.activeToolCallId}:operation:${operation}`
