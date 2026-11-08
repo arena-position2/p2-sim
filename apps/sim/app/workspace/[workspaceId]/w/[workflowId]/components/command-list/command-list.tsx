@@ -5,8 +5,9 @@ import { Button, cn, handleKeyboardActivation, Library } from '@sim/emcn'
 import { Search } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import Image from 'next/image'
-import { useParams, useRouter } from 'next/navigation'
 import { AgentIcon } from '@/components/icons'
+import { useResourceRouter } from '@/app/workspace/[workspaceId]/components/resource/resource-navigation'
+import { useWorkflowScope } from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import { usePreventZoom } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
 import { useOrgBrandConfig } from '@/ee/whitelabeling/components/branding-provider'
 import { useSearchModalStore } from '@/stores/modals/search/store'
@@ -51,13 +52,11 @@ const commands: CommandItem[] = [
  * Centered on the screen for empty workflows
  */
 export function CommandList() {
-  const params = useParams()
-  const router = useRouter()
+  const { workspaceId } = useWorkflowScope()
+  const router = useResourceRouter()
   const brand = useOrgBrandConfig()
   const openSearchModal = useSearchModalStore((s) => s.open)
   const preventZoomRef = usePreventZoom()
-
-  const workspaceId = params.workspaceId as string | undefined
 
   /**
    * Handle click on a command row.
@@ -81,10 +80,6 @@ export function CommandList() {
             return
           }
           case 'Logs': {
-            if (!workspaceId) {
-              logger.warn('No workspace ID found, cannot navigate to logs from command list')
-              return
-            }
             router.push(`/workspace/${workspaceId}/logs`)
             return
           }

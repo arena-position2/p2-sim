@@ -10,7 +10,7 @@ import type {
   AgentAccessRequestDecisionStatus,
   AgentAccessRequestRow,
 } from '@/lib/api/contracts/agent-access-requests'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
 import {
   SettingsEmptyState,

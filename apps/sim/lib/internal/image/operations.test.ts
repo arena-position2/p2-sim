@@ -1,14 +1,44 @@
+import {
+  executionLimitsMock,
+  executionLimitsMockFns,
+} from '@sim/testing/mocks/execution-limits.mock'
+import {
+  inputValidationMock,
+  inputValidationMockFns,
+} from '@sim/testing/mocks/input-validation.mock'
+import { uploadsCopilotMock, uploadsCopilotMockFns } from '@sim/testing/mocks/uploads-copilot.mock'
+import { uploadsExecutionMock } from '@sim/testing/mocks/uploads-execution.mock'
+import { utilsHelpersMock, utilsHelpersMockFns } from '@sim/testing/mocks/utils-helpers.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  runImageToolGeneration: vi.fn(),
+  fetch: vi.fn(),
+  getFalAICostMetadata: vi.fn(),
 }))
 
-vi.mock('@/lib/image-generation/run-image-tool.server', () => ({
-  runImageToolGeneration: mocks.runImageToolGeneration,
+vi.mock('@/lib/core/security/input-validation.server', () => inputValidationMock)
+
+vi.mock('@sim/utils/helpers', () => utilsHelpersMock)
+
+vi.mock('@/lib/core/execution-limits', () => executionLimitsMock)
+
+vi.mock('@/lib/tools/falai-pricing', () => ({
+  getFalAICostMetadata: mocks.getFalAICostMetadata,
 }))
+
+vi.mock('@/lib/uploads/contexts/copilot', () => uploadsCopilotMock)
+
+vi.mock('@/lib/uploads/contexts/execution', () => uploadsExecutionMock)
+
+const { mockSecureFetchWithPinnedIP, mockValidateUrlWithDNS } = inputValidationMockFns
 
 import { executeImageGeneration } from '@/lib/internal/image/operations'
+
+const { mockInterruptibleSleep } = utilsHelpersMockFns
+
+const { mockUploadCopilotFile } = uploadsCopilotMockFns
+
+executionLimitsMockFns.mockGetMaxExecutionTimeout.mockReturnValue(9000)
 
 const falInput = {
   provider: 'falai' as const,
@@ -19,23 +49,34 @@ const falInput = {
 
 describe('image operations', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mocks.fetch.mockReset()
+    mockSecureFetchWithPinnedIP.mockReset()
+    vi.stubGlobal('fetch', mocks.fetch)
+    mockInterruptibleSleep.mockResolvedValue(undefined)
+    mockUploadCopilotFile.mockResolvedValue({ url: 'https://sim.test/generated.png' })
+    // Content-derived queue URLs are validated and pinned; default to allowed.
+    mockValidateUrlWithDNS.mockResolvedValue({
+      isValid: true,
+      resolvedIP: '203.0.113.1',
+      originalHostname: 'queue.fal.run',
+    })
   })
 
-  it('delegates generation to the Arena image tool runner', async () => {
-    mocks.runImageToolGeneration.mockResolvedValue({
-      content: 'generated',
-      imageUrl: 'https://sim.test/generated.png',
-      fileName: 'generated.png',
-      contentType: 'image/png',
-      provider: 'falai',
-      model: 'nano-banana-2',
-      metadata: {
-        provider: 'falai',
-        model: 'nano-banana-2',
-        contentType: 'image/png',
-      },
-    })
+  it('submits a Fal.ai job once and only polls the created job', async () => {
+    const inlineImage = `data:image/png;base64,${Buffer.from('png').toString('base64')}`
+    // The job is created against the fixed public queue host over plain fetch.
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json({
+        request_id: 'job-1',
+        status_url: 'https://queue.fal.run/status/job-1',
+        response_url: 'https://queue.fal.run/result/job-1',
+      })
+    )
+    // The response-derived status/result URLs are polled over the guarded path.
+    mockSecureFetchWithPinnedIP
+      .mockResolvedValueOnce(Response.json({ status: 'IN_QUEUE' }))
+      .mockResolvedValueOnce(Response.json({ status: 'COMPLETED' }))
+      .mockResolvedValueOnce(Response.json({ images: [{ url: inlineImage }] }))
 
     const response = await executeImageGeneration(falInput, {
       userId: 'user-1',
@@ -44,18 +85,26 @@ describe('image operations', () => {
 
     expect(response.status).toBe(200)
     expect((await response.json()).imageUrl).toBe('https://sim.test/generated.png')
-    expect(mocks.runImageToolGeneration).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ...falInput,
-        userId: 'user-1',
-      }),
-      expect.objectContaining({ userId: 'user-1', requestId: 'request-1' })
-    )
+    expect(mocks.fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://queue.fal.run/fal-ai/nano-banana-2',
+    ])
+    expect(mockSecureFetchWithPinnedIP.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://queue.fal.run/status/job-1',
+      'https://queue.fal.run/status/job-1',
+      'https://queue.fal.run/result/job-1',
+    ])
   })
 
-  it('does not generate when the caller has already aborted', async () => {
+  it('cancels polling without resubmitting or storing an image', async () => {
     const controller = new AbortController()
-    controller.abort()
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json({
+        request_id: 'job-2',
+        status_url: 'https://queue.fal.run/status/job-2',
+        response_url: 'https://queue.fal.run/result/job-2',
+      })
+    )
+    mockInterruptibleSleep.mockImplementationOnce(async () => controller.abort())
 
     await expect(
       executeImageGeneration(falInput, {
@@ -65,55 +114,102 @@ describe('image operations', () => {
       })
     ).rejects.toMatchObject({ name: 'AbortError' })
 
-    expect(mocks.runImageToolGeneration).not.toHaveBeenCalled()
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(mockSecureFetchWithPinnedIP).not.toHaveBeenCalled()
+    expect(mockUploadCopilotFile).not.toHaveBeenCalled()
   })
 
-  it('forwards trusted workflow scope so generated images store as file objects', async () => {
-    mocks.runImageToolGeneration.mockResolvedValue({
-      content: 'generated',
-      imageUrl: 'https://sim.test/generated.png',
-      image: {
-        id: 'file-1',
-        name: 'generated.png',
-        url: 'https://sim.test/generated.png',
-        size: 12,
-        type: 'image/png',
-        key: 'agent-generated-images/workflow-1/user-1/generated.png',
-      },
-      fileName: 'generated.png',
-      contentType: 'image/png',
-      provider: 'falai',
-      model: 'nano-banana-2',
-      metadata: {
-        provider: 'falai',
-        model: 'nano-banana-2',
-        contentType: 'image/png',
-      },
-    })
-
-    await executeImageGeneration(falInput, {
-      userId: 'user-1',
-      workspaceId: 'workspace-1',
-      workflowId: 'workflow-1',
-      executionId: 'execution-1',
-      requestId: 'request-3',
-    })
-
-    expect(mocks.runImageToolGeneration).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ...falInput,
-        userId: 'user-1',
-        workspaceId: 'workspace-1',
-        workflowId: 'workflow-1',
-        executionId: 'execution-1',
-      }),
-      expect.objectContaining({
-        userId: 'user-1',
-        workspaceId: 'workspace-1',
-        workflowId: 'workflow-1',
-        executionId: 'execution-1',
-        requestId: 'request-3',
+  it('rejects foreign fal queue hosts before sending credentials', async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json({
+        request_id: 'foreign-job',
+        status_url: 'https://untrusted.example/status',
       })
     )
+    mockSecureFetchWithPinnedIP.mockResolvedValueOnce(Response.json({ status: 'FAILED' }))
+
+    const response = await executeImageGeneration(falInput, {
+      userId: 'user-1',
+      requestId: 'foreign-queue',
+    })
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toMatchObject({ error: 'Invalid Fal.ai queue URL' })
+    expect(mockSecureFetchWithPinnedIP).not.toHaveBeenCalled()
+  })
+
+  it('retrieves nested fal jobs from the documented application request path', async () => {
+    mocks.fetch.mockResolvedValueOnce(Response.json({ request_id: 'nested-job' }))
+    mockSecureFetchWithPinnedIP.mockImplementation(async (url: string) => {
+      if (url === 'https://queue.fal.run/fal-ai/bytedance/requests/nested-job/status') {
+        return Response.json({ status: 'COMPLETED' })
+      }
+      if (url === 'https://queue.fal.run/fal-ai/bytedance/requests/nested-job') {
+        return Response.json({ images: [{ url: 'data:image/png;base64,cG5n' }] })
+      }
+      return new Response('Not found', { status: 404 })
+    })
+
+    const response = await executeImageGeneration(
+      { ...falInput, model: 'seedream-v4.5' },
+      {
+        userId: 'user-1',
+        requestId: 'nested-queue',
+      }
+    )
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).imageUrl).toBe('https://sim.test/generated.png')
+  })
+
+  it.each(['openai', 'gemini'])(
+    'does not purchase a fallback for an unknown %s model',
+    async (provider) => {
+      mocks.fetch.mockResolvedValueOnce(new Response('Unexpected generation', { status: 502 }))
+      const response = await executeImageGeneration(
+        { ...falInput, provider, model: 'unknown-model' },
+        {
+          userId: 'user-1',
+          requestId: 'unknown-model',
+        }
+      )
+
+      expect(response.status).toBe(400)
+      expect(mocks.fetch).not.toHaveBeenCalled()
+    }
+  )
+
+  it('retains the completed fal receipt when delivery is interrupted', async () => {
+    const controller = new AbortController()
+    mocks.fetch.mockResolvedValueOnce(Response.json({ request_id: 'paid-job' }))
+    mocks.getFalAICostMetadata.mockImplementation(async ({ signal }: { signal?: AbortSignal }) => {
+      signal?.throwIfAborted()
+      return {
+        requestId: 'paid-job',
+        endpointId: 'fal-ai/nano-banana-2',
+        costDollars: 0.1,
+        source: 'billing_events',
+      }
+    })
+    mockSecureFetchWithPinnedIP.mockResolvedValueOnce(Response.json({ status: 'COMPLETED' }))
+    mockSecureFetchWithPinnedIP.mockImplementationOnce(async () => {
+      controller.abort()
+      return Response.json({ status: 'COMPLETED' })
+    })
+
+    await expect(
+      executeImageGeneration(
+        { ...falInput, useHostedCostTracking: true },
+        {
+          userId: 'user-1',
+          requestId: 'completed-job',
+          signal: controller.signal,
+        }
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mocks.getFalAICostMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'paid-job' })
+    )
+    expect(mocks.getFalAICostMetadata.mock.calls[0][0].signal).toBeUndefined()
   })
 })

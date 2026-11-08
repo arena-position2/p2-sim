@@ -30,6 +30,7 @@ vi.mock('@/lib/uploads/core/setup.server', () => ({
   },
 }))
 
+import { ContentDeliveryUnobservedError } from '@/lib/core/application'
 import { withWorkspaceInvocationScope } from '@/lib/core/application/workspace-invocation-scope'
 import { encryptSecret } from '@/lib/core/security/encryption'
 import {
@@ -39,15 +40,18 @@ import {
 import { runCli } from '@/lib/mothership/agent-cli/run-cli'
 import { createScopedCliTransport } from '@/lib/mothership/agent-cli/scoped-transport'
 import { createAgentCliTransport } from '@/lib/mothership/agent-cli/transport'
+import { createWorkbenchFileProvenance } from '@/lib/mothership/agent-cli/workbench-file-provenance'
 import { createCopilotChatPrincipal } from '@/lib/mothership/auth/application-delegation'
 import {
   updateWorkspaceFileContent,
   uploadWorkspaceFile,
-} from '@/lib/uploads/contexts/workspace/workspace-file-manager'
-import type { WorkspaceFileSecretProvenance } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+} from '@/lib/uploads/contexts/workspace/file-manager'
+import {
+  markWorkspaceFileSecretProvenanceUnknown,
+  type WorkspaceFileSecretProvenance,
+} from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import { WORKSPACE_FILES_DELEGATION_AUDIENCE } from '@/lib/workspace-files/application/authorization'
 import { downloadWorkspaceFileStream } from '@/lib/workspace-files/application/download-workspace-file'
-import { WorkspaceFileDeliveryUnobservedError } from '@/lib/workspace-files/application/file-delivery-observer'
 import { projectResolvedSecretModelContent } from '@/executor/utils/resolved-secret-content-projection'
 import { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
 import '@/app/api/v2/files/[fileId]/text/route'
@@ -85,7 +89,10 @@ describe('chat-delegated file version history', () => {
   })
 
   /** Version 2 holds a named secret; version 3 replaced it with public text. */
-  async function seedVersionedFile(historicalProvenance?: WorkspaceFileSecretProvenance) {
+  async function seedVersionedFile(
+    historicalProvenance?: WorkspaceFileSecretProvenance,
+    markHistoricalUnknown = false
+  ) {
     const ids = createKnowledgeAclFixtureIds()
     fixtures.push(ids)
     await seedKnowledgeAclFixture(ids)
@@ -123,6 +130,9 @@ describe('chat-delegated file version history', () => {
           secretProvenancePolicy: { mode: 'replace', provenance },
         }
       )
+      if (markHistoricalUnknown && content.startsWith('token=')) {
+        await markWorkspaceFileSecretProvenanceUnknown(ids.workspaceId, [file.id])
+      }
     }
     return { ...ids, fileId: file.id }
   }
@@ -145,6 +155,12 @@ describe('chat-delegated file version history', () => {
             endpoint: ORIGIN,
             invocation,
             ...(registry ? { registry } : {}),
+            files: createWorkbenchFileProvenance({
+              userId,
+              workspaceId: fixture.workspaceId,
+              sessionKey: invocation.chatId,
+              resolvedSecretTraceRegistry: registry,
+            }),
             resources: [],
             observeReads: true,
           })
@@ -208,7 +224,7 @@ describe('chat-delegated file version history', () => {
     expect(projected.value).toContain('token=[REDACTED_SECRET]')
 
     const untracked = await chatTransport(fixture, fixture.bobId)(url)
-    expect(untracked.status).toBe(503)
+    expect(untracked.status).toBe(403)
     const refusal = await untracked.text()
     expect(refusal).not.toContain(SECRET)
     expect(refusal).toContain('provenance is unavailable')
@@ -287,7 +303,7 @@ describe('chat-delegated file version history', () => {
     expect((await versionRows(fixture.fileId)).map((row) => row.version)).toEqual([1, 2, 3])
   })
 
-  it('refuses a delegated version read that no delivery observer records', async () => {
+  it('refuses a delegated version read that no content gate admits', async () => {
     const fixture = await seedVersionedFile()
 
     const response = await chatTransport(fixture, fixture.bobId, undefined, { observer: false })(
@@ -390,6 +406,31 @@ describe('chat-delegated file version history', () => {
     expect(registry.isPermanentlyIncomplete()).toBe(false)
   })
 
+  it('retains a classification-only refusal when the current version becomes historical and is reverted', async () => {
+    const fixture = await seedVersionedFile(undefined, true)
+    const chat = chatTransport(fixture, fixture.aliceId, registryFor(fixture, fixture.aliceId))
+    const older = await chat(
+      `/api/v2/files/${fixture.fileId}/versions/1/text?workspaceId=${fixture.workspaceId}`
+    )
+    expect(older.status).toBe(200)
+    const historical = await chat(
+      `/api/v2/files/${fixture.fileId}/versions/2/text?workspaceId=${fixture.workspaceId}`
+    )
+    expect(historical.status).toBe(403)
+    expect(await historical.text()).not.toContain(SECRET)
+    const reverted = await chat(`/api/v2/files/${fixture.fileId}/versions/2/revert`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: fixture.workspaceId }),
+    })
+    expect(reverted.status).toBe(200)
+    const current = await chat(
+      `/api/v2/files/${fixture.fileId}/text?workspaceId=${fixture.workspaceId}`
+    )
+    expect(current.status).toBe(403)
+    expect(await current.text()).not.toContain(SECRET)
+  })
+
   it('keeps a secret redacted after Chat reverts the file to the version holding it', async () => {
     const fixture = await seedVersionedFile()
     const reverted = await chatTransport(fixture, fixture.aliceId)(
@@ -412,15 +453,15 @@ describe('chat-delegated file version history', () => {
     expect(projected.value).toContain('token=[REDACTED_SECRET]')
 
     const untracked = await chatTransport(fixture, fixture.bobId)(url)
-    expect(untracked.status).toBe(503)
+    expect(untracked.status).toBe(403)
     expect(await untracked.text()).not.toContain(SECRET)
   })
 
   /**
-   * The current-file text read and download admitted Chat whether or not a delivery observer would
+   * The current-file text read and download admitted Chat whether or not a content gate would
    * record the secret provenance of the bytes; only the transport Chat composes today installed one.
    */
-  describe('current-file reads without a delivery observer', () => {
+  describe('current-file reads without a content gate', () => {
     async function revertToSecretVersion(fixture: Awaited<ReturnType<typeof seedVersionedFile>>) {
       const reverted = await chatTransport(fixture, fixture.aliceId)(
         `/api/v2/files/${fixture.fileId}/versions/2/revert`,
@@ -475,7 +516,7 @@ describe('chat-delegated file version history', () => {
       )
 
       await expect(inWorkspace(fixture, () => download(fixture, principal))).rejects.toThrow(
-        WorkspaceFileDeliveryUnobservedError
+        ContentDeliveryUnobservedError
       )
     })
 

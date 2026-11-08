@@ -64,6 +64,7 @@ interface ThreadRecord {
 }
 
 import { useChatStreaming } from '@/app/(interfaces)/chat/hooks'
+import { InterfacesShell } from '@/app/(interfaces)/components'
 import SSOAuth from '@/ee/sso/components/sso-auth'
 import { useDeployedChatConfig } from '@/hooks/queries/chats'
 import { useGitHubStars } from '@/hooks/queries/github-stars'
@@ -822,7 +823,11 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   // If error, show error message using the extracted component
   if (chatConfigError) {
     logger.error('Error fetching chat config:', chatConfigError)
-    return <ChatErrorState error={CHAT_ERROR_MESSAGES.CHAT_UNAVAILABLE} />
+    return (
+      <InterfacesShell>
+        <ChatErrorState error={CHAT_ERROR_MESSAGES.CHAT_UNAVAILABLE} />
+      </InterfacesShell>
+    )
   }
 
   if (authRequired) {
@@ -838,7 +843,11 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   }
 
   if (!chatConfig) {
-    return <ChatLoadingState />
+    return (
+      <InterfacesShell>
+        <ChatLoadingState />
+      </InterfacesShell>
+    )
   }
 
   return (

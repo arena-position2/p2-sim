@@ -4,9 +4,9 @@ import { z } from 'zod'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
 import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
+import { processFilesToUserFiles } from '@/lib/uploads/utils/file'
+import { downloadServableFileFromStorage } from '@/lib/uploads/utils/file.server'
 import { RawFileInputArraySchema } from '@/lib/uploads/utils/file-schemas'
-import { processFilesToUserFiles } from '@/lib/uploads/utils/file-utils'
-import { downloadServableFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
 import { UNIPILE_BASE_URL } from '@/tools/unipile/types'
 
 const logger = createLogger('UnipileSendChatMessageAPI')

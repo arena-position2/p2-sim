@@ -29,7 +29,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/workspace/ws-emir/home',
 }))
-vi.mock('@/lib/auth/auth-client', () => ({ useActiveOrganization: () => ({ data: null }) }))
+vi.mock('@/lib/auth/client', () => ({ useActiveOrganization: () => ({ data: null }) }))
 vi.mock('@/hooks/use-settings-navigation', () => ({
   useSettingsNavigation: () => ({
     navigateToSettings: mockNavigateToSettings,

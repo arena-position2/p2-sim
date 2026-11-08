@@ -1,0 +1,68 @@
+---
+title: Image Fusion
+description: Fuse multiple images with Nano Banana Pro
+integration:
+  type: "image_fusion"
+  color: "#4D5FFF"
+---
+
+import { ReferenceDetails } from "@/components/ui/reference-details"
+
+## Use the block [#usage-instructions]
+
+Combine or fuse multiple images into one using Google Nano Banana Pro. Upload two or more images and describe how to merge them in the prompt. Use 1K resolution for faster results; 2K/4K may hit API deadlines with multiple images.
+
+## Actions
+
+### Google Nano Banana
+
+Generate images using Google's Gemini Native Image (Nano Banana) model
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `model` | string | Yes | The Nano Banana model to use \(gemini-2.5-flash-image\) |
+| `prompt` | string | Yes | A text description of the desired image |
+| `aspectRatio` | string | No | The aspect ratio of the generated image \(1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9\) |
+| `inputImage` | string | No | Reference image URL or file reference for editing. Do not pass inline base64 image data; use an uploaded file reference or URL instead. |
+| `inputImageMimeType` | string | No | MIME type of the input image \(image/png, image/jpeg, etc.\) |
+| `inputImages` | array | No | Multiple reference images for fusion. Supported on Gemini image models \(up to 14 on Nano Banana 2, 11 on Pro, 3 on Nano Banana\). Use image URLs or uploaded file reference objects; do not pass inline base64 image data. When provided, used instead of inputImage. |
+| `inputImageUrls` | string | No | Image URLs \(one per line or comma-separated\). Merged with inputImages and any URLs in the prompt for fusion / reference images. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Operation success status |
+| `content` | string | Image identifier |
+| `image` | string | Base64 encoded image data |
+| `images` | array | Generated images \(URLs in S3/local storage or base64\) |
+| `metadata` | object | Image generation metadata |
+|   ↳ `model` | string | Model used for image generation |
+|   ↳ `mimeType` | string | Image MIME type |
+|   ↳ `aspectRatio` | string | Image aspect ratio |
+|   ↳ `imageSize` | string | Output resolution \(1K/2K/4K\) when using Nano Banana Pro |
+|   ↳ `hasInputImage` | boolean | Whether an input image was provided for editing |
+|   ↳ `hasInputImages` | boolean | Whether multiple images were provided for fusion |
+|   ↳ `inputImageCount` | number | Number of input images used for fusion \(when hasInputImages is true\) |
+|   ↳ `inputImageMimeType` | string | MIME type of the input image \(if provided\) |
+| `output` | object | Generated image data |
+|   ↳ `content` | string | Image identifier |
+|   ↳ `image` | string | Base64 encoded image data |
+|   ↳ `images` | array | Generated images \(URLs in S3/local storage or base64\) |
+|   ↳ `metadata` | object | Image generation metadata |
+|     ↳ `model` | string | Model used for image generation |
+|     ↳ `mimeType` | string | Image MIME type |
+|     ↳ `aspectRatio` | string | Image aspect ratio |
+|     ↳ `imageSize` | string | Output resolution \(1K/2K/4K\) when using Nano Banana Pro |
+|     ↳ `hasInputImage` | boolean | Whether an input image was provided for editing |
+|     ↳ `hasInputImages` | boolean | Whether multiple images were provided for fusion |
+|     ↳ `inputImageCount` | number | Number of input images used for fusion \(when hasInputImages is true\) |
+|     ↳ `inputImageMimeType` | string | MIME type of the input image \(if provided\) |
+
+</ReferenceDetails>
+
+

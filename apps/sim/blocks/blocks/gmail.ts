@@ -64,7 +64,7 @@ export const GmailBlock: BlockConfig = {
   description: 'Send, read, search, and move Gmail messages or trigger workflows from Gmail events',
   authMode: AuthMode.OAuth,
   longDescription:
-    'Integrate Gmail into the workflow. Can send, read, search, and move emails. Can be used in trigger mode to trigger a workflow when a new email is received.',
+    'Send or draft messages, read and search mail, and manage labels and read status. New-mail triggers can start workflows.',
   docsLink: 'https://docs.sim.ai/integrations/gmail',
   category: 'tools',
   integrationType: IntegrationType.Email,
@@ -622,6 +622,8 @@ Return ONLY the search query - no explanations, no extra text.`,
             return 'gmail_add_label'
           case 'remove_label_gmail':
             return 'gmail_remove_label'
+          case 'edit_draft_gmail':
+            return 'gmail_edit_draft_v2'
           default:
             throw new Error(`Invalid Gmail operation: ${params.operation}`)
         }
@@ -844,6 +846,7 @@ export const GmailV2Block: BlockConfig = {
       'gmail_delete_v2',
       'gmail_add_label_v2',
       'gmail_remove_label_v2',
+      'gmail_list_labels_v2',
     ],
     config: {
       ...GmailBlock.tools?.config,

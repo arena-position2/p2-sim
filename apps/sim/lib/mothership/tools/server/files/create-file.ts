@@ -15,13 +15,13 @@ import {
   createWorkspaceFileSecretProvenanceFromRegistry,
   EXACT_EMPTY_WORKSPACE_FILE_SECRET_PROVENANCE,
   type WorkspaceFileSecretProvenance,
-} from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+} from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import {
   createWorkspaceFileBufferByPath,
   updateWorkspaceFileContentBufferByPath,
   type WriteWorkspaceFileByPathResult,
 } from '@/lib/workspace-files/application/write-workspace-file-by-path'
-import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
+import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-content-type'
 import { rejectHtmlCreateContent } from './html-edit-size-guards'
 
 const logger = createLogger('CreateFileServerTool')

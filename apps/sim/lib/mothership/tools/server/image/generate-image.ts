@@ -24,16 +24,18 @@ import {
   type BaseServerTool,
   type ServerToolContext,
 } from '@/lib/mothership/tools/server/base-tool'
-import { assertOpaqueWorkspaceFileModelSafe } from '@/lib/mothership/tools/server/model-input'
-import { writeCopilotWorkspaceFileByPath } from '@/lib/mothership/vfs/resource-writer'
-import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
-import { createWorkspaceFileSecretProvenanceFromRegistry } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+import {
+  validateCopilotWorkspaceFileWriteTarget,
+  writeCopilotWorkspaceFileByPath,
+} from '@/lib/mothership/vfs/resource-writer'
+import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/file-manager'
+import { createWorkspaceFileSecretProvenanceFromRegistry } from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import { fileOperations } from '@/lib/workspace-files/application/operations'
 import { readWorkspaceFileContent } from '@/lib/workspace-files/application/read-workspace-file-content'
 
 const logger = createLogger('GenerateImageTool')
 
-const NANO_BANANA_MODEL = 'gemini-3.1-flash-image-preview'
+const NANO_BANANA_MODEL = 'gemini-3.1-flash-image'
 const NANO_BANANA_IMAGE_COST_USD = 0.101
 const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 
@@ -150,7 +152,7 @@ async function loadReferenceImage(
     }
     throw error
   }
-  await assertOpaqueWorkspaceFileModelSafe({ workspaceId, file })
+
   try {
     const { content } = await executeCopilotFileUseCase(
       context,
@@ -159,6 +161,7 @@ async function loadReferenceImage(
         fileId: file.id,
         assertedWorkspaceId: workspaceId,
         maxBytes: MAX_MEDIA_BYTES,
+        contentView: 'opaque',
       },
       { fileId: file.id }
     )
@@ -191,9 +194,18 @@ export const generateImageServerTool: BaseServerTool<GenerateImageArgs, Generate
     }
 
     try {
+      const outputFiles = params.outputs?.files ?? []
+      for (const outputFile of outputFiles) {
+        if (!outputFile.path) continue
+        await validateCopilotWorkspaceFileWriteTarget(context, {
+          workspaceId,
+          target: { path: outputFile.path, mode: outputFile.mode ?? 'create' },
+        })
+      }
+
       const { imageCount, promptImageUrl, singleImagePrompt, singleImagePrompts } =
         await resolveImageGenerationCount({ prompt })
-      const apiKey = getRotatingApiKey('google')
+      const apiKey = getRotatingApiKey('gemini')
       const ai = new GoogleGenAI({ apiKey })
 
       const aspectRatio = params.aspectRatio || '1:1'

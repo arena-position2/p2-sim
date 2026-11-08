@@ -149,8 +149,21 @@ interface GmailDraftV2Response {
 export const gmailDraftV2Tool: InternalToolConfig<GmailSendParams, GmailDraftV2Response> = {
   id: 'gmail_draft_v2',
   name: 'Gmail Draft',
-  description: 'Draft emails using Gmail',
+  description: 'Draft emails using Gmail.',
   version: '2.0.0',
+  assistant: {
+    effect: 'write',
+    version: 1,
+    reviewFields: [
+      { name: 'to', label: 'To', target: true },
+      { name: 'cc', label: 'Cc', target: true },
+      { name: 'bcc', label: 'Bcc', target: true },
+      { name: 'threadId', label: 'Thread', target: true },
+      { name: 'replyToMessageId', label: 'Reply to message', target: true },
+      { name: 'subject', label: 'Subject', editable: true },
+      { name: 'body', label: 'Message', format: 'multiline', editable: true },
+    ],
+  },
   oauth: gmailDraftTool.oauth,
   params: gmailDraftTool.params,
   operation: gmailDraftTool.operation,

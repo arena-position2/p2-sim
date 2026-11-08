@@ -1,6 +1,6 @@
 import { mcpServerDelegationPolicy } from '@/lib/mcp/application/authorization'
 import { mcpServerOperations } from '@/lib/mcp/application/operations'
-import { createCopilotApplicationAdapter } from '@/lib/mothership/application/application-adapter'
+import { createCopilotApplicationAdapter } from '@/lib/mothership/application/adapter'
 import { COPILOT_APPLICATION_DELEGATION_TTL_MS } from '@/lib/mothership/auth/application-delegation'
 
 /**

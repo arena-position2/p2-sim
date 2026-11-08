@@ -12,6 +12,10 @@ interface ResourceNoResultsProps {
   filterCount: number
   /** Clears the query and every filter, restoring the open folder's contents. */
   onClear: () => void
+  /** Where a search looked, for a list that isn't foldered within a workspace. */
+  searchScope?: string
+  /** The scope of active filters when the search is empty. */
+  filterScope?: string
   /**
    * Override the folder-scoped description. Document lists (and other unfoldered
    * surfaces) pass their own copy so they do not claim a search spanned folders.
@@ -36,18 +40,15 @@ export function ResourceNoResults({
   search,
   filterCount,
   onClear,
+  searchScope = 'Searched every folder in this workspace.',
+  filterScope = 'Filters apply to this folder only.',
   description,
 }: ResourceNoResultsProps) {
   const trimmed = search.trim()
   return (
     <EmptyState
       title={trimmed ? `No results for “${trimmed}”` : 'No results'}
-      description={
-        description ??
-        (trimmed
-          ? 'Searched every folder in this workspace.'
-          : 'Filters apply to this folder only.')
-      }
+      description={description ?? (trimmed ? searchScope : filterScope)}
       action={
         <Chip variant='border' onClick={onClear}>
           {trimmed && filterCount > 0

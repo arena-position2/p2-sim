@@ -23,7 +23,7 @@ import {
 import {
   aggregateLoopIterationOutputs,
   collectLoopScopedOutputs,
-} from '@/executor/utils/subflow-utils'
+} from '@/executor/utils/subflow'
 import {
   type AsyncPathNavigator,
   navigatePath,

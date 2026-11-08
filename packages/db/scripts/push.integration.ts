@@ -307,6 +307,48 @@ export const workflows = pgTable('workflow', {
     ])
   }, 60_000)
 
+  it('preserves populated composite folder references when schema push is repeated', async () => {
+    await schema(`export const folders = pgTable('folder', {
+  id: text('id').primaryKey(), resourceType: text('resource_type').notNull(),
+  workspaceId: text('workspace_id').notNull(), parentId: text('parent_id'),
+}, (t) => [
+  unique('folder_workspace_owner_type_unique').on(t.id, t.workspaceId, t.resourceType),
+  foreignKey({ name: 'folder_workspace_parent_owner_fk', columns: [t.parentId, t.workspaceId, t.resourceType], foreignColumns: [t.id, t.workspaceId, t.resourceType] }),
+])`)
+    const first = push()
+    expect(first.status, first.stdout + first.stderr).toBe(0)
+    await sql`INSERT INTO folder (id, workspace_id, resource_type, parent_id)
+      VALUES ('parent', 'workspace-a', 'file', NULL), ('child', 'workspace-a', 'file', 'parent')`
+    const repeated = push()
+    expect(repeated.status, repeated.stdout + repeated.stderr).toBe(0)
+    expect(await sql`SELECT id, parent_id, workspace_id FROM folder ORDER BY id`).toEqual([
+      { id: 'child', parent_id: 'parent', workspace_id: 'workspace-a' },
+      { id: 'parent', parent_id: null, workspace_id: 'workspace-a' },
+    ])
+    await expect(
+      sql`UPDATE folder SET workspace_id = 'workspace-b' WHERE id = 'child'`
+    ).rejects.toMatchObject({ code: '23503' })
+  }, 60_000)
+
+  it('adds a composite unique constraint before the foreign keys that reference it', async () => {
+    await sql`CREATE TABLE folder (id text PRIMARY KEY, resource_type text NOT NULL, parent_id text)`
+    await sql`INSERT INTO folder VALUES ('parent', 'file', NULL), ('child', 'file', 'parent')`
+    await schema(`export const folders = pgTable('folder', {
+  id: text('id').primaryKey(), resourceType: text('resource_type').notNull(),
+  projectId: text('project_id'), parentId: text('parent_id'),
+}, (t) => [
+  unique('folder_project_owner_type_unique').on(t.id, t.projectId, t.resourceType),
+  foreignKey({ name: 'folder_project_parent_owner_fk', columns: [t.parentId, t.projectId, t.resourceType], foreignColumns: [t.id, t.projectId, t.resourceType] }),
+])`)
+    const result = push()
+    expect(result.error).toBeUndefined()
+    expect(result.status, result.stdout + result.stderr).toBe(0)
+    await sql`UPDATE folder SET project_id = 'project' WHERE id = 'parent'`
+    await expect(
+      sql`UPDATE folder SET project_id = 'other' WHERE id = 'child'`
+    ).rejects.toMatchObject({ code: '23503' })
+  }, 30_000)
+
   it('retires the legacy size bridge without losing bigint or unbackfilled values', async () => {
     await sql`CREATE TABLE workspace_files (id text PRIMARY KEY, size integer NOT NULL, size_bytes bigint)`
     await sql`INSERT INTO workspace_files VALUES ('legacy', 123, NULL), ('large', 2147483647, 5000000000)`

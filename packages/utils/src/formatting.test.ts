@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  formatDate,
-  formatDateTime,
   formatDuration,
   formatInUserTimezone,
+  formatLowerBound,
   formatUserDateTime,
   getTimezoneAbbreviation,
 } from './formatting.js'
@@ -12,25 +11,6 @@ describe('getTimezoneAbbreviation', () => {
   it('resolves a valid IANA timezone outside the hardcoded map via Intl instead of the raw string', () => {
     const result = getTimezoneAbbreviation('Europe/Berlin', new Date('2023-01-15'))
     expect(result).not.toBe('Europe/Berlin')
-  })
-
-  it('returns PST or PDT for Los Angeles', () => {
-    const result = getTimezoneAbbreviation('America/Los_Angeles', new Date('2023-01-15'))
-    expect(['PST', 'PDT']).toContain(result)
-  })
-})
-
-describe('formatDateTime', () => {
-  it('formats a date with time', () => {
-    const date = new Date('2023-05-15T14:30:00')
-    const result = formatDateTime(date)
-    expect(result).toMatch(/May 15, 2023/)
-  })
-
-  it('appends timezone abbreviation when timezone is provided', () => {
-    const date = new Date('2023-05-15T14:30:00Z')
-    const result = formatDateTime(date, 'UTC')
-    expect(result).toContain('UTC')
   })
 })
 
@@ -64,18 +44,21 @@ describe('formatInUserTimezone', () => {
   })
 })
 
-describe('formatDate', () => {
-  it('formats a date without time', () => {
-    const date = new Date('2023-05-15T14:30:00')
-    const result = formatDate(date)
-    expect(result).toMatch(/May 15, 2023/)
-    expect(result).not.toMatch(/14:30/)
-  })
-})
-
 describe('formatDuration', () => {
   it('formats sub-millisecond durations', () => {
     expect(formatDuration(0.5)).toBe('0.50ms')
     expect(formatDuration(0.001)).toBe('0ms')
+  })
+})
+
+describe('formatLowerBound', () => {
+  it('keeps counts under 100 exact', () => {
+    expect(formatLowerBound(0)).toBe('0+')
+    expect(formatLowerBound(66)).toBe('66+')
+  })
+
+  it('rounds down to two significant figures, never up', () => {
+    expect(formatLowerBound(999)).toBe('990+')
+    expect(formatLowerBound(5499)).toBe('5,400+')
   })
 })

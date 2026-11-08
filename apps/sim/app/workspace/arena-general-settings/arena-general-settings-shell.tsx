@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useRef } from 'react'
 import { SettingsHeaderProvider, SettingsHeaderShell } from '@/components/settings/settings-header'
 import { SettingsSectionProvider } from '@/components/settings/settings-panel'
 import { useSettingsBrowserNavigation } from '@/components/settings/use-settings-browser-navigation'
-import { useTheme } from '@/app/_shell/providers/theme-provider'
+import { useTheme } from 'next-themes'
 import { ArenaThemeSync } from '@/app/workspace/[workspaceId]/providers/arena-theme-sync'
 
 const ARENA_EMBED_THEMES = ['light', 'dark', 'system'] as const
@@ -32,8 +32,15 @@ function useArenaEmbedTheme() {
   }, [setTheme])
 }
 
+interface ArenaGeneralSettingsMeta {
+  label: string
+  description: string
+  docsLink?: string
+}
+
 interface ArenaGeneralSettingsShellProps {
   children: ReactNode
+  meta: ArenaGeneralSettingsMeta
 }
 
 /**
@@ -44,20 +51,24 @@ interface ArenaGeneralSettingsShellProps {
  * layout's theme listener. The iframe must subscribe itself or an Arena theme
  * PATCH never updates the embedded document.
  */
-export function ArenaGeneralSettingsShell({ children }: ArenaGeneralSettingsShellProps) {
+export function ArenaGeneralSettingsShell({ children, meta }: ArenaGeneralSettingsShellProps) {
   useSettingsBrowserNavigation()
   useArenaEmbedTheme()
 
   return (
-    <div className='flex h-screen w-full overflow-hidden bg-[var(--bg)]'>
+    <div className='flex h-screen w-full flex-col overflow-hidden bg-[var(--bg)]'>
       <ArenaThemeSync />
-      <SettingsHeaderProvider>
-        <SettingsHeaderShell>
-          <SettingsSectionProvider section='general' meta={{ label: '', description: '' }}>
-            {children}
-          </SettingsSectionProvider>
-        </SettingsHeaderShell>
-      </SettingsHeaderProvider>
+      <div className='min-h-0 w-full flex-1'>
+        <SettingsHeaderProvider>
+          <SettingsHeaderShell
+            meta={{ title: meta.label, description: meta.description, docsLink: meta.docsLink }}
+          >
+            <SettingsSectionProvider plane='account' section='general' meta={meta}>
+              {children}
+            </SettingsSectionProvider>
+          </SettingsHeaderShell>
+        </SettingsHeaderProvider>
+      </div>
     </div>
   )
 }

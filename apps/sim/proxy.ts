@@ -1,9 +1,16 @@
+import {
+  LANDING_INTEGRATION_SLUGS,
+  LANDING_SLUG_BY_DOCS_SLUG,
+} from '@sim/deployment-config/integration-docs'
 import { createLogger } from '@sim/logger'
 import { getSessionCookie } from 'better-auth/cookies'
 import { type NextRequest, NextResponse } from 'next/server'
 import { resolveSimMcpHostPath } from '@/lib/api/mcp/host-routing'
 import { SIM_MCP_ROUTE_PATH } from '@/lib/api/mcp/urls'
-import { APP_ENTRY_PATH, isNoindexPath } from '@/lib/navigation/paths'
+import { getBrowserExtensionOrigins } from '@/lib/core/security/extension'
+import { isMarketingPath } from '@/lib/landing/routes'
+import { isAuthSurfacePath } from '@/lib/navigation/auth-surfaces'
+import { APP_ENTRY_PATH, isAppSurfacePath, isNoindexPath } from '@/lib/navigation/paths'
 import { isOAuthAuthorizationCallback, resolveAuthRedirect } from '@/app/(auth)/auth-redirect'
 import { sendToProfound } from './lib/analytics/profound'
 import {
@@ -300,13 +307,19 @@ const SUSPICIOUS_UA_PATTERNS = [
 ] as const
 
 /**
- * Handles authentication-based redirects for root paths
+ * Resolves legacy homepage aliases and authentication-based root redirects.
  */
 function handleRootPathRedirects(
   request: NextRequest,
   hasActiveSession: boolean
 ): NextResponse | null {
   const url = request.nextUrl
+
+  if (url.pathname !== '/sim' && url.pathname.toLowerCase() === '/sim') {
+    const destination = url.clone()
+    destination.pathname = '/'
+    return NextResponse.redirect(destination, 308)
+  }
 
   if (url.pathname !== '/' || url.searchParams.has('home')) {
     return null
@@ -376,15 +389,16 @@ function handleSecurityFiltering(request: NextRequest): NextResponse | null {
     pathname.startsWith('/api/webhooks/tiktok') ||
     pathname.startsWith('/api/webhooks/agentmail')
   const isMcpEndpoint = pathname.startsWith('/api/mcp/')
-  const isMcpDiscoveryEndpoint =
+  const isDiscoveryEndpoint =
     pathname.startsWith('/.well-known/oauth-authorization-server') ||
     pathname.startsWith('/.well-known/oauth-protected-resource') ||
-    pathname === '/.well-known/openai-apps-challenge'
+    pathname === '/.well-known/openai-apps-challenge' ||
+    pathname === '/.well-known/api-catalog'
   const isSuspicious = SUSPICIOUS_UA_PATTERNS.some((pattern) => pattern.test(userAgent))
 
   // Block suspicious requests, but exempt machine-to-machine endpoints that may
-  // legitimately omit User-Agent headers (webhooks and MCP protocol discovery/calls).
-  if (isSuspicious && !isWebhookEndpoint && !isMcpEndpoint && !isMcpDiscoveryEndpoint) {
+  // legitimately omit User-Agent headers (webhooks, MCP calls, and protocol discovery).
+  if (isSuspicious && !isWebhookEndpoint && !isMcpEndpoint && !isDiscoveryEndpoint) {
     // Scanner traffic (empty or tool user agents probing /admin.php etc.); the 403 is the response.
     logger.debug('Blocked suspicious request', {
       userAgent,
@@ -410,6 +424,21 @@ function handleSecurityFiltering(request: NextRequest): NextResponse | null {
   }
 
   return null
+}
+
+/**
+ * Docs integration slugs (`google_drive`, `microsoft_ad`) are not landing slugs (`google-drive`,
+ * `azure-ad`), yet reach the landing site through hand-written and search-indexed links. Redirect a
+ * known docs slug to its landing page through the catalog mapping instead of serving a 404.
+ */
+function handleIntegrationSlugRedirect(request: NextRequest): NextResponse | null {
+  const slug = /^\/integrations\/([^/]+)\/?$/.exec(request.nextUrl.pathname)?.[1]
+  if (!slug || LANDING_INTEGRATION_SLUGS.has(slug)) return null
+  const landingSlug = LANDING_SLUG_BY_DOCS_SLUG.get(slug)
+  if (!landingSlug) return null
+  const url = request.nextUrl.clone()
+  url.pathname = `/integrations/${landingSlug}`
+  return NextResponse.redirect(url, 308)
 }
 
 export function proxy(request: NextRequest) {
@@ -464,7 +493,6 @@ export function proxy(request: NextRequest) {
         NextResponse.redirect(new URL(APP_ENTRY_PATH, request.url))
       )
     }
-    // Arena SSO resume unless this deployment serves the in-app login page
     if (!isLocalLoginEnabled) {
       return track(request, redirectUnauthenticated(request))
     }
@@ -475,32 +503,41 @@ export function proxy(request: NextRequest) {
     return applyIndexingPolicy(request, response)
   }
 
-  // `/chat/*` requires a Better Auth session, same as `/workspace` — Arena SSO
-  // resume when missing (configured hub, e.g. app.thearena.ai /sso/sim-resume).
+  // Chat pages are publicly accessible embeds — CSP is set in next.config.ts headers
   if (url.pathname.startsWith('/chat/')) {
-    if (!hasActiveSession) {
-      return track(request, redirectUnauthenticated(request))
-    }
-    const response = NextResponse.next()
-    response.headers.set('Content-Security-Policy', generateRuntimeCSP())
-    response.headers.set('X-Content-Type-Options', 'nosniff')
-    return track(request, response)
+    return applyIndexingPolicy(request, NextResponse.next())
   }
 
-  // Arena redirect SSO callback / error — no Better Auth session yet
+  if (url.pathname === '/extension' || url.pathname.startsWith('/extension/')) {
+    const response = NextResponse.next()
+    response.headers.set(
+      'Content-Security-Policy',
+      generateRuntimeCSP(getBrowserExtensionOrigins())
+    )
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    response.headers.set('Cache-Control', 'private, no-store')
+    response.headers.set('Referrer-Policy', 'no-referrer')
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow')
+    return response
+  }
+
   if (url.pathname === '/auth/arena-sso-callback' || url.pathname === '/auth/arena-sso-error') {
     return track(request, NextResponse.next())
   }
 
-  if (url.pathname.startsWith('/workspace')) {
+  if (isAppSurfacePath(url.pathname)) {
     if (!hasActiveSession) {
       return track(request, redirectUnauthenticated(request))
     }
     const response = NextResponse.next()
     response.headers.set('Content-Security-Policy', generateRuntimeCSP())
     response.headers.set('X-Content-Type-Options', 'nosniff')
-    return track(request, response)
+    response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+    return applyIndexingPolicy(request, response)
   }
+
+  const integrationSlugRedirect = handleIntegrationSlugRedirect(request)
+  if (integrationSlugRedirect) return applyIndexingPolicy(request, integrationSlugRedirect)
 
   const invitationRedirect = handleInvitationRedirects(request, hasActiveSession)
   if (invitationRedirect) return applyIndexingPolicy(request, invitationRedirect)
@@ -509,8 +546,6 @@ export function proxy(request: NextRequest) {
   if (securityBlock) return applyIndexingPolicy(request, securityBlock)
 
   const response = NextResponse.next()
-  response.headers.set('Vary', 'User-Agent')
-
   response.headers.set('Content-Security-Policy', generateRuntimeCSP())
   response.headers.set('X-Content-Type-Options', 'nosniff')
 
@@ -518,10 +553,9 @@ export function proxy(request: NextRequest) {
 }
 
 /**
- * Keeps non-production Arena agent hosts out of search results. Only
- * `agent.thearena.ai` is indexable. App and utility paths are noindex on every
- * host, including redirects, so a signed-out crawler bounced from
- * `/workspace/*` still sees the directive.
+ * Keeps every host except the indexable Arena agent host, plus auth and utility
+ * paths on that host, out of search results. Applies to redirects too, so a
+ * signed-out crawler bounced from `/workspace/*` still sees the directive.
  *
  * `noindex` rather than a robots.txt `Disallow` is deliberate: a disallowed URL
  * can still be indexed when linked externally, and blocking the crawl stops
@@ -535,7 +569,13 @@ function applyIndexingPolicy(request: NextRequest, response: NextResponse): Next
     request.headers.get('host') ||
     request.nextUrl.host
 
-  if (!isSearchIndexableHost(host) || isNoindexPath(request.nextUrl.pathname)) {
+  const { pathname } = request.nextUrl
+  if (
+    !isSearchIndexableHost(host) ||
+    isNoindexPath(pathname) ||
+    isAuthSurfacePath(pathname) ||
+    (!isHosted && isMarketingPath(pathname))
+  ) {
     response.headers.set('X-Robots-Tag', 'noindex, nofollow')
   }
 
@@ -568,9 +608,10 @@ export const config = {
     '/session-required',
     '/auth/arena-sso-callback',
     '/auth/arena-sso-error',
-    // Runtime CORS. The desktop's raw upload routes are left out: running the proxy makes Next
-    // buffer the body, cutting it off at its 10 MB proxy limit, and those bodies are whole files.
-    '/api/((?!desktop/tool/(?:import|file)$).*)',
+    // Runtime CORS. The desktop's raw upload routes and the realtime relay's document persists are
+    // left out: running the proxy makes Next buffer the body, cutting it off at its 10 MB proxy
+    // limit, and those bodies are whole files or document snapshots.
+    '/api/((?!desktop/tool/(?:import|file)$|internal/file-doc/persist$|internal/project-file-doc/[^/]+/[^/]+/persist$).*)',
     // Next's image optimizer fetches public editorial images without a User-Agent.
     '/((?!api/|api$|_next/static|_next/image|(?:blog|changelog)/.*\\.(?:avif|gif|jpe?g|png|svg|webp)$|ingest|favicon.ico|logo/|landing/|static/|footer/|social/|enterprise/|favicon/|twitter/|robots.txt|sitemap.xml).*)',
   ],

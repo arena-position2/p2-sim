@@ -2,10 +2,10 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useTheme } from '@/app/_shell/providers/theme-provider'
+import { useTheme } from 'next-themes'
 import '@sim/emcn/components/code/code.css'
 import { CSV_PREVIEW_MAX_ROWS } from '@/lib/api/contracts/workspace-file-table'
-import { getFileExtension } from '@/lib/uploads/utils/file-utils'
+import { getFileExtension } from '@/lib/uploads/utils/file'
 import { normalizeMimeType } from '@/lib/uploads/utils/mime'
 import {
   SIM_ARTIFACT_SHELL,

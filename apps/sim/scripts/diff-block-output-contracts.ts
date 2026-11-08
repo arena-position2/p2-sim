@@ -406,7 +406,7 @@ function formatDiff(diff: OutputContractDiff, verbose: boolean): string {
 
 async function collectCurrentDump(): Promise<OutputContractDump> {
   const { getBlockRegistry } = await import('@/blocks/registry')
-  const { getBlockOutputs, getToolOutputs } = await import('@/lib/workflows/blocks/block-outputs')
+  const { getBlockOutputs, getToolOutputs } = await import('@/lib/workflows/blocks/outputs')
   const rows: OutputContractRow[] = []
 
   for (const block of Object.values(getBlockRegistry())) {

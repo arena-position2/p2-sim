@@ -4,6 +4,7 @@ export const organizationKeys = {
   adminLists: () => [...organizationKeys.all, 'admin'] as const,
   details: () => [...organizationKeys.all, 'detail'] as const,
   detail: (id: string) => [...organizationKeys.details(), id] as const,
+  summary: (id: string) => [...organizationKeys.detail(id), 'summary'] as const,
   subscription: (id: string) => [...organizationKeys.detail(id), 'subscription'] as const,
   billing: (id: string) => [...organizationKeys.detail(id), 'billing'] as const,
   planSeats: (id: string) => [...organizationKeys.billing(id), 'plan-seats'] as const,

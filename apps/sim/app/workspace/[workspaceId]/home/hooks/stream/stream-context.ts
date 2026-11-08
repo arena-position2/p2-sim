@@ -5,7 +5,10 @@ import type { RevealedSimKeysByMessage } from '@/lib/mothership/chat/sim-key-red
 import { captureRevealedSimKeys } from '@/lib/mothership/chat/sim-key-redaction'
 import type { SyntheticFilePreviewPayload } from '@/lib/mothership/request/session'
 import type { FilePreviewSession } from '@/lib/mothership/request/session/file-preview-session-contract'
-import type { MothershipResourceUpdate } from '@/lib/mothership/resources/types'
+import type {
+  ChatResourceAddress,
+  MothershipResourceUpdate,
+} from '@/lib/mothership/resources/types'
 import {
   createTurnModel,
   type TurnModel,
@@ -18,9 +21,9 @@ import {
 import type { ResourceEventHandler } from '@/app/workspace/[workspaceId]/home/hooks/use-chat'
 import type {
   ChatMessage,
+  ChatRequestMode,
   ContentBlock,
   MothershipResource,
-  MothershipResourceType,
 } from '@/app/workspace/[workspaceId]/home/types'
 import {
   type MothershipChatHistory,
@@ -99,6 +102,7 @@ export interface StreamEventScope {
 }
 
 export interface StreamLoopDeps {
+  requestMode: ChatRequestMode
   viewerId?: string
   citedSourcesEnabled?: boolean
   workspaceId?: string
@@ -113,18 +117,17 @@ export interface StreamLoopDeps {
   setPendingMessages: Dispatch<SetStateAction<ChatMessage[]>>
   setResolvedChatId: Dispatch<SetStateAction<string | undefined>>
   /** Adopts a server-created chat before any event handler mutates chatIdRef. */
-  adoptResolvedChatId: (chatId: string) => void
+  adoptResolvedChatId: (chatId: string, options?: { replaceHomeHistory?: boolean }) => void
   setResources: Dispatch<SetStateAction<MothershipResource[]>>
   setActiveResourceId: Dispatch<SetStateAction<string | null>>
 
   addResource: (resource: MothershipResourceUpdate) => boolean
-  removeResource: (
-    resourceType: MothershipResourceType,
-    resourceId: string,
-    workspaceId?: string
-  ) => void
+  removeResource: (resource: ChatResourceAddress) => void
+  /** Drops a queued client write that would re-add a resource the server already removed. */
+  discardPendingResourceUpsert: (resource: ChatResourceAddress) => void
   startClientWorkflowTool: (id: string, name: string, args: Record<string, unknown>) => void
   startClientLocalFilesystemTool: (id: string, name: string, args: Record<string, unknown>) => void
+  startClientComputerTool: (id: string, args: Record<string, unknown>, ts?: string) => void
   startClientBrowserTool: (
     id: string,
     name: string,
@@ -157,6 +160,7 @@ export interface StreamLoopDeps {
 
   buildAssistantSnapshotMessage: (params: {
     id: string
+    streamId?: string
     content: string
     contentBlocks: ContentBlock[]
     requestId?: string
@@ -295,6 +299,7 @@ export function createStreamLoopContext(deps: StreamLoopDeps): StreamLoopContext
       const snapshot: Partial<ChatMessage> = {
         content: modelContent,
         contentBlocks: modelBlocks,
+        ...(deps.streamIdRef.current ? { streamId: deps.streamIdRef.current } : {}),
       }
       // Always stamp liveStatus when set so later flushes cannot drop it. Clear
       // with empty string on terminal events so normalizeMessage removes it.
@@ -322,6 +327,7 @@ export function createStreamLoopContext(deps: StreamLoopDeps): StreamLoopContext
 
     const assistantMessage = deps.buildAssistantSnapshotMessage({
       id: deps.assistantId,
+      ...(deps.streamIdRef.current ? { streamId: deps.streamIdRef.current } : {}),
       content: modelContent,
       contentBlocks: modelBlocks,
       ...(state.streamRequestId ? { requestId: state.streamRequestId } : {}),

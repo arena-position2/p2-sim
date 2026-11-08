@@ -1,0 +1,298 @@
+---
+title: Figma
+description: Interact with Figma files, create designs, and convert to code
+integration:
+  type: "figma"
+  color: "#F24E1E"
+---
+
+import { ReferenceDetails } from "@/components/ui/reference-details"
+
+## Use the block [#usage-instructions]
+
+Integrate Figma into your workflow. Create new Figma files, convert designs to HTML/React/Angular code, manage comments, and access team projects. Requires Figma API key for authentication.
+
+## Actions
+
+### Generate Figma Design with AI
+
+Generate AI-powered Figma designs automatically using Claude AI and browser automation
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `description` | string | No | Optional description for the file |
+| `designPrompt` | string | Yes | AI prompt to generate design content |
+| `projectId` | string | Yes | Figma project ID to create the file in |
+| `brandGuidelines` | file | No | Optional brand guidelines file \(PDF, image, or text\) to inform the design |
+| `wireframes` | file | No | Optional wireframes file to guide the design structure |
+| `additionalData` | file | No | Optional additional data or reference files |
+| `additionalInfo` | string | No | Additional text information to guide the design generation |
+| `designTargets` | array | No | Device/layout experiences \(desktop, mobile, etc.\) to generate simultaneously |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Success message with Figma file URL |
+| `metadata` | object | File metadata including key, name, and generated content |
+|   ↳ `key` | string | Figma file URL |
+|   ↳ `name` | string | File name |
+|   ↳ `lastModified` | string | Last modified timestamp |
+|   ↳ `thumbnailUrl` | string | Thumbnail URL |
+|   ↳ `version` | string | File version |
+|   ↳ `role` | string | User role in the file |
+|   ↳ `editorType` | string | Editor type |
+|   ↳ `linkAccess` | string | Link access level |
+|   ↳ `designPrompt` | string | Design prompt used |
+|   ↳ `projectId` | string | Project ID |
+|   ↳ `figmaFileUrl` | string | URL to the created Figma file |
+|   ↳ `renderedData` | string | Generated HTML/CSS code |
+| `cost` | object | LLM cost for design generation \(overall tool price\) |
+
+</ReferenceDetails>
+
+### figma_convert
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Convert Figma to HTML with AI
+
+Convert Figma designs to HTML and CSS using advanced AI processing. Extracts data from Figma API using file key and node ID, then generates responsive code with design system extraction.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key \(required\) |
+| `nodeId` | string | No | Specific node ID to convert \(optional - converts entire file if not provided\) |
+| `includeStyles` | boolean | No | Whether to include CSS styles \(default: true\) |
+| `responsive` | boolean | No | Whether to make the output responsive \(default: true\) |
+| `outputFormat` | string | No | Output format \(html, react, or vue\) |
+| `customPrompt` | string | No | Custom AI prompt for specific requirements |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `metadata` | object | Metadata about the conversion process including combined HTML/CSS |
+|   ↳ `fileKey` | string | Figma file key |
+|   ↳ `nodeId` | string | Figma node ID |
+|   ↳ `processingTime` | number | Processing time in milliseconds |
+|   ↳ `aiModel` | string | AI model used for conversion |
+|   ↳ `tokensUsed` | number | Number of tokens used |
+|   ↳ `combinedHtml` | string | Generated HTML document with embedded CSS styles |
+| `cost` | object | LLM cost for the conversion \(overall tool price\) |
+
+</ReferenceDetails>
+
+### Get Figma Comments
+
+Retrieve comments from a Figma file
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key |
+| `nodeId` | string | No | Specific node ID to get comments for \(optional\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Post Figma Comment
+
+Post a comment to a Figma file
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key |
+| `message` | string | Yes | Comment message |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Delete Figma Comment
+
+Delete a comment from a Figma file
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key |
+| `commentId` | string | Yes | Comment ID to delete |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Get Team Projects
+
+Retrieve projects from a Figma team
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `teamId` | string | Yes | Figma team ID |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Get Figma File
+
+Retrieve a Figma file and its contents
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key |
+| `version` | string | No | Specific version to retrieve \(optional\) |
+| `ids` | array | No | Specific node IDs to retrieve \(optional\) |
+| `depth` | number | No | Depth of the document tree to retrieve \(optional\) |
+| `geometry` | string | No | Geometry format \(optional\) |
+| `plugin_data` | string | No | Plugin data to include \(optional\) |
+| `branch_data` | boolean | No | Include branch data \(optional\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Get Figma File Nodes
+
+Retrieve specific nodes from a Figma file
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key |
+| `ids` | array | Yes | Node IDs to retrieve |
+| `version` | string | No | Specific version to retrieve \(optional\) |
+| `depth` | number | No | Depth of the document tree to retrieve \(optional\) |
+| `geometry` | string | No | Geometry format \(optional\) |
+| `plugin_data` | string | No | Plugin data to include \(optional\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Get Figma File Images
+
+Export nodes from a Figma file as images
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fileKey` | string | Yes | Figma file key |
+| `ids` | array | Yes | Node IDs to export as images |
+| `format` | string | No | Image format \(optional\) |
+| `scale` | number | No | Scale factor \(optional\) |
+| `svg_include_id` | boolean | No | Include ID in SVG \(optional\) |
+| `svg_simplify_stroke` | boolean | No | Simplify stroke in SVG \(optional\) |
+| `use_absolute_bounds` | boolean | No | Use absolute bounds \(optional\) |
+| `version` | string | No | Specific version to retrieve \(optional\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+### Get Project Files
+
+Retrieve files from a Figma project
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `projectId` | string | Yes | Figma project ID |
+| `branch_data` | boolean | No | Include branch data \(optional\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | string | Response content |
+| `metadata` | json | Response metadata |
+
+</ReferenceDetails>
+
+

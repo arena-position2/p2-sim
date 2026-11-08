@@ -2,6 +2,8 @@ import { createLogger } from '@sim/logger'
 import { isRecordLike } from '@sim/utils/object'
 import { z } from 'zod'
 import { getValidationErrorMessage, isZodError } from '@/lib/api/server/validation'
+import { OAUTH_API_WRITE_SCOPE } from '@/lib/auth/oauth-provider'
+import { requireDelegatedApiScope } from '@/lib/core/application/oauth-authorization'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
   Ffmpeg,
@@ -32,7 +34,7 @@ import { ffmpegServerTool } from '@/lib/mothership/tools/server/media/ffmpeg'
 import { generateAudioServerTool } from '@/lib/mothership/tools/server/media/generate-audio'
 import { generateVideoServerTool } from '@/lib/mothership/tools/server/media/generate-video'
 import { openResourceServerTool } from '@/lib/mothership/tools/server/open-resource'
-import { userMemoryServerTool } from '@/lib/mothership/tools/server/other/user-memory'
+import { listProjectsServerTool } from '@/lib/mothership/tools/server/project-list'
 import { organizationSearchSourcesServerTool } from '@/lib/mothership/tools/server/search-sources'
 import { settingsServerTool } from '@/lib/mothership/tools/server/settings'
 import { testsServerTool } from '@/lib/mothership/tools/server/tests'
@@ -72,6 +74,7 @@ const baseServerToolRegistry: Record<string, BaseServerTool> = {
   [searchDocsServerTool.name]: searchDocsServerTool,
   [searchWorkspaceServerTool.name]: searchWorkspaceServerTool,
   [listWorkspacesServerTool.name]: listWorkspacesServerTool,
+  [listProjectsServerTool.name]: listProjectsServerTool,
   [workspacesServerTool.name]: workspacesServerTool,
   [organizationSearchSourcesServerTool.name]: organizationSearchSourcesServerTool,
   [settingsServerTool.name]: settingsServerTool,
@@ -87,8 +90,6 @@ const baseServerToolRegistry: Record<string, BaseServerTool> = {
   [ffmpegServerTool.name]: ffmpegServerTool,
   // Not agent-reachable: the internal credentials route dispatches this directly.
   [getCredentialsServerTool.name]: getCredentialsServerTool,
-  // Arena Local Copilot advertises user_memory; implementation lived unregistered.
-  [userMemoryServerTool.name]: userMemoryServerTool,
 }
 
 function getServerToolRegistry(): Record<string, BaseServerTool> {
@@ -158,6 +159,7 @@ export async function routeExecution(
   }
 
   assertServerToolNotAborted(context, `User stop signal aborted ${toolName} after validation`)
+  if (tool.writes?.(args)) requireDelegatedApiScope(OAUTH_API_WRITE_SCOPE)
 
   // Execute. None of the remaining tools resolve blocks or gate discovery, so the old
   // custom-block-overlay / block-visibility ALS scopes are gone with the tools that

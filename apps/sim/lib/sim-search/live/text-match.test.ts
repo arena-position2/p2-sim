@@ -3,6 +3,7 @@ import {
   confluenceTextClause,
   holdsHalfTheTerms,
   jiraTextClause,
+  queryRelevance,
 } from '@/lib/sim-search/live/text-match'
 
 describe('text match clauses', () => {
@@ -58,6 +59,16 @@ describe('text match clauses', () => {
     )
   })
 
+  it('sends a colon or backslash to Confluence as a word break, which it otherwise rejects', () => {
+    expect(confluenceTextClause('Security: Weekly Report', 'all')).toBe(
+      'text ~ "Security  Weekly Report"'
+    )
+    expect(confluenceTextClause(String.raw`C:\builds\out`, 'any')).toBe(
+      'siteSearch ~ "C  builds out"'
+    )
+    expect(confluenceTextClause(String.raw` :\ `, 'all')).toBeUndefined()
+  })
+
   it('falls back to the all-terms clause when fewer than two terms are distinctive', () => {
     expect(jiraTextClause('how does it work', 'any')).toBe('text ~ "how does it work"')
   })
@@ -90,6 +101,19 @@ describe('text match clauses', () => {
 
     it('accepts one matching term for a two-term query', () => {
       expect(holdsHalfTheTerms('contractor offboarding')('Contractor directory')).toBe(true)
+    })
+  })
+
+  describe('queryRelevance', () => {
+    it('never folds a two-letter term to a single letter', () => {
+      const relevance = queryRelevance('OS performance')
+      expect(relevance('OS performance reference guide', '')).toEqual([2, 2, 0.5])
+      expect(relevance('O(n) performance', '')).toEqual([1, 1, 1 / 3])
+    })
+
+    it('ranks a two-letter acronym in capitals but not the same word in lowercase', () => {
+      expect(queryRelevance('IT onboarding')('IT onboarding', '')).toEqual([2, 2, 1])
+      expect(queryRelevance('reset it')('Reset it', '')).toEqual([1, 1, 0.5])
     })
   })
 })

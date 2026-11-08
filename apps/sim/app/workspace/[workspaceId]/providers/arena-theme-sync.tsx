@@ -3,8 +3,8 @@
 import { useEffect } from 'react'
 import { createLogger } from '@sim/logger'
 import { normalizeEmail } from '@sim/utils/string'
-import { useSession } from '@/lib/auth/auth-client'
-import { useTheme } from '@/app/_shell/providers/theme-provider'
+import { useTheme } from 'next-themes'
+import { useSession } from '@/lib/auth/client'
 
 const logger = createLogger('ArenaThemeSync')
 

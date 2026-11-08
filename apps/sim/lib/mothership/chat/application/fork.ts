@@ -36,6 +36,7 @@ import { type MothershipResource, sanitizeChatResources } from '@/lib/mothership
 import { hasCopilotApiKey } from '@/lib/mothership/server/copilot-api-keys'
 import { captureServerEvent } from '@/lib/posthog/server'
 import { deleteFile } from '@/lib/uploads/core/storage-service'
+import { lockActiveWorkspace } from '@/lib/workspaces/active-workspace'
 import { getLocalCopilotUserAccess } from '@/local-copilot/lib/access'
 import type { CopilotBackendPreference } from '@/local-copilot/lib/copilot-backend-preference'
 import { mothershipChatConversationTitle } from '@/local-copilot/lib/persistence/store'
@@ -225,15 +226,22 @@ export const forkChat = defineAuthorizedChatUseCase({
 
       /** Publish only after both the file bytes and the worker conversation are prepared. */
       await db.transaction(async (tx) => {
+        if (parent.workspaceId) {
+          const currentWorkspace = await lockActiveWorkspace(tx, parent.workspaceId)
+          if (currentWorkspace.organizationId !== context.workspaceOrganizationId)
+            throw new OrchestrationError(
+              'conflict',
+              'Workspace organization changed. Refresh and retry.'
+            )
+        }
         /**
-         * The fork can share keys with its source (organization attachments, files whose copy
-         * failed), and chat cleanup deletes a shared key once no remaining chat references it,
-         * checking only after it deletes the source row. Holding the source row until commit
-         * orders the two: a purge that already removed it refuses this fork, and one that has
-         * not waits for this commit and then sees the fork's references.
+         * The fork can share keys with its source (`ChatFileRef` in `lib/cleanup/chat-files.ts`),
+         * and chat cleanup checks for other references only after the source row is deleted.
+         * Holding the source row until commit orders the two: a purge that already removed it
+         * refuses this fork, and one that has not waits for this commit and sees its references.
          */
         const [source] = await tx
-          .select({ id: copilotChats.id })
+          .select({ id: copilotChats.id, memorySpaceId: copilotChats.memorySpaceId })
           .from(copilotChats)
           .where(eq(copilotChats.id, chatId))
           .for('key share')
@@ -252,6 +260,7 @@ export const forkChat = defineAuthorizedChatUseCase({
             resources: newChatResources,
             previewYaml: parent.previewYaml,
             config: arena ? withArenaCopilotMarker(parent.config) : parent.config,
+            memorySpaceId: source.memorySpaceId,
             conversationId: null,
             updatedAt: now,
             lastSeenAt: now,

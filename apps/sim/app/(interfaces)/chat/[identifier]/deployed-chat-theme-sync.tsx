@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTheme } from 'next-themes'
 import { requestJson } from '@/lib/api/client/request'
 import { getUserSettingsContract } from '@/lib/api/contracts/user'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { syncThemeToNextThemes } from '@/lib/core/utils/theme'
 import { ArenaThemeSync } from '@/app/workspace/[workspaceId]/providers/arena-theme-sync'
 import {

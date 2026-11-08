@@ -1,0 +1,41 @@
+---
+title: SpyFu
+description: Query SpyFu for SEO, PPC, competitor, keyword, ranking, and usage data.
+integration:
+  type: "spyfu"
+  color: "#14213D"
+---
+
+
+## Use the block [#usage-instructions]
+
+Connect directly to SpyFu’s Domain Stats, Ad History, PPC Research, SEO Research, Competitors, Kombat, Keyword, Ranking History, and Account APIs using their predefined endpoints. Select the endpoint you need, fill in its required parameters (domain, keyword, date), and optionally include request bodies for bulk keyword jobs.
+
+## Actions
+
+### SpyFu API
+
+Call any SpyFu REST endpoint for domain, keyword, ranking, or account insights.
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `operationId` | string | No | The predefined SpyFu operation to execute. |
+| `domain` | string | No | Domain parameter for domain-based SpyFu endpoints. |
+| `keyword` | string | No | Keyword parameter for keyword-based SpyFu endpoints. |
+| `term` | string | No | Keyword parameter for keyword-based SpyFu endpoints. |
+| `date` | string | No | Date parameter \(YYYY-MM-DD\) for endpoints that require a specific date. |
+| `countryCode` | string | No | SpyFu country code \(US, UK, DE, etc.\) appended as `countryCode` query parameter. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `data` | json | Raw payload returned by the SpyFu API endpoint. |
+| `status` | number | HTTP status code returned by SpyFu. |
+| `headers` | json | SpyFu response headers. |
+| `endpoint` | string | Full SpyFu endpoint URL used for the request. |
+| `method` | string | HTTP method used for the SpyFu request. |
+
+

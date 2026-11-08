@@ -1,4 +1,4 @@
-import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
+import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-content-type'
 
 /**
  * Existing HTML at or above this size cannot use `workspace_file` operation=update

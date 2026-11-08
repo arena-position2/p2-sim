@@ -1,0 +1,41 @@
+---
+title: Presentation
+description: Create presentations
+integration:
+  type: "presentation"
+  color: "#F4B400"
+---
+
+
+## Use the block [#usage-instructions]
+
+Integrate Presentation creation into the workflow. Can create presentations with customizable slides, tone, and verbosity.
+
+## Actions
+
+### Create Presentation
+
+Create a presentation with specified number of slides, tone, and verbosity
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `operation` | string | Yes | Operation to perform \(e.g., create\) |
+| `numberOfSlides` | number | Yes | Number of slides to create |
+| `tone` | string | Yes | Tone of the presentation \(e.g., professional\) |
+| `verbosity` | string | Yes | Verbosity level of the presentation \(e.g., standard\) |
+| `template` | string | No | Presentation template \(e.g., Position2\) |
+| `content` | string | No | Presentation content |
+| `slides_markdown` | array | No | Array of markdown strings for each slide. Bypasses outline generation and uses your markdown directly. Auto-sets slide count to array length. |
+| `instructions` | string | No | Custom guidance for AI generation. Influences outline generation, layout selection, and slide content. Examples: "Focus on ROI", "Use bullet points", "Keep slides concise" |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `presentationFile` | file | Presentation file |
+| `presentationId` | string | Presentation ID |
+| `message` | string | Status message |
+
+

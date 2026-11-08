@@ -105,11 +105,11 @@ describe('organization settings navigation', () => {
     expect(resolveOrganizationSettingsSection('credential-groups')).toBe('connected-accounts')
     expect(resolveOrganizationSettingsSection('/o/one/settings/network')).toBeNull()
     expect(resolveOrganizationSettingsSection('skills')).toBeNull()
-    expect(buildOrganizationNavItems('org', true, true).map(({ id }) => id)).toEqual([
-      'home',
-      'search',
-      'integrations',
-    ])
+    expect(
+      buildOrganizationNavItems('org', { searchAvailable: true, mothershipAvailable: true }).map(
+        ({ id }) => id
+      )
+    ).toEqual(['home', 'search', 'integrations'])
   })
 
   it('groups the sections as account, organization, governance, and Sim Search, in order', () => {

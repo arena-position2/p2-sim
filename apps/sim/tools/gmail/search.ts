@@ -156,7 +156,7 @@ export const gmailSearchTool: ToolConfig<GmailSearchParams, GmailToolResponse> =
 export const gmailSearchV2Tool: ToolConfig<GmailSearchParams, GmailToolResponse> = {
   id: 'gmail_search_v2',
   name: 'Gmail Search',
-  description: 'Search emails in Gmail',
+  description: 'Search emails in Gmail.',
   version: '2.0.0',
   oauth: gmailSearchTool.oauth,
   params: gmailSearchTool.params,

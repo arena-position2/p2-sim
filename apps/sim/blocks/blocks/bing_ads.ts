@@ -1,6 +1,6 @@
 import { MicrosoftIcon } from '@/components/icons'
 import { resolveExecutionWorkspaceId } from '@/lib/workspaces/is-admin-workspace'
-import type { BlockConfig } from '@/blocks/types'
+import { IntegrationType, type BlockConfig, type BlockMeta } from '@/blocks/types'
 
 /** In-flight promise cache keyed by workspaceId — deduplicates concurrent fetchOptions + fetchOptionById calls */
 let _inflightFetch: {
@@ -41,6 +41,7 @@ export const BingAdsBlock: BlockConfig = {
     'Connect to Microsoft Advertising (Bing Ads) API and query campaign performance, ad metrics, and account insights using natural language. Supports all Position2 Bing Ads accounts with AI-powered query parsing.',
   docsLink: 'https://docs.sim.ai/blocks/bing-ads',
   category: 'tools',
+  integrationType: IntegrationType.Marketing,
   bgColor: '#00A4EF',
   icon: MicrosoftIcon,
   subBlocks: [
@@ -168,4 +169,9 @@ Generate a clear, specific question about Bing Ads performance based on the user
       description: 'Original query',
     },
   },
+}
+
+export const BingAdsBlockMeta: BlockMeta = {
+  tags: ['marketing'],
+  url: 'https://ads.microsoft.com',
 }

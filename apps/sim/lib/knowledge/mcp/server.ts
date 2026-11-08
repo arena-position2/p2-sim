@@ -6,6 +6,7 @@ import { parseRetryAfter } from '@sim/utils/retry'
 import type { NextRequest } from 'next/server'
 import {
   chatSearchMcpSchema,
+  liveSearchMcpDefaultTopK,
   liveSearchMcpSchema,
   readLiveDocumentMcpSchema,
 } from '@/lib/api/contracts/knowledge/mcp'
@@ -133,13 +134,15 @@ export function createKnowledgeMcpServer(context: KnowledgeMcpContext): McpServe
     },
     async (input: unknown, extra: { signal: AbortSignal }) =>
       execute('search', knowledgeOperations.search, extra.signal, async (registry, signal) => {
-        const { query, topK, nativeQueries, ...filters } = liveSearchMcpSchema.parse(input)
+        const parsed = liveSearchMcpSchema.parse(input)
+        const { query, topK, nativeQueries, ...filters } = parsed
         const result = await searchLiveKnowledge.execute({
           principal,
           input: {
+            surface: 'mcp',
             organizationId,
             query,
-            topK,
+            topK: topK ?? liveSearchMcpDefaultTopK(parsed),
             nativeQueries,
             filters,
             resultSecretRegistry: registry,
@@ -237,13 +240,13 @@ export function createKnowledgeMcpServer(context: KnowledgeMcpContext): McpServe
     {
       title: 'Chat',
       description:
-        'Ask the Sim Assistant to research a question in your accessible organization sources and write a cited answer. It runs its own multi-step search, so it usually takes 30 to 60 seconds and returns a synthesized answer rather than the sources. To answer a question yourself, use search and read_document, which return sources in seconds; use chat only when the user asks for the Sim Assistant’s answer. Starts a new private conversation. Use source, modifiedAfter, or documentIds to narrow the evidence. No web search or source changes.',
+        'Ask the Sim Assistant to research a question in your accessible organization sources and write a cited answer. It runs its own multi-step search, so it usually takes 30 to 60 seconds and returns a synthesized answer rather than the sources. To answer a question yourself, use search and read_document, which return sources in seconds; use chat only when the user asks for the Sim Assistant’s answer. Starts a new private conversation. Use source, modifiedAfter, or documentIds to narrow the evidence. It searches the public web only when your sources lack the answer, and makes no source changes.',
       inputSchema: chatSearchMcpSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
     async ({ query, ...filters }, extra) =>

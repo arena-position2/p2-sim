@@ -3,7 +3,7 @@ import { CONTROL_BACK_EDGE_HANDLES, EDGE, SUBFLOW_CONTROL_EDGE_HANDLES } from '@
 import type { DAG, DAGNode } from '@/executor/dag/builder'
 import type { DAGEdge } from '@/executor/dag/types'
 import type { NormalizedBlockOutput } from '@/executor/types'
-import { buildSentinelEndId, extractLoopIdFromSentinel } from '@/executor/utils/subflow-utils'
+import { buildSentinelEndId, extractLoopIdFromSentinel } from '@/executor/utils/subflow'
 
 const logger = createLogger('EdgeManagerV2')
 

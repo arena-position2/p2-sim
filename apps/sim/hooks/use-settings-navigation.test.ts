@@ -10,13 +10,13 @@ const { mockIsArenaBilling } = vi.hoisted(() => ({
 }))
 
 /**
- * `@/lib/auth/auth-client` builds a Better Auth client at module scope, which
+ * `@/lib/auth/client` builds a Better Auth client at module scope, which
  * throws when NEXT_PUBLIC_APP_URL is absent from the environment (and under
  * `isolate: false` an earlier file may have imported the graph in a polluted
  * env). This test exercises the pure `resolveSettingsHref` helper, so stub the
  * client module out entirely.
  */
-vi.mock('@/lib/auth/auth-client', () => authClientMock)
+vi.mock('@/lib/auth/client', () => authClientMock)
 vi.mock('@/lib/billing/arena/env', () => ({
   isArenaBilling: mockIsArenaBilling,
 }))

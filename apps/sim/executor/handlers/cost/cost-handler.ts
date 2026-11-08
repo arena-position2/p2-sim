@@ -4,7 +4,7 @@ import type { BlockOutput } from '@/blocks/types'
 import { BlockType, isUuid, normalizeName } from '@/executor/constants'
 import type { BlockHandler, ExecutionContext } from '@/executor/types'
 import { collectBlockData } from '@/executor/utils/block-data'
-import { extractBaseBlockId } from '@/executor/utils/subflow-utils'
+import { extractBaseBlockId } from '@/executor/utils/subflow'
 import type { SerializedBlock } from '@/serializer/types'
 
 const logger = createLogger('CostBlockHandler')

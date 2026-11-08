@@ -188,6 +188,19 @@ export interface ToolParameterItemSchema {
   readonly anyOf?: readonly ToolParameterItemSchema[]
 }
 
+/** Serializable policy and review contract for an operation available to Assistant. */
+export interface AssistantOperationMetadata {
+  effect: 'read' | 'write'
+  version: number
+  reviewFields?: readonly {
+    name: string
+    label: string
+    format?: 'text' | 'multiline' | 'json'
+    target?: boolean
+    editable?: boolean
+  }[]
+}
+
 export interface ToolConfig<P = any, R = any> {
   // Basic tool identification
   id: string
@@ -215,6 +228,7 @@ export interface ToolConfig<P = any, R = any> {
   // OAuth configuration for this tool (if it requires authentication)
   oauth?: OAuthConfig
   personalToken?: PersonalTokenConfig
+  assistant?: AssistantOperationMetadata
 
   // Error extractor to use for this tool's error responses
   // If specified, only this extractor will be used (deterministic)

@@ -10,6 +10,7 @@ import { editContentServerTool } from '@/lib/mothership/tools/server/files/edit-
 import { workspaceFileServerTool } from '@/lib/mothership/tools/server/files/workspace-file'
 import { knowledgeBaseServerTool } from '@/lib/mothership/tools/server/knowledge/knowledge-base'
 import { searchOnlineServerTool } from '@/lib/mothership/tools/server/other/search-online'
+import { userMemoryServerTool } from '@/lib/mothership/tools/server/other/user-memory'
 
 const arenaToolByLeafName = {
   create_file: createFileServerTool,
@@ -39,5 +40,7 @@ function buildArenaServerToolRegistry(): Record<string, BaseServerTool> {
 }
 
 /** Arena leaf names, plus Cloud ids upstream's router does not register. */
-export const arenaServerToolRegistry: Record<string, BaseServerTool> =
-  buildArenaServerToolRegistry()
+export const arenaServerToolRegistry: Record<string, BaseServerTool> = {
+  ...buildArenaServerToolRegistry(),
+  [userMemoryServerTool.name]: userMemoryServerTool,
+}

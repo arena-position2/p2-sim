@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import {
   type Browser,
@@ -13,14 +14,17 @@ import {
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { generateId, generateShortId } from '@sim/utils/id'
+import { toRecord } from '@sim/utils/object'
 import { makeSignature } from 'better-auth/crypto'
 import postgres from 'postgres'
 
 /**
  * Real browser coverage against a running local app and disposable PostgreSQL.
  * Requires MOBILE_E2E_BASE_URL, MOBILE_E2E_DATABASE_URL, MOBILE_E2E_AUTH_SECRET,
- * and MOBILE_E2E_REPORT_PATH. Install Chromium and WebKit with Playwright first.
+ * and MOBILE_E2E_REPORT_PATH. Native launches require installed Playwright browsers.
+ * PLAYWRIGHT_WEBKIT_WS_ENDPOINT uses the pinned loopback WebKit server instead.
  * MOBILE_E2E_BROWSER and MOBILE_E2E_VIEWPORT narrow a diagnostic rerun.
+ * MOBILE_E2E_SHARD (index/count, one-based) partitions all viewports across CI jobs.
  */
 const logger = createLogger('MobileE2E')
 const expect = browserExpect.configure({ timeout: 20_000 })
@@ -29,6 +33,19 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]
   assert(value, `${name} must be explicitly provided`)
   return value
+}
+
+const selectedBrowser = process.env.MOBILE_E2E_BROWSER
+const webkitEndpoint = process.env.PLAYWRIGHT_WEBKIT_WS_ENDPOINT
+if (webkitEndpoint !== undefined) {
+  assert.equal(selectedBrowser, 'webkit', 'A remote endpoint requires explicit WebKit selection')
+  assert(/^ws:\/\/127\.0\.0\.1:[1-9]\d*\/$/.test(webkitEndpoint), 'Invalid WebKit endpoint')
+  new URL(webkitEndpoint)
+  assert.equal(
+    toRecord(createRequire(import.meta.url)('@playwright/test/package.json')).version,
+    '1.64.1',
+    'The remote WebKit image requires Playwright 1.64.1'
+  )
 }
 
 const baseUrl = new URL(requiredEnvironment('MOBILE_E2E_BASE_URL'))
@@ -97,13 +114,18 @@ const viewports = [
   { name: 'wide-desktop', width: 1920, height: 1080, touch: false },
 ] as const
 const routes = ['home', 'files', 'tables', 'knowledge', 'logs', 'integrations', 'settings/general']
-const selectedBrowser = process.env.MOBILE_E2E_BROWSER
 const selectedViewport = process.env.MOBILE_E2E_VIEWPORT
 assert(!selectedBrowser || ['chromium', 'webkit'].includes(selectedBrowser), 'Unknown browser')
 assert(
   !selectedViewport || viewports.some((viewport) => viewport.name === selectedViewport),
   'Unknown viewport'
 )
+const shard = /^([1-9]\d*)\/([1-9]\d*)$/.exec(process.env.MOBILE_E2E_SHARD || '1/1')
+assert(shard, 'MOBILE_E2E_SHARD must be index/count, one-based')
+const shardIndex = Number(shard[1]) - 1
+const shardCount = Number(shard[2])
+assert(shardIndex < shardCount && shardCount <= viewports.length, 'Invalid viewport shard')
+assert(!selectedViewport || shardCount === 1, 'Select either a viewport or a shard')
 
 interface CheckResult {
   name: string
@@ -1111,7 +1133,7 @@ async function exerciseViewport(
         await expectContained(page, navigation)
         await navigation.getByRole('button', { name: 'General', exact: true }).tap()
         await expectContained(page, page.getByRole('menu'))
-        await page.getByRole('menuitem', { name: 'General', exact: true }).tap()
+        await page.getByRole('menuitemradio', { name: 'General', exact: true }).tap()
         await expect(page.getByRole('menu')).toHaveCount(0)
         await expect(page).toHaveURL(/\/selfhost\/settings\/general/)
         await expect(navigation).toBeVisible()
@@ -1274,11 +1296,15 @@ try {
     if (selectedBrowser && selectedBrowser !== browserName) continue
     let browser: Browser | undefined
     await check(`${browserName}/browser starts`, undefined, async () => {
-      browser = await browserType.launch()
+      browser =
+        webkitEndpoint === undefined
+          ? await browserType.launch()
+          : await browserType.connect(webkitEndpoint, { timeout: 180_000 })
     })
     if (!browser) continue
     try {
-      for (const viewport of viewports) {
+      for (const [index, viewport] of viewports.entries()) {
+        if (index % shardCount !== shardIndex) continue
         if (selectedViewport && selectedViewport !== viewport.name) continue
         await exerciseViewport(browser, browserName, cookie, viewport)
       }

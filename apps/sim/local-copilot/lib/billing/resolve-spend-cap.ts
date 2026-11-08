@@ -2,7 +2,7 @@ import {
   checkOrganizationMemberUsageLimit,
   checkServerSideUsageLimits,
 } from '@/lib/billing/calculations/usage-monitor'
-import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/attribution'
 import { isBillingEnabled } from '@/lib/core/config/env-flags'
 import type { SpendCapSnapshot } from '@/local-copilot/lib/billing/spend-cap'
 

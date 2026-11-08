@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { readChatUpload } from '@/lib/mothership/tools/handlers/upload-file-reader'
-import { isImageFileType } from '@/lib/uploads/utils/file-utils'
+import { isImageFileType } from '@/lib/uploads/utils/file'
 import {
   formatOversizedUploadInlineNote,
   shouldAutoInlineTextUploadBody,

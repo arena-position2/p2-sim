@@ -22,7 +22,7 @@ vi.mock('@/lib/uploads/core/storage-service', () => ({
   uploadFile: vi.fn(),
 }))
 
-vi.mock('@/lib/uploads/contexts/knowledge-base/knowledge-base-file-manager', () => ({
+vi.mock('@/lib/uploads/contexts/knowledge-base/file-manager', () => ({
   generateKnowledgeBaseFileKey: vi.fn(() => 'kb/copied-file'),
 }))
 

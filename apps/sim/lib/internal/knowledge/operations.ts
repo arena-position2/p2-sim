@@ -13,7 +13,7 @@ import {
 } from '@/lib/api/contracts/knowledge/documents'
 import type { KnowledgeSearchBody } from '@/lib/api/contracts/knowledge/search'
 import { AuthType } from '@/lib/auth/hybrid'
-import { resolveBillingAttribution } from '@/lib/billing/core/billing-attribution'
+import { resolveBillingAttribution } from '@/lib/billing/core/attribution'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
 import {
   internalKnowledgeActorUserId,

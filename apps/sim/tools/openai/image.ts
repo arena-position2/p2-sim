@@ -374,6 +374,11 @@ export const imageTool: ToolConfig = {
     metadata: {
       type: 'json',
       description: 'Generation metadata (model, stored, etc.)',
+      properties: {
+        count: { type: 'number', description: 'Images returned' },
+        s3UploadFailed: { type: 'boolean', description: 'Whether storing the image failed' },
+        warnings: { type: 'array', description: 'Generation warnings' },
+      },
     },
   },
 }

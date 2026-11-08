@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { DesktopSettingsSurface } from '@/components/settings/navigation'
 import { ORGANIZATION_PLANE_UNIFIED_SECTIONS } from '@/components/settings/navigation'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import { getSubscriptionAccessState } from '@/lib/billing/client'
 import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'

@@ -19,7 +19,7 @@ import {
   deleteWorkflowFolder,
   listWorkflowFolders,
   relocateWorkflowFolder,
-} from '@/lib/workflows/application/workflow-folders'
+} from '@/lib/workflows/application/folders'
 import { decideBlockEnablement } from '@/lib/workflows/editing/block-enablement'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'

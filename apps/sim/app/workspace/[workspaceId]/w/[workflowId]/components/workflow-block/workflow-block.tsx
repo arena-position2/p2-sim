@@ -39,7 +39,6 @@ import {
   useUpdateNodeInternals,
 } from '@xyflow/react'
 import { isEqual } from 'es-toolkit'
-import { useParams } from 'next/navigation'
 import { usePostHog } from 'posthog-js/react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
@@ -86,6 +85,10 @@ import {
   hasAdvancedValues,
   resolveDependencyValue,
 } from '@/lib/workflows/subblocks/visibility'
+import {
+  useScopedWorkflowId,
+  useWorkflowScope,
+} from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import { ActionBar } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/action-bar/action-bar'
 import {
@@ -725,9 +728,9 @@ export const WorkflowBlock = memo(function WorkflowBlock({
 
   const contentRef = useRef<HTMLDivElement>(null)
 
-  const params = useParams()
   const { chatEnabled } = useDeploymentShape()
-  const workspaceId = params.workspaceId as string
+  const { workspaceId } = useWorkflowScope()
+  const currentWorkflowId = useScopedWorkflowId()
 
   const {
     currentWorkflow,
@@ -750,7 +753,6 @@ export const WorkflowBlock = memo(function WorkflowBlock({
    */
   const isWorkflowRunning = useIsCurrentWorkflowExecuting()
   const isExecutionHighlighted = useIsBlockInActiveExecutionHandoff(id)
-  const currentWorkflowId = (params.workflowId as string) || activeWorkflowId || ''
 
   const currentBlock = currentWorkflow.getBlockById(id)
 

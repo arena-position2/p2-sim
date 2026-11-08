@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { copilotChatStopBodySchema } from '@/lib/api/contracts/copilot'
 import type { PersistedToolState } from '@/lib/api/contracts/copilot-messages'
+import { isChatContext } from '@/lib/mothership/chat/context'
 import { toDisplayMessage } from '@/lib/mothership/chat/display-message'
 import { getLiveAssistantMessageId } from '@/lib/mothership/chat/live-message-id'
 import type { OrchestratorResult } from '@/lib/mothership/request/types'
-import { getToolDisplayTitle } from '@/lib/mothership/tools/tool-display'
+import { readCallActivity } from '@/lib/mothership/tools/activity'
+import { getToolDisplayTitle } from '@/lib/mothership/tools/display'
 import { resolveMessageCitations } from '@/app/workspace/[workspaceId]/home/components/message-content/resolve-citations'
 import {
   buildPersistedAssistantMessage,
@@ -127,6 +129,38 @@ describe('persisted-message', () => {
       })
     }
   )
+
+  it.each([
+    ['with its arguments', { category_id: null }],
+    ['without arguments', undefined],
+    ['with its own activity argument', { title: 'Ship it', activity: 'Development' }],
+  ])("keeps a resolved operation's inherited grouping beside its arguments %s", (_case, params) => {
+    const grouping = { id: 'gauge-read', title: 'Reading Gauge', completedTitle: 'Read Gauge' }
+    const persisted = buildPersistedAssistantMessage({
+      success: true,
+      content: '',
+      toolCalls: [],
+      contentBlocks: [
+        {
+          type: 'tool_call',
+          timestamp: 1,
+          toolCall: {
+            id: 'gateway-call',
+            name: 'mcp-server-get_overview',
+            status: 'success',
+            params,
+            activity: grouping,
+          },
+        },
+      ],
+    })
+    // utils-lint-allow: exercises the JSON persistence boundary a stored row crosses
+    const stored = JSON.parse(JSON.stringify(persisted)) as Record<string, unknown>
+    const reloaded = toDisplayMessage(normalizeMessage(stored)).contentBlocks?.[0].toolCall
+
+    expect(reloaded?.params).toEqual(params)
+    expect(readCallActivity(reloaded)).toEqual(grouping)
+  })
 
   it('preserves activity metadata on legacy tool blocks without inferring it from old titles', () => {
     const message = normalizeMessage({
@@ -529,6 +563,39 @@ describe('persisted-message', () => {
       label: 'Sales (2 rows)',
       tableId: 't1',
       tableName: 'Sales',
+    })
+  })
+
+  it('restores the exact page snapshot after persistence and display', () => {
+    const snapshot = {
+      id: '11111111-1111-4111-8111-111111111111',
+      url: 'https://example.com/docs',
+      title: 'Original title',
+      text: 'The captured page before navigation',
+      capturedAt: '2026-10-29T12:00:00.000Z',
+      kind: 'page' as const,
+      truncated: true,
+    }
+    const persisted = buildPersistedUserMessage({
+      id: 'user-page',
+      content: '@Page summarize this',
+      contexts: [{ kind: 'browser_page', label: 'Page', snapshot }],
+    })
+    snapshot.text = 'A different page after navigation'
+    const serialized = JSON.stringify(persisted)
+    const stored = JSON.parse(serialized) as Record<string, unknown>
+    const displayed = toDisplayMessage(normalizeMessage(stored))
+    const restored = displayed.contexts?.[0]
+
+    expect(isChatContext(restored)).toBe(true)
+    expect(restored?.snapshot).toEqual({
+      id: '11111111-1111-4111-8111-111111111111',
+      url: 'https://example.com/docs',
+      title: 'Original title',
+      text: 'The captured page before navigation',
+      capturedAt: '2026-10-29T12:00:00.000Z',
+      kind: 'page',
+      truncated: true,
     })
   })
 

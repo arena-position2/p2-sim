@@ -11,7 +11,7 @@ import {
   updateWorkflowMcpDeploymentServer,
 } from '@/lib/mcp/application/workflow-deployments'
 import { buildWorkflowMcpApiEndpoint, buildWorkflowMcpServerUrl } from '@/lib/mcp/urls'
-import { messageForCopilotApplicationError } from '@/lib/mothership/application/error'
+import { messageForCopilotApplicationError } from '@/lib/mothership/application/errors'
 import { copilotToolCanWrite, copilotWriteDeniedMessage } from '@/lib/mothership/tools/permissions'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import { executeCopilotMcpServerUseCase } from '@/local-copilot/lib/tools/execute-mcp-server-use-case'

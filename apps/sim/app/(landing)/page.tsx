@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { getEnv } from '@/lib/core/config/env'
-import { isSearchIndexableAppUrl, SITE_URL } from '@/lib/core/utils/urls'
+import { isSearchIndexableAppUrl, SITE_URL, toSiteUrl } from '@/lib/core/utils/urls'
 import {
   HOME_PAGE_DESCRIPTION,
   HOME_PAGE_TITLE,
@@ -19,9 +19,9 @@ export const metadata: Metadata = {
   description: HOME_PAGE_DESCRIPTION,
   keywords:
     'AI workspace, AI agent builder, AI agent workflow builder, build AI agents, visual workflow builder, open-source AI agent platform, AI agents, agentic workflows, LLM orchestration, AI automation, knowledge base, workflow builder, AI integrations, SOC2 compliant, enterprise AI',
-  authors: [{ name: 'Arena' }],
-  creator: 'Arena',
-  publisher: 'Arena',
+  authors: [{ name: 'Sim' }],
+  creator: 'Sim',
+  publisher: 'Sim',
   formatDetection: {
     email: false,
     address: false,
@@ -32,14 +32,14 @@ export const metadata: Metadata = {
     description: HOME_PAGE_DESCRIPTION,
     type: 'website',
     url: SITE_URL,
-    siteName: 'Arena',
+    siteName: 'Sim',
     locale: 'en_US',
     images: [
       {
         url: '/logo/426-240/reverse/small.png',
         width: 2130,
         height: 1200,
-        alt: 'Arena, The AI Workspace for Teams',
+        alt: 'Sim, The AI Workspace for Teams',
         type: 'image/png',
       },
     ],
@@ -52,11 +52,12 @@ export const metadata: Metadata = {
     description: HOME_PAGE_DESCRIPTION,
     images: {
       url: '/logo/426-240/reverse/small.png',
-      alt: 'Arena, The AI Workspace for Teams',
+      alt: 'Sim, The AI Workspace for Teams',
     },
   },
   alternates: {
     canonical: SITE_URL,
+    types: { 'text/markdown': toSiteUrl('/index.md') },
     languages: {
       'en-US': SITE_URL,
       'x-default': SITE_URL,

@@ -262,6 +262,56 @@ describe.runIf(Boolean(redisUrl))('Chat runs no controller owns', () => {
     return { ...run, marker: chat?.conversationId ?? null }
   }
 
+  describe('a Sim claim past its start window', () => {
+    async function lateTool(
+      runId: string,
+      fields: Partial<{ status: 'running'; claimedBy: string }> = {}
+    ) {
+      const tool = await dispatchedTool(runId)
+      await db
+        .update(copilotAsyncToolCalls)
+        .set({ executionDeadlineAt: sql`clock_timestamp() + interval '30 seconds'`, ...fields })
+        .where(eq(copilotAsyncToolCalls.toolCallId, tool.toolCallId))
+      return tool
+    }
+
+    async function storedTool(toolCallId: string) {
+      const [row] = await db
+        .select()
+        .from(copilotAsyncToolCalls)
+        .where(eq(copilotAsyncToolCalls.toolCallId, toolCallId))
+      return row
+    }
+
+    it('leaves an admitted pending call unclaimed for its caller to settle as never run', async () => {
+      const run = await admittedRun()
+      const tool = await lateTool(run.runId)
+
+      expect(await claimToolExecution(tool)).toEqual({ outcome: 'too_late' })
+      expect(await storedTool(tool.toolCallId)).toMatchObject({
+        status: 'pending',
+        executionStartedAt: null,
+        executionOwnerToken: null,
+      })
+    })
+
+    it('reports a stopped run as closed before the start window', async () => {
+      const run = await admittedRun({ stopped: true })
+      const tool = await lateTool(run.runId)
+
+      expect(await claimToolExecution(tool)).toEqual({ outcome: 'closed' })
+    })
+
+    it('still claims a call a client already claimed, and one without a deadline', async () => {
+      const run = await admittedRun()
+      const clientClaimed = await lateTool(run.runId, { status: 'running', claimedBy: 'client' })
+      const undated = await dispatchedTool(run.runId)
+
+      expect(await claimToolExecution(clientClaimed)).toMatchObject({ outcome: 'claimed' })
+      expect(await claimToolExecution(undated)).toMatchObject({ outcome: 'claimed' })
+    })
+  })
+
   it('settles a run whose controller died once its recovery window has passed', async () => {
     const orphan = await admittedRun({ idleMinutes: 90, status: 'paused_waiting_for_tool' })
 
@@ -280,7 +330,7 @@ describe.runIf(Boolean(redisUrl))('Chat runs no controller owns', () => {
     /** A long tool call writes nothing to the run; only its execution heartbeat shows it is alive. */
     const orphan = await admittedRun({ idleMinutes: 90, status: 'paused_waiting_for_tool' })
     const tool = await dispatchedTool(orphan.runId)
-    expect(await claimToolExecution(tool)).toEqual({ outcome: 'claimed' })
+    expect(await claimToolExecution(tool)).toMatchObject({ outcome: 'claimed' })
 
     expect((await sweepOrphanedRuns()).settledRunIds).not.toContain(orphan.runId)
     const live = await stored(orphan.runId)
@@ -318,7 +368,7 @@ describe.runIf(Boolean(redisUrl))('Chat runs no controller owns', () => {
       }
     )
 
-    expect(await claim).toEqual({ outcome: 'claimed' })
+    expect(await claim).toMatchObject({ outcome: 'claimed' })
     expect((await sweep).settledRunIds).not.toContain(orphan.runId)
     const run = await stored(orphan.runId)
     expect(run.status).toBe('paused_waiting_for_tool')
@@ -328,7 +378,7 @@ describe.runIf(Boolean(redisUrl))('Chat runs no controller owns', () => {
   it('never settles a run whose Sim tool lease a heartbeat renewed as the sweep settled it', async () => {
     const orphan = await admittedRun({ idleMinutes: 90, status: 'paused_waiting_for_tool' })
     const tool = await dispatchedTool(orphan.runId)
-    expect(await claimToolExecution(tool)).toEqual({ outcome: 'claimed' })
+    expect(await claimToolExecution(tool)).toMatchObject({ outcome: 'claimed' })
     await db
       .update(copilotAsyncToolCalls)
       .set({ executionLeaseExpiresAt: sql`clock_timestamp() - interval '1 second'` })

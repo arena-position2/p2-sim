@@ -30,4 +30,7 @@ export const executionPreprocessingMock = {
   preprocessExecution: executionPreprocessingMockFns.mockPreprocessExecution,
   WORKFLOW_NOT_DEPLOYED_CODE: 'WORKFLOW_NOT_DEPLOYED',
   BILLING_EMAIL_NOT_FOUND_CODE: 'BILLING_EMAIL_NOT_FOUND',
+  RATE_LIMIT_EXCEEDED_CODE: 'RATE_LIMIT_EXCEEDED',
+  isWorkflowStateRejection: (error: { workflowState?: string }) =>
+    error.workflowState !== undefined,
 }

@@ -1,5 +1,5 @@
 import { SpyfuIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import { IntegrationType, type BlockConfig, type BlockMeta } from '@/blocks/types'
 import {
   SPYFU_DEFAULT_OPERATION_ID,
   spyfuDateOperationIds,
@@ -20,6 +20,7 @@ export const SpyfuBlock: BlockConfig = {
     'Connect directly to SpyFu’s Domain Stats, Ad History, PPC Research, SEO Research, Competitors, Kombat, Keyword, Ranking History, and Account APIs using their predefined endpoints. Select the endpoint you need, fill in its required parameters (domain, keyword, date), and optionally include request bodies for bulk keyword jobs.',
   docsLink: 'https://developer.spyfu.com/reference',
   category: 'tools',
+  integrationType: IntegrationType.Marketing,
   bgColor: '#14213D',
   icon: SpyfuIcon,
   subBlocks: [
@@ -198,4 +199,9 @@ export const SpyfuBlock: BlockConfig = {
     endpoint: { type: 'string', description: 'Endpoint URL that was executed.' },
     method: { type: 'string', description: 'HTTP method used in the request.' },
   },
+}
+
+export const SpyfuBlockMeta: BlockMeta = {
+  tags: ['seo'],
+  url: 'https://www.spyfu.com',
 }

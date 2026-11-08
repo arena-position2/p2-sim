@@ -1,5 +1,5 @@
 import { PresentationIcon } from '@/components/icons'
-import type { BlockConfig } from '@/blocks/types'
+import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { IntegrationType } from '@/blocks/types'
 
 export const P2DocsBlock: BlockConfig = {
@@ -148,4 +148,8 @@ export const P2DocsBlock: BlockConfig = {
     },
     total: { type: 'number', description: 'Total number of team members returned' },
   },
+}
+
+export const P2DocsBlockMeta: BlockMeta = {
+  tags: ['knowledge-base'],
 }

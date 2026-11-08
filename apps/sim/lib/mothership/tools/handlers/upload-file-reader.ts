@@ -14,10 +14,10 @@ import { getServePathPrefix } from '@/lib/uploads'
 import {
   fetchWorkspaceFileBuffer,
   type WorkspaceFileRecord,
-} from '@/lib/uploads/contexts/workspace/workspace-file-manager'
-import type { WorkspaceFileSecretProvenanceEnvelope } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+} from '@/lib/uploads/contexts/workspace/file-manager'
+import type { WorkspaceFileSecretProvenanceEnvelope } from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import { getWorkspaceFileSize } from '@/lib/uploads/shared/types'
-import { buildArchiveExtractGuidance, isArchiveFileName } from '@/lib/uploads/utils/file-utils'
+import { buildArchiveExtractGuidance, isArchiveFileName } from '@/lib/uploads/utils/file'
 import { decodeVfsSegmentSafe, encodeVfsSegment } from '@/lib/vfs/path'
 
 const logger = createLogger('UploadFileReader')

@@ -14,20 +14,21 @@ import { cn } from '@sim/emcn'
 import { CircleStop } from '@sim/emcn/icons'
 import { isPlainRecord } from '@sim/utils/object'
 import { AgentStreamThinkingChrome } from '@/components/agent-stream/agent-stream-chrome'
+import { useAssistantActionLayout } from '@/components/assistant-actions'
 import { resolveAssistantDisplayLabel } from '@/lib/chat/assistant-display-name'
 import type { ToolActivity } from '@/lib/mothership/generated/protocol'
 import { PrepareFileEdit, Read as ReadTool } from '@/lib/mothership/generated/tool-catalog-v1'
 import type { TaskBlockInfo } from '@/lib/mothership/request/types'
+import { readCallActivity } from '@/lib/mothership/tools/activity'
 import { isToolHiddenInUi } from '@/lib/mothership/tools/client/hidden-tools'
 import { resolveToolDisplay } from '@/lib/mothership/tools/client/store-utils'
 import { ClientToolCallState } from '@/lib/mothership/tools/client/tool-call-state'
-import { readToolActivity } from '@/lib/mothership/tools/tool-activity'
 import {
   getToolDisplayTitle,
   getToolStatusDisplayTitle,
   humanizeToolName,
   normalizeToolActivityDescription,
-} from '@/lib/mothership/tools/tool-display'
+} from '@/lib/mothership/tools/display'
 import { useChatSurface } from '@/app/workspace/[workspaceId]/home/components/chat-surface-context'
 import {
   hasAgentGroupItemContent,
@@ -39,6 +40,7 @@ import {
   ownsTurnWait,
   type TurnLiveIndicators,
 } from '@/app/workspace/[workspaceId]/home/components/message-content/components/agent-group/lane-activity'
+import { THINKING_LABEL } from '@/app/workspace/[workspaceId]/home/components/message-content/components/agent-group/tool-activity-group'
 import type { CredentialSubmissionPayload } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags'
 import { WatchActivity } from '@/app/workspace/[workspaceId]/home/components/message-content/components/watch-activity/watch-activity'
 import { collectMessageSources } from '@/app/workspace/[workspaceId]/home/components/message-content/message-sources'
@@ -370,6 +372,7 @@ function toToolData(tc: NonNullable<ContentBlock['toolCall']>): ToolCallData {
     displayTitle,
     activityDescription,
     status: tc.status,
+    activity: tc.activity,
     params: tc.params,
     result: tc.result,
     streamingArgs: tc.streamingArgs,
@@ -704,10 +707,7 @@ function groupByActivity(segments: MessageSegment[], isStreaming: boolean): Mess
     const groups: AgentGroupSegment[] = []
     let current: AgentGroupSegment | undefined
     for (const item of segment.items) {
-      const activity =
-        item.type === 'tool'
-          ? readToolActivity(item.data.params, item.data.streamingArgs)
-          : undefined
+      const activity = item.type === 'tool' ? readCallActivity(item.data) : undefined
       if (activity) labels.set(activity.id, { ...labels.get(activity.id), ...activity })
       if (!current || (activity && activity.id !== current.activity?.id)) {
         current = {
@@ -1038,11 +1038,13 @@ export function assistantMessageHasRenderableContent(
 /** The turn's live indicators, decided once by {@link getTurnLiveIndicators} for every lane. */
 function getMessageLiveIndicators(
   segments: MessageSegment[],
-  isStreaming: boolean
+  isStreaming: boolean,
+  actionLayout: ReturnType<typeof useAssistantActionLayout>
 ): TurnLiveIndicators {
   return getTurnLiveIndicators(
     segments.flatMap((segment) => (segment.type === 'agent_group' ? [segment] : [])),
-    isStreaming
+    isStreaming,
+    actionLayout
   )
 }
 
@@ -1077,9 +1079,9 @@ export function deriveThinkingLabel(blocks: ContentBlock[]): string {
     case 'tool_call':
       return last.toolCall && DISPATCH_TOOL_NAMES.has(last.toolCall.name)
         ? 'Dispatching'
-        : 'Thinking'
+        : THINKING_LABEL
     default:
-      return 'Thinking'
+      return THINKING_LABEL
   }
 }
 
@@ -1152,6 +1154,8 @@ interface MessageContentProps {
    * place without ever changing height.
    */
   isLast?: boolean
+  /** Pending review controls own the tail until the user decides. */
+  awaitingInteraction?: boolean
   /** Transcript-derived answers for this message's question card (renders the recap). */
   questionAnswers?: string[]
   /** Transcript-derived status payload for this message's credential card. */
@@ -1185,6 +1189,7 @@ function MessageContentInner({
   isStreaming = false,
   liveStatus,
   isLast = false,
+  awaitingInteraction = false,
   questionAnswers,
   credentialSubmission,
   credentialAbandoned,
@@ -1245,9 +1250,10 @@ function MessageContentInner({
   )
   const visibleStreamActivityKey = getVisibleStreamActivityKey(segments)
   /** Decided once per parse, not on every idle-timer or text-reveal render. */
+  const actionLayout = useAssistantActionLayout()
   const liveIndicators = useMemo(
-    () => getMessageLiveIndicators(segments, isStreaming),
-    [segments, isStreaming]
+    () => getMessageLiveIndicators(segments, isStreaming, actionLayout),
+    [segments, isStreaming, actionLayout]
   )
 
   // Every visible stream update restarts the quiet-period clock. A layout
@@ -1288,7 +1294,8 @@ function MessageContentInner({
   // trailing text keeps visually revealing on a timer after the network stream
   // closes, and collapsing under a still-growing reveal reads as the blob
   // winking out early while everything shifts.
-  const thinkingExpanded = phase !== 'settled' && lastSegment?.type !== 'stopped'
+  const thinkingExpanded =
+    !awaitingInteraction && phase !== 'settled' && lastSegment?.type !== 'stopped'
   const thinkingText = collectMainThinkingText(blocks)
   // Keep chrome in the streaming state for the whole turn while thoughts exist.
   // Gating only on an open (un-ended) segment collapses the panel on tool calls

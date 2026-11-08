@@ -14,6 +14,7 @@ export const slackListChannelsTool: InternalToolConfig<
   SlackListChannelsResponse
 > = {
   id: 'slack_list_channels',
+  assistant: { effect: 'read', version: 1 },
   name: 'Slack List Channels',
   description:
     'List one page of accessible Slack conversations. Credential-group user tokens also return one-to-one and group direct messages. Pass the returned nextCursor as cursor to fetch the next page.',

@@ -4,30 +4,19 @@
  */
 
 import { isOrgAdminRole } from '@sim/platform-authz/predicates'
-import type { Organization } from '@/lib/workspaces/organization/types'
+import type { Member } from '@/lib/workspaces/organization/types'
 
-/**
- * Get the role of a user in an organization
- */
-export function getUserRole(
-  organization: Organization | null | undefined,
-  userEmail?: string
-): string {
-  if (!userEmail || !organization?.members) {
-    return 'member'
-  }
-  const currentMember = organization.members.find((m) => m.user?.email === userEmail)
-  return currentMember?.role ?? 'member'
+interface OrganizationMembers {
+  members?: Member[]
 }
 
-/**
- * Check if a user is an admin or owner in an organization
- */
 export function isAdminOrOwner(
-  organization: Organization | null | undefined,
+  organization: OrganizationMembers | null | undefined,
   userEmail?: string
 ): boolean {
-  const role = getUserRole(organization, userEmail)
+  if (!userEmail || !organization?.members) return false
+  const role =
+    organization.members.find((member) => member.user?.email === userEmail)?.role ?? 'member'
   return isOrgAdminRole(role)
 }
 

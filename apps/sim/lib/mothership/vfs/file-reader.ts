@@ -14,8 +14,8 @@ import { TraceSpan } from '@/lib/mothership/generated/trace-spans-v1'
 import { recordFileRead } from '@/lib/mothership/request/metrics'
 import { markSpanForError } from '@/lib/mothership/request/otel'
 import { type PlaceholderKind, readPlaceholder } from '@/lib/mothership/vfs/read-placeholders'
-import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
-import { fetchWorkspaceFileBuffer } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
+import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace/file-manager'
+import { fetchWorkspaceFileBuffer } from '@/lib/uploads/contexts/workspace/file-manager'
 import {
   isHeifContainer,
   MAX_TRANSCODE_INPUT_BYTES,
@@ -27,7 +27,7 @@ import {
   isImageFileType,
   MODEL_SUPPORTED_IMAGE_MIME_TYPES,
   resolveEffectiveMimeType,
-} from '@/lib/uploads/utils/file-utils'
+} from '@/lib/uploads/utils/file'
 
 // Lazy tracer (same pattern as lib/mothership/request/otel.ts).
 function getVfsTracer() {

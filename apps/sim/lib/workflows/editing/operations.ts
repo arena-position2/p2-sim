@@ -26,7 +26,7 @@ import {
 } from './builders'
 import { VALID_LOOP_TYPES, VALID_PARALLEL_TYPES } from './container-types'
 import { rewriteBlockNameReferencesInWorkflowBlocks } from './reference-normalization'
-import type { EditWorkflowOperation, OperationContext } from './types'
+import type { EditWorkflowOperation, OperationContext, SkippedItem } from './types'
 import { logSkippedItem } from './types'
 import {
   findBlockWithDuplicateNormalizedName,
@@ -36,6 +36,36 @@ import {
 } from './validation'
 
 const logger = createLogger('EditWorkflowServerTool')
+
+/**
+ * Refuses a new block of a sunset (`legacy` / `deprecated`) type and names its
+ * successor. Placed instances keep executing and stay editable.
+ *
+ * @returns whether the placement was refused
+ */
+function refuseSunsetPlacement(
+  skippedItems: SkippedItem[],
+  placement: {
+    blockType: string | undefined
+    operationType: string
+    blockId: string
+    outcome: string
+    details?: Record<string, unknown>
+  }
+): boolean {
+  const { blockType, operationType, blockId, outcome, details } = placement
+  const sunset = blockType ? getBlock(blockType)?.sunset : undefined
+  if (!sunset) return false
+  const successor = sunset.replacedBy ? ` - use "${sunset.replacedBy}" instead` : ''
+  logSkippedItem(skippedItems, {
+    type: 'block_not_allowed',
+    operationType,
+    blockId,
+    reason: `Block type "${blockType}" is ${sunset.status}${successor} - ${outcome}`,
+    details: { requestedType: blockType, replacedBy: sunset.replacedBy, ...details },
+  })
+  return true
+}
 
 /**
  * Applies loop/parallel container config from `inputs` onto a block state (data.loopType, etc.).
@@ -107,6 +137,18 @@ function processNestedNodesForParent(
         childId,
         childId_type: typeof childId,
       })
+      return
+    }
+
+    if (
+      refuseSunsetPlacement(skippedItems, {
+        blockType: childBlock.type,
+        operationType: 'add_nested_node',
+        blockId: childId,
+        outcome: 'child block skipped',
+        details: { parentBlockId },
+      })
+    ) {
       return
     }
 
@@ -286,6 +328,18 @@ function mergeNestedNodesForParent(
         blockId: String(childId || 'invalid'),
         reason: `Invalid childId "${childId}" in nestedNodes - child block skipped`,
       })
+      return
+    }
+
+    if (
+      refuseSunsetPlacement(skippedItems, {
+        blockType: childBlock.type,
+        operationType: 'add_nested_node',
+        blockId: childId,
+        outcome: 'child block skipped',
+        details: { parentBlockId },
+      })
+    ) {
       return
     }
 
@@ -620,7 +674,15 @@ export function handleEditOperation(op: EditWorkflowOperation, ctx: OperationCon
         reason: `Block type "${params.type}" is unavailable in this deployment or blocked by access control - type change skipped`,
         details: { requestedType: params.type },
       })
-    } else {
+    } else if (
+      params.type === block.type ||
+      !refuseSunsetPlacement(skippedItems, {
+        blockType: params.type,
+        operationType: 'edit',
+        blockId: block_id,
+        outcome: 'type change skipped',
+      })
+    ) {
       block.type = params.type
     }
   }
@@ -814,6 +876,17 @@ export function handleAddOperation(op: EditWorkflowOperation, ctx: OperationCont
       reason: `Block type "${params.type}" is unavailable in this deployment or blocked by access control - block not added`,
       details: { requestedType: params.type },
     })
+    return
+  }
+
+  if (
+    refuseSunsetPlacement(skippedItems, {
+      blockType: params.type,
+      operationType: 'add',
+      blockId: block_id,
+      outcome: 'block not added',
+    })
+  ) {
     return
   }
 
@@ -1049,6 +1122,18 @@ export function handleInsertIntoSubflowOperation(
         reason: `Block type "${params.type}" is unavailable in this deployment or blocked by access control - block not inserted`,
         details: { requestedType: params.type, subflowId },
       })
+      return
+    }
+
+    if (
+      refuseSunsetPlacement(skippedItems, {
+        blockType: params.type,
+        operationType: 'insert_into_subflow',
+        blockId: block_id,
+        outcome: 'block not inserted into subflow',
+        details: { subflowId },
+      })
+    ) {
       return
     }
 

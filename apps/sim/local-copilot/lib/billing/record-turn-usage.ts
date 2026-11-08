@@ -5,7 +5,7 @@ import {
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
   toBillingContext,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import { recordUsage } from '@/lib/billing/core/usage-log'
 import type { ExecutionActor } from '@/lib/execution/actor-resolution'
 import {

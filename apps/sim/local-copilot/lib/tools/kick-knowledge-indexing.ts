@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { isRecordLike, toArray } from '@sim/utils/object'
-import type { BillingAttributionSnapshot } from '@/lib/billing/core/billing-attribution'
+import type { BillingAttributionSnapshot } from '@/lib/billing/core/attribution'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { SYSTEM_ACCESS_SCOPE } from '@/lib/knowledge/access/types'
 import { dispatchDocumentProcessing } from '@/lib/knowledge/documents/processing-dispatch'

@@ -57,7 +57,7 @@ import { createAnthropicMessage } from '@/lib/anthropic/create-message'
 import type { ModelUsageByModel } from '@/lib/billing/core/record-model-usage'
 import { buildToolLlmCostFromModelUsage } from '@/lib/billing/core/tool-llm-cost'
 import { downloadFile } from '@/lib/uploads/core/storage-service'
-import { extractStorageKey } from '@/lib/uploads/utils/file-utils'
+import { extractStorageKey } from '@/lib/uploads/utils/file'
 import { getMaxOutputTokensForModel, supportsTemperature } from '@/providers/models'
 
 const logger = createLogger('FigmaDesignGenerator')

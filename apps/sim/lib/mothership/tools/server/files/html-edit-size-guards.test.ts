@@ -11,7 +11,7 @@ import {
   rejectHtmlFullUpdate,
   utf8ByteLength,
 } from '@/lib/mothership/tools/server/files/html-edit-size-guards'
-import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
+import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-content-type'
 
 describe('isHtmlWorkspaceTarget', () => {
   it('detects html extensions and content types', () => {

@@ -6,7 +6,7 @@ import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import { useRouter } from 'next/navigation'
-import { client } from '@/lib/auth/auth-client'
+import { client } from '@/lib/auth/client'
 import { useGeneratedImageReuse } from '@/lib/chat/use-generated-image-reuse'
 import { getCustomInputFields, normalizeInputFormatValue } from '@/lib/workflows/input-format-utils'
 import {
@@ -184,7 +184,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
 
   const [showScrollButton, setShowScrollButton] = useState(false)
-  const [userHasScrolled, setUserHasScrolled] = useState(false)
+  const [, setUserHasScrolled] = useState(false)
   const isUserScrollingRef = useRef(false)
 
   const [authRequired, setAuthRequired] = useState<'password' | 'email' | 'sso' | null>(null)
@@ -695,17 +695,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     //     logger.error('Failed to fetch GitHub stars:', err)
     //   })
   }, [identifier])
-
-  const refreshChat = () => {
-    fetchChatConfig()
-  }
-
-  const handleAuthSuccess = () => {
-    setAuthRequired(null)
-    setTimeout(() => {
-      refreshChat()
-    }, 800)
-  }
 
   // Handle sending a message
   const handleSendMessage = async (

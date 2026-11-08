@@ -39,6 +39,7 @@ interface ChatSurfaceContextValue {
    */
   onContextRemove: (context: ChatContext, remaining: ChatContext[]) => void
   onViewSources?: (messageId: string, requestId?: string) => void
+  onNavigateToChat?: (chatId: string) => void
   /** Opens a workspace resource referenced from rendered message content. */
   onWorkspaceResourceSelect: (resource: WorkspaceResourceRef) => void
   /** When true, show the Local / Cloud copilot switch in the chat input. */
@@ -63,6 +64,7 @@ interface ChatSurfaceProviderProps {
   onContextAdd?: (context: ChatContext) => void
   onContextRemove?: (context: ChatContext, remaining: ChatContext[]) => void
   onViewSources?: (messageId: string, requestId?: string) => void
+  onNavigateToChat?: (chatId: string) => void
   onWorkspaceResourceSelect?: (resource: WorkspaceResourceRef) => void
   canSwitchCopilotBackend?: boolean
   copilotBackend?: CopilotBackendPreference
@@ -90,16 +92,20 @@ export function ChatSurfaceProvider({
   setCopilotBackend,
   localCopilotCatalogId,
   setLocalCopilotCatalogId,
+  onNavigateToChat,
   children,
 }: ChatSurfaceProviderProps) {
   const onViewSourcesRef = useRef(onViewSources)
   const hasSourcePanel = Boolean(onViewSources)
+  const hasChatNavigation = Boolean(onNavigateToChat)
+  const onNavigateToChatRef = useRef(onNavigateToChat)
   const onContextAddRef = useRef(onContextAdd)
   const onContextRemoveRef = useRef(onContextRemove)
   const onWorkspaceResourceSelectRef = useRef(onWorkspaceResourceSelect)
 
   useLayoutEffect(() => {
     onViewSourcesRef.current = onViewSources
+    onNavigateToChatRef.current = onNavigateToChat
     onContextAddRef.current = onContextAdd
     onContextRemoveRef.current = onContextRemove
     onWorkspaceResourceSelectRef.current = onWorkspaceResourceSelect
@@ -118,10 +124,14 @@ export function ChatSurfaceProvider({
   const stableOnViewSources = useCallback((messageId: string, requestId?: string) => {
     onViewSourcesRef.current?.(messageId, requestId)
   }, [])
+  const stableOnNavigateToChat = useCallback((chatId: string) => {
+    onNavigateToChatRef.current?.(chatId)
+  }, [])
 
   const value = useMemo<ChatSurfaceContextValue>(
     () => ({
       onViewSources: hasSourcePanel ? stableOnViewSources : undefined,
+      onNavigateToChat: hasChatNavigation ? stableOnNavigateToChat : undefined,
       SearchConnectionComponent,
       chatId,
       userId,
@@ -136,6 +146,8 @@ export function ChatSurfaceProvider({
     }),
     [
       hasSourcePanel,
+      hasChatNavigation,
+      stableOnNavigateToChat,
       stableOnViewSources,
       SearchConnectionComponent,
       chatId,

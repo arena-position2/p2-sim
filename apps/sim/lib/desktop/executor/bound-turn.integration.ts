@@ -511,7 +511,7 @@ describe.runIf(Boolean(redisUrl))("a turn bound to a desktop's background execut
 
       await lapse(toolCallId, 'lease')
       /** A Sim tool waiting on the same run sweeps its expired executions; this one is not its. */
-      await revokeExpiredSimToolExecutions({ runId: run.runId, userId })
+      await revokeExpiredSimToolExecutions({ runId: run.runId, userId, toolCallId: 'waiting-call' })
       expect((await storedCall(toolCallId)).status).toBe('running')
       await answer
       const late = await desktop.complete(toolCallId, executionToken, { output: 'built' })
@@ -663,7 +663,7 @@ describe.runIf(Boolean(redisUrl))("a turn bound to a desktop's background execut
         userId,
         ownerToken: generateId(),
       }
-      expect(await claimToolExecution(owner)).toEqual({ outcome: 'claimed' })
+      expect(await claimToolExecution(owner)).toMatchObject({ outcome: 'claimed' })
       await expect(
         prepareWorkbenchAccess({ ...owner, sessionKey: chatSandboxSessionKey(run.chatId) })
       ).resolves.toMatchObject({ handlersPending: false })

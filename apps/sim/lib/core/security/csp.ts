@@ -35,6 +35,10 @@ const LOCAL_DEV_FRAME_ANCESTORS = ['http://localhost:3001'] as const
  * relative import that itself pulls in no `@/` paths (../../consent/constants).
  */
 
+/** File responses select CSP at runtime; JSON and error responses retain the main policy. */
+export const FILE_DELIVERY_CSP_PATH_PATTERN =
+  '/(?:api/files/serve/.+|api/files/public/[^/]+/(?:content|inline)|api/projects/[^/]+/files/(?:inline|download|[^/]+/(?:content|artifact|export|versions/[^/]+/content))|api/workspaces/[^/]+/files/(?:inline|download|[^/]+/versions/[^/]+/content)|api/v2/projects/[^/]+/files/(?:bulk-download|[^/]+/(?:content|export|versions/[^/]+/content))|api/v2/files/(?:bulk-download|[^/]+(?:/versions/[^/]+/content)?))'
+
 const DEFAULT_SOCKET_URL = 'http://localhost:3002'
 const DEFAULT_OLLAMA_URL = 'http://localhost:11434'
 
@@ -307,7 +311,7 @@ export function buildCSPString(directives: CSPDirectives): string {
  * but resolves env vars at request time via getEnv() to fix Docker
  * deployments where build-time values may be stale placeholders.
  */
-export function generateRuntimeCSP(): string {
+export function generateRuntimeCSP(frameAncestors?: string[]): string {
   const appUrl = getEnv('NEXT_PUBLIC_APP_URL') || ''
 
   // Must permit whatever getSocketUrl() actually connects to, or the browser
@@ -333,7 +337,11 @@ export function generateRuntimeCSP(): string {
   const runtimeDirectives: CSPDirectives = {
     ...buildTimeCSPDirectives,
 
-    'img-src': [...STATIC_IMG_SRC, ...(isDev ? ['*'] : [])],
+    ...(frameAncestors
+      ? { 'frame-ancestors': frameAncestors.length > 0 ? frameAncestors : ["'none'"] }
+      : {}),
+
+    'img-src': [...STATIC_IMG_SRC],
 
     'connect-src': [
       ...STATIC_CONNECT_SRC,
@@ -345,6 +353,7 @@ export function generateRuntimeCSP(): string {
       ...brandLogoDomains,
       ...privacyDomains,
       ...termsDomains,
+      ...ARENA_APP_CSP_ORIGINS,
       ...s3EndpointSources,
     ],
   }

@@ -28,7 +28,7 @@ export function handleSessionEvent(ctx: StreamLoopContext, parsed: SessionEvent)
       // This synchronously migrates provisional browser/terminal ownership
       // before writing chatIdRef. Assigning the ref here first would make the
       // adoption path believe there was no provisional scope to move.
-      deps.adoptResolvedChatId(payloadChatId)
+      deps.adoptResolvedChatId(payloadChatId, { replaceHomeHistory: true })
     } else {
       deps.chatIdRef.current = payloadChatId
       if (payloadChatId === selected) {
@@ -45,6 +45,7 @@ export function handleSessionEvent(ctx: StreamLoopContext, parsed: SessionEvent)
       const activeStreamId = deps.streamIdRef.current
       if (userMsg && activeStreamId) {
         const assistantMessage = deps.buildAssistantSnapshotMessage({
+          streamId: activeStreamId,
           id:
             deps.activeTurnRef.current?.assistantMessageId ??
             getLiveAssistantMessageId(activeStreamId),

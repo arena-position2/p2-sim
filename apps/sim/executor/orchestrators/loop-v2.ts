@@ -31,8 +31,8 @@ import {
   extractBaseBlockId,
   extractLoopIdFromSentinel,
   extractParallelIdFromSentinel,
-} from '@/executor/utils/subflow-utils'
-import { resolveArrayInputAsync } from '@/executor/utils/subflow-utils.server'
+} from '@/executor/utils/subflow'
+import { resolveArrayInputAsync } from '@/executor/utils/subflow.server'
 import type { VariableResolver } from '@/executor/variables/resolver'
 import type { SerializedLoop } from '@/serializer/types'
 

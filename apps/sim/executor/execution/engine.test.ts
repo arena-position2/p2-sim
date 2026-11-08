@@ -31,7 +31,7 @@ import {
   buildLoopSentinelEndId,
   buildLoopSentinelStartId,
 } from '@/executor/utils/subflow-node-id-codec'
-import { buildSentinelEndId } from '@/executor/utils/subflow-utils'
+import { buildSentinelEndId } from '@/executor/utils/subflow'
 import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
 import { ExecutionEngine } from './engine'
 

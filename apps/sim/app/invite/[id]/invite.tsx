@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { AuthIdentity, AuthStack } from '@sim/auth-ui'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { formatQuotedNameList, normalizeEmail } from '@sim/utils/string'
@@ -9,11 +10,10 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { ApiClientError } from '@/lib/api/client/errors'
 import { requestJson } from '@/lib/api/client/request'
 import { acceptInvitationContract } from '@/lib/api/contracts/invitations'
-import { client, useSession } from '@/lib/auth/auth-client'
+import { client, useSession } from '@/lib/auth/client'
 import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
 import { buildAuthCrossLink } from '@/app/(auth)/auth-redirect'
 import { InvitationDisclosure, InviteLayout, InviteStatusCard } from '@/app/invite/components'
-import { useBrandConfig } from '@/ee/whitelabeling'
 import { useInvitationDetails } from '@/hooks/queries/invitations'
 import { organizationKeys } from '@/hooks/queries/organization'
 import { refreshSessionQuery } from '@/hooks/queries/session'
@@ -286,7 +286,6 @@ export default function Invite({ registrationDisabled }: InviteProps) {
   const inviteTokenStorageKey = `inviteToken:${inviteId}`
   const searchParams = useSearchParams()
   const { data: session, isPending } = useSession()
-  const brandConfig = useBrandConfig()
   const queryClient = useQueryClient()
   const [actionError, setActionError] = useState<InviteError | null>(null)
   const [isAccepting, setIsAccepting] = useState(false)
@@ -583,7 +582,18 @@ export default function Invite({ registrationDisabled }: InviteProps) {
         title={isOrg ? 'Organization Invitation' : 'Workspace Invitation'}
         description={`You've been invited to join ${displayName}.`}
         details={
-          invitation && <InvitationDisclosure invitation={invitation} joinPreview={joinPreview} />
+          <AuthStack>
+            {session?.user?.email && (
+              <AuthIdentity email={session.user.email} name={session.user.name ?? undefined} />
+            )}
+            {invitation && (
+              <InvitationDisclosure
+                invitation={invitation}
+                joinPreview={joinPreview}
+                appearance='auth'
+              />
+            )}
+          </AuthStack>
         }
         icon={isOrg ? 'users' : 'mail'}
         actions={[

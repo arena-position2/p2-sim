@@ -1,8 +1,8 @@
 import type { Logger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
-import { processSingleFileToUserFile, type RawFileInput } from '@/lib/uploads/utils/file-utils'
-import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
+import { processSingleFileToUserFile, type RawFileInput } from '@/lib/uploads/utils/file'
+import { downloadFileFromStorage } from '@/lib/uploads/utils/file.server'
 import { assertToolFileAccess } from '@/app/api/files/authorization'
 
 export type DevelopmentReferenceMediaType = 'application/pdf'

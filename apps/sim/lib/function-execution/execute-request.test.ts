@@ -26,7 +26,7 @@ import { NextRequest } from 'next/server'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { functionExecuteBodySchema } from '@/lib/api/contracts'
 import { OrchestrationError } from '@/lib/core/orchestration/types'
-import { INTERNAL_EXECUTION_DEADLINE_HEADER } from '@/lib/execution/execution-deadline-header'
+import { INTERNAL_EXECUTION_DEADLINE_HEADER } from '@/lib/execution/deadline-header'
 import {
   MOUNTED_WORKSPACE_FILES_PROVENANCE_KEY,
   PRIVATE_SECRET_PROVENANCE_BUNDLE_V1,
@@ -39,6 +39,7 @@ import {
   SandboxOutputFileError,
   SandboxOutputLimitError,
 } from '@/lib/execution/remote-sandbox/output-limits'
+import { SandboxExecutionTimeoutError } from '@/lib/execution/remote-sandbox/timeout'
 
 const {
   mockExecuteInIsolatedVM,
@@ -115,7 +116,7 @@ vi.mock('@/lib/mothership/vfs/resource-writer', () => ({
   writeWorkspaceFileByPath: mockWriteWorkspaceFileByPath,
 }))
 
-vi.mock('@/lib/uploads/contexts/workspace/workspace-file-manager', () => workspaceFileManagerMock)
+vi.mock('@/lib/uploads/contexts/workspace/file-manager', () => workspaceFileManagerMock)
 
 vi.mock(
   '@/lib/workspace-files/application/resolve-workspace-file-reference',
@@ -132,7 +133,7 @@ vi.mock('@/lib/workspace-files/application/read-workspace-file-content', () => (
 
 vi.mock('@/lib/uploads', () => uploadsMock)
 
-vi.mock('@/lib/uploads/contexts/execution/execution-file-manager', () => ({
+vi.mock('@/lib/uploads/contexts/execution/file-manager', () => ({
   uploadExecutionFile: mockUploadExecutionFile,
 }))
 
@@ -3455,6 +3456,39 @@ describe('Function execution request', () => {
       expect(referencedData.__resolvedSecretNames).toEqual(['API_KEY'])
       expect(directData.output.stdout).toBe('secret-value')
       expect(directData.__resolvedSecretNames).toEqual(['API_KEY'])
+    })
+
+    it('returns a timed-out workbench run’s output with the secret names it may reveal', async () => {
+      envFlagsMock.isRemoteSandboxEnabled = true
+      mockExecuteShellInSandbox.mockRejectedValueOnce(
+        new SandboxExecutionTimeoutError({
+          output: 'secret-value\nrendered 2 of 3',
+          stoppedAfterMs: 290_000,
+          outputFiles: ['/tmp/sim/outputs/call-1/frame-1.png'],
+        })
+      )
+
+      const response = await POST(
+        createMockRequest(
+          'POST',
+          {
+            code: 'printf "%s\\n" "$API_KEY"; ./render',
+            language: 'shell',
+            envVars: { API_KEY: 'secret-value' },
+            timeout: 300_000,
+          },
+          { 'x-sim-request-private-tool-metadata': 'resolved-secret-names-v1' }
+        )
+      )
+      const data = await response.json()
+
+      expect(response.status).toBe(408)
+      expect(data.output.stdout).toBe('secret-value\nrendered 2 of 3')
+      expect(data.output.cost).toBeUndefined()
+      expect(data.__resolvedSecretNames).toEqual(['API_KEY'])
+      expect(data.error).toMatch(/^Function execution timed out after 300000ms\. /)
+      expect(data.error).toContain('stopped after 290 s')
+      expect(data.error).toContain('/tmp/sim/outputs/call-1/frame-1.png')
     })
 
     it('returns nonzero shell stderr as a visible 422 error and diagnostic output', async () => {

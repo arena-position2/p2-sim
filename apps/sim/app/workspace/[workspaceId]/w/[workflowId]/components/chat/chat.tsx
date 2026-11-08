@@ -32,7 +32,7 @@ import { generateId } from '@sim/utils/id'
 import { ArrowUp, MoreVertical, Paperclip, Square, X } from 'lucide-react'
 import { useParams } from 'next/navigation'
 import { useShallow } from 'zustand/react/shallow'
-import { useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/client'
 import {
   formatChartDeployOutputForChat,
   hasRenderableChartDeployOutput,

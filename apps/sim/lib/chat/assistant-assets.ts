@@ -3,7 +3,7 @@ import {
   extractStorageKey,
   inferContextFromKey,
   isInternalFileUrl,
-} from '@/lib/uploads/utils/file-utils'
+} from '@/lib/uploads/utils/file'
 
 export interface AssistantChatFile {
   id: string

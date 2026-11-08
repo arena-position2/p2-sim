@@ -6,7 +6,7 @@ import {
   assertBillingAttributionSnapshot,
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import type { AsyncExecutionCorrelation } from '@/lib/core/async-jobs/types'
 import type { ExecutionActor } from '@/lib/execution/actor-resolution'
 import { resolveChildExecutionLineage } from '@/lib/execution/lineage'

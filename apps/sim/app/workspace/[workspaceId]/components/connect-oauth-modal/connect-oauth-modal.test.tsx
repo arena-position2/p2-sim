@@ -102,7 +102,7 @@ vi.mock('@sim/emcn', () => ({
   InfoCardList: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }))
 
-vi.mock('@/lib/auth/auth-client', () => ({
+vi.mock('@/lib/auth/client', () => ({
   useSession: () => ({ data: { user: { name: 'Test User', email: 'test@example.com' } } }),
   useActiveOrganization: () => ({ data: { id: 'org-1' } }),
 }))

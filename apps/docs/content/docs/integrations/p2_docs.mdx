@@ -1,0 +1,69 @@
+---
+title: P2 Docs
+description: Presentation template schemas, icons, and team data
+integration:
+  type: "p2_docs"
+  color: "#F4B400"
+---
+
+
+## Use the block [#usage-instructions]
+
+Internal Position2 presentation helpers: fetch template JSON schemas, browse the slide icon library, and list P2 team members for deck generation. No OAuth required.
+
+## Actions
+
+### Get Template Schema
+
+Return the JSON schema for a presentation template (e.g. position2_2026)
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `template` | string | No | Template id \(e.g. position2_2026\). Defaults to position2_2026 when omitted. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `schema` | json | Full presentation template schema \(slides, blocks, shapeIds, etc.\) |
+
+### Get Icons Library
+
+Return the presentation icon catalog (ids, labels, categories, tags, and image URLs) for template slides
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `category` | string | No | Optional category filter \(e.g. marketing, technology, ai\) |
+| `color` | string | No | Icon color variant to return: "black" or "white". When a slide block specifies iconLibraryColor, pass that value here to receive only matching icons. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `version` | string | Icon library version |
+| `baseUrl` | string | Base URL for icon assets |
+| `icons` | json | Icon entries \(id, label, category, color, tags, pngUrl, optional svgUrl\) |
+| `count` | number | Number of icons returned |
+
+### Get P2 Team Members
+
+Returns the list of Position2 (P2) team members — name, designation, and profile image URL — for use when populating team or speaker slides. Optionally filter by name or designation keyword.
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `filter` | string | No | Optional case-insensitive keyword to filter members by name or designation \(e.g. "VP", "Board", "Rajiv"\). |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `users` | array | List of matched P2 team members. |
+| `total` | number | Total number of users returned. |
+
+

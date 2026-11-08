@@ -1,6 +1,6 @@
+import { INTEGRATION_COUNT_LABEL } from '@sim/deployment-config/integration-claims'
 import type { Metadata } from 'next'
 import { getBaseUrl, isSearchIndexableAppUrl } from '@/lib/core/utils/urls'
-import { INTEGRATION_COUNT_LABEL } from '@/lib/landing/constants'
 import { getBrandConfig } from '@/ee/whitelabeling/branding'
 
 /**
@@ -15,8 +15,8 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
   const allowIndexing = isSearchIndexableAppUrl(getBaseUrl())
 
   const defaultTitle = brand.name
-  const summaryFull = `Arena is the open-source AI workspace where teams build, deploy, and manage AI agents. Connect ${INTEGRATION_COUNT_LABEL} integrations and every major LLM to create agents that automate real work — visually, conversationally, or with code. Trusted by over 100,000 builders — from startups to Fortune 500 companies. SOC2 compliant.`
-  const summaryShort = `Arena is the open-source AI workspace where teams build, deploy, and manage AI agents. Connect ${INTEGRATION_COUNT_LABEL} integrations and every major LLM to create agents that automate real work.`
+  const summaryFull = `Sim is the open-source AI workspace where teams build, deploy, and manage AI agents. Connect ${INTEGRATION_COUNT_LABEL} integrations and every major LLM to create agents that automate real work — visually, conversationally, or with code. Trusted by over 100,000 builders — from startups to Fortune 500 companies. SOC2 compliant.`
+  const summaryShort = `Sim is the open-source AI workspace where teams build, deploy, and manage AI agents. Connect ${INTEGRATION_COUNT_LABEL} integrations and every major LLM to create agents that automate real work.`
 
   return {
     title: {
@@ -77,7 +77,7 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
       locale: 'en_US',
       title: defaultTitle,
       description: summaryFull,
-      siteName: 'Arena AI',
+      siteName: brand.name,
       images: [
         {
           url: brand.logoUrl || '/logo/426-240/reverse/small.png',
@@ -92,8 +92,8 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
       title: defaultTitle,
       description: summaryFull,
       images: [brand.logoUrl || '/logo/426-240/reverse/small.png'],
-      creator: '@position2',
-      site: '@position2',
+      creator: '@simdotai',
+      site: '@simdotai',
     },
     manifest: '/manifest.webmanifest',
     icons: {

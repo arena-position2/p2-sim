@@ -1,0 +1,358 @@
+---
+title: Arena
+description: Arena
+integration:
+  type: "arena"
+  color: "#E0E0E0"
+---
+
+import { ReferenceDetails } from "@/components/ui/reference-details"
+
+## Use the block [#usage-instructions]
+
+Arena
+
+## Actions
+
+### Arena Create Task
+
+Create a milestone task in Arena using workspace selectors (client, project, group, assignee).
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `task-name` | string | Yes | Name of the task |
+| `task-description` | string | Yes | Detailed description of the task |
+| `task-client` | string | No | Client associated with the task |
+| `task-project` | string | No | Project under which the task belongs |
+| `task-group` | object | No | Task group |
+| `task-assignee` | string | No | Assignee |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | json | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Create Task (names & emails)
+
+Create a milestone task in Arena using client/project/group names and assignee email.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `task-name` | string | Yes | Name of the task |
+| `task-description` | string | Yes | Detailed description of the task |
+| `task-client-name` | string | No | Client name |
+| `task-project-name` | string | No | Project name |
+| `task-epic-name` | string | No | Group / epic name |
+| `task-assignee-email` | string | No | Assignee email |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | json | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Create Sub Task
+
+Create a subtask in Arena using workspace selectors.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `task-name` | string | Yes | Name of the subtask |
+| `task-description` | string | Yes | Detailed description |
+| `task-client` | string | No | Client |
+| `task-project` | string | No | Project |
+| `task-task` | string | No | Parent task |
+| `task-assignee` | string | No | Assignee |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | json | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Create Sub Task (names & emails)
+
+Create a subtask in Arena using names, emails, and parent task number.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `task-name` | string | Yes | Name of the subtask |
+| `task-description` | string | Yes | Detailed description |
+| `task-client-name` | string | No | Client name |
+| `task-project-name` | string | No | Project name |
+| `task-assignee-email` | string | No | Assignee email |
+| `task-number` | string | No | Parent task number |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | json | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Fetch Searched Tasks
+
+Search Arena tasks by client name, project name, assignee name, and state (free-text filters).
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `fetch-searched-client-name` | string | No | Client name filter |
+| `fetch-searched-project-name` | string | No | Project name filter |
+| `fetch-searched-assignee-name` | string | No | Assignee name filter |
+| `fetch-searched-state` | string | No | State name filter |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Search Task
+
+Search Arena tasks using client, project, state, visibility, due date, assignee, and page size. For search by task name or number only, use the Search Task (name only) operation.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `search-task-client` | string | No | Client associated with the task |
+| `search-task-project` | string | No | Project under which the task belongs |
+| `search-task-assignee` | string | No | User ID of the assignee |
+| `search-task-visibility` | string | No | Task visibility \(Internal / Client Facing\) |
+| `search-task-state` | string | No | State of the task |
+| `search-task-due-date` | string | No | Due date of the task |
+| `search-task-max-results` | string | No | Max number of search results \(page size\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `ts` | string | Timestamp when response was transformed |
+| `response` | object | Response from Arena |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Search Task (name only)
+
+Search Arena tasks by name or number. Use the full “Search Task” operation when you need client, project, state, or other filters.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `search-task-name` | string | No | Task name or number to search |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Save Summary
+
+Save a summary for a client in Arena.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `save-summary-client` | object | Yes | Client associated with the summary |
+| `save-summary-text` | string | Yes | Summary text to save |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Add Comment
+
+Add a comment to an Arena task using client, project, group, and task selectors. Set those on the block; you supply the comment text and optional client note.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `comment-client` | object | Yes | Client \(set in the block; not an LLM argument\) |
+| `comment-project` | string | Yes | Project \(set in the block; not an LLM argument\) |
+| `comment-group` | object | Yes | Task group \(set in the block; not an LLM argument\) |
+| `comment-task` | string | Yes | Target task \(set in the block; not an LLM argument\) |
+| `comment-text` | string | Yes | Comment body to post. |
+| `comment-client-note` | boolean | No | Client-facing note \(optional\). Default false if unsure. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Add Comment (by task number)
+
+Add a comment to an Arena task using its task number and the updated comment API. Task number is usually set on the block; you supply comment text and optional To/CC.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `comment-task-number` | string | Yes | Arena task number \(set in the block or from a prior step\). |
+| `comment-to` | string | No | To line \(optional\). Use empty string if not needed. |
+| `comment-cc` | string | No | CC \(optional\). Use empty string if not needed. |
+| `comment-text` | string | Yes | Comment body to post. |
+| `comment-client-note` | boolean | No | Client-facing note \(optional\). Default false if unsure. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Get Meetings
+
+Get meetings for a client in Arena. Use basic mode to pick a client, or advanced mode to enter a client ID.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `get-meetings-client` | string | Yes | Client: selector value \(basic\) or client ID as string \(advanced\). Merged on the block as one field. |
+| `get-meetings-period` | string | Yes | Time period for meetings \(7days, today, 14days\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Get My Tasks
+
+Get the current user’s tasks from Arena.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `withinMinutes` | number | No | Optional. Return tasks updated within the last N minutes from now \(passed to Arena as withinMinutes\). |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Get My Overdue Tasks
+
+Get the current user’s overdue tasks from Arena.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Indicates if transform was successful |
+| `output` | object | Output from Arena |
+
+</ReferenceDetails>
+
+### Arena Get Token
+
+Get Arena token for the logged-in user or workflow owner. Both must have @position2.com email.
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `success` | boolean | Whether the request succeeded |
+| `found` | boolean | Whether a token was found for the user |
+| `userId` | string | User id \(when found\) |
+| `name` | string | User display name from user table \(when found\) |
+| `email` | string | User email \(when found\) |
+| `arenaToken` | string | Arena token for the user \(when found\) |
+| `timezone` | string | User timezone from Arena details \(when found\) |
+| `persona` | string | User persona from Arena details \(when found\) |
+| `reason` | string | Error or failure reason \(when not found\) |
+
+</ReferenceDetails>
+
+

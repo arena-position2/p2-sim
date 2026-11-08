@@ -733,6 +733,7 @@ export async function createStreamingResponse(
   const maxThinkingChars = DEFAULT_MAX_THINKING_CHARS
 
   let requestAborted = false
+  let streamCancelled = false
   const onRequestAbort = () => {
     requestAborted = true
     timeoutController.abort()
@@ -759,8 +760,13 @@ export async function createStreamingResponse(
 
   return new ReadableStream({
     async start(controller) {
+      /** After `cancel()` the controller is closed and enqueue throws; the client is gone. */
+      const enqueue = (bytes: Uint8Array) => {
+        if (!streamCancelled) controller.enqueue(bytes)
+      }
+
       /** Flush headers promptly and keep silent blocks alive through idle-limited proxies. */
-      controller.enqueue(encodeSSEComment('keepalive'))
+      enqueue(encodeSSEComment('keepalive'))
       keepaliveId = setInterval(() => {
         try {
           controller.enqueue(encodeSSEComment('keepalive'))
@@ -798,7 +804,7 @@ export async function createStreamingResponse(
           state.streamedSelectedOutputKeys.add(options.selectedOutputKey)
         }
         const frame: ChatStreamChunkFrame = { blockId, chunk }
-        controller.enqueue(encodeSSE(frame))
+        enqueue(encodeSSE(frame))
         state.processedOutputs.add(blockId)
       }
 
@@ -813,7 +819,7 @@ export async function createStreamingResponse(
           event: 'thinking',
           data: forwarded,
         }
-        controller.enqueue(encodeSSE(frame))
+        enqueue(encodeSSE(frame))
       }
 
       const sendTool = (
@@ -831,7 +837,7 @@ export async function createStreamingResponse(
           name,
           ...(phase === 'end' && status ? { status } : {}),
         }
-        controller.enqueue(encodeSSE(frame))
+        enqueue(encodeSSE(frame))
       }
 
       const completedBlockIdsEmitted = new Set<string>()
@@ -887,7 +893,7 @@ export async function createStreamingResponse(
             emittedSinceReset = true
           } else {
             const frame: ChatStreamChunkFrame = { blockId, chunk: text }
-            controller.enqueue(encodeSSE(frame))
+            enqueue(encodeSSE(frame))
           }
         }
 
@@ -908,7 +914,7 @@ export async function createStreamingResponse(
               } else if (sinkAnswerText && event.type === 'turn_end') {
                 if (event.turn === 'intermediate' && emittedSinceReset) {
                   const frame: ChatStreamChunkResetFrame = { blockId, event: 'chunk_reset' }
-                  controller.enqueue(encodeSSE(frame))
+                  enqueue(encodeSSE(frame))
                   // Re-arm separator bookkeeping so re-streamed text starts clean.
                   emittedSinceReset = false
                   state.processedOutputs.delete(blockId)
@@ -949,7 +955,7 @@ export async function createStreamingResponse(
             blockId,
             error: getErrorMessage(error, 'Stream reading error'),
           }
-          controller.enqueue(encodeSSE(frame))
+          enqueue(encodeSSE(frame))
         } finally {
           unsubscribe?.()
           sendBlockComplete(blockId)
@@ -967,7 +973,7 @@ export async function createStreamingResponse(
         const selectedOutputBlockId = outputBlockId ?? blockId
         state.completedBlockIds.add(selectedOutputBlockId)
 
-        if (!streamConfig.selectedOutputs?.length) {
+        if (streamCancelled || !streamConfig.selectedOutputs?.length) {
           return
         }
 
@@ -997,7 +1003,7 @@ export async function createStreamingResponse(
           : output
 
         for (const descriptor of matchingOutputs) {
-          if (state.selectedOutputError) {
+          if (streamCancelled || state.selectedOutputError) {
             break
           }
           try {
@@ -1061,7 +1067,7 @@ export async function createStreamingResponse(
                   event: 'output',
                   data: hydratedOutput,
                 }
-                controller.enqueue(encodeSSE(frame))
+                enqueue(encodeSSE(frame))
                 state.selectedOutputBytes = nextSelectedOutputBytes
                 state.streamedSelectedOutputKeys.add(descriptor.key)
                 state.processedOutputs.add(selectedOutputBlockId)
@@ -1095,7 +1101,7 @@ export async function createStreamingResponse(
               blockId: selectedOutputBlockId,
               error: errorMessage,
             }
-            controller.enqueue(encodeSSE(frame))
+            enqueue(encodeSSE(frame))
             break
           }
         }
@@ -1169,7 +1175,7 @@ export async function createStreamingResponse(
             await result._streamingMetadata.loggingSession.markAsFailed(timeoutErrorMessage)
           }
           const frame: ChatStreamErrorFrame = { event: 'error', error: timeoutErrorMessage }
-          controller.enqueue(encodeSSE(frame))
+          enqueue(encodeSSE(frame))
         } else if (result.status === 'cancelled' && requestAborted) {
           logger.info(`[${requestId}] Streaming execution aborted by client disconnect`)
           if (result._streamingMetadata?.loggingSession) {
@@ -1178,7 +1184,7 @@ export async function createStreamingResponse(
           }
           // No `final` after abort; clients that already disconnected ignore these.
           const frame: ChatStreamErrorFrame = { event: 'error', error: 'Client cancelled request' }
-          controller.enqueue(encodeSSE(frame))
+          enqueue(encodeSSE(frame))
         } else {
           await completeLoggingSession(result)
 
@@ -1215,18 +1221,18 @@ export async function createStreamingResponse(
                 ...(result.status === 'paused' && { status: 'paused' }),
               },
             }
-            controller.enqueue(encodeSSE(frame))
+            enqueue(encodeSSE(frame))
           }
         }
 
         // Terminal marker: always follows success `final` or a single terminal `error`.
-        controller.enqueue(encodeSSE('[DONE]'))
+        enqueue(encodeSSE('[DONE]'))
 
         if (executionId) {
           await cleanupExecutionBase64Cache(executionId)
         }
 
-        controller.close()
+        if (!streamCancelled) controller.close()
       } catch (error) {
         logger.error(
           `[${requestId}] Stream error`,
@@ -1237,15 +1243,15 @@ export async function createStreamingResponse(
             ? SELECTED_OUTPUT_TOO_LARGE_MESSAGE
             : getErrorMessage(error, 'Stream processing error')
         const frame: ChatStreamErrorFrame = { event: 'error', error: errorMessage }
-        controller.enqueue(encodeSSE(frame))
+        enqueue(encodeSSE(frame))
         // Same terminal rule as timeout/abort: one error, then [DONE], never `final`.
-        controller.enqueue(encodeSSE('[DONE]'))
+        enqueue(encodeSSE('[DONE]'))
 
         if (executionId) {
           await cleanupExecutionBase64Cache(executionId)
         }
 
-        controller.close()
+        if (!streamCancelled) controller.close()
       } finally {
         stopKeepalive()
         cleanupRequestAbort()
@@ -1253,6 +1259,7 @@ export async function createStreamingResponse(
       }
     },
     async cancel(reason) {
+      streamCancelled = true
       logger.info(
         `[${requestId}] Streaming response cancelled`,
         projectResolvedSecretDiagnosticError(reason, undefined)

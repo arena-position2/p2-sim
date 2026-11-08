@@ -12,7 +12,7 @@ import {
   KnowledgeBasePermissionError,
 } from '@/lib/knowledge/service'
 import type { ChunkingConfig, KnowledgeBaseWithCounts } from '@/lib/knowledge/types'
-import { generateKnowledgeBaseFileKey } from '@/lib/uploads/contexts/knowledge-base/knowledge-base-file-manager'
+import { generateKnowledgeBaseFileKey } from '@/lib/uploads/contexts/knowledge-base/file-manager'
 import { downloadFile, uploadFile } from '@/lib/uploads/core/storage-service'
 import { MAX_FILE_SIZE } from '@/lib/uploads/utils/validation'
 import { getUserEntityPermissions } from '@/lib/workspaces/permissions/utils'

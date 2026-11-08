@@ -29,8 +29,8 @@ import { generateOpenAIImageEdit } from '@/lib/image-generation/openai-reference
 import { type FalAICostMetadata, getFalAICostMetadata } from '@/lib/tools/falai-pricing'
 import { buildImageBillingMetadata } from '@/lib/tools/image-pricing'
 import { generateFileId } from '@/lib/uploads/contexts/execution/utils'
-import { extractStorageKey, isInternalFileUrl } from '@/lib/uploads/utils/file-utils'
-import { resolveInternalFileUrl } from '@/lib/uploads/utils/file-utils.server'
+import { extractStorageKey, isInternalFileUrl } from '@/lib/uploads/utils/file'
+import { resolveInternalFileUrl } from '@/lib/uploads/utils/file.server'
 import { saveGeneratedImage } from '@/lib/uploads/utils/image-storage.server'
 import { parseImageUrls } from '@/lib/utils/parse-image-urls'
 

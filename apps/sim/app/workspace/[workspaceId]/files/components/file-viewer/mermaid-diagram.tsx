@@ -3,7 +3,7 @@
 import { memo, useEffect, useState } from 'react'
 import { toError } from '@sim/utils/errors'
 import { generateShortId } from '@sim/utils/id'
-import { useTheme } from '@/app/_shell/providers/theme-provider'
+import { useTheme } from 'next-themes'
 import {
   mermaidWorkflowCss,
   readMermaidThemeVariables,

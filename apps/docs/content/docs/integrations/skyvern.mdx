@@ -1,0 +1,132 @@
+---
+title: Skyvern
+description: Create and run Skyvern browser automation workflows
+integration:
+  type: "skyvern"
+  color: "#7C3AED"
+---
+
+
+## Use the block [#usage-instructions]
+
+Integrate with Skyvern to create UI automation workflows, list existing workflows, trigger runs with parameters, and poll run status until completion.
+
+## Actions
+
+### Skyvern Create Workflow
+
+Create a new Skyvern browser automation workflow
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `apiKey` | string | No | Skyvern API key \(x-api-key header\). Optional if SKYVERN_API_KEY is set on the server. |
+| `baseUrl` | string | No | Skyvern server base URL \(e.g. https://api.skyvern.com). Optional if SKYVERN_BASE_URL is set on the server. |
+| `title` | string | Yes | Workflow title |
+| `description` | string | No | Workflow description |
+| `blockLabel` | string | No | Label for the task block \(default UI_Automation\) |
+| `url` | string | Yes | Starting URL for the browser task block |
+| `navigationGoal` | string | No | Natural-language navigation goal for the task block |
+| `dataExtractionGoal` | string | No | Natural-language data extraction goal for the task block |
+| `prompt` | string | No | Optional step-by-step instructions \(used as navigation goal when navigation goal is empty\) |
+| `workflowParameters` | json | No | Workflow input parameters \(key, workflow_parameter_type, description, default_value\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `workflowId` | string | Workflow version ID \(w_...\) |
+| `workflowPermanentId` | string | Permanent workflow ID \(wpid_...\) used to run the workflow |
+| `title` | string | Workflow title |
+| `description` | string | Workflow description |
+| `status` | string | Workflow status \(e.g. published\) |
+| `version` | number | Workflow version number |
+| `agentId` | string | Agent ID \(wpid_...\) associated with the workflow |
+
+### Skyvern List Workflows
+
+List Skyvern workflows for the organization
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `apiKey` | string | No | Skyvern API key \(x-api-key header\). Optional if SKYVERN_API_KEY is set on the server. |
+| `baseUrl` | string | No | Skyvern server base URL \(e.g. https://api.skyvern.com). Optional if SKYVERN_BASE_URL is set on the server. |
+| `page` | number | No | Page number for pagination |
+| `pageSize` | number | No | Number of workflows per page |
+| `status` | string | No | Filter by workflow status |
+| `searchKey` | string | No | Search workflows by title, folder, or parameter metadata |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `workflows` | array | List of workflows |
+|   ↳ `workflowId` | string | Workflow version ID \(w_...\) |
+|   ↳ `workflowPermanentId` | string | Permanent workflow ID \(wpid_...\) |
+|   ↳ `title` | string | Workflow title |
+|   ↳ `description` | string | Workflow description |
+|   ↳ `status` | string | Workflow status |
+|   ↳ `version` | number | Workflow version number |
+|   ↳ `agentId` | string | Agent ID \(wpid_...\) |
+|   ↳ `createdAt` | string | Creation timestamp |
+|   ↳ `modifiedAt` | string | Last modified timestamp |
+| `count` | number | Number of workflows returned |
+
+### Skyvern Run Workflow
+
+Run a Skyvern workflow by permanent workflow ID (agent_id)
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `apiKey` | string | No | Skyvern API key \(x-api-key header\). Optional if SKYVERN_API_KEY is set on the server. |
+| `baseUrl` | string | No | Skyvern server base URL \(e.g. https://api.skyvern.com). Optional if SKYVERN_BASE_URL is set on the server. |
+| `workflowPermanentId` | string | Yes | Permanent workflow / agent ID \(wpid_...\) |
+| `parameters` | json | No | Workflow run parameters \(e.g. \{ "starting_url": "https://example.com" \}\) |
+| `title` | string | No | Optional title for this workflow run |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `workflowId` | string | Workflow permanent ID that was run |
+| `workflowRunId` | string | Workflow run ID \(wr_...\) for polling status |
+| `status` | string | Initial run status \(e.g. created, queued, running\) |
+| `agentId` | string | Agent ID associated with the run |
+| `agentRunId` | string | Run ID \(wr_...\) — same as workflowRunId |
+
+### Skyvern Get Run
+
+Get the status and output of a Skyvern workflow run
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `apiKey` | string | No | Skyvern API key \(x-api-key header\). Optional if SKYVERN_API_KEY is set on the server. |
+| `baseUrl` | string | No | Skyvern server base URL \(e.g. https://api.skyvern.com). Optional if SKYVERN_BASE_URL is set on the server. |
+| `runId` | string | Yes | Workflow run ID \(wr_...\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `runId` | string | Workflow run ID |
+| `status` | string | Run status \(e.g. completed, failed, running\) |
+| `output` | json | Run output payload including block outputs and extracted information |
+| `failureReason` | string | Failure reason when status is failed |
+| `downloadedFiles` | array | Files downloaded during the run |
+| `recordingUrl` | string | URL to the run recording |
+| `screenshotUrls` | array | Screenshot URLs captured during the run |
+| `createdAt` | string | Run creation timestamp |
+| `startedAt` | string | Run start timestamp |
+| `finishedAt` | string | Run finish timestamp |
+| `appUrl` | string | URL to view the run in the Skyvern app |
+| `stepCount` | number | Number of steps executed |
+| `runType` | string | Run type \(e.g. workflow_run\) |
+
+

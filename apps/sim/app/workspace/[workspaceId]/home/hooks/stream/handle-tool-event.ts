@@ -21,7 +21,10 @@ import {
   isWorkflowToolName,
   streamFrameRequestsClientExecution,
 } from '@/lib/mothership/tools/client-executed-tools'
-import { isDesktopToolCall } from '@/lib/mothership/tools/desktop-tools'
+import {
+  isBackgroundDesktopToolCall,
+  isDesktopToolCall,
+} from '@/lib/mothership/tools/desktop-tools'
 import { invalidateResourceQueries } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-registry'
 import type { StreamLoopContext } from '@/app/workspace/[workspaceId]/home/hooks/stream/stream-context'
 import {
@@ -207,7 +210,7 @@ export function handleToolEvent(ctx: StreamLoopContext, parsed: ToolEvent): void
     streamFrameRequestsClientExecution(payload) &&
     isClientExecutedToolCall(name, args) &&
     (isDesktopApp() || !isDesktopCall) &&
-    !(isDesktopCall && deps.options.desktopToolsOnDevice) &&
+    !(isBackgroundDesktopToolCall(name, args) && deps.options.desktopToolsOnDevice) &&
     !isPartial &&
     !deps.options.suppressedWorkflowToolStartIds?.has(rawId) &&
     node?.kind === 'tool' &&
@@ -220,6 +223,8 @@ export function handleToolEvent(ctx: StreamLoopContext, parsed: ToolEvent): void
       deps.startClientBrowserTool(rawId, name, args ?? {}, parsed.ts)
     } else if (isTerminalToolName(name)) {
       deps.startClientTerminalTool(rawId, name, args ?? {}, parsed.ts)
+    } else if (name === 'computer') {
+      deps.startClientComputerTool(rawId, payload.arguments ?? {}, parsed.ts)
     } else {
       deps.startClientLocalFilesystemTool(rawId, name, args ?? {})
     }

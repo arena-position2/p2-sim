@@ -15,5 +15,15 @@ export default async function ArenaGeneralSettingsLayout({ children }: { childre
   const session = await getSession()
   if (!session?.user) redirect('/login')
 
-  return <ArenaGeneralSettingsShell>{children}</ArenaGeneralSettingsShell>
+  return (
+    <ArenaGeneralSettingsShell
+      meta={{
+        label: generalMeta?.label ?? 'General',
+        description: generalMeta?.description ?? 'Manage your profile, appearance, and preferences.',
+        docsLink: generalMeta?.docsLink,
+      }}
+    >
+      {children}
+    </ArenaGeneralSettingsShell>
+  )
 }

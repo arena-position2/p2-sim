@@ -5,7 +5,7 @@ import { truncate } from '@sim/utils/string'
 import {
   type BillingAttributionSnapshot,
   resolveBillingAttribution,
-} from '@/lib/billing/core/billing-attribution'
+} from '@/lib/billing/core/attribution'
 import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {

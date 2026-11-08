@@ -199,7 +199,7 @@ export async function waitForToolConfirmation(
       if (settled) return
       if (options.executionScope) {
         try {
-          await revokeExpiredSimToolExecutions(options.executionScope)
+          await revokeExpiredSimToolExecutions({ ...options.executionScope, toolCallId })
         } catch (error) {
           logger.warn('Could not verify retained tool execution ownership', {
             toolCallId,
