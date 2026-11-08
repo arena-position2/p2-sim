@@ -1,6 +1,6 @@
 import { MicrosoftIcon } from '@/components/icons'
 import { resolveExecutionWorkspaceId } from '@/lib/workspaces/is-admin-workspace'
-import { IntegrationType, type BlockConfig, type BlockMeta } from '@/blocks/types'
+import { type BlockConfig, type BlockMeta, IntegrationType } from '@/blocks/types'
 
 /** In-flight promise cache keyed by workspaceId — deduplicates concurrent fetchOptions + fetchOptionById calls */
 let _inflightFetch: {

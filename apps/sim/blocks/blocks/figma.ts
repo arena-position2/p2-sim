@@ -1,5 +1,10 @@
 import { FigmaIcon } from '@/components/icons'
-import { IntegrationType, type BlockConfig, type BlockMeta, type SubBlockType } from '@/blocks/types'
+import {
+  type BlockConfig,
+  type BlockMeta,
+  IntegrationType,
+  type SubBlockType,
+} from '@/blocks/types'
 
 export const FigmaBlock: BlockConfig = {
   type: 'figma',

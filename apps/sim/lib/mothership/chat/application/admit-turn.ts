@@ -157,13 +157,7 @@ export const admitChatTurn = defineAuthorizedChatUseCase({
     await assertChatStreamLease(input.lease)
     const desktopDeviceId = await turnDesktopDevice(principal, workspaceId, input.desktopDeviceId)
     return withRunAdmissionLock(userId, request.messageId, async (tx) => {
-      const chat = await moveChatToTurn(
-        tx,
-        context,
-        request,
-        input.effortChoice,
-        input.chatModel
-      )
+      const chat = await moveChatToTurn(tx, context, request, input.effortChoice, input.chatModel)
       await appendCopilotChatMessages(
         chatId,
         [buildPersistedUserMessage(input.message)],

@@ -10,8 +10,8 @@ import {
   projectResolvedModelInput,
   selectModelSchemaInputPaths,
 } from '@/lib/execution/model-input-provenance'
-import { applyAgentChatFilesToImageGeneratorTools } from '@/lib/image-generation/reference-files'
 import { NonRetryableExecutionError } from '@/lib/execution/non-retryable-error'
+import { applyAgentChatFilesToImageGeneratorTools } from '@/lib/image-generation/reference-files'
 import { readAvailableCustomToolByIdOrTitleAsExecutor } from '@/lib/internal/custom-tools/read-available-by-id-or-title'
 import { resolveExecutorFileMaterializationContext } from '@/lib/internal/file/materialization-context'
 import { discoverMcpServerToolsAsExecutor } from '@/lib/internal/mcp/discover-tools'

@@ -6,7 +6,7 @@ import {
   parseImageUrls,
   s3UriToPathObject,
 } from '@/lib/utils/parse-image-urls'
-import { AuthMode, IntegrationType, type BlockConfig, type BlockMeta } from '@/blocks/types'
+import { AuthMode, type BlockConfig, type BlockMeta, IntegrationType } from '@/blocks/types'
 
 const NANO_BANANA_PRO_MODEL = 'gemini-3-pro-image-preview'
 

@@ -6,6 +6,12 @@ import {
   messageForCopilotWorkflowError,
 } from '@/lib/mothership/application/execute-workflow-use-case'
 import { deleteWorkflow } from '@/lib/workflows/application/delete-workflow'
+import {
+  createWorkflowFolder,
+  deleteWorkflowFolder,
+  listWorkflowFolders,
+  relocateWorkflowFolder,
+} from '@/lib/workflows/application/folders'
 import { moveWorkflowsBulk } from '@/lib/workflows/application/move-workflows-bulk'
 import { readWorkflowGraph } from '@/lib/workflows/application/read-workflow-graph'
 import { replaceWorkflowState } from '@/lib/workflows/application/replace-workflow-state'
@@ -14,12 +20,6 @@ import {
   applyWorkflowVariableOperations,
   type WorkflowVariableOperation,
 } from '@/lib/workflows/application/update-workflow-content'
-import {
-  createWorkflowFolder,
-  deleteWorkflowFolder,
-  listWorkflowFolders,
-  relocateWorkflowFolder,
-} from '@/lib/workflows/application/folders'
 import { decideBlockEnablement } from '@/lib/workflows/editing/block-enablement'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'

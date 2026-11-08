@@ -1,6 +1,12 @@
 'use client'
 
-import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  type QueryClient,
+  type QueryKey,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { requestJson } from '@/lib/api/client/request'
 import type { ContractBodyInput, ContractQueryInput } from '@/lib/api/contracts'
 import {

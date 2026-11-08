@@ -1,5 +1,5 @@
 import { SpyfuIcon } from '@/components/icons'
-import { IntegrationType, type BlockConfig, type BlockMeta } from '@/blocks/types'
+import { type BlockConfig, type BlockMeta, IntegrationType } from '@/blocks/types'
 import {
   SPYFU_DEFAULT_OPERATION_ID,
   spyfuDateOperationIds,

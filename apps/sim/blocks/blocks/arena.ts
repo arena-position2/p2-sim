@@ -1,5 +1,5 @@
 import { ArenaIcon } from '@/components/icons'
-import { IntegrationType, type BlockConfig, type BlockMeta } from '@/blocks/types'
+import { type BlockConfig, type BlockMeta, IntegrationType } from '@/blocks/types'
 
 export const ArenaBlock: BlockConfig = {
   type: 'arena',

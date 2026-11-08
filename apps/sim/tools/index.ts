@@ -55,13 +55,13 @@ import { getAccessibleOAuthCredentials } from '@/lib/credentials/environment'
 import { pickPreferredOAuthCredential } from '@/lib/credentials/pick-oauth-credential'
 import { SIM_VIA_HEADER, serializeCallChain } from '@/lib/execution/call-chain'
 import {
-  isDurableSecretProvenanceEnforced,
-  reportUnrecordedDurableProvenance,
-} from '@/lib/execution/durable-secret-provenance-enforcement'
-import {
   INTERNAL_EXECUTION_DEADLINE_HEADER,
   serializeExecutionDeadlineHeader,
 } from '@/lib/execution/deadline-header'
+import {
+  isDurableSecretProvenanceEnforced,
+  reportUnrecordedDurableProvenance,
+} from '@/lib/execution/durable-secret-provenance-enforcement'
 import {
   addModelInputProvenanceToRequest,
   createModelInputProvenanceRequestMetadata,

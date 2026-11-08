@@ -1,5 +1,5 @@
 import { PresentationIcon } from '@/components/icons'
-import { IntegrationType, type BlockConfig } from '@/blocks/types'
+import { type BlockConfig, IntegrationType } from '@/blocks/types'
 
 export const PresentationBlock: BlockConfig = {
   type: 'presentation',

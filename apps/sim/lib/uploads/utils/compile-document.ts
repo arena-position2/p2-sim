@@ -1,7 +1,7 @@
 import { sha256Hex } from '@sim/security/hash'
 import { runSandboxTask } from '@/lib/execution/sandbox/run-task'
-import { loadCompiledDocByExt } from '@/lib/uploads/documents/compile'
 import { parseWorkspaceFileKey } from '@/lib/uploads/contexts/workspace/file-manager'
+import { loadCompiledDocByExt } from '@/lib/uploads/documents/compile'
 import { getContentType } from '@/app/api/files/utils'
 import type { SandboxTaskId } from '@/sandboxes/registry'
 

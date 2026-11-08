@@ -1,5 +1,5 @@
 import { GoogleIcon } from '@/components/icons'
-import { IntegrationType, type BlockConfig } from '@/blocks/types'
+import { type BlockConfig, IntegrationType } from '@/blocks/types'
 
 /** In-flight promise cache keyed by workspaceId — deduplicates concurrent fetchOptions + fetchOptionById calls */
 let _inflightFetch: {

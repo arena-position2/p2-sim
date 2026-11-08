@@ -19,7 +19,6 @@ import type { BlockStateController, ContextExtensions } from '@/executor/executi
 import type { ExecutionContext, NormalizedBlockOutput } from '@/executor/types'
 import { createReferencePattern } from '@/executor/utils/reference-validation'
 import { projectResolvedSecretDiagnosticError } from '@/executor/utils/resolved-secret-content-projection'
-import { mergeSubflowSecretProvenance } from '@/executor/utils/subflow-secret-provenance'
 import {
   addSubflowErrorLog,
   buildParallelSentinelEndId,
@@ -33,6 +32,7 @@ import {
   extractParallelIdFromSentinel,
 } from '@/executor/utils/subflow'
 import { resolveArrayInputAsync } from '@/executor/utils/subflow.server'
+import { mergeSubflowSecretProvenance } from '@/executor/utils/subflow-secret-provenance'
 import type { VariableResolver } from '@/executor/variables/resolver'
 import type { SerializedLoop } from '@/serializer/types'
 

@@ -11,7 +11,8 @@ import type { SimConnection } from '@/lib/mothership/generated/sim-transport'
  * rejects `direct` with "Customer requests require outbound Sim transport".
  */
 export function getSimConnection(override?: SimConnection['mode']): SimConnection {
-  const mode = override ?? env.MOTHERSHIP_SIM_TRANSPORT ?? (isSimCloudHosted ? 'direct' : 'checkpoint')
+  const mode =
+    override ?? env.MOTHERSHIP_SIM_TRANSPORT ?? (isSimCloudHosted ? 'direct' : 'checkpoint')
   if (mode === 'direct') return { mode }
   return {
     mode,

@@ -19,7 +19,8 @@ export default async function ArenaGeneralSettingsLayout({ children }: { childre
     <ArenaGeneralSettingsShell
       meta={{
         label: generalMeta?.label ?? 'General',
-        description: generalMeta?.description ?? 'Manage your profile, appearance, and preferences.',
+        description:
+          generalMeta?.description ?? 'Manage your profile, appearance, and preferences.',
         docsLink: generalMeta?.docsLink,
       }}
     >

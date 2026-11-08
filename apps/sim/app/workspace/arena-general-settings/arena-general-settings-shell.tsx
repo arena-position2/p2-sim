@@ -1,10 +1,10 @@
 'use client'
 
 import { type ReactNode, useEffect, useRef } from 'react'
+import { useTheme } from 'next-themes'
 import { SettingsHeaderProvider, SettingsHeaderShell } from '@/components/settings/settings-header'
 import { SettingsSectionProvider } from '@/components/settings/settings-panel'
 import { useSettingsBrowserNavigation } from '@/components/settings/use-settings-browser-navigation'
-import { useTheme } from 'next-themes'
 import { ArenaThemeSync } from '@/app/workspace/[workspaceId]/providers/arena-theme-sync'
 
 const ARENA_EMBED_THEMES = ['light', 'dark', 'system'] as const
