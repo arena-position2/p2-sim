@@ -253,7 +253,7 @@ async function extractFileContent(
 
       if (!extension) {
         try {
-          const fileUtilsPath = '@' + '/lib/uploads/utils/file-utils'
+          const fileUtilsPath = '@' + '/lib/uploads/utils/file'
           const fileUtilsModule = await import(fileUtilsPath)
           extension = fileUtilsModule.getExtensionFromMimeType(mimeType) || null
         } catch (error) {
