@@ -643,6 +643,37 @@ function formatTableWithSpacing(tableLines: string[]): string {
   return allFormattedLines.join('\n')
 }
 
+function addCodeBlockRequest(
+  requests: Array<Record<string, any>>,
+  code: string,
+  _language: string,
+  index: number
+): number {
+  requests.push({
+    insertText: {
+      location: { index },
+      text: `${code}\n`,
+    },
+  })
+
+  requests.push({
+    updateTextStyle: {
+      range: {
+        startIndex: index,
+        endIndex: index + code.length,
+      },
+      textStyle: {
+        weightedFontFamily: { fontFamily: 'Courier New' },
+        fontSize: { magnitude: 10, unit: 'PT' },
+        backgroundColor: { color: { rgbColor: { red: 0.95, green: 0.95, blue: 0.95 } } },
+      },
+      fields: 'weightedFontFamily,fontSize,backgroundColor',
+    },
+  })
+
+  return index + code.length + 1
+}
+
 function addHorizontalRuleRequest(requests: Array<Record<string, any>>, index: number): number {
   // Insert a newline for the border to apply to
   requests.push({
