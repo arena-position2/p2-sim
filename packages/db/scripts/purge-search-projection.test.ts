@@ -5,23 +5,20 @@ import {
 } from '@sim/db/scripts/purge-search-projection'
 import { describe, expect, it } from 'vitest'
 
-const primary = 'postgresql://operator:secret@fixture.pg.psdb.cloud:5432/app'
+const primary = 'postgresql://operator@fixture.pg.psdb.cloud:5432/app'
 const tls = 'sslmode=verify-full&sslrootcert=system'
 
 describe('purge operator connection', () => {
   it.each([
     ['a missing URL', undefined],
-    ['a non-PostgreSQL URL', 'mysql://operator:secret@fixture.pg.psdb.cloud:5432/app'],
-    [
-      'a URL without a database name',
-      `postgresql://operator:secret@fixture.pg.psdb.cloud:5432/?${tls}`,
-    ],
-    ['a pooler port', `postgresql://operator:secret@fixture.pg.psdb.cloud:6432/app?${tls}`],
+    ['a non-PostgreSQL URL', 'mysql://operator@fixture.pg.psdb.cloud:5432/app'],
+    ['a URL without a database name', `postgresql://operator@fixture.pg.psdb.cloud:5432/?${tls}`],
+    ['a pooler port', `postgresql://operator@fixture.pg.psdb.cloud:6432/app?${tls}`],
     [
       'a routed pooler role',
-      `postgresql://operator%7Creplica:secret@fixture.pg.psdb.cloud:5432/app?${tls}`,
+      `postgresql://operator%7Creplica@fixture.pg.psdb.cloud:5432/app?${tls}`,
     ],
-    ['an unverified host', `postgresql://operator:secret@db.fixture.test:5432/app?${tls}`],
+    ['an unverified host', `postgresql://operator@db.fixture.test:5432/app?${tls}`],
     ['a primary without verified TLS', `${primary}?sslmode=require`],
     ['a connection override', `${primary}?${tls}&options=-c%20statement_timeout%3D0`],
     ['a loopback database without a test segment', 'postgresql://postgres@localhost:5432/app'],
