@@ -1,4 +1,9 @@
-import { NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
+import {
+  clearDomainSessionCookiesGetContract,
+  clearDomainSessionCookiesPostContract,
+} from '@/lib/api/contracts/arena-auth'
+import { parseRequest } from '@/lib/api/server'
 import {
   buildComprehensiveSessionCookieClearHeaderValues,
   isHttpsForSecureSessionCookies,
@@ -11,7 +16,14 @@ import { getBaseUrl } from '@/lib/core/utils/urls'
  * `Domain=<NEXT_PUBLIC host>`, and parent `Domain` (e.g. `thearena.ai` / `.thearena.ai`) for
  * cross-subdomain session cookies. Host-only only on localhost.
  */
-function respond(request: Request) {
+async function respond(
+  request: NextRequest,
+  contract:
+    | typeof clearDomainSessionCookiesGetContract
+    | typeof clearDomainSessionCookiesPostContract
+) {
+  const parsed = await parseRequest(contract, request, {})
+  if (!parsed.success) return parsed.response
   const publicAppUrlIsHttps = getBaseUrl().startsWith('https://')
   const useHttps = isHttpsForSecureSessionCookies(request, publicAppUrlIsHttps)
   const hostname = resolvePublicUrlHostnameForCookieClearing()
@@ -31,10 +43,10 @@ function respond(request: Request) {
   return res
 }
 
-export function GET(request: Request) {
-  return respond(request)
+export function GET(request: NextRequest) {
+  return respond(request, clearDomainSessionCookiesGetContract)
 }
 
-export function POST(request: Request) {
-  return respond(request)
+export function POST(request: NextRequest) {
+  return respond(request, clearDomainSessionCookiesPostContract)
 }

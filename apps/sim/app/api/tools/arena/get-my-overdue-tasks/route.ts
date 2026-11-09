@@ -1,18 +1,25 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaGetMyOverdueTasksContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
 import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
 const logger = createLogger('ArenaGetMyOverdueTasks')
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const workflowId = searchParams.get('workflowId')
-
-  if (!workflowId) {
-    return NextResponse.json({ error: 'Missing required field: workflowId' }, { status: 400 })
-  }
+  const parsed = await parseRequest(
+    arenaGetMyOverdueTasksContract,
+    req,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const { workflowId } = parsed.data.query
 
   const resolved = await resolveArenaCaller(req, workflowId)
   if (!resolved.found) {

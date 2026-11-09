@@ -1,15 +1,33 @@
 import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
+import { bingAdsQueryContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { executeBingAdsQuery } from './execute'
-import type { BingAdsV1Request } from './types'
 
 export async function POST(request: NextRequest) {
-  try {
-    const body: BingAdsV1Request = await request.json()
-    const workspaceId =
-      body.workspaceId ?? request.nextUrl.searchParams.get('workspaceId') ?? undefined
+  const parsed = await parseRequest(
+    bingAdsQueryContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
 
-    const result = await executeBingAdsQuery({ ...body, workspaceId }, {})
+  try {
+    const body = parsed.data.body
+    const workspaceId = body.workspaceId ?? parsed.data.query.workspaceId
+
+    const result = await executeBingAdsQuery(
+      {
+        query: body.query ?? '',
+        account: body.account ?? '',
+        ...(workspaceId ? { workspaceId } : {}),
+      },
+      {}
+    )
     return NextResponse.json(result.body, { status: result.status })
   } catch (error) {
     return NextResponse.json(

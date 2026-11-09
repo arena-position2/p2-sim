@@ -5,6 +5,8 @@ import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { generateId, generateShortId } from '@sim/utils/id'
 import { and, eq, isNull, sql } from 'drizzle-orm'
+import { adminImportDeployWorkflowsContract } from '@/lib/api/contracts/admin-import-deploy'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { createApiKey } from '@/lib/api-key/auth'
 import { hashApiKey } from '@/lib/api-key/crypto'
 import { getUserOrganization } from '@/lib/billing/organizations/membership'
@@ -329,15 +331,13 @@ export const POST = withRouteHandler(async (request) => {
       return authResponse
     }
 
-    const body: unknown = await request.json()
-    if (!isRecord(body)) {
-      return adminBadRequestResponse('Request body must be a JSON object.')
-    }
-
-    const emailId = typeof body.emailId === 'string' ? body.emailId.trim().toLowerCase() : ''
-    if (!emailId) {
-      return adminBadRequestResponse('emailId is required.')
-    }
+    const parsed = await parseRequest(adminImportDeployWorkflowsContract, request, undefined, {
+      invalidJsonResponse: () => adminBadRequestResponse('Request body must be a JSON object.'),
+      validationErrorResponse: (error) => adminBadRequestResponse(getValidationErrorMessage(error)),
+    })
+    if (!parsed.success) return parsed.response
+    const body = parsed.data.body
+    const { emailId } = body
 
     const { inputs, error } = getSourceWorkflowInputs(body)
     if (error || !inputs) {

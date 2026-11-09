@@ -1,5 +1,6 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { slackTokenContract, slackTokenFormSchema } from '@/lib/api/contracts/arena-auth'
 import { env } from '@/lib/core/config/env'
 
 const logger = createLogger('SlackTokenProxy')
@@ -17,13 +18,18 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.formData()
-    const code = body.get('code') as string | null
-    const redirectUri = body.get('redirect_uri') as string | null
-
-    if (!code) {
+    const codeField = body.get('code')
+    const redirectField = body.get('redirect_uri')
+    const slackTokenBodySchema = slackTokenContract.body ?? slackTokenFormSchema
+    const parsed = slackTokenBodySchema.safeParse({
+      code: typeof codeField === 'string' ? codeField : undefined,
+      redirect_uri: typeof redirectField === 'string' ? redirectField : undefined,
+    })
+    if (!parsed.success) {
       logger.error('Slack token proxy: missing code in request')
       return NextResponse.json({ ok: false, error: 'missing_code' }, { status: 400 })
     }
+    const { code, redirect_uri: redirectUri } = parsed.data
 
     const clientId = env.SLACK_CLIENT_ID?.trim().replace(/^["']|["']$/g, '')
     const clientSecret = env.SLACK_CLIENT_SECRET?.trim().replace(/^["']|["']$/g, '')

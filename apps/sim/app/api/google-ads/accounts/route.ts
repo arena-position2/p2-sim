@@ -4,12 +4,24 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
+import { googleAdsAccountsContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { getGoogleAdsAccounts } from '@/lib/channel-accounts'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const parsed = await parseRequest(
+    googleAdsAccountsContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+
   try {
-    const workspaceId = request.nextUrl.searchParams.get('workspaceId') ?? undefined
-    const userId = request.nextUrl.searchParams.get('userId') ?? undefined
+    const { workspaceId, userId } = parsed.data.query
     const accounts = await getGoogleAdsAccounts(workspaceId, userId)
 
     return NextResponse.json({

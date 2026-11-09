@@ -5,6 +5,11 @@ import { getErrorMessage } from '@sim/utils/errors'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import {
+  videoAgentUsageBodyContract,
+  videoAgentUsageQueryContract,
+} from '@/lib/api/contracts/video-agent-usage'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { recordUsage, stableEventKey } from '@/lib/billing/core/usage-log'
 import { hasAgentEmailAccess } from '@/lib/chat/agent-email-access'
 import { isVideoBuilderAgentUrl } from '@/lib/chat/video-agent-redirect'
@@ -32,10 +37,12 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
   const auth = checkInternalApiKey(request)
   if (!auth.success) return createUnauthorizedResponse()
 
-  const email = new URL(request.url).searchParams.get('email')?.trim().toLowerCase() ?? ''
-  if (!email.includes('@')) {
-    return NextResponse.json({ error: 'email is required.' }, { status: 400 })
-  }
+  const parsed = await parseRequest(videoAgentUsageQueryContract, request, undefined, {
+    validationErrorResponse: (error) =>
+      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+  })
+  if (!parsed.success) return parsed.response
+  const { email } = parsed.data.query
 
   const rows = await db
     .select({ allowedEmails: chat.allowedEmails, redirectUrl: chat.redirectUrl })
@@ -55,21 +62,16 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
   const auth = checkInternalApiKey(request)
   if (!auth.success) return createUnauthorizedResponse()
 
-  const body: unknown = await request.json().catch(() => null)
-  if (!isRecord(body)) {
-    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
-  }
-
-  const email = readString(body.email).toLowerCase()
-  const endpointId = readString(body.endpointId)
-  const requestId = readString(body.requestId)
-  const workspaceId = readString(body.workspaceId)
-  if (!email.includes('@') || endpointId === '' || requestId === '') {
-    return NextResponse.json(
-      { error: 'email, endpointId, and requestId are required.' },
-      { status: 400 }
-    )
-  }
+  const parsed = await parseRequest(videoAgentUsageBodyContract, request, undefined, {
+    invalidJsonResponse: () =>
+      NextResponse.json({ error: 'Invalid request body.' }, { status: 400 }),
+    validationErrorResponse: (error) =>
+      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+  })
+  if (!parsed.success) return parsed.response
+  const email = parsed.data.body.email.toLowerCase()
+  const { endpointId, requestId } = parsed.data.body
+  const workspaceId = parsed.data.body.workspaceId ?? ''
 
   const [person] = await db
     .select({ id: user.id })
@@ -133,11 +135,3 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
     )
   }
 })
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}

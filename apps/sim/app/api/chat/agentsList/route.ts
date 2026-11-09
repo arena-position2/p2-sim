@@ -4,6 +4,8 @@ import { createLogger } from '@sim/logger'
 import type { SQL } from 'drizzle-orm'
 import { and, desc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { chatAgentsListContract } from '@/lib/api/contracts/arena-chat'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import {
   hasAgentEmailAccess,
@@ -439,9 +441,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { searchParams } = new URL(request.url)
-    const tabName = searchParams.get('tabName')
-    const emailId = searchParams.get('emailId')
+    const parsed = await parseRequest(chatAgentsListContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: getValidationErrorMessage(error) },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
+    const { tabName, emailId, departmentName, onlyAgentAccess, GENERIC_AGENTS_WORKSPACE_ID } =
+      parsed.data.query
 
     if (tabName === 'myagents') {
       if (!emailId?.trim()) {
@@ -471,15 +480,13 @@ export async function GET(request: NextRequest) {
         )
       }
 
-      const departmentName = searchParams.get('departmentName')
-      const departmentValue = await resolveAgentDepartmentValue(departmentName)
-      const onlyAgentAccess = searchParams.get('onlyAgentAccess') === 'true'
+      const departmentValue = await resolveAgentDepartmentValue(departmentName ?? null)
       const genericWorkspaceIds = parseGenericAgentsWorkspaceIds(
-        searchParams.get('GENERIC_AGENTS_WORKSPACE_ID')
+        GENERIC_AGENTS_WORKSPACE_ID ?? null
       )
 
       return await getGlobalAgentsList(emailId.trim(), departmentValue, {
-        onlyAgentAccess,
+        onlyAgentAccess: onlyAgentAccess === 'true',
         genericWorkspaceIds,
       })
     }

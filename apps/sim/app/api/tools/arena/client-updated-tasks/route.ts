@@ -1,40 +1,30 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaClientUpdatedTasksContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
 import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
 const logger = createLogger('ArenaClientUpdatedTasksAPI')
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const workflowId = searchParams.get('workflowId')
-  const cid = searchParams.get('cid')
-  const period = searchParams.get('period')
-  const pageNumber = searchParams.get('pageNumber')
-  const pageSize = searchParams.get('pageSize')
-
-  if (!workflowId) {
-    return NextResponse.json({ error: 'Missing required field: workflowId' }, { status: 400 })
-  }
-
-  if (!cid) {
-    return NextResponse.json({ error: 'Missing required field: cid' }, { status: 400 })
-  }
-
-  if (!period) {
-    return NextResponse.json({ error: 'Missing required field: period' }, { status: 400 })
-  }
-
-  const resolvedPageNumber = pageNumber ? Number(pageNumber) : 1
-  const resolvedPageSize = pageSize ? Number(pageSize) : 10
-
-  if (!Number.isInteger(resolvedPageNumber) || resolvedPageNumber <= 0) {
-    return NextResponse.json({ error: 'Invalid pageNumber' }, { status: 400 })
-  }
-
-  if (!Number.isInteger(resolvedPageSize) || resolvedPageSize <= 0) {
-    return NextResponse.json({ error: 'Invalid pageSize' }, { status: 400 })
-  }
+  const parsed = await parseRequest(
+    arenaClientUpdatedTasksContract,
+    req,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const {
+    workflowId,
+    cid,
+    period,
+    pageNumber: resolvedPageNumber,
+    pageSize: resolvedPageSize,
+  } = parsed.data.query
 
   const resolved = await resolveArenaCaller(req, workflowId)
   if (!resolved.found) {

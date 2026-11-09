@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { hubspotCampaignsContract } from '@/lib/api/contracts/arena-auth'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { getCredential, refreshAccessTokenIfNeeded } from '@/lib/oauth/credential-service'
@@ -26,14 +28,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Get parameters from query
-    const { searchParams } = new URL(request.url)
-    const credentialId = searchParams.get('credentialId')
-    const limit = searchParams.get('limit') || '100'
-
-    if (!credentialId) {
-      logger.warn(`[${requestId}] Missing credential ID`)
-      return NextResponse.json({ error: 'Credential ID is required' }, { status: 400 })
-    }
+    const parsed = await parseRequest(hubspotCampaignsContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    })
+    if (!parsed.success) return parsed.response
+    const { credentialId } = parsed.data.query
+    const limit = parsed.data.query.limit || '100'
 
     // Get the credential from the database using the utility (handles alias and multiple tables)
     const credential = await getCredential(requestId, credentialId, session.user.id)

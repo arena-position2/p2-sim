@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { knowledgeUserAccessContract } from '@/lib/api/contracts/knowledge-user-access'
+import { parseRequest } from '@/lib/api/server'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { getUserKnowledgeBaseAccess } from '@/lib/knowledge/service'
@@ -22,8 +24,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { searchParams } = new URL(req.url)
-    const workspaceId = searchParams.get('workspaceId')
+    const parsed = await parseRequest(knowledgeUserAccessContract, req, {})
+    if (!parsed.success) return parsed.response
+    const workspaceId = parsed.data.query.workspaceId ?? null
 
     const knowledgeBases = await getUserKnowledgeBaseAccess(session.user.id, workspaceId)
 

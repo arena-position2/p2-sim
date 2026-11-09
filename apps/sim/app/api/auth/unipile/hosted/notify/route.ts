@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { unipileHostedNotifyContract } from '@/lib/api/contracts/arena-auth'
+import { parseRequest } from '@/lib/api/server'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import {
   extractCorrelationUserIdFromNotifyPayload,
@@ -15,12 +17,11 @@ const logger = createLogger('UnipileHostedNotifyAPI')
  * Persists the linked account for the Sim user identified by the hosted link `name` field.
  */
 export const POST = withRouteHandler(async (request: NextRequest) => {
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
+  const parsed = await parseRequest(unipileHostedNotifyContract, request, undefined, {
+    invalidJsonResponse: () => NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
+  })
+  if (!parsed.success) return parsed.response
+  const body = parsed.data.body
 
   const unipileAccountId = extractUnipileAccountIdFromNotifyPayload(body)
   const userId = extractCorrelationUserIdFromNotifyPayload(body)

@@ -3,6 +3,8 @@ import { clientChannelMapping } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { asc, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { clientChannelMappingContract } from '@/lib/api/contracts/client-channel-mapping'
+import { parseRequest } from '@/lib/api/server'
 
 const logger = createLogger('client-channel-mapping')
 
@@ -11,31 +13,18 @@ export async function GET(
   { params }: { params: Promise<{ clientId: string }> }
 ) {
   const requestId = crypto.randomUUID()
-  const { clientId } = await params
+  const parsed = await parseRequest(clientChannelMappingContract, request, { params })
+  if (!parsed.success) return parsed.response
+  const { clientId } = parsed.data.params
 
   logger.info(`[${requestId}] Fetching channels for client`, { clientId })
 
   try {
-    // First, check if table exists and has any records
-    const allRecords = await db.select().from(clientChannelMapping).limit(10)
-    console.log('📋 All records in client_channel_mapping table:', allRecords)
-
-    // Log the exact query being executed
-    console.log('🔍 Executing query:', {
-      table: 'client_channel_mapping',
-      where: { clientId },
-      orderBy: 'channelName ASC',
-    })
-
-    // Fetch channels from client_channel_mapping table
     const channels = await db
       .select()
       .from(clientChannelMapping)
       .where(eq(clientChannelMapping.clientId, clientId))
       .orderBy(asc(clientChannelMapping.channelName))
-
-    console.log('📊 Raw query result:', channels)
-    console.log('📈 Channels found for client:', channels.length)
 
     logger.info(`[${requestId}] Found channels`, {
       clientId,
@@ -49,8 +38,6 @@ export async function GET(
         channel_name: channel.channelName,
       })),
     }
-
-    console.log('📤 API Response:', responseData)
 
     return NextResponse.json(responseData)
   } catch (error) {

@@ -5,6 +5,8 @@ import path from 'node:path'
 const ROOT = path.resolve(import.meta.dir, '..')
 const API_DIR = path.join(ROOT, 'apps/sim/app/api')
 const CONTRACTS_DIR = path.join(ROOT, 'apps/sim/lib/api/contracts')
+/** Arena Local Copilot contracts are defineRouteContract values parsed by their routes. */
+const LOCAL_COPILOT_CONTRACTS_DIR = path.join(ROOT, 'apps/sim/local-copilot/contracts')
 const QUERY_HOOKS_DIR = path.join(ROOT, 'apps/sim/hooks/queries')
 const SELECTOR_HOOKS_DIR = path.join(ROOT, 'apps/sim/hooks/selectors')
 
@@ -153,7 +155,8 @@ const INDIRECT_ZOD_ROUTES = new Set([
   'apps/sim/app/api/v1/copilot/chat/route.ts',
 ])
 
-const CONTRACT_IMPORT_PATTERN = /\bfrom\s+['"]@\/lib\/api\/contracts(?:\/[^'"]*)?['"]/
+const CONTRACT_IMPORT_PATTERN =
+  /\bfrom\s+['"]@(?:\/lib\/api\/contracts|\/local-copilot\/contracts)(?:\/[^'"]*)?['"]/
 const DECLARATIVE_ROUTE_BUILDER_IMPORT_PATTERN =
   /\bimport\s*\{[^}]*(?:\bdefineInternalJsonRoute\b|\bdefineV2JsonRoute\b|\bdefineInternalBinaryRoute\b|\bdefineV2BinaryRoute\b)[^}]*\}\s*from\s*['"]@\/lib\/api\/server\/routes['"]|\bimport\s*\{[^}]*\bdefineScimRoute\b[^}]*\}\s*from\s*['"]@\/ee\/scim\/lib\/route['"]/
 const DECLARATIVE_ROUTE_BUILDER_USAGE_PATTERN =
@@ -1319,7 +1322,10 @@ async function main() {
     }
   }
 
-  const contractFiles = await walk(CONTRACTS_DIR, (fileName) => /\.ts$/.test(fileName))
+  const contractFiles = [
+    ...(await walk(CONTRACTS_DIR, (fileName) => /\.ts$/.test(fileName))),
+    ...(await walk(LOCAL_COPILOT_CONTRACTS_DIR, (fileName) => /\.ts$/.test(fileName))),
+  ]
   const untypedResponseFindings: UntypedResponseFinding[] = []
   let untypedResponseExemptions = 0
 

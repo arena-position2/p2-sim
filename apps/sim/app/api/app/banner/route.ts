@@ -4,6 +4,8 @@ import { createLogger } from '@sim/logger'
 import { and, eq } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { appBannerContract } from '@/lib/api/contracts/banner'
+import { parseRequest } from '@/lib/api/server'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 
 const logger = createLogger('AppBannerAPI')
@@ -11,7 +13,10 @@ const logger = createLogger('AppBannerAPI')
 /**
  * Returns the app-level banner message shown at the top of the workspace shell.
  */
-export const GET = withRouteHandler(async (_request: NextRequest) => {
+export const GET = withRouteHandler(async (request: NextRequest) => {
+  const parsed = await parseRequest(appBannerContract, request, {})
+  if (!parsed.success) return parsed.response
+
   try {
     const rawRows = await db
       .select()

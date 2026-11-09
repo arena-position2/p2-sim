@@ -4,11 +4,24 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
+import { bingAdsAccountsContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { getBingAdsAccounts } from '@/lib/channel-accounts'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const parsed = await parseRequest(
+    bingAdsAccountsContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+
   try {
-    const workspaceId = request.nextUrl.searchParams.get('workspaceId') ?? undefined
+    const { workspaceId } = parsed.data.query
     const accounts = await getBingAdsAccounts(workspaceId)
 
     return NextResponse.json({

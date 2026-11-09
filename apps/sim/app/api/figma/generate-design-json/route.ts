@@ -1,5 +1,13 @@
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import {
+  figmaGenerateDesignContract,
+  figmaGenerateDesignDocsContract,
+} from '@/lib/api/contracts/figma'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { generateFigmaDesign } from '@/lib/figma-design-generator'
+
+const logger = createLogger('FigmaGenerateDesignJsonAPI')
 
 export const runtime = 'nodejs'
 export const maxDuration = 300 // 5 minutes for design generation
@@ -20,31 +28,25 @@ export const maxDuration = 300 // 5 minutes for design generation
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-
-    // Extract required fields
-    const projectId = body.projectId as string
-    const fileName = body.fileName as string
-    const prompt = body.prompt as string
-
-    // Validate required fields
-    if (!projectId || !fileName || !prompt) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Missing required fields: projectId, fileName, and prompt are required',
-        },
-        { status: 400 }
-      )
-    }
-
-    // Extract optional file paths
-    const brandGuidelinesFile = body.brandGuidelinesFile as string | undefined
-    const wireframesFile = body.wireframesFile as string | undefined
-    const additionalDataFile = body.additionalDataFile as string | undefined
-    const additionalInfo = body.additionalInfo as string | undefined
-    const description = body.description as string | undefined
-    const designTargetsInput = body.designTargets
+    const parsed = await parseRequest(figmaGenerateDesignContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: getValidationErrorMessage(error) },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
+    const {
+      projectId,
+      fileName,
+      prompt,
+      brandGuidelinesFile,
+      wireframesFile,
+      additionalDataFile,
+      additionalInfo,
+      description,
+    } = parsed.data.body
+    const designTargetsInput = parsed.data.body.designTargets
     const designTargets = Array.isArray(designTargetsInput)
       ? (designTargetsInput as string[])
       : typeof designTargetsInput === 'string' && designTargetsInput.length > 0
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result)
   } catch (error) {
-    console.error('Error in generate-design-json API:', error)
+    logger.error('Error in generate-design-json API', error)
     return NextResponse.json(
       {
         success: false,
@@ -84,7 +86,9 @@ export async function POST(request: NextRequest) {
  *
  * Get API documentation
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const parsed = await parseRequest(figmaGenerateDesignDocsContract, request, {})
+  if (!parsed.success) return parsed.response
   return NextResponse.json({
     endpoint: '/api/figma/generate-design-json',
     method: 'POST',

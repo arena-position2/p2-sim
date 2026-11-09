@@ -3,6 +3,8 @@ import { chat, user, workflow } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { and, eq, isNull } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { chatAgentDetailContract } from '@/lib/api/contracts/arena-chat'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import { hasAgentEmailAccess } from '@/lib/chat/agent-email-access'
 import { getAgentDepartmentLabel } from '@/lib/chat/arena-departments'
@@ -34,13 +36,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   try {
-    const { id } = await params
-    const agentId = id?.trim()
-    const emailId = new URL(request.url).searchParams.get('emailId')?.trim()
-
-    if (!agentId) {
-      return NextResponse.json({ success: false, error: 'id is required' }, { status: 400 })
-    }
+    const parsed = await parseRequest(
+      chatAgentDetailContract,
+      request,
+      { params },
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json(
+            { success: false, error: getValidationErrorMessage(error) },
+            { status: 400 }
+          ),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const agentId = parsed.data.params.id.trim()
+    const emailId = parsed.data.query.emailId?.trim()
 
     const rows = await db
       .select({

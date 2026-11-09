@@ -8,6 +8,8 @@
 
 import { createLogger } from '@sim/logger'
 import type { NextRequest } from 'next/server'
+import { arenaThemeEventsContract } from '@/lib/api/contracts/arena-events'
+import { parseRequest } from '@/lib/api/server'
 import { getSession } from '@/lib/auth'
 import { SSE_HEADERS } from '@/lib/core/utils/sse'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
@@ -23,6 +25,9 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
   if (!session?.user?.id) {
     return new Response('Unauthorized', { status: 401 })
   }
+
+  const parsed = await parseRequest(arenaThemeEventsContract, request, {})
+  if (!parsed.success) return parsed.response
 
   const userId = session.user.id
   const encoder = new TextEncoder()

@@ -2,6 +2,8 @@ import { db, workflowStatsDaily, workflowStatsMonthly } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { and, gte, lte, sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { statsMonthlyContract } from '@/lib/api/contracts/stats'
+import { parseRequest } from '@/lib/api/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import { generateRequestId } from '@/lib/core/utils/request'
 
@@ -24,6 +26,9 @@ export async function GET(request: NextRequest) {
   if (authError) {
     return authError
   }
+
+  const parsed = await parseRequest(statsMonthlyContract, request, {})
+  if (!parsed.success) return parsed.response
 
   try {
     // Calculate last month's date range

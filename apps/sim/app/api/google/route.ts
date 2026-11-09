@@ -1,4 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { googleImageContract, googleImageDocsContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { generateNanoBananaImage } from '@/app/api/google/api-service'
 
@@ -24,19 +26,28 @@ export const maxDuration = 1200
  * - inputImages: array (optional) - multiple images for fusion (Nano Banana Pro)
  */
 export const POST = withRouteHandler(async (request: NextRequest) => {
-  const body = await request.json()
-  const workflowId = request.nextUrl.searchParams.get('workflowId') ?? undefined
-  const userId = request.nextUrl.searchParams.get('userId') ?? undefined
+  const parsed = await parseRequest(
+    googleImageContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const body = parsed.data.body
+  const { workflowId, userId } = parsed.data.query
 
   const { toolResponse, httpStatus } = await generateNanoBananaImage({
-    model: body.model as string,
-    prompt: body.prompt as string,
-    aspectRatio: body.aspectRatio as string | undefined,
-    imageSize: body.imageSize as string | undefined,
-    apiKey: body.apiKey as string | undefined,
-    inputImage: body.inputImage as unknown,
-    inputImageMimeType: body.inputImageMimeType as string | undefined,
-    inputImages: Array.isArray(body.inputImages) ? body.inputImages : undefined,
+    model: body.model,
+    prompt: body.prompt,
+    aspectRatio: body.aspectRatio,
+    imageSize: body.imageSize,
+    apiKey: body.apiKey,
+    inputImage: body.inputImage,
+    inputImageMimeType: body.inputImageMimeType,
+    inputImages: body.inputImages,
     _context: {
       workflowId,
       userId,
@@ -51,7 +62,18 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
  *
  * API documentation for Nano Banana image generation.
  */
-export const GET = withRouteHandler(async () => {
+export const GET = withRouteHandler(async (request: NextRequest) => {
+  const parsed = await parseRequest(
+    googleImageDocsContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+
   return NextResponse.json({
     endpoint: '/api/google',
     method: 'POST',

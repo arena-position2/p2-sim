@@ -3,6 +3,8 @@ import { chat, chatPromptFeedback, user, workflow, workflowExecutionLogs } from 
 import { createLogger } from '@sim/logger'
 import { count, desc, eq, inArray } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
+import { chatWorkflowFeedbackContract } from '@/lib/api/contracts/arena-chat'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('ChatFeedbackByWorkflowAPI')
@@ -81,17 +83,18 @@ function extractChatData(
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id: workflowId } = await params
-    if (!workflowId) {
-      return createCodedErrorResponse('workflowId is required', 400)
-    }
-
-    // Parse pagination parameters from query string with validation
-    const { searchParams } = new URL(request.url)
-    const pageSizeParam = Number(searchParams.get('pageSize'))
-    const pageParam = Number(searchParams.get('page'))
-    const pageSize = Number.isFinite(pageSizeParam) ? Math.min(Math.max(pageSizeParam, 1), 100) : 20
-    const pageNumber = Number.isFinite(pageParam) ? Math.max(pageParam, 1) : 1
+    const parsed = await parseRequest(
+      chatWorkflowFeedbackContract,
+      request,
+      { params },
+      {
+        validationErrorResponse: (error) =>
+          createCodedErrorResponse(getValidationErrorMessage(error), 400),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const { id: workflowId } = parsed.data.params
+    const { pageSize, page: pageNumber } = parsed.data.query
     const offset = (pageNumber - 1) * pageSize
 
     // Fetch author email from chat table for workflow context

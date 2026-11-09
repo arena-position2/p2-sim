@@ -3,6 +3,8 @@ import { apiKey as apiKeyTable, user, userArenaDetails } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { eq, isNull, ne, or } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { userApprovalContract } from '@/lib/api/contracts/user-approval'
+import { parseRequest } from '@/lib/api/server'
 import { getSession } from '@/lib/auth'
 import { createCodedErrorResponse } from '@/app/api/workflows/utils'
 
@@ -34,6 +36,9 @@ export async function GET(request: NextRequest) {
     if (!authenticatedUserId) {
       return createCodedErrorResponse('Authentication required', 401)
     }
+
+    const parsed = await parseRequest(userApprovalContract, request, {})
+    if (!parsed.success) return parsed.response
 
     // Get users joined with user_arena_details and filter out client_stakeholder
     const rows = await db

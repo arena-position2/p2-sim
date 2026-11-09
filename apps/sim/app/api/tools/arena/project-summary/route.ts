@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaProjectSummaryContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
 import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 import { arenaBackendBaseUrl } from '@/lib/arena/tokens'
@@ -7,9 +9,17 @@ import { arenaBackendBaseUrl } from '@/lib/arena/tokens'
 const logger = createLogger('ArenaProjectSummaryAPI')
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const workflowId = searchParams.get('workflowId')
-  const cid = searchParams.get('cid')
+  const parsed = await parseRequest(
+    arenaProjectSummaryContract,
+    req,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const { workflowId, cid } = parsed.data.query
   const headerToken =
     req.headers.get('authorisation')?.trim() ?? req.headers.get('authorization')?.trim()
 
@@ -18,10 +28,6 @@ export async function GET(req: NextRequest) {
       { error: 'Missing required field: workflowId or authorisation header' },
       { status: 400 }
     )
-  }
-
-  if (!cid) {
-    return NextResponse.json({ error: 'Missing required field: cid' }, { status: 400 })
   }
 
   const path = `/sol/v1/agentic/project-summary?cid=${encodeURIComponent(cid)}`

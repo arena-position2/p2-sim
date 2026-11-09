@@ -1,36 +1,24 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { presentationCreateContract } from '@/lib/api/contracts/presentation-create'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { env } from '@/lib/core/config/env'
 
 const PRESENTATION_API_BASE_URL = env.PRESENTATION_API_BASE_URL
 export async function POST(req: NextRequest) {
   try {
-    const data = await req.json()
-    const {
-      operation,
-      numberOfSlides,
-      tone,
-      verbosity,
-      template,
-      content,
-      slides_markdown,
-      instructions,
-    } = data
+    const parsed = await parseRequest(presentationCreateContract, req, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    })
+    if (!parsed.success) return parsed.response
+    const { numberOfSlides, tone, verbosity, template, content, slides_markdown, instructions } =
+      parsed.data.body
 
-    // Validate required parameters
-    if (!operation) {
-      return NextResponse.json({ error: 'Missing required field: operation' }, { status: 400 })
-    }
     if (!numberOfSlides && !slides_markdown) {
       return NextResponse.json(
         { error: 'Missing required field: numberOfSlides (or provide slides_markdown)' },
         { status: 400 }
       )
-    }
-    if (!tone) {
-      return NextResponse.json({ error: 'Missing required field: tone' }, { status: 400 })
-    }
-    if (!verbosity) {
-      return NextResponse.json({ error: 'Missing required field: verbosity' }, { status: 400 })
     }
 
     // Step 1: Generate presentation

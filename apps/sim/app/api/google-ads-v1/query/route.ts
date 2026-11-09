@@ -1,8 +1,9 @@
 import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
+import { googleAdsV1QueryContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { executeGoogleAdsV1Query } from './execute'
-import type { GoogleAdsV1Request } from './types'
 
 /**
  * POST /api/google-ads-v1/query
@@ -13,16 +14,26 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const body: GoogleAdsV1Request = await request.json()
-    const workspaceId =
-      body.workspaceId ?? request.nextUrl.searchParams.get('workspaceId') ?? undefined
-    const userId = request.nextUrl.searchParams.get('userId') ?? undefined
+    const parsed = await parseRequest(
+      googleAdsV1QueryContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          validationErrorResponse(error, getValidationErrorMessage(error)),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const body = parsed.data.body
+    const workspaceId = body.workspaceId ?? parsed.data.query.workspaceId
+    const userId = parsed.data.query.userId
 
     const result = await executeGoogleAdsV1Query(
       {
         ...body,
-        workspaceId,
-        userId,
+        query: body.query ?? '',
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(userId ? { userId } : {}),
       },
       { requestId }
     )

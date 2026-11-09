@@ -1,5 +1,10 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import {
+  imageGenerationBodySchema,
+  imageGenerationContract,
+} from '@/lib/api/contracts/image-generation'
+import { getValidationErrorMessage } from '@/lib/api/server'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import {
   INLINE_IMAGE_PAYLOAD_ERROR,
@@ -45,9 +50,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = await runImageGenerationWrapper(
-      body as Parameters<typeof runImageGenerationWrapper>[0]
-    )
+    const imageGenerationRequestSchema = imageGenerationContract.body ?? imageGenerationBodySchema
+    const parsed = imageGenerationRequestSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, error: getValidationErrorMessage(parsed.error) },
+        { status: 400 }
+      )
+    }
+
+    const result = await runImageGenerationWrapper(parsed.data)
 
     if (!result.success) {
       return NextResponse.json(

@@ -1,4 +1,9 @@
-import { NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
+import {
+  clearLegacySessionCookiesGetContract,
+  clearLegacySessionCookiesPostContract,
+} from '@/lib/api/contracts/arena-auth'
+import { parseRequest } from '@/lib/api/server'
 import {
   buildHostOnlySessionCookieClearHeaderValues,
   isHttpsForSecureSessionCookies,
@@ -12,7 +17,14 @@ import { getBaseUrl } from '@/lib/core/utils/urls'
  *
  * Call from the browser (GET or POST, same origin) so `Set-Cookie` applies to this host.
  */
-function respond(request: Request) {
+async function respond(
+  request: NextRequest,
+  contract:
+    | typeof clearLegacySessionCookiesGetContract
+    | typeof clearLegacySessionCookiesPostContract
+) {
+  const parsed = await parseRequest(contract, request, {})
+  if (!parsed.success) return parsed.response
   const publicAppUrlIsHttps = getBaseUrl().startsWith('https://')
   const useHttps = isHttpsForSecureSessionCookies(request, publicAppUrlIsHttps)
   const res = NextResponse.json({
@@ -25,10 +37,10 @@ function respond(request: Request) {
   return res
 }
 
-export function GET(request: Request) {
-  return respond(request)
+export function GET(request: NextRequest) {
+  return respond(request, clearLegacySessionCookiesGetContract)
 }
 
-export function POST(request: Request) {
-  return respond(request)
+export function POST(request: NextRequest) {
+  return respond(request, clearLegacySessionCookiesPostContract)
 }

@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { googleAdsQueryContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import type { ChannelAccount } from '@/lib/channel-accounts'
 import { getGoogleAdsAccounts } from '@/lib/channel-accounts'
 import { generateRequestId } from '@/lib/core/utils/request'
@@ -11,7 +13,7 @@ import {
   buildApiResponse,
 } from './response-builder'
 import { processGoogleAdsResults } from './result-processing'
-import type { AccountResult, GoogleAdsRequest } from './types'
+import type { AccountResult } from './types'
 
 const logger = createLogger('GoogleAdsAPI')
 
@@ -19,17 +21,16 @@ const logger = createLogger('GoogleAdsAPI')
  * Resolves account input to account key (supports both keys and numeric IDs)
  */
 function resolveAccountKey(
-  accountInput: string,
+  accountInput: string | undefined,
   googleAdsAccounts: Record<string, ChannelAccount>
 ): string {
-  // Try direct key match first (gentle_dental)
+  if (!accountInput) return ''
   if (googleAdsAccounts[accountInput]) {
     return accountInput
   }
 
-  // If not found, search by numeric ID
   const foundAccount = Object.entries(googleAdsAccounts).find(
-    ([key, account]) => account.id === accountInput
+    ([, account]) => account.id === accountInput
   )
 
   if (foundAccount) {
@@ -48,18 +49,22 @@ export async function POST(request: NextRequest) {
   try {
     logger.info(`[${requestId}] Google Ads query request started`)
 
-    const body: GoogleAdsRequest = await request.json()
+    const parsed = await parseRequest(
+      googleAdsQueryContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          validationErrorResponse(error, getValidationErrorMessage(error)),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const body = parsed.data.body
     logger.info(`[${requestId}] Request body received`, { body })
 
     const { query, accounts, workspaceId: bodyWorkspaceId } = body
-    const workspaceId =
-      bodyWorkspaceId ?? request.nextUrl.searchParams.get('workspaceId') ?? undefined
-    const userId = request.nextUrl.searchParams.get('userId') ?? undefined
-
-    if (!query) {
-      logger.error(`[${requestId}] No query provided in request`)
-      return NextResponse.json({ error: 'No query provided' }, { status: 400 })
-    }
+    const workspaceId = bodyWorkspaceId ?? parsed.data.query.workspaceId
+    const userId = parsed.data.query.userId
 
     const googleAdsAccounts = await getGoogleAdsAccounts(workspaceId, userId)
 

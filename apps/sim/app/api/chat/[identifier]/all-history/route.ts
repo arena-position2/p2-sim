@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import type { NextRequest } from 'next/server'
+import { chatAllHistoryContract } from '@/lib/api/contracts/arena-chat'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { resolveDeployedChatThreadAccess } from '@/lib/chat/deployed-chat-thread-auth'
 import { listDeployedChatThreadsForUser } from '@/lib/chat/deployed-chat-threads'
 import { generateRequestId } from '@/lib/core/utils/request'
@@ -13,10 +15,20 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ identifier: string }> }
 ) {
-  const { identifier } = await params
   const requestId = generateRequestId()
 
   try {
+    const parsed = await parseRequest(
+      chatAllHistoryContract,
+      request,
+      { params },
+      {
+        validationErrorResponse: (error) =>
+          addCorsHeaders(createCodedErrorResponse(getValidationErrorMessage(error), 400), request),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const { identifier } = parsed.data.params
     logger.debug(`[${requestId}] Fetching all deployed chat history for identifier: ${identifier}`)
 
     const access = await resolveDeployedChatThreadAccess(requestId, identifier, request)

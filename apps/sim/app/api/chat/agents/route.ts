@@ -3,6 +3,8 @@ import { chat, user, workflow } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { chatAgentsContract } from '@/lib/api/contracts/arena-chat'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { getAgentDepartmentLabelMap, labelFromDepartmentMap } from '@/lib/chat/arena-departments'
 
 const logger = createLogger('ChatAgentsAPI')
@@ -31,19 +33,15 @@ const logger = createLogger('ChatAgentsAPI')
 export async function GET(request: NextRequest) {
   try {
     // Extract emailId from query parameters
-    const { searchParams } = new URL(request.url)
-    const emailId = searchParams.get('emailId')
-
-    if (!emailId) {
-      logger.warn('Missing required parameter: emailId')
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'emailId parameter is required',
-        },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(chatAgentsContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: getValidationErrorMessage(error) },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
+    const { emailId } = parsed.data.query
 
     logger.info(`Fetching chats for email: ${emailId}`)
 

@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
+import { adminSyncDefaultWorkflowsContract } from '@/lib/api/contracts/admin-default-workflows'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import {
@@ -16,10 +18,6 @@ import {
 } from '@/app/api/v1/admin/responses'
 
 const logger = createLogger('AdminSyncDefaultWorkflowsAPI')
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /**
  * POST /api/v1/admin/default-workflows/sync
@@ -46,16 +44,13 @@ export const POST = withRouteHandler(async (request) => {
       return authResponse
     }
 
-    const body: unknown = await request.json()
-    if (!isRecord(body)) {
-      return adminBadRequestResponse('Request body must be a JSON object.')
-    }
-
-    const sourceWorkflowId =
-      typeof body.sourceWorkflowId === 'string' ? body.sourceWorkflowId.trim() : ''
-    if (!sourceWorkflowId) {
-      return adminBadRequestResponse('sourceWorkflowId is required.')
-    }
+    const parsed = await parseRequest(adminSyncDefaultWorkflowsContract, request, undefined, {
+      invalidJsonResponse: () => adminBadRequestResponse('Request body must be a JSON object.'),
+      validationErrorResponse: (error) => adminBadRequestResponse(getValidationErrorMessage(error)),
+    })
+    if (!parsed.success) return parsed.response
+    const body = parsed.data.body
+    const { sourceWorkflowId } = body
 
     const deploy = body.deploy !== false
     const deployAsChat = body.deployAsChat !== false

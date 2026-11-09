@@ -1,31 +1,25 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaGetMyTasksContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
 import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
 const logger = createLogger('ArenaGetMyTasks')
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const workflowId = searchParams.get('workflowId')
-  const withinMinutesParam = searchParams.get('withinMinutes')?.trim()
-
-  if (!workflowId) {
-    return NextResponse.json({ error: 'Missing required field: workflowId' }, { status: 400 })
-  }
-
-  let withinMinutes: number | undefined
-  if (withinMinutesParam) {
-    const parsed = Number(withinMinutesParam)
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return NextResponse.json(
-        { error: 'Invalid withinMinutes: must be a positive number' },
-        { status: 400 }
-      )
+  const parsed = await parseRequest(
+    arenaGetMyTasksContract,
+    req,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
     }
-    withinMinutes = parsed
-  }
+  )
+  if (!parsed.success) return parsed.response
+  const { workflowId, withinMinutes } = parsed.data.query
 
   const resolved = await resolveArenaCaller(req, workflowId)
   if (!resolved.found) {

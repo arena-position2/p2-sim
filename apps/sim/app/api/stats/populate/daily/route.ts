@@ -2,6 +2,8 @@ import { chat, db, user, workflow, workflowExecutionLogs, workflowStatsDaily } f
 import { createLogger } from '@sim/logger'
 import { and, count, eq, gte, inArray, lte } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { statsPopulateDailyContract } from '@/lib/api/contracts/stats'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import { generateRequestId } from '@/lib/core/utils/request'
 
@@ -337,28 +339,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { searchParams } = new URL(request.url)
-    const startDateParam = searchParams.get('startDate')
-    const endDateParam = searchParams.get('endDate')
-    const skipExistingParam = searchParams.get('skipExisting')
-
-    // Validate required parameters
-    if (!startDateParam || !endDateParam) {
-      return NextResponse.json(
-        { error: 'Both startDate and endDate query parameters are required (format: YYYY-MM-DD)' },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(statsPopulateDailyContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    })
+    if (!parsed.success) return parsed.response
+    const {
+      startDate: startDateParam,
+      endDate: endDateParam,
+      skipExisting: skipExistingParam,
+    } = parsed.data.query
 
     const skipExisting = skipExistingParam !== 'false' // Default to true unless explicitly false
 
-    // Parse dates
     const startDate = new Date(`${startDateParam}T00:00:00Z`)
     const endDate = new Date(`${endDateParam}T00:00:00Z`)
-
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-      return NextResponse.json({ error: 'Invalid date format. Use YYYY-MM-DD' }, { status: 400 })
-    }
 
     if (startDate > endDate) {
       return NextResponse.json(

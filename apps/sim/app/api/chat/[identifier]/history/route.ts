@@ -3,6 +3,8 @@ import { chat, chatPromptFeedback, workflowExecutionLogs } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
+import { chatHistoryContract } from '@/lib/api/contracts/arena-chat'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { getSession } from '@/lib/auth'
 import {
   getPersistedGeneratedImages,
@@ -38,21 +40,24 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ identifier: string }> }
 ) {
-  const { identifier } = await params
   const requestId = generateRequestId()
 
   try {
+    const parsed = await parseRequest(
+      chatHistoryContract,
+      request,
+      { params },
+      {
+        validationErrorResponse: (error) =>
+          addCorsHeaders(createCodedErrorResponse(getValidationErrorMessage(error), 400), request),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const { identifier } = parsed.data.params
     logger.debug(`[${requestId}] Fetching chat history for identifier: ${identifier}`)
 
-    // Parse query parameters for pagination and filtering
-    const { searchParams } = new URL(request.url)
-    const limit = Math.min(Number.parseInt(searchParams.get('limit') || '50'), 100) // Max 100 items
-    const offset = Math.max(Number.parseInt(searchParams.get('offset') || '0'), 0) // Ensure non-negative
-    const startDate = searchParams.get('startDate')
-    const endDate = searchParams.get('endDate')
-    const conversationId = searchParams.get('conversationId') || identifier
-    const chatId = searchParams.get('chatId')
-    const level = searchParams.get('level') // 'info' or 'error'
+    const { limit, offset, startDate, endDate, chatId, level } = parsed.data.query
+    const conversationId = parsed.data.query.conversationId || identifier
 
     logger.debug(
       `[${requestId}] Start date: ${startDate}, End date: ${endDate}, Conversation ID: ${conversationId}, Chat ID: ${chatId}, Level: ${level}`
@@ -73,13 +78,6 @@ export async function GET(
     }
 
     // Validate level parameter
-    if (level && !['info', 'error'].includes(level)) {
-      return addCorsHeaders(
-        createCodedErrorResponse('Invalid level parameter. Must be "info" or "error".', 400),
-        request
-      )
-    }
-
     // Require authenticated user and use their id to filter records
     const session = await getSession()
     const executingUserId = session?.user?.id

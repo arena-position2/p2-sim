@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { listUnipileChatsContract } from '@/lib/api/contracts/unipile'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { checkSessionOrInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
 import { UNIPILE_BASE_URL } from '@/tools/unipile/types'
@@ -20,13 +22,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const accountId = request.nextUrl.searchParams.get('account_id')?.trim()
-  if (!accountId) {
-    return NextResponse.json(
-      { success: false, error: 'account_id query parameter is required', items: [] },
-      { status: 400 }
-    )
-  }
+  const parsed = await parseRequest(
+    listUnipileChatsContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          {
+            success: false,
+            error: getValidationErrorMessage(error),
+            items: [],
+          },
+          { status: 400 }
+        ),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const accountId = parsed.data.query.account_id.trim()
 
   const apiKey = env.UNIPILE_API_KEY?.trim()
   if (!apiKey) {

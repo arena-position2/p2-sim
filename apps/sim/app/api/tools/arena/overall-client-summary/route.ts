@@ -3,6 +3,11 @@ import { clientDetails, overallClientSummary } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import {
+  arenaOverallClientSummaryBodyContract,
+  arenaOverallClientSummaryQueryContract,
+} from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { generateRequestId } from '@/lib/core/utils/request'
 
 const logger = createLogger('arena-overall-client-summary-api')
@@ -10,39 +15,29 @@ const logger = createLogger('arena-overall-client-summary-api')
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type OverallClientSummaryRequestBody = {
-  client_id?: string
-  client_name?: string
-  type?: string
-  one_day_summary?: string
-  seven_day_summary?: string
-  fourteen_day_summary?: string
-  daily_summary_changes?: string
-  weekly_sentiment?: string
-  status?: string
+function overallClientSummaryValidationError(
+  error: Parameters<typeof getValidationErrorMessage>[0]
+) {
+  return NextResponse.json(
+    { success: false, error: { message: getValidationErrorMessage(error) } },
+    { status: 400 }
+  )
 }
 
 export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const url = new URL(request.url)
-    const cid = url.searchParams.get('cid')
-    const summaryType = url.searchParams.get('type')
-
-    if (!cid) {
-      return NextResponse.json(
-        { success: false, error: { message: 'cid parameter is required' } },
-        { status: 400 }
-      )
-    }
-
-    if (!summaryType) {
-      return NextResponse.json(
-        { success: false, error: { message: 'type parameter is required' } },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(
+      arenaOverallClientSummaryQueryContract,
+      request,
+      {},
+      {
+        validationErrorResponse: overallClientSummaryValidationError,
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const { cid, type: summaryType } = parsed.data.query
 
     logger.info(`[${requestId}] Fetching latest overall client summaries`, {
       cid,
@@ -165,7 +160,15 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const body = (await request.json()) as OverallClientSummaryRequestBody
+    const parsed = await parseRequest(
+      arenaOverallClientSummaryBodyContract,
+      request,
+      {},
+      {
+        validationErrorResponse: overallClientSummaryValidationError,
+      }
+    )
+    if (!parsed.success) return parsed.response
     const {
       client_id,
       client_name,
@@ -176,14 +179,7 @@ export async function POST(request: NextRequest) {
       daily_summary_changes,
       weekly_sentiment,
       status,
-    } = body
-
-    if (!client_id) {
-      return NextResponse.json(
-        { success: false, error: { message: 'client_id is required' } },
-        { status: 400 }
-      )
-    }
+    } = parsed.data.body
 
     const now = new Date()
     const todayDate = now.toISOString().split('T')[0]

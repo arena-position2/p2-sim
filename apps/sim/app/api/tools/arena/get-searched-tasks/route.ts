@@ -1,22 +1,21 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaGetSearchedTasksContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
 import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
-interface GetSearchedTasksBody {
-  workflowId?: string
-  clientName?: string
-  projectName?: string
-  assigneeName?: string
-  state?: string
-}
-
 export async function POST(req: NextRequest) {
-  const data = (await req.json()) as GetSearchedTasksBody
-  const { workflowId, clientName, projectName, assigneeName, state } = data
-
-  if (!workflowId) {
-    return NextResponse.json({ error: 'Missing required field: workflowId' }, { status: 400 })
-  }
+  const parsed = await parseRequest(
+    arenaGetSearchedTasksContract,
+    req,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const { workflowId, clientName, projectName, assigneeName, state } = parsed.data.body
 
   const resolved = await resolveArenaCaller(req, workflowId)
   if (!resolved.found) {

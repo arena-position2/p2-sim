@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { listUnipileUserRelationsContract } from '@/lib/api/contracts/unipile'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { checkSessionOrInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
 import { fetchAllUnipileUserRelationItems } from '@/tools/unipile/fetch_all_user_relations'
@@ -30,19 +32,25 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const accountId = request.nextUrl.searchParams.get('account_id')?.trim()
-  if (!accountId) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'account_id query parameter is required',
-        items: [] as UnipileRelationOption[],
-      },
-      { status: 400 }
-    )
-  }
-
-  const filter = request.nextUrl.searchParams.get('filter')?.trim()
+  const parsed = await parseRequest(
+    listUnipileUserRelationsContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          {
+            success: false,
+            error: getValidationErrorMessage(error),
+            items: [] as UnipileRelationOption[],
+          },
+          { status: 400 }
+        ),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const accountId = parsed.data.query.account_id.trim()
+  const filter = parsed.data.query.filter?.trim()
   const baseUrl = UNIPILE_BASE_URL.replace(/\/$/, '')
 
   try {

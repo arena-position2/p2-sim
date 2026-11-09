@@ -1,6 +1,8 @@
 import { createLogger } from '@sim/logger'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { googleSlidesPresignContract } from '@/lib/api/contracts/google-slides-presign'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { S3_AGENT_GENERATED_IMAGES_CONFIG } from '@/lib/uploads/config'
@@ -38,10 +40,12 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { imageUrl } = (await request.json()) as { imageUrl?: string }
-  if (!imageUrl || typeof imageUrl !== 'string') {
-    return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 })
-  }
+  const parsed = await parseRequest(googleSlidesPresignContract, request, undefined, {
+    validationErrorResponse: (error) =>
+      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+  })
+  if (!parsed.success) return parsed.response
+  const { imageUrl } = parsed.data.body
 
   const key = extractKeyFromServeUrl(imageUrl)
   if (!key) {

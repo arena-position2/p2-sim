@@ -2,6 +2,8 @@ import { chat, db, user, workflow, workflowExecutionLogs, workflowStatsDaily } f
 import { createLogger } from '@sim/logger'
 import { and, count, eq, gte, inArray, lte } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { statsDailyContract } from '@/lib/api/contracts/stats'
+import { parseRequest } from '@/lib/api/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
 import { generateRequestId } from '@/lib/core/utils/request'
 
@@ -24,6 +26,9 @@ export async function GET(request: NextRequest) {
   if (authError) {
     return authError
   }
+
+  const parsed = await parseRequest(statsDailyContract, request, {})
+  if (!parsed.success) return parsed.response
 
   try {
     // Calculate yesterday's date range (UTC to match database timestamps)

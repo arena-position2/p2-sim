@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { semrushPositionTrackingOrganicContract } from '@/lib/api/contracts/tools/semrush'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { checkSessionOrInternalAuth } from '@/lib/auth/hybrid'
 
 const logger = createLogger('SemrushPositionTrackingOrganicAPI')
@@ -17,24 +19,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: auth.error || 'Unauthorized' }, { status: 401 })
     }
 
-    const { searchParams } = new URL(request.url)
-    const apiKey = searchParams.get('apiKey')?.trim()
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'Semrush API key is required. Configure it on the Semrush block.' },
-        { status: 400 }
-      )
-    }
-
-    const campaignId = searchParams.get('campaignId')
-    const urlParam = searchParams.get('url')
-
-    if (!campaignId || !urlParam) {
-      return NextResponse.json(
-        { error: 'campaignId and url are required for Organic Positions Report.' },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(
+      semrushPositionTrackingOrganicContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          validationErrorResponse(error, getValidationErrorMessage(error)),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const query = parsed.data.query
+    const apiKey = query.apiKey.trim()
+    const campaignId = query.campaignId
+    const urlParam = query.url
 
     const semrushParams = new URLSearchParams()
     semrushParams.set('key', apiKey)
@@ -58,8 +56,8 @@ export async function GET(request: NextRequest) {
       'serp_feature_filter',
     ] as const
     for (const name of optionalParams) {
-      const value = searchParams.get(name)
-      if (value !== null && value !== '') semrushParams.set(name, value)
+      const value = query[name]
+      if (value !== undefined && value !== '') semrushParams.set(name, value)
     }
 
     const baseUrl = 'https://api.semrush.com/reports/v1/projects'

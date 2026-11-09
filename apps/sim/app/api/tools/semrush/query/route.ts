@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { semrushQueryContract } from '@/lib/api/contracts/tools/semrush'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { checkSessionOrInternalAuth } from '@/lib/auth/hybrid'
 
 const logger = createLogger('SemrushQueryAPI')
@@ -47,19 +49,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: auth.error || 'Unauthorized' }, { status: 401 })
     }
 
-    const { searchParams } = new URL(request.url)
-    const apiKey = searchParams.get('apiKey')?.trim()
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'Semrush API key is required. Configure it on the Semrush block.' },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(
+      semrushQueryContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          validationErrorResponse(error, getValidationErrorMessage(error)),
+      }
+    )
+    if (!parsed.success) return parsed.response
+    const query = parsed.data.query
+    const apiKey = query.apiKey.trim()
 
-    const rawDomain = searchParams.get('domain')
-    const rawUrl = searchParams.get('url')
-    const type = coerceSemrushTypeParam(searchParams.get('type'), rawDomain, rawUrl)
-    const database = searchParams.get('database') ?? 'us'
+    const rawDomain = query.domain ?? null
+    const rawUrl = query.url ?? null
+    const type = coerceSemrushTypeParam(query.type ?? null, rawDomain, rawUrl)
+    const database = query.database ?? 'us'
 
     const semrushParams = new URLSearchParams()
     semrushParams.set('type', type)
@@ -86,12 +92,12 @@ export async function GET(request: NextRequest) {
       semrushParams.set('domain', domain)
     }
 
-    const displayLimit = searchParams.get('display_limit')
+    const displayLimit = query.display_limit
     if (displayLimit) semrushParams.set('display_limit', displayLimit)
-    const exportColumns = searchParams.get('export_columns')
+    const exportColumns = query.export_columns
     if (exportColumns) semrushParams.set('export_columns', exportColumns)
 
-    const additionalParams = searchParams.get('additionalParams')
+    const additionalParams = query.additionalParams
     if (additionalParams) {
       try {
         const extra = new URLSearchParams(additionalParams)

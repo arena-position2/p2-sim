@@ -1,12 +1,25 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { facebookAdsAccountsContract } from '@/lib/api/contracts/ads'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { getFacebookAdsAccounts } from '@/lib/channel-accounts'
 
 const logger = createLogger('FacebookAdsAccounts')
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const parsed = await parseRequest(
+    facebookAdsAccountsContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+
   try {
-    const workspaceId = request.nextUrl.searchParams.get('workspaceId') ?? undefined
+    const { workspaceId } = parsed.data.query
     const accounts = await getFacebookAdsAccounts(workspaceId)
 
     return NextResponse.json({

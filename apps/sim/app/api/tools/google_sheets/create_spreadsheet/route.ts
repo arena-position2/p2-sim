@@ -1,5 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import { googleSheetsCreateContract } from '@/lib/api/contracts/google-sheets-create'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { validateAlphanumericId } from '@/lib/core/security/input-validation'
 import { generateRequestId } from '@/lib/core/utils/request'
 
@@ -17,19 +19,13 @@ export async function POST(request: NextRequest) {
   logger.info(`[${requestId}] Create spreadsheet request received`)
 
   try {
-    let body: {
-      title?: string
-      sheetTitles?: string[]
-      locale?: string
-      timeZone?: string
-      parentFolderId?: string
-      accessToken?: string
-    }
-    try {
-      body = await request.json()
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-    }
+    const parsed = await parseRequest(googleSheetsCreateContract, request, undefined, {
+      invalidJsonResponse: () => NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    })
+    if (!parsed.success) return parsed.response
+    const body = parsed.data.body
 
     const token =
       typeof body.accessToken === 'string' && body.accessToken.trim()
@@ -42,10 +38,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const title = typeof body.title === 'string' ? body.title.trim() : ''
-    if (!title) {
-      return NextResponse.json({ error: 'title is required' }, { status: 400 })
-    }
+    const title = body.title
 
     const parentFolderId =
       typeof body.parentFolderId === 'string' && body.parentFolderId.trim()

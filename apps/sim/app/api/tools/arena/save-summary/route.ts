@@ -1,10 +1,21 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaSaveSummaryContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { ArenaAuthError, arenaSolFetch } from '@/lib/arena/fetch'
 import { resolveArenaCaller } from '@/lib/arena/resolve-caller'
 
 export async function POST(req: NextRequest) {
-  const data = await req.json()
-  const { workflowId, ...restData } = data
+  const parsed = await parseRequest(
+    arenaSaveSummaryContract,
+    req,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        validationErrorResponse(error, getValidationErrorMessage(error)),
+    }
+  )
+  if (!parsed.success) return parsed.response
+  const { workflowId, ...restData } = parsed.data.body
   const resolved = await resolveArenaCaller(req, workflowId)
   if (!resolved.found) {
     return NextResponse.json(

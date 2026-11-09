@@ -2,6 +2,11 @@ import { db } from '@sim/db'
 import { slackSummary } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
+import {
+  slackSummaryBodyContract,
+  slackSummaryQueryContract,
+} from '@/lib/api/contracts/slack-summary'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { generateRequestId } from '@/lib/core/utils/request'
 
 const logger = createLogger('slack-summary-api')
@@ -13,23 +18,16 @@ export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const url = new URL(request.url)
-    const clientId = url.searchParams.get('cid')
-    const summaryType = url.searchParams.get('type')
-
-    if (!clientId) {
-      return NextResponse.json(
-        { success: false, error: { message: 'cid parameter is required' } },
-        { status: 400 }
-      )
-    }
-
-    if (!summaryType) {
-      return NextResponse.json(
-        { success: false, error: { message: 'type parameter is required' } },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(slackSummaryQueryContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: { message: getValidationErrorMessage(error) } },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
+    const clientId = parsed.data.query.cid
+    const summaryType = parsed.data.query.type
 
     logger.info(`[${requestId}] Fetching latest summaries for client`, {
       clientId,
@@ -137,7 +135,14 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const body = await request.json()
+    const parsed = await parseRequest(slackSummaryBodyContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: { message: getValidationErrorMessage(error) } },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
     const {
       client_id,
       client_name,
@@ -148,35 +153,7 @@ export async function POST(request: NextRequest) {
       one_day_summary,
       seven_day_summary,
       fourteen_day_summary,
-    } = body
-
-    // Validate required fields
-    if (!client_id) {
-      return NextResponse.json(
-        { success: false, error: { message: 'client_id is required' } },
-        { status: 400 }
-      )
-    }
-
-    if (!channel_id) {
-      return NextResponse.json(
-        { success: false, error: { message: 'channel_id is required' } },
-        { status: 400 }
-      )
-    }
-
-    if (!one_day_summary && !seven_day_summary && !fourteen_day_summary) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            message:
-              'At least one summary field is required (one_day_summary, seven_day_summary, or fourteen_day_summary)',
-          },
-        },
-        { status: 400 }
-      )
-    }
+    } = parsed.data.body
 
     logger.info(`[${requestId}] Saving slack summary`, {
       client_id,
@@ -199,11 +176,11 @@ export async function POST(request: NextRequest) {
     const { sql } = await import('drizzle-orm')
 
     try {
-      console.log('Performing UPSERT for slack summary')
+      logger.info(`[${requestId}] Performing UPSERT for slack summary`)
 
       // Check if record exists first, then insert or update manually
       try {
-        console.log('Checking existing record...')
+        logger.info(`[${requestId}] Checking existing slack summary record`)
 
         // First, check if record exists for today (same client, channel, date)
         const existingRecord = await db
@@ -218,7 +195,7 @@ export async function POST(request: NextRequest) {
 
         if (recordExists) {
           // Update existing record for today
-          console.log('Updating existing record for today')
+          logger.info(`[${requestId}] Updating existing slack summary for today`)
 
           await db
             .update(slackSummary)
@@ -237,10 +214,10 @@ export async function POST(request: NextRequest) {
               sql`${slackSummary.clientIdRef} = ${client_id} AND ${slackSummary.channelIdRef} = ${channel_id} AND ${slackSummary.runDate} = ${todayDate} AND ${slackSummary.type} = ${type ?? null}`
             )
 
-          console.log('Record update successful for today')
+          logger.info(`[${requestId}] Slack summary update successful for today`)
         } else {
           // Insert new record for today
-          console.log('Inserting new record for today')
+          logger.info(`[${requestId}] Inserting slack summary for today`)
 
           await db.insert(slackSummary).values({
             id,
@@ -262,15 +239,14 @@ export async function POST(request: NextRequest) {
             runDate: todayDate,
           })
 
-          console.log('Record insert successful for today')
+          logger.info(`[${requestId}] Slack summary insert successful for today`)
         }
       } catch (sqlError: any) {
-        console.log('Raw SQL failed, trying Drizzle...', sqlError.message)
-        console.error('Full SQL error details:', sqlError)
+        logger.error(`[${requestId}] Raw SQL failed, trying Drizzle`, sqlError)
 
         // Fallback to Drizzle
         try {
-          const upsertResult = await db
+          await db
             .insert(slackSummary)
             .values({
               id,
@@ -307,10 +283,9 @@ export async function POST(request: NextRequest) {
               },
             })
 
-          console.log('Drizzle upsert successful after raw SQL failed:', upsertResult)
+          logger.info(`[${requestId}] Drizzle upsert successful after raw SQL failed`)
         } catch (drizzleError: any) {
-          console.log('Both raw SQL and Drizzle failed')
-          console.error('Drizzle error details:', drizzleError)
+          logger.error(`[${requestId}] Both raw SQL and Drizzle failed`, drizzleError)
           throw drizzleError
         }
       }
@@ -346,7 +321,7 @@ export async function POST(request: NextRequest) {
         { status: action === 'created' ? 201 : 200 }
       )
     } catch (error: any) {
-      console.log('Database operation failed:', error)
+      logger.error(`[${requestId}] Database operation failed`, error)
       throw error
     }
   } catch (error: any) {
@@ -355,9 +330,6 @@ export async function POST(request: NextRequest) {
       errorCode: error.code,
       errorDetails: error,
     })
-
-    // Log more details for debugging
-    console.error('Full error details:', error)
 
     return NextResponse.json(
       {

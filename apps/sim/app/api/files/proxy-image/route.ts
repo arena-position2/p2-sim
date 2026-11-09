@@ -1,6 +1,8 @@
 import { createLogger } from '@sim/logger'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { proxyImageContract } from '@/lib/api/contracts/proxy-image'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { getEnv } from '@/lib/core/config/env'
 
 const logger = createLogger('FilesProxyImageAPI')
@@ -39,10 +41,12 @@ function isAllowedProxyUrl(targetUrl: URL, requestHost: string): boolean {
  * Only allows URLs for the same app host or *.thearena.ai.
  */
 export async function GET(request: NextRequest) {
-  const urlParam = request.nextUrl.searchParams.get('url')
-  if (!urlParam || typeof urlParam !== 'string') {
-    return NextResponse.json({ error: 'Missing url parameter' }, { status: 400 })
-  }
+  const parsed = await parseRequest(proxyImageContract, request, undefined, {
+    validationErrorResponse: (error) =>
+      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+  })
+  if (!parsed.success) return parsed.response
+  const urlParam = parsed.data.query.url
 
   let targetUrl: URL
   try {

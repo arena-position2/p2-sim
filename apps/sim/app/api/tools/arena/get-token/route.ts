@@ -3,6 +3,8 @@ import { user, userArenaDetails } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import { arenaGetTokenContract } from '@/lib/api/contracts/tools/arena'
+import { getValidationErrorMessage, parseRequest, validationErrorResponse } from '@/lib/api/server'
 import { getHumanArenaAccessToken } from '@/lib/arena/tokens'
 import { getSession } from '@/lib/auth'
 import { verifyInternalToken } from '@/lib/auth/internal'
@@ -30,7 +32,6 @@ async function resolveAuthorizedUserId(
 > {
   const { searchParams } = new URL(req.url)
   const paramUserId = searchParams.get('userId')?.trim()
-  const paramEmail = searchParams.get('email')?.trim()
 
   const session = await getSession()
   if (session?.user?.id) {
@@ -76,6 +77,17 @@ async function resolveAuthorizedUserId(
  */
 export async function GET(req: NextRequest) {
   try {
+    const parsed = await parseRequest(
+      arenaGetTokenContract,
+      req,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          validationErrorResponse(error, getValidationErrorMessage(error)),
+      }
+    )
+    if (!parsed.success) return parsed.response
+
     const resolved = await resolveAuthorizedUserId(req)
     if (!resolved.ok) {
       return NextResponse.json(resolved.body, { status: resolved.status })

@@ -3,27 +3,17 @@ import { meetingSummary } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
+import {
+  meetingSummaryBodyContract,
+  meetingSummaryQueryContract,
+} from '@/lib/api/contracts/meeting-summary'
+import { getValidationErrorMessage, parseRequest } from '@/lib/api/server'
 import { generateRequestId } from '@/lib/core/utils/request'
 
 const logger = createLogger('meeting-summary-api')
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-type MeetingSummaryRequestBody = {
-  client_id?: string
-  client_name?: string
-  meeting_type?: string
-  type?: string
-  one_day_summary?: string
-  seven_day_summary?: string
-  fourteen_day_summary?: string
-  start_time?: string
-  end_time?: string
-  status?: string
-  retry_count?: number
-  run_date?: string
-}
 
 const parseOptionalDate = (value?: string) => {
   if (!value) return undefined
@@ -36,23 +26,16 @@ export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const url = new URL(request.url)
-    const clientId = url.searchParams.get('cid')
-    const summaryType = url.searchParams.get('type')
-
-    if (!clientId) {
-      return NextResponse.json(
-        { success: false, error: { message: 'cid parameter is required' } },
-        { status: 400 }
-      )
-    }
-
-    if (!summaryType) {
-      return NextResponse.json(
-        { success: false, error: { message: 'type parameter is required' } },
-        { status: 400 }
-      )
-    }
+    const parsed = await parseRequest(meetingSummaryQueryContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: { message: getValidationErrorMessage(error) } },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
+    const clientId = parsed.data.query.cid
+    const summaryType = parsed.data.query.type
 
     logger.info(`[${requestId}] Fetching latest meeting summaries for client`, {
       clientId,
@@ -141,7 +124,14 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const body = (await request.json()) as MeetingSummaryRequestBody
+    const parsed = await parseRequest(meetingSummaryBodyContract, request, undefined, {
+      validationErrorResponse: (error) =>
+        NextResponse.json(
+          { success: false, error: { message: getValidationErrorMessage(error) } },
+          { status: 400 }
+        ),
+    })
+    if (!parsed.success) return parsed.response
     const {
       client_id,
       client_name,
@@ -155,27 +145,7 @@ export async function POST(request: NextRequest) {
       status,
       retry_count,
       run_date,
-    } = body
-
-    if (!client_id) {
-      return NextResponse.json(
-        { success: false, error: { message: 'client_id is required' } },
-        { status: 400 }
-      )
-    }
-
-    if (!one_day_summary && !seven_day_summary && !fourteen_day_summary) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            message:
-              'At least one summary field is required (one_day_summary, seven_day_summary, or fourteen_day_summary)',
-          },
-        },
-        { status: 400 }
-      )
-    }
+    } = parsed.data.body
 
     const now = new Date()
     const todayDate = now.toISOString().split('T')[0]
