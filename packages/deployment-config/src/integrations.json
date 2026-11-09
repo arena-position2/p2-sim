@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-08",
+  "updatedAt": "2026-11-06",
   "integrations": [
     {
       "type": "onepassword",
@@ -845,30 +845,6 @@
       "updatedAt": "2026-10-14"
     },
     {
-      "type": "airweave",
-      "slug": "airweave",
-      "name": "Airweave",
-      "description": "Search your synced data collections",
-      "longDescription": "Search across your synced data sources using Airweave. Supports semantic search with hybrid, neural, or keyword retrieval strategies. Optionally generate AI-powered answers from search results.",
-      "bgColor": "#6366F1",
-      "iconName": "AirweaveIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/airweave",
-      "operations": [
-        {
-          "name": "Airweave Search",
-          "description": "Search your synced data collections using Airweave. Supports semantic search with hybrid, neural, or keyword retrieval strategies. Optionally generate AI-powered answers from search results."
-        }
-      ],
-      "operationCount": 1,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "api-key",
-      "category": "tools",
-      "integrationType": "search",
-      "tags": ["vector-search", "knowledge-base"],
-      "updatedAt": "2026-11-08"
-    },
-    {
       "type": "algolia",
       "slug": "algolia",
       "name": "Algolia",
@@ -1535,81 +1511,6 @@
       "integrationType": "sales",
       "tags": ["enrichment", "sales-engagement"],
       "updatedAt": "2026-10-14"
-    },
-    {
-      "type": "arena",
-      "slug": "arena",
-      "name": "Arena",
-      "description": "Arena",
-      "longDescription": "Arena",
-      "bgColor": "#E0E0E0",
-      "iconName": "ArenaIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/arena",
-      "operations": [
-        {
-          "name": "Create Task",
-          "description": "Create a milestone task in Arena using workspace selectors (client, project, group, assignee)."
-        },
-        {
-          "name": "Create Task (names & emails)",
-          "description": "Create a milestone task in Arena using client/project/group names and assignee email."
-        },
-        {
-          "name": "Create Sub Task",
-          "description": "Create a subtask in Arena using workspace selectors."
-        },
-        {
-          "name": "Create Sub Task (names & emails)",
-          "description": "Create a subtask in Arena using names, emails, and parent task number."
-        },
-        {
-          "name": "Add Comments",
-          "description": "Add a comment to an Arena task using client, project, group, and task selectors. Set those on the block; you supply the comment text and optional client note."
-        },
-        {
-          "name": "Add Comments (Task number)",
-          "description": "Add a comment to an Arena task using its task number and the updated comment API. Task number is usually set on the block; you supply comment text and optional To/CC."
-        },
-        {
-          "name": "Fetch tasks (client, project, assignee, state name)",
-          "description": "Search Arena tasks by client name, project name, assignee name, and state (free-text filters)."
-        },
-        {
-          "name": "Search Task",
-          "description": "Search Arena tasks using client, project, state, visibility, due date, assignee, and page size. For search by task name or number only, use the Search Task (name only) operation."
-        },
-        {
-          "name": "Search Task (name only)",
-          "description": "Search Arena tasks by name or number. Use the full “Search Task” operation when you need client, project, state, or other filters."
-        },
-        {
-          "name": "Save Summary",
-          "description": "Save a summary for a client in Arena."
-        },
-        {
-          "name": "Get Meetings",
-          "description": "Get meetings for a client in Arena. Use basic mode to pick a client, or advanced mode to enter a client ID."
-        },
-        {
-          "name": "Get Token",
-          "description": "Get Arena token for the logged-in user or workflow owner. Both must have @position2.com email."
-        },
-        {
-          "name": "Get My Tasks",
-          "description": "Get the current user’s tasks from Arena."
-        },
-        {
-          "name": "Get My Overdue Tasks",
-          "description": "Get the current user’s overdue tasks from Arena."
-        }
-      ],
-      "operationCount": 14,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "none",
-      "category": "tools",
-      "integrationType": "productivity",
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "arxiv",
@@ -3442,29 +3343,6 @@
       "integrationType": "devops",
       "tags": ["version-control", "ci-cd", "project-management"],
       "updatedAt": "2026-10-14"
-    },
-    {
-      "type": "bing_ads",
-      "slug": "bing-ads",
-      "name": "Bing Ads",
-      "description": "Query Microsoft Advertising (Bing Ads) data with natural language",
-      "longDescription": "Connect to Microsoft Advertising (Bing Ads) API and query campaign performance, ad metrics, and account insights using natural language. Supports all Position2 Bing Ads accounts with AI-powered query parsing.",
-      "bgColor": "#00A4EF",
-      "iconName": "MicrosoftIcon",
-      "docsUrl": "https://docs.sim.ai/blocks/bing-ads",
-      "operations": [
-        {
-          "name": "Bing Ads Query",
-          "description": "Query Microsoft Advertising (Bing Ads) API for campaign performance, ad metrics, and account insights using natural language. Supports all Position2 Bing Ads accounts."
-        }
-      ],
-      "operationCount": 1,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "none",
-      "category": "tools",
-      "integrationType": "marketing",
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "bitbucket",
@@ -9388,31 +9266,6 @@
       "updatedAt": "2026-10-14"
     },
     {
-      "type": "facebook_ads",
-      "slug": "facebook-ads",
-      "name": "Facebook Ads",
-      "description": "Query Facebook Ads data with natural language",
-      "longDescription": "Connect to Facebook Ads API and query campaign performance, ad set metrics, and account insights using natural language. Supports all 22 Position2 Facebook ad accounts with AI-powered query parsing.",
-      "bgColor": "#1877F2",
-      "iconName": "MetaIcon",
-      "docsUrl": "https://docs.sim.ai/blocks/facebook-ads",
-      "operations": [
-        {
-          "name": "Facebook Ads Query",
-          "description": "Query Facebook Ads API for campaign performance, ad set metrics, and account insights using natural language. Supports all Position2 Facebook ad accounts."
-        }
-      ],
-      "operationCount": 1,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "oauth",
-      "oauthServiceId": "facebook-ads",
-      "category": "tools",
-      "integrationType": "marketing",
-      "tags": ["marketing", "data-analytics"],
-      "updatedAt": "2026-11-08"
-    },
-    {
       "type": "fathom",
       "slug": "fathom",
       "name": "Fathom",
@@ -9466,65 +9319,6 @@
       "integrationType": "analytics",
       "tags": ["meeting", "note-taking"],
       "updatedAt": "2026-10-14"
-    },
-    {
-      "type": "figma",
-      "slug": "figma",
-      "name": "Figma",
-      "description": "Interact with Figma files, create designs, and convert to code",
-      "longDescription": "Integrate Figma into your workflow. Create new Figma files, convert designs to HTML/React/Angular code, manage comments, and access team projects. Requires Figma API key for authentication.",
-      "bgColor": "#F24E1E",
-      "iconName": "FigmaIcon",
-      "docsUrl": "https://docs.sim.ai/tools/figma",
-      "operations": [
-        {
-          "name": "Generate Design (AI)",
-          "description": "Generate AI-powered Figma designs automatically using Claude AI and browser automation"
-        },
-        {
-          "name": "Convert to HTML",
-          "description": "Convert Figma designs to HTML and CSS using advanced AI processing. Extracts data from Figma API using file key and node ID, then generates responsive code with design system extraction."
-        },
-        {
-          "name": "Get Comments",
-          "description": ""
-        },
-        {
-          "name": "Post Comment",
-          "description": ""
-        },
-        {
-          "name": "Delete Comment",
-          "description": ""
-        },
-        {
-          "name": "Get Team Projects",
-          "description": ""
-        },
-        {
-          "name": "Get File",
-          "description": ""
-        },
-        {
-          "name": "Get File Nodes",
-          "description": ""
-        },
-        {
-          "name": "Get File Images",
-          "description": ""
-        },
-        {
-          "name": "Get Project Files",
-          "description": ""
-        }
-      ],
-      "operationCount": 10,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "none",
-      "category": "tools",
-      "integrationType": "documents",
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "findymail",
@@ -9651,16 +9445,20 @@
         {
           "name": "Credit Usage",
           "description": "Retrieve the remaining and allocated Firecrawl credits for the team."
+        },
+        {
+          "name": "Enrich Contact or Company",
+          "description": "Find work emails, phone numbers, LinkedIn profiles, company domains, and company information through Firecrawl Alexandria. Uses FullEnrich for contact lookups and People Data Labs for company, name-based profile, and single-part-name contact lookups. Provider terms must be enabled in Firecrawl. People Data Labs has a 50,000-record annual team limit."
         }
       ],
-      "operationCount": 13,
+      "operationCount": 14,
       "triggers": [],
       "triggerCount": 0,
       "authType": "api-key",
       "category": "tools",
       "integrationType": "search",
       "tags": ["web-scraping", "automation"],
-      "updatedAt": "2026-10-20"
+      "updatedAt": "2026-11-05"
     },
     {
       "type": "fireflies_v2",
@@ -9999,6 +9797,118 @@
       "updatedAt": "2026-08-18"
     },
     {
+      "type": "flow",
+      "slug": "flow-engineering",
+      "name": "Flow Engineering",
+      "description": "Manage engineering requirements and traceability",
+      "longDescription": "Read and update Flow Engineering projects, requirements, tests, and other entities through its customer API. Search current project data, inspect categories and relationships, manage comments, and make controlled changes on a working branch using your connected account permissions.",
+      "bgColor": "#FFFFFF",
+      "iconName": "FlowIcon",
+      "docsUrl": "https://docs.sim.ai/integrations/flow",
+      "operations": [
+        {
+          "name": "List Projects",
+          "description": "List projects accessible to the connected Flow user. The API returns up to the requested limit without a continuation cursor."
+        },
+        {
+          "name": "Get Project",
+          "description": "Read a Flow project by its UUID."
+        },
+        {
+          "name": "Get Data Model",
+          "description": "Read the project categories and field definitions before interpreting values or writing custom fields."
+        },
+        {
+          "name": "List Branches",
+          "description": "List the Flow project branches and their review and protection state."
+        },
+        {
+          "name": "Create Branch",
+          "description": "Create a working branch before modifying requirements, tests, or other project entities."
+        },
+        {
+          "name": "Search Entities",
+          "description": "Search live Flow entities by name, supported field values, or exact Flow/Human ID. Returns at most 100 compact matches; fetch entities for full values. Text results may be unavailable while the provider index warms."
+        },
+        {
+          "name": "List Entities",
+          "description": "Read one page of live Flow entities. Continue with nextPageStart while moreAvailable is true, including after an empty page."
+        },
+        {
+          "name": "Get Entities",
+          "description": "Read the full values, relationships, and timestamps of up to 100 Flow entities in one project and branch."
+        },
+        {
+          "name": "Create Entity",
+          "description": "Create an entity in a category on the selected branch. Branch protection and the connected user permissions remain enforced."
+        },
+        {
+          "name": "Create Entities",
+          "description": "Create 1\\u2013100 entities atomically on a single branch. A timed-out request may already have committed; inspect the branch before retrying."
+        },
+        {
+          "name": "Set Value",
+          "description": "Set one field on a Flow entity using a key from the data model and a JSON value of the documented field type."
+        },
+        {
+          "name": "Set Values",
+          "description": "Set 1\\u2013100 field values atomically on one branch. Returns each affected entity once in first-touched order."
+        },
+        {
+          "name": "Delete Entity",
+          "description": "Delete an entity on the selected branch. Branch protection is enforced."
+        },
+        {
+          "name": "Restore Entity",
+          "description": "Restore a deleted entity with its prior fields and links. Restoring a child does not restore its deleted parent."
+        },
+        {
+          "name": "Add Link",
+          "description": "Add a downstream relationship between Flow entities on the selected branch."
+        },
+        {
+          "name": "Remove Link",
+          "description": "Remove a downstream relationship between Flow entities on the selected branch."
+        },
+        {
+          "name": "List Comments",
+          "description": "Read direct comment threads for an entity or direct replies to the original comment ID. Keep the same branch when following replies."
+        },
+        {
+          "name": "Get Comment",
+          "description": "Read a comment using its ID and its returned entity_id as the parent path."
+        },
+        {
+          "name": "Create Comment",
+          "description": "Start a thread on an entity or reply using the original comment ID as entityId. Set the branch explicitly; replies do not inherit it."
+        },
+        {
+          "name": "Update Comment",
+          "description": "Edit comment text or resolve/reopen its thread. Use the original comment to change the thread status."
+        },
+        {
+          "name": "Delete Comment",
+          "description": "Delete a comment authored by the connected user."
+        },
+        {
+          "name": "Filter Entities",
+          "description": "Read one page of IDs matching typed field conditions and AND/OR groups. Continue until nextCursor is null, including after empty pages; results reflect current state."
+        },
+        {
+          "name": "Get Entity History",
+          "description": "Read a page of change history for up to 500 entities. Keep project, branch, and entity IDs fixed while paging; restart if a rebase expires the cursor."
+        }
+      ],
+      "operationCount": 23,
+      "triggers": [],
+      "triggerCount": 0,
+      "authType": "api-key",
+      "category": "tools",
+      "integrationType": "devops",
+      "tags": ["project-management", "automation", "version-control"],
+      "updatedAt": "2026-11-06"
+    },
+    {
       "type": "gamma",
       "slug": "gamma",
       "name": "Gamma",
@@ -10037,6 +9947,134 @@
       "integrationType": "marketing",
       "tags": ["document-processing", "content-management"],
       "updatedAt": "2026-10-14"
+    },
+    {
+      "type": "gauge",
+      "slug": "gauge",
+      "name": "Gauge",
+      "description": "Track AI visibility and manage Gauge prompts",
+      "longDescription": "Manage organizations, categories, topics, tracked prompts, and tags; inspect brands, AI answers, citations, and search queries; and run visibility, share-of-voice, and AI-traffic reports with the Gauge Chat API.",
+      "bgColor": "#E8FF3F",
+      "iconName": "GaugeIcon",
+      "docsUrl": "https://docs.sim.ai/integrations/gauge",
+      "operations": [
+        {
+          "name": "Get Current Credential",
+          "description": "Read the identity, permissions, and expiry of the connected Gauge API key."
+        },
+        {
+          "name": "List Organizations",
+          "description": "List organizations and agency clients accessible to the connected API key."
+        },
+        {
+          "name": "Get Organization",
+          "description": "Read an organization and its enabled Gauge products."
+        },
+        {
+          "name": "List Categories",
+          "description": "List the AI-search categories configured for an organization."
+        },
+        {
+          "name": "Get Category",
+          "description": "Read the details of an AI-search category."
+        },
+        {
+          "name": "List Topics",
+          "description": "List one page of tracked-prompt topics in a category."
+        },
+        {
+          "name": "Create Topic",
+          "description": "Create a topic to organize tracked prompts."
+        },
+        {
+          "name": "Get Topic",
+          "description": "Read a topic and its tracked-prompt count."
+        },
+        {
+          "name": "Rename Topic",
+          "description": "Change the title of an existing topic."
+        },
+        {
+          "name": "List Prompts",
+          "description": "List one page of tracked prompts with optional topic, tag, and tracking-type filters."
+        },
+        {
+          "name": "Create Prompts",
+          "description": "Add a batch of tracked questions or preview the import without creating prompts."
+        },
+        {
+          "name": "Bulk Update Prompts",
+          "description": "Change the topic or tracking type of up to 500 tracked prompts."
+        },
+        {
+          "name": "Add Tags to Prompts",
+          "description": "Apply a set of tags to the selected tracked prompts."
+        },
+        {
+          "name": "Remove Tags from Prompts",
+          "description": "Remove a set of tags from the selected tracked prompts."
+        },
+        {
+          "name": "Get Prompt",
+          "description": "Read a tracked question and its topic, tags, and sampling information."
+        },
+        {
+          "name": "Update Prompt",
+          "description": "Move a prompt to another topic or change its tracking type. Prompt text is immutable: create a new prompt instead."
+        },
+        {
+          "name": "List Tags",
+          "description": "List the tags available to organize prompts in an organization."
+        },
+        {
+          "name": "Create Tag",
+          "description": "Create an organization-wide prompt tag."
+        },
+        {
+          "name": "Get Tag",
+          "description": "Read a prompt tag and its usage count."
+        },
+        {
+          "name": "Update Tag",
+          "description": "Change the name or color of a prompt tag."
+        },
+        {
+          "name": "Delete Tag",
+          "description": "Delete a prompt tag and remove its associations with prompts."
+        },
+        {
+          "name": "List Brands",
+          "description": "Your owned brands and the category's tracked competitors. Together these are the share-of-voice denominator."
+        },
+        {
+          "name": "Get Query Catalog",
+          "description": "Discover available report datasets, metrics, dimensions, filters, and values."
+        },
+        {
+          "name": "Run Report Query",
+          "description": "Run a report on AI answers, citations, search queries, or AI bot traffic using metrics from the query catalog."
+        },
+        {
+          "name": "List Answers",
+          "description": "List one page of collected AI answers using date, model, prompt, and brand filters."
+        },
+        {
+          "name": "Get Answer",
+          "description": "Read an AI answer with its prompt, brand mentions, source citations, and searches."
+        },
+        {
+          "name": "List Citations",
+          "description": "List one page of sources cited by AI answers in a category."
+        }
+      ],
+      "operationCount": 27,
+      "triggers": [],
+      "triggerCount": 0,
+      "authType": "api-key",
+      "category": "tools",
+      "integrationType": "marketing",
+      "tags": ["marketing", "seo", "data-analytics", "automation"],
+      "updatedAt": "2026-11-06"
     },
     {
       "type": "github_v2",
@@ -10792,10 +10830,6 @@
           "description": "Read emails from Gmail"
         },
         {
-          "name": "Read Thread",
-          "description": "Read all emails in a Gmail thread by thread ID"
-        },
-        {
           "name": "Draft Email",
           "description": "Draft emails using Gmail"
         },
@@ -10806,10 +10840,6 @@
         {
           "name": "Search Email",
           "description": "Search emails in Gmail"
-        },
-        {
-          "name": "Advanced Search",
-          "description": "Search emails in Gmail with full content and attachment parsing, returning threaded conversations"
         },
         {
           "name": "Move Email",
@@ -10844,7 +10874,7 @@
           "description": "Remove label(s) from a Gmail message"
         }
       ],
-      "operationCount": 15,
+      "operationCount": 13,
       "triggers": [
         {
           "id": "gmail_poller",
@@ -10858,7 +10888,7 @@
       "category": "tools",
       "integrationType": "email",
       "tags": ["google-workspace", "messaging"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-10-14"
     },
     {
       "type": "gong",
@@ -11964,22 +11994,6 @@
           "description": "Create a new Google Slides presentation"
         },
         {
-          "name": "Create Presentation from Template",
-          "description": "Create a new presentation from a template: duplicate the template by id, duplicate slides as needed, then replace text, images, and lists from the provided schema JSON."
-        },
-        {
-          "name": "Duplicate Presentation",
-          "description": "Create a duplicate of an existing Google Slides presentation"
-        },
-        {
-          "name": "Replace Text",
-          "description": "Replace all text in a shape or table cell in a Google Slides presentation. This deletes existing text and inserts new text."
-        },
-        {
-          "name": "Replace Lists",
-          "description": "Replace all list content in a shape in a Google Slides presentation. This preserves bullet/numbering style and formatting."
-        },
-        {
           "name": "Copy Presentation",
           "description": "Copy a template presentation in Drive to a new file. Use this before merging data so the original template is never modified."
         },
@@ -12176,7 +12190,7 @@
           "description": "Update video playback options (autoPlay, mute, start/end) and outline."
         }
       ],
-      "operationCount": 56,
+      "operationCount": 52,
       "triggers": [],
       "triggerCount": 0,
       "authType": "oauth",
@@ -12184,7 +12198,7 @@
       "category": "tools",
       "integrationType": "documents",
       "tags": ["google-workspace", "document-processing", "content-management"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-08-18"
     },
     {
       "type": "google_tasks",
@@ -13403,6 +13417,62 @@
       "updatedAt": "2026-10-14"
     },
     {
+      "type": "higgsfield",
+      "slug": "higgsfield",
+      "name": "Higgsfield",
+      "description": "Generate images and videos with Higgsfield models",
+      "longDescription": "Generate images and videos with any Higgsfield model, create SOUL images with styles and trained characters, train and manage Soul ID characters, and check, cancel, or delete generation requests.",
+      "bgColor": "#D1FE17",
+      "iconName": "HiggsfieldIcon",
+      "docsUrl": "https://docs.sim.ai/integrations/higgsfield",
+      "operations": [
+        {
+          "name": "Generate (Any Model)",
+          "description": "Submit a generation request to any Higgsfield image or video model endpoint with that model's documented JSON input, then wait for the output URLs."
+        },
+        {
+          "name": "Generate SOUL Image",
+          "description": "Generate images with Higgsfield SOUL, optionally in a style or as a trained Soul ID character, then wait for the image URLs."
+        },
+        {
+          "name": "Get Request Status",
+          "description": "Get the status of a Higgsfield generation request and, once completed, its output URLs."
+        },
+        {
+          "name": "Cancel Request",
+          "description": "Cancel a Higgsfield generation request that is still queued. Requests that have started processing cannot be canceled."
+        },
+        {
+          "name": "Delete Request",
+          "description": "Immediately delete a finished Higgsfield request's output files, prompt, and parameters."
+        },
+        {
+          "name": "Create Character",
+          "description": "Train a reusable Soul ID character from public reference image URLs. Training runs in the background; use Get Character to check when it completes."
+        },
+        {
+          "name": "Get Character",
+          "description": "Get a Soul ID character reference, including its training status."
+        },
+        {
+          "name": "List Characters",
+          "description": "List the Soul ID character references in the Higgsfield account, one page at a time."
+        },
+        {
+          "name": "Delete Character",
+          "description": "Permanently delete a Soul ID character reference."
+        }
+      ],
+      "operationCount": 9,
+      "triggers": [],
+      "triggerCount": 0,
+      "authType": "api-key",
+      "category": "tools",
+      "integrationType": "ai",
+      "tags": ["image-generation", "video-generation", "marketing", "automation"],
+      "updatedAt": "2026-11-06"
+    },
+    {
       "type": "hubspot",
       "slug": "hubspot",
       "name": "HubSpot",
@@ -13414,7 +13484,7 @@
       "operations": [
         {
           "name": "Get Contacts",
-          "description": "List contacts with pagination, or fetch a single contact when Contact ID or Email is set (matches HubSpot block “Get Contacts”)."
+          "description": "Retrieve all contacts from HubSpot account with pagination support"
         },
         {
           "name": "Create Contact",
@@ -13455,102 +13525,6 @@
         {
           "name": "Get Deals",
           "description": "Retrieve all deals from HubSpot account with pagination support"
-        },
-        {
-          "name": "List Campaigns",
-          "description": "Retrieve marketing campaigns with pagination support"
-        },
-        {
-          "name": "Get Campaign",
-          "description": "Retrieve details for a specific marketing campaign"
-        },
-        {
-          "name": "Get Campaign Spend",
-          "description": "Retrieve a specific spend item for a campaign or multiple campaigns"
-        },
-        {
-          "name": "Get Campaign Metrics",
-          "description": "Retrieve performance metrics for a campaign or multiple campaigns"
-        },
-        {
-          "name": "Get Campaign Revenue",
-          "description": "Retrieve revenue reports for a campaign or multiple campaigns"
-        },
-        {
-          "name": "Get Campaign Contacts",
-          "description": "Retrieve contacts tied to a campaign report"
-        },
-        {
-          "name": "Get Campaign Budget Totals",
-          "description": "Retrieve budget and spend totals for a campaign"
-        },
-        {
-          "name": "Get Campaign Budget Item",
-          "description": "Retrieve a specific budget item for a campaign"
-        },
-        {
-          "name": "Get Campaign Assets",
-          "description": "Retrieve assets associated with a campaign"
-        },
-        {
-          "name": "Get Email Statistics Histogram",
-          "description": "Retrieve aggregated email statistics histogram with specified interval"
-        },
-        {
-          "name": "Get Email",
-          "description": "Retrieve a single email engagement by ID from HubSpot (content requires the sales-email-read scope)"
-        },
-        {
-          "name": "Marketing Emails",
-          "description": "Retrieve all email engagements from HubSpot account with pagination support"
-        },
-        {
-          "name": "List CRM Objects",
-          "description": "Retrieve a page of CRM objects by type (e.g. appointments, tickets). Control fields via properties param."
-        },
-        {
-          "name": "Get CRM Object",
-          "description": "Retrieve a single CRM object by type and ID (e.g. appointment, course 0-410, deal 0-3, discount, custom object)"
-        },
-        {
-          "name": "List Association Types",
-          "description": "List association types between two CRM object types (e.g. contacts and companies)"
-        },
-        {
-          "name": "List Associations",
-          "description": "List records of one object type associated with a given record, e.g. all emails or notes logged on a contact"
-        },
-        {
-          "name": "Get Commerce Payments",
-          "description": "Retrieve commerce payments from HubSpot CRM with pagination support"
-        },
-        {
-          "name": "Get Subscriptions",
-          "description": "Retrieve commerce subscriptions from HubSpot CRM with pagination support"
-        },
-        {
-          "name": "List Imports",
-          "description": "Get active CRM imports with pagination support"
-        },
-        {
-          "name": "Get Import",
-          "description": "Get information on a single CRM import by ID"
-        },
-        {
-          "name": "List Pipelines",
-          "description": "List pipelines for a CRM object type (e.g. deals, tickets)"
-        },
-        {
-          "name": "Get Pipeline",
-          "description": "Retrieve a single pipeline by ID for a CRM object type (e.g. deals, tickets)"
-        },
-        {
-          "name": "List Properties",
-          "description": "Read all property definitions for a CRM object type"
-        },
-        {
-          "name": "Get Property",
-          "description": "Read a single property definition for a CRM object type"
         },
         {
           "name": "Create Deal",
@@ -13709,7 +13683,7 @@
           "description": "Retrieve all users from HubSpot account"
         }
       ],
-      "operationCount": 74,
+      "operationCount": 50,
       "triggers": [
         {
           "id": "hubspot_poller",
@@ -13723,7 +13697,7 @@
       "category": "tools",
       "integrationType": "sales",
       "tags": ["marketing", "sales-engagement", "customer-support"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-10-14"
     },
     {
       "type": "huggingface",
@@ -13820,29 +13794,6 @@
       "integrationType": "sales",
       "tags": ["enrichment", "sales-engagement"],
       "updatedAt": "2026-08-18"
-    },
-    {
-      "type": "image_fusion",
-      "slug": "image-fusion",
-      "name": "Image Fusion",
-      "description": "Fuse multiple images with Nano Banana Pro",
-      "longDescription": "Combine or fuse multiple images into one using Google Nano Banana Pro. Upload two or more images and describe how to merge them in the prompt. Use 1K resolution for faster results; 2K/4K may hit API deadlines with multiple images.",
-      "bgColor": "#4D5FFF",
-      "iconName": "ImageIcon",
-      "docsUrl": "https://docs.sim.ai/tools/image_generator",
-      "operations": [
-        {
-          "name": "Google Nano Banana",
-          "description": "Generate images using Google's Gemini Native Image (Nano Banana) model"
-        }
-      ],
-      "operationCount": 1,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "api-key",
-      "category": "tools",
-      "integrationType": "ai",
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "incidentio",
@@ -14546,6 +14497,187 @@
       "updatedAt": "2026-10-14"
     },
     {
+      "type": "jama",
+      "slug": "jama-connect",
+      "name": "Jama Connect",
+      "description": "Manage requirements, traceability, and verification in Jama Connect",
+      "longDescription": "Search and manage requirements, inspect custom item types and pick lists, trace upstream and downstream relationships, collaborate with comments, compare item versions and baselines, and read test plans, cycles, and runs or update execution results. Connect with saved Jama API client credentials that retain the account owner’s permissions.",
+      "bgColor": "#FFFFFF",
+      "iconName": "JamaIcon",
+      "docsUrl": "https://docs.sim.ai/integrations/jama",
+      "operations": [
+        {
+          "name": "List Projects",
+          "description": "List Projects in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Project",
+          "description": "Get Project in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Item Types",
+          "description": "List Item Types in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Item Type",
+          "description": "Get Item Type in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Items",
+          "description": "List Items in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Search Items",
+          "description": "Search Items in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Item",
+          "description": "Get Item in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Create Item",
+          "description": "Create Item in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Update Item",
+          "description": "Update Item in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Delete Item",
+          "description": "Delete Item in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Item Children",
+          "description": "List Item Children in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Upstream Items",
+          "description": "List Upstream Items in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Downstream Items",
+          "description": "List Downstream Items in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Relationships",
+          "description": "List Relationships in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Relationship",
+          "description": "Get Relationship in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Create Relationship",
+          "description": "Create Relationship in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Delete Relationship",
+          "description": "Delete Relationship in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Relationship Types",
+          "description": "List Relationship Types in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Item Comments",
+          "description": "List Item Comments in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Create Comment",
+          "description": "Create Comment in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Item Versions",
+          "description": "List Item Versions in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Item Version",
+          "description": "Get Item Version in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Filters",
+          "description": "List Filters in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Filter",
+          "description": "Get Filter in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Filter Results",
+          "description": "List Filter Results in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Baselines",
+          "description": "List Baselines in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Baseline",
+          "description": "Get Baseline in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Baseline Items",
+          "description": "List Baseline Items in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Test Plans",
+          "description": "List Test Plans in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Test Plan",
+          "description": "Get Test Plan in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Test Cycles",
+          "description": "List Test Cycles in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Test Cycle",
+          "description": "Get Test Cycle in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Test Runs",
+          "description": "List Test Runs in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Test Run",
+          "description": "Get Test Run in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Update Test Run",
+          "description": "Update Test Run in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Releases",
+          "description": "List Releases in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Tags",
+          "description": "List Tags in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Pick Lists",
+          "description": "List Pick Lists in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "List Pick List Options",
+          "description": "List Pick List Options in Jama Connect using the connected user's access permissions."
+        },
+        {
+          "name": "Get Current User",
+          "description": "Get Current User in Jama Connect using the connected user's access permissions."
+        }
+      ],
+      "operationCount": 40,
+      "triggers": [],
+      "triggerCount": 0,
+      "authType": "oauth",
+      "oauthServiceId": "jama",
+      "category": "tools",
+      "integrationType": "devops",
+      "tags": ["project-management", "knowledge-base"],
+      "updatedAt": "2026-11-06"
+    },
+    {
       "type": "jina",
       "slug": "jina",
       "name": "Jina",
@@ -14830,7 +14962,7 @@
         },
         {
           "name": "Get Comments",
-          "description": "Retrieve comments from a Figma file"
+          "description": "Get comments for a service request in Jira Service Management"
         },
         {
           "name": "Get Customers",
@@ -15011,7 +15143,7 @@
       "category": "tools",
       "integrationType": "support",
       "tags": ["customer-support", "ticketing", "incident-management"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-08-18"
     },
     {
       "type": "jotform",
@@ -16378,107 +16510,6 @@
       "integrationType": "sales",
       "tags": ["marketing", "sales-engagement"],
       "updatedAt": "2026-10-14"
-    },
-    {
-      "type": "unipile",
-      "slug": "linkedin-unipile",
-      "name": "LinkedIn (Unipile)",
-      "description": "LinkedIn company data and messaging via Unipile",
-      "longDescription": "Shared workspaces list public LinkedIn accounts from `outreach_user_connections_v1` plus your personal connections via Unipile hosted authentication (`GET /api/unipile/accounts`). Other workspaces connect LinkedIn via hosted authentication only. Uses `UNIPILE_API_KEY` from the deployment environment. Covers LinkedIn company and user profiles, posts, comments, reactions, search, messaging, relations, and attachments.",
-      "bgColor": "#0F2736",
-      "iconName": "UnipileIcon",
-      "docsUrl": "https://developer.unipile.com/reference/",
-      "operations": [
-        {
-          "name": "Comment on a post",
-          "description": "Comments on a post or replies to a comment (`POST /api/v1/posts/{post_id}/comments`, multipart). LinkedIn: `post_id` is the post social_id; optional `mentions` is a JSON array of { name, profile_id, is_company? } for `{{n}}` placeholders in text (the Unipile block uses a mention table to build this). See https://developer.unipile.com/docs/posts-and-comments Uses server UNIPILE_API_KEY."
-        },
-        {
-          "name": "Create Post",
-          "description": "Creates a LinkedIn post (`POST /api/v1/posts` multipart). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "Retrieve a chat",
-          "description": "Retrieves a chat by id (`GET /api/v1/chats/{chat_id}`). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "Get Message Attachment",
-          "description": "Downloads an attachment from a message (`GET /api/v1/messages/{message_id}/attachments/{attachment_id}`). Text-like bodies return `content`; binary returns `content_base64` plus `mime_type`."
-        },
-        {
-          "name": "Retrieve search parameters",
-          "description": "Returns LinkedIn search parameter IDs for building a search body (`GET /api/v1/linkedin/search/parameters`). LinkedIn expects IDs, not raw labels. Guide: https://developer.unipile.com/docs/linkedin-search Uses server UNIPILE_API_KEY."
-        },
-        {
-          "name": "Get Post",
-          "description": "Retrieves a single post (`GET /api/v1/posts/{post_id}`). Requires `account_id` query (Unipile). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "Retrieve a profile",
-          "description": "Retrieves a user profile (`GET /api/v1/users/{identifier}`). Required: `account_id`, `user_identifier` (path). Optional LinkedIn queries: `linkedin_sections` (JSON array string—avoid `*` for high volume; see throttling), `linkedin_api` (recruiter | sales_navigator), `notify` (boolean; profile visit notification). Consult provider limits: https://developer.unipile.com/docs/provider-limits-and-restrictions Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List Chat Attendees",
-          "description": "Lists attendees for a chat (`GET /api/v1/chats/{chat_id}/attendees`). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List Chat Messages",
-          "description": "Lists messages in a chat (`GET /api/v1/chats/{chat_id}/messages`). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List all chats",
-          "description": "Lists chats (`GET /api/v1/chats`) with optional filters: unread, cursor, before/after ISO UTC datetimes, limit (1–250), account_type, account_id. Uses server UNIPILE_API_KEY."
-        },
-        {
-          "name": "Perform search",
-          "description": "Runs LinkedIn Classic, Sales Navigator, or Recruiter search (`POST /api/v1/linkedin/search`). Pass `search_body` as a JSON string built from api, category, keywords, filters, optional `{ url }`, etc. Use Retrieve LinkedIn search parameters for filter IDs. Guide: https://developer.unipile.com/docs/linkedin-search Query: account_id (required), optional cursor, limit (0–100; Classic should stay ≤50). Uses server UNIPILE_API_KEY."
-        },
-        {
-          "name": "List Post Comments",
-          "description": "Lists comments on a post (`GET /api/v1/posts/{post_id}/comments`). Requires `account_id` query (Unipile). Optional `cursor`, `limit` (1–100), `sort_by`, `comment_id` (replies). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List all reactions from a post",
-          "description": "Lists every reaction on a post (`GET /api/v1/posts/{post_id}/reactions`), following Unipile paging until complete. LinkedIn: use the post social_id from GET post or list posts; see https://developer.unipile.com/docs/posts-and-comments Uses server UNIPILE_API_KEY."
-        },
-        {
-          "name": "List User Comments",
-          "description": "Lists comments for a user (`GET /api/v1/users/{identifier}/comments`). Requires `account_id` and `user_identifier`. Optional `cursor`. Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List all posts",
-          "description": "Returns posts written by a user or company (`GET /api/v1/users/{identifier}/posts`). Requires `account_id` and `user_identifier` (path). Optional `cursor`, `limit` (1–100), and LinkedIn `is_company`. Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List User Reactions",
-          "description": "Lists reactions for a user (`GET /api/v1/users/{identifier}/reactions`). Requires `account_id` and `user_identifier`. Optional `cursor`. Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "List User Relations",
-          "description": "Lists all LinkedIn relations for an account (`GET /api/v1/users/relations`), following cursor pagination internally until complete (with safety caps). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "Retrieve Company Profile",
-          "description": "Fetches a LinkedIn company profile via Unipile (`GET /api/v1/linkedin/company/{identifier}?account_id=…`). Uses `UNIPILE_API_KEY` from the server environment."
-        },
-        {
-          "name": "Send Chat Message",
-          "description": "Sends a message in a chat (`POST /api/v1/chats/{chat_id}/messages` as multipart form). Uses server `UNIPILE_API_KEY`."
-        },
-        {
-          "name": "Start New Chat",
-          "description": "Starts a new chat via Unipile (`POST /api/v1/chats` as multipart form). Requires `attendees_ids` (array of attendee provider ids). Uses `UNIPILE_API_KEY` from the server environment."
-        }
-      ],
-      "operationCount": 20,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "oauth",
-      "oauthServiceId": "unipile_linkedin",
-      "category": "tools",
-      "integrationType": "communication",
-      "tags": ["messaging", "sales-engagement"],
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "linkup",
@@ -19655,37 +19686,6 @@
       "updatedAt": "2026-10-14"
     },
     {
-      "type": "p2_docs",
-      "slug": "p2-docs",
-      "name": "P2 Docs",
-      "description": "Presentation template schemas, icons, and team data",
-      "longDescription": "Internal Position2 presentation helpers: fetch template JSON schemas, browse the slide icon library, and list P2 team members for deck generation. No OAuth required.",
-      "bgColor": "#F4B400",
-      "iconName": "PresentationIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/p2_docs",
-      "operations": [
-        {
-          "name": "Get Template Schema",
-          "description": "Return the JSON schema for a presentation template (e.g. position2_2026)"
-        },
-        {
-          "name": "Get Icons Library",
-          "description": "Return the presentation icon catalog (ids, labels, categories, tags, and image URLs) for template slides"
-        },
-        {
-          "name": "Get P2 Team Members",
-          "description": "Returns the list of Position2 (P2) team members — name, designation, and profile image URL — for use when populating team or speaker slides. Optionally filter by name or designation keyword."
-        }
-      ],
-      "operationCount": 3,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "none",
-      "category": "tools",
-      "integrationType": "documents",
-      "updatedAt": "2026-11-08"
-    },
-    {
       "type": "pagerduty",
       "slug": "pagerduty",
       "name": "PagerDuty",
@@ -21582,29 +21582,6 @@
       "integrationType": "analytics",
       "tags": ["data-analytics", "microsoft-365", "automation"],
       "updatedAt": "2026-10-02"
-    },
-    {
-      "type": "presentation",
-      "slug": "presentation",
-      "name": "Presentation",
-      "description": "Create presentations",
-      "longDescription": "Integrate Presentation creation into the workflow. Can create presentations with customizable slides, tone, and verbosity.",
-      "bgColor": "#F4B400",
-      "iconName": "PresentationIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/presentation",
-      "operations": [
-        {
-          "name": "Create",
-          "description": "Create a presentation with specified number of slides, tone, and verbosity"
-        }
-      ],
-      "operationCount": 1,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "none",
-      "category": "tools",
-      "integrationType": "documents",
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "profound",
@@ -25001,7 +24978,7 @@
       "slug": "semrush",
       "name": "Semrush",
       "description": "Research SEO and paid search data with Semrush",
-      "longDescription": "Query the Semrush SEO API for domain, subdomain, and URL traffic overviews, organic and paid keywords, ad and product listing creatives, competitor sets, keyword research, backlink profiles, and Position Tracking organic positions. Requires a Semrush subscription with API units.",
+      "longDescription": "Query the Semrush SEO API for domain, subdomain, and URL traffic overviews, organic and paid keywords, ad and product listing creatives, competitor sets, keyword research, and backlink profiles. Requires a Semrush subscription with API units.",
       "bgColor": "#FFFFFF",
       "iconName": "SemrushIcon",
       "docsUrl": "https://docs.sim.ai/integrations/semrush",
@@ -25181,20 +25158,16 @@
         {
           "name": "Backlink Competitors",
           "description": "List domains with a backlink profile similar to the target, ranked by shared referring domains."
-        },
-        {
-          "name": "Organic Positions (Position Tracking)",
-          "description": "Get Position Tracking organic positions report for a campaign: keywords, rankings per URL, position changes over time. Requires a Semrush API key configured on the block."
         }
       ],
-      "operationCount": 45,
+      "operationCount": 44,
       "triggers": [],
       "triggerCount": 0,
       "authType": "api-key",
       "category": "tools",
       "integrationType": "analytics",
       "tags": ["seo", "marketing", "data-analytics"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-10-14"
     },
     {
       "type": "sendblue",
@@ -25791,10 +25764,6 @@
           "description": "List products from your Shopify store with optional filtering"
         },
         {
-          "name": "Products Over Time",
-          "description": "Get product creation counts over time periods (day/week/month)"
-        },
-        {
           "name": "Update Product",
           "description": "Update an existing product in your Shopify store"
         },
@@ -25809,58 +25778,6 @@
         {
           "name": "List Orders",
           "description": "List orders from your Shopify store with optional filtering"
-        },
-        {
-          "name": "Gross Sales Over Time",
-          "description": "Get aggregated gross sales data over time periods (day/week/month)"
-        },
-        {
-          "name": "Net Sales Over Time",
-          "description": "Get aggregated net sales data over time periods (day/week/month)"
-        },
-        {
-          "name": "Orders Over Time",
-          "description": "Get aggregated order counts and values over time periods (day/week/month)"
-        },
-        {
-          "name": "Revenue by Product",
-          "description": "Get revenue breakdown by product within a date range"
-        },
-        {
-          "name": "Revenue by Customer",
-          "description": "Get revenue breakdown by customer within a date range"
-        },
-        {
-          "name": "Revenue by Location",
-          "description": "Get revenue breakdown by shipping location within a date range"
-        },
-        {
-          "name": "Top Selling Products",
-          "description": "Get top selling products by quantity within a date range"
-        },
-        {
-          "name": "Top Customers",
-          "description": "Get top customers by revenue within a date range"
-        },
-        {
-          "name": "New Customer Sales Over Time",
-          "description": "Get sales data from first-time customers over time periods (day/week/month)"
-        },
-        {
-          "name": "New Customers Over Time",
-          "description": "Get new customer acquisition counts over time periods (day/week/month)"
-        },
-        {
-          "name": "New vs Returning Customers",
-          "description": "Compare new vs returning customer orders and revenue over time"
-        },
-        {
-          "name": "One-Time Customers",
-          "description": "Get customers who have only placed a single order"
-        },
-        {
-          "name": "Predicted Spend Tiers",
-          "description": "Segment customers into spend tiers (high/medium/low) based on their purchase history"
         },
         {
           "name": "Update Order",
@@ -25881,10 +25798,6 @@
         {
           "name": "List Customers",
           "description": "List customers from your Shopify store with optional filtering"
-        },
-        {
-          "name": "Customers Over Time",
-          "description": "Get new customer counts over time periods (day/week/month)"
         },
         {
           "name": "Update Customer",
@@ -25951,7 +25864,7 @@
           "description": "Get a specific collection by ID, including its products. Use this to retrieve products within a collection."
         }
       ],
-      "operationCount": 43,
+      "operationCount": 28,
       "triggers": [],
       "triggerCount": 0,
       "authType": "oauth",
@@ -25959,7 +25872,7 @@
       "category": "tools",
       "integrationType": "commerce",
       "tags": ["payments", "automation"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-10-09"
     },
     {
       "type": "similarweb",
@@ -26042,54 +25955,18 @@
       "updatedAt": "2026-08-18"
     },
     {
-      "type": "skyvern",
-      "slug": "skyvern",
-      "name": "Skyvern",
-      "description": "Create and run Skyvern browser automation workflows",
-      "longDescription": "Integrate with Skyvern to create UI automation workflows, list existing workflows, trigger runs with parameters, and poll run status until completion.",
-      "bgColor": "#7C3AED",
-      "iconName": "SkyvernIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/skyvern",
-      "operations": [
-        {
-          "name": "Create Workflow",
-          "description": "Create a new Skyvern browser automation workflow"
-        },
-        {
-          "name": "List Workflows",
-          "description": "List Skyvern workflows for the organization"
-        },
-        {
-          "name": "Run Workflow",
-          "description": "Run a Skyvern workflow by permanent workflow ID (agent_id)"
-        },
-        {
-          "name": "Get Run Status",
-          "description": "Get the status and output of a Skyvern workflow run"
-        }
-      ],
-      "operationCount": 4,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "api-key",
-      "category": "tools",
-      "integrationType": "ai",
-      "tags": ["web-scraping", "automation", "agentic"],
-      "updatedAt": "2026-11-08"
-    },
-    {
       "type": "slack_v2",
       "slug": "slack",
       "name": "Slack",
       "description": "Manage Slack messages, channels, users, files, Lists, canvases, and Agent Sessions",
-      "longDescription": "Build Slack workflows with messages, conversations, files, reactions, pins, bookmarks, user groups, profiles, Lists, canvases, and Agent Sessions. Operations that need additional app scopes use custom Slack bots. Lists require lists:read/lists:write and a paid Slack plan. Native Arena connections retain their existing permissions. Page through list outputs explicitly.",
+      "longDescription": "Build Slack workflows with messages, conversations, files, reactions, pins, bookmarks, user groups, profiles, Lists, canvases, and Agent Sessions. Operations that need additional app scopes use custom Slack bots. Lists require lists:read/lists:write and a paid Slack plan. Native Sim connections retain their existing permissions. Page through list outputs explicitly.",
       "bgColor": "#611f69",
       "iconName": "SlackIcon",
       "docsUrl": "https://docs.sim.ai/integrations/slack",
       "operations": [
         {
           "name": "Send Message",
-          "description": "Send a Slack message. If destinationType is omitted, it is inferred: channel/channelId => channel message; dmUserId/userId => DM. If both are provided, destinationType wins (otherwise channel wins)."
+          "description": "Send messages to Slack channels or direct messages. Supports Slack mrkdwn formatting."
         },
         {
           "name": "Send Ephemeral Message",
@@ -26149,19 +26026,11 @@
         },
         {
           "name": "List Channels",
-          "description": "List one page of accessible Slack conversations. Credential-group user tokens also return one-to-one and group direct messages. Pass the returned nextCursor as cursor to fetch the next page."
-        },
-        {
-          "name": "Get My Channels & DMs",
-          "description": "List only the conversations the token owner belongs to via Slack users.conversations. Default behavior is channels (public/private) only; DMs are opt-in. If the user asked for 1:1 DMs set includeDMs=true (im:read). If the user asked for group DMs set includeGroupDMs=true (mpim:read)."
+          "description": "List one page of accessible public and private Slack channels. Pass the returned nextCursor as cursor to fetch the next page."
         },
         {
           "name": "List Channel Members",
           "description": "List all members (user IDs) in a Slack channel. Use with Get User Info to resolve IDs to names."
-        },
-        {
-          "name": "Auth User",
-          "description": "Identify the token owner via Slack auth.test. Returns the user ID, username, team, team ID, and workspace URL of whoever the token belongs to. No user ID input required."
         },
         {
           "name": "List Users",
@@ -26186,10 +26055,6 @@
         {
           "name": "Add Reaction",
           "description": "Add an emoji reaction to a Slack message"
-        },
-        {
-          "name": "Search All",
-          "description": "Search all content in Slack (messages and files) that the user has access to."
         },
         {
           "name": "Remove Reaction",
@@ -26480,7 +26345,7 @@
           "description": "Attach custom previews to links already shared in a message. Configure the relevant unfurl domains in your Slack app."
         }
       ],
-      "operationCount": 98,
+      "operationCount": 95,
       "triggers": [
         {
           "id": "slack_oauth",
@@ -26519,11 +26384,11 @@
         },
         "privacy": {
           "body": "Sim requests only the Slack permissions its actions and triggers need, and never shows private channel names or messages to people who are not members of those channels in Slack.",
-          "href": "https://thearena.ai/privacy"
+          "href": "/privacy"
         },
         "aiDisclaimer": "A paid Slack plan is required to use Sim's AI agent in Slack's app container. Other Sim features continue to work on free Slack plans. Sim agents use AI models to generate messages and responses sent to Slack. AI-generated content can be inaccurate or incomplete, so review automated outputs before relying on them, especially for important communications."
       },
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-09-24"
     },
     {
       "type": "smartlead",
@@ -27876,29 +27741,6 @@
       "integrationType": "analytics",
       "tags": ["data-analytics"],
       "updatedAt": "2026-10-14"
-    },
-    {
-      "type": "spyfu",
-      "slug": "spyfu",
-      "name": "SpyFu",
-      "description": "Query SpyFu for SEO, PPC, competitor, keyword, ranking, and usage data.",
-      "longDescription": "Connect directly to SpyFu’s Domain Stats, Ad History, PPC Research, SEO Research, Competitors, Kombat, Keyword, Ranking History, and Account APIs using their predefined endpoints. Select the endpoint you need, fill in its required parameters (domain, keyword, date), and optionally include request bodies for bulk keyword jobs.",
-      "bgColor": "#14213D",
-      "iconName": "SpyfuIcon",
-      "docsUrl": "https://developer.spyfu.com/reference",
-      "operations": [
-        {
-          "name": "SpyFu API",
-          "description": "Call any SpyFu REST endpoint for domain, keyword, ranking, or account insights."
-        }
-      ],
-      "operationCount": 1,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "none",
-      "category": "tools",
-      "integrationType": "marketing",
-      "updatedAt": "2026-11-08"
     },
     {
       "type": "square",
@@ -31569,55 +31411,47 @@
       "docsUrl": "https://docs.sim.ai/integrations/zoom",
       "operations": [
         {
-          "name": "Zoom Create Meeting",
+          "name": "Create Meeting",
           "description": "Create a new Zoom meeting"
         },
         {
-          "name": "Zoom List Meetings",
+          "name": "List Meetings",
           "description": "List all meetings for a Zoom user"
         },
         {
-          "name": "Zoom Get Meeting",
+          "name": "Get Meeting",
           "description": "Get details of a specific Zoom meeting"
         },
         {
-          "name": "Zoom Update Meeting",
+          "name": "Update Meeting",
           "description": "Update an existing Zoom meeting"
         },
         {
-          "name": "Zoom Delete Meeting",
+          "name": "Delete Meeting",
           "description": "Delete or cancel a Zoom meeting"
         },
         {
-          "name": "Zoom Get Meeting Invitation",
+          "name": "Get Meeting Invitation",
           "description": "Get the meeting invitation text for a Zoom meeting"
         },
         {
-          "name": "Zoom List Recordings",
+          "name": "List Recordings",
           "description": "List all cloud recordings for a Zoom user"
         },
         {
-          "name": "Zoom List Account Recordings",
-          "description": "List all cloud recordings for a Zoom account"
-        },
-        {
-          "name": "Zoom Get Account Recordings with Transcript",
-          "description": "Get all account recordings with transcripts, optionally filtered by meeting title"
-        },
-        {
-          "name": "Zoom Download Transcript",
-          "description": "Download a Zoom recording transcript or file using a download URL"
-        },
-        {
-          "name": "Zoom Get Meeting Recordings",
+          "name": "Get Meeting Recordings",
           "description": "Get all recordings for a specific Zoom meeting"
         },
         {
-          "name": "Zoom List Past Participants",
+          "name": "Delete Recording",
+          "description": "Delete cloud recordings for a Zoom meeting"
+        },
+        {
+          "name": "List Past Participants",
           "description": "List participants from a past Zoom meeting"
         }
       ],
-      "operationCount": 12,
+      "operationCount": 10,
       "triggers": [
         {
           "id": "zoom_meeting_started",
@@ -31652,11 +31486,11 @@
       ],
       "triggerCount": 6,
       "authType": "oauth",
-      "oauthServiceId": "zoom-client",
+      "oauthServiceId": "zoom",
       "category": "tools",
       "integrationType": "communication",
       "tags": ["meeting", "calendar", "scheduling"],
-      "updatedAt": "2026-11-08"
+      "updatedAt": "2026-10-14"
     },
     {
       "type": "zoominfo",

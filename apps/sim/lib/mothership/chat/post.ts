@@ -440,7 +440,7 @@ async function resolveAgentContexts(params: {
         requestMode
       )
     } catch (error) {
-      logger.error(`[${requestId}] Failed to process contexts`, error)
+      logger.error('Failed to process contexts', error, { requestId })
     }
   }
 
@@ -1529,7 +1529,8 @@ export async function handleUnifiedChatPost(req: NextRequest) {
     if (isZodError(error)) {
       // A rejected body otherwise leaves no trace: the client sees a 400 and
       // its stream reconnect 404s, which reads as the stream dying for no reason.
-      logger.warn(`[${requestId}] Rejected chat request as invalid`, {
+      logger.warn('Rejected chat request as invalid', {
+        requestId,
         issues: error.issues.map((issue) => ({
           path: issue.path.join('.'),
           message: issue.message,
@@ -1561,7 +1562,8 @@ export async function handleUnifiedChatPost(req: NextRequest) {
       return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
     }
 
-    logger.error(`[${requestId}] Error handling unified chat request`, {
+    logger.error('Error handling unified chat request', {
+      requestId,
       error: getErrorMessage(error, 'Unknown error'),
       stack: error instanceof Error ? error.stack : undefined,
     })

@@ -81,6 +81,7 @@ export interface PerformCreateCredentialParams {
   serviceAccountJson?: string
   apiToken?: string
   domain?: string
+  providerWorkspaceId?: string
   atlassianProduct?: AtlassianProduct
   signingSecret?: string
   botToken?: string
@@ -309,6 +310,7 @@ export async function createCredentialRecord(
           botToken: params.botToken,
           apiToken: params.apiToken,
           domain: params.domain,
+          providerWorkspaceId: params.providerWorkspaceId,
           atlassianProduct: params.atlassianProduct,
           serviceAccountJson: params.serviceAccountJson,
           clientId: params.clientId,

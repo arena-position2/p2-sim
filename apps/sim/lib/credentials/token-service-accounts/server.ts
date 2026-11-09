@@ -7,7 +7,10 @@ import {
   CLAUDE_PLATFORM_SERVICE_ACCOUNT_PROVIDER_ID,
   CLICKUP_SERVICE_ACCOUNT_PROVIDER_ID,
   CODA_SERVICE_ACCOUNT_PROVIDER_ID,
+  FLOW_SERVICE_ACCOUNT_PROVIDER_ID,
+  GAUGE_SERVICE_ACCOUNT_PROVIDER_ID,
   HARMONIC_SERVICE_ACCOUNT_PROVIDER_ID,
+  HIGGSFIELD_SERVICE_ACCOUNT_PROVIDER_ID,
   HUBSPOT_SERVICE_ACCOUNT_PROVIDER_ID,
   isTokenServiceAccountProviderId,
   LINEAR_SERVICE_ACCOUNT_PROVIDER_ID,
@@ -29,7 +32,10 @@ import { validateCalcomServiceAccount } from '@/lib/credentials/token-service-ac
 import { validateClaudePlatformServiceAccount } from '@/lib/credentials/token-service-accounts/validators/claude-platform'
 import { validateClickupServiceAccount } from '@/lib/credentials/token-service-accounts/validators/clickup'
 import { validateCodaServiceAccount } from '@/lib/credentials/token-service-accounts/validators/coda'
+import { validateFlowServiceAccount } from '@/lib/credentials/token-service-accounts/validators/flow'
+import { validateGaugeServiceAccount } from '@/lib/credentials/token-service-accounts/validators/gauge'
 import { validateHarmonicServiceAccount } from '@/lib/credentials/token-service-accounts/validators/harmonic'
+import { validateHiggsfieldServiceAccount } from '@/lib/credentials/token-service-accounts/validators/higgsfield'
 import { validateHubspotServiceAccount } from '@/lib/credentials/token-service-accounts/validators/hubspot'
 import { validateLinearServiceAccount } from '@/lib/credentials/token-service-accounts/validators/linear'
 import { validateMondayServiceAccount } from '@/lib/credentials/token-service-accounts/validators/monday'
@@ -45,6 +51,7 @@ import { validateWebflowServiceAccount } from '@/lib/credentials/token-service-a
 export interface TokenServiceAccountFields {
   apiToken: string
   domain?: string
+  providerWorkspaceId?: string
 }
 
 /** Result of a successful provider verification. */
@@ -103,6 +110,9 @@ const TOKEN_SERVICE_ACCOUNT_VALIDATORS: Record<
   [CLAUDE_PLATFORM_SERVICE_ACCOUNT_PROVIDER_ID]: validateClaudePlatformServiceAccount,
   [SNOWFLAKE_SERVICE_ACCOUNT_PROVIDER_ID]: validateSnowflakeServiceAccount,
   [CODA_SERVICE_ACCOUNT_PROVIDER_ID]: validateCodaServiceAccount,
+  [GAUGE_SERVICE_ACCOUNT_PROVIDER_ID]: validateGaugeServiceAccount,
+  [HIGGSFIELD_SERVICE_ACCOUNT_PROVIDER_ID]: validateHiggsfieldServiceAccount,
+  [FLOW_SERVICE_ACCOUNT_PROVIDER_ID]: validateFlowServiceAccount,
 }
 
 export function getTokenServiceAccountValidator(
@@ -123,6 +133,7 @@ export interface TokenServiceAccountSecretBlob {
   providerId: string
   apiToken: string
   domain?: string
+  providerWorkspaceId?: string
   metadata?: Record<string, string>
 }
 

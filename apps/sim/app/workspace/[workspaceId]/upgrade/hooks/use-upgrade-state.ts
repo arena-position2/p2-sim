@@ -12,6 +12,7 @@ import { ARENA_CREDIT_TIERS, isArenaMaxPlan } from '@/lib/billing/arena/tier-con
 import { useSubscriptionUpgrade } from '@/lib/billing/client/upgrade'
 import { CREDIT_TIERS } from '@/lib/billing/constants'
 import { getPlanTierCredits, isEnterprise, isFree, isPro, isTeam } from '@/lib/billing/plan-helpers'
+import { useAwsMarketplaceBilling } from '@/hooks/queries/aws-marketplace'
 import { invalidateWorkspaceUsage } from '@/hooks/queries/utils/invalidate-usage'
 import { subscriptionKeys } from '@/hooks/queries/utils/subscription-keys'
 import { workspaceHostKeys } from '@/hooks/queries/workspace-host'
@@ -47,6 +48,11 @@ export interface UpgradeState {
   }
   showUpgradePlans: boolean
   isArena: boolean
+  billedThroughMarketplace: boolean
+  /** How this workspace is billed could not be read, so plans stay hidden until a retry succeeds. */
+  billingLookupFailed: boolean
+  isRetryingBillingLookup: boolean
+  retryBillingLookup: () => void
   proTier: { credits: number; dollars: number; name: string }
   maxTier: { credits: number; dollars: number; name: string }
   isOnPro: boolean
@@ -91,6 +97,7 @@ export function useUpgradeState({
   const MAX_TIER = arenaBilling ? ARENA_MAX_TIER : UPSTREAM_MAX_TIER
   const starter = isStarterPlan(ownerBilling.plan)
   const stripePaid = ownerBilling.isPaid && !starter
+  const marketplace = useAwsMarketplaceBilling(hostContext.hostOrganizationId ?? null)
 
   const [isAnnual, setIsAnnual] = useState(!stripePaid || ownerBilling.billingInterval === 'year')
   const [isSwitchingInterval, setIsSwitchingInterval] = useState(false)
@@ -311,8 +318,13 @@ export function useUpgradeState({
     isAnnual,
     setIsAnnual,
     subscription,
-    showUpgradePlans: !subscription.isEnterprise,
+    showUpgradePlans:
+      !subscription.isEnterprise && marketplace.isResolved && !marketplace.billedThroughMarketplace,
     isArena: arenaBilling,
+    billedThroughMarketplace: marketplace.billedThroughMarketplace,
+    billingLookupFailed: !marketplace.isResolved && marketplace.isError,
+    isRetryingBillingLookup: marketplace.isRetrying,
+    retryBillingLookup: marketplace.retry,
     proTier: PRO_TIER,
     maxTier: MAX_TIER,
     isOnPro,

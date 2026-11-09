@@ -263,14 +263,15 @@ export async function completeOAuthCredentialToken(params: {
     return { ok: true, token: buildOAuthTokenPayload(credential, accessToken) }
   } catch (error) {
     if (error instanceof CredentialRevokedError) {
-      logger.warn(`[${requestId}] OAuth credential revoked by provider; reconnect required`, {
+      logger.warn('OAuth credential revoked by provider; reconnect required', {
+        requestId,
         credentialId: resolvedCredentialId,
         providerId: error.provider?.providerId,
         errorCode: error.provider?.errorCode,
       })
       return { ok: false, status: 401, code: OAUTH_CREDENTIAL_REVOKED, error: error.message }
     }
-    logger.error(`[${requestId}] Failed to refresh access token:`, error)
+    logger.error('Failed to refresh access token:', error, { requestId })
     return { ok: false, status: 401, error: 'Failed to refresh access token' }
   }
 }
@@ -396,13 +397,14 @@ export async function resolveCredentialToken(
             credentialType: 'service_account',
             cloudId: result.cloudId,
             domain: result.domain,
+            providerWorkspaceId: result.providerWorkspaceId,
             instanceUrl: result.instanceUrl,
             apiDomain: result.apiDomain,
             authStyle: result.authStyle,
           },
         }
       } catch (error) {
-        logger.error(`[${requestId}] Service account token error:`, error)
+        logger.error('Service account token error:', error, { requestId })
         if (error instanceof TokenServiceAccountValidationError) {
           // Classified provider outages are infra failures, not bad credentials.
           if (error.code === 'provider_unavailable') {
@@ -468,7 +470,7 @@ export async function resolveCredentialToken(
       auditRequest,
     })
   } catch (error) {
-    logger.error(`[${requestId}] Error getting access token`, error)
+    logger.error('Error getting access token', error, { requestId })
     return { ok: false, status: 500, error: 'Internal server error' }
   }
 }
@@ -557,7 +559,7 @@ export async function resolveCredentialAccessToken(
 
   const toolMetadata = getToolMetadata(toolId)
   if (!toolMetadata?.oauth?.required) {
-    logger.error(`[${requestId}] Tool is not configured for managed OAuth`, { toolId })
+    logger.error('Tool is not configured for managed OAuth', { requestId, toolId })
     return {
       ok: false,
       status: 500,
@@ -572,7 +574,8 @@ export async function resolveCredentialAccessToken(
     toolMetadata.oauth.requiredScopes ??
     getDefaultToolScopesForProvider(toolMetadata.oauth.provider)
   if (requiredScopes.length === 0 && toolMetadata.oauth.requiredScopes === undefined) {
-    logger.error(`[${requestId}] Tool has no trusted OAuth scope policy`, {
+    logger.error('Tool has no trusted OAuth scope policy', {
+      requestId,
       toolId,
       providerId: toolMetadata.oauth.provider,
     })
@@ -621,7 +624,8 @@ export async function resolveCredentialAccessToken(
     }
   } catch (error) {
     if (error instanceof ManagedOAuthCredentialError) {
-      logger.warn(`[${requestId}] Managed OAuth credential rejected`, {
+      logger.warn('Managed OAuth credential rejected', {
+        requestId,
         credentialId: resolved.credentialId,
         code: error.code,
       })

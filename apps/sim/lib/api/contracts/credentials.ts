@@ -149,6 +149,7 @@ export const createCredentialFieldsSchema = z.object({
     .optional(),
   apiToken: z.string().trim().min(1).optional(),
   domain: z.string().trim().min(1).optional(),
+  providerWorkspaceId: z.string().trim().min(1).max(256).optional(),
   atlassianProduct: atlassianProductSchema.optional(),
   /**
    * Client-supplied credential id, honored only for `slack-custom-bot` creates:
@@ -286,6 +287,7 @@ export const updateCredentialByIdBodySchema = z
     /** Atlassian service-account secret rotation (reconnect). */
     apiToken: z.string().trim().min(1).optional(),
     domain: z.string().trim().min(1).optional(),
+    providerWorkspaceId: z.string().trim().min(1).max(256).optional(),
     atlassianProduct: atlassianProductSchema.optional(),
     /** Client-credential service-account secret rotation (reconnect). */
     clientId: z.string().trim().min(1).max(512).optional(),
@@ -314,6 +316,7 @@ export const updateCredentialByIdBodySchema = z
       data.botToken !== undefined ||
       data.apiToken !== undefined ||
       data.domain !== undefined ||
+      data.providerWorkspaceId !== undefined ||
       data.atlassianProduct !== undefined ||
       data.clientId !== undefined ||
       data.clientSecret !== undefined ||
@@ -661,5 +664,24 @@ export const startPersonalCredentialConnectionContract = defineRouteContract({
   response: {
     mode: 'json',
     schema: z.object({ url: z.string().url(), providerId: z.string().min(1).max(100) }),
+  },
+})
+
+/**
+ * Starts a workspace connection from the confirmation page. A connect link only
+ * opens that page; this POST is the explicit step that creates the user-bound
+ * draft the authorize route launches from.
+ */
+export const startCredentialConnectionContract = defineRouteContract({
+  method: 'POST',
+  path: '/api/credentials/connections',
+  body: z.object({
+    workspaceId: workspaceIdSchema,
+    providerId: z.string().trim().min(1, 'Provider is required').max(100),
+    credentialId: z.string().min(1, 'Credential ID must not be empty').max(255).optional(),
+  }),
+  response: {
+    mode: 'json',
+    schema: z.object({ authorizationUrl: z.string().url() }),
   },
 })

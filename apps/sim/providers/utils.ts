@@ -27,7 +27,7 @@ import {
 } from '@/lib/workflows/subblocks/visibility'
 import { resolveBlockToolId } from '@/lib/workflows/tool-input/identity'
 import { assembleCustomBlockInputMapping, isCustomBlockType } from '@/blocks/custom/build-config'
-import type { SubBlockConfig } from '@/blocks/types'
+import type { BlockToolParamsContext, SubBlockConfig } from '@/blocks/types'
 import { isCustomTool } from '@/executor/constants'
 import {
   findProviderFromModel,
@@ -174,6 +174,7 @@ export const providers: Record<ProviderId, ProviderMetadata> = {
   together: buildProviderMetadata('together'),
   baseten: buildProviderMetadata('baseten'),
   nebius: buildProviderMetadata('nebius'),
+  thinkingmachines: buildProviderMetadata('thinkingmachines'),
 }
 
 export function updateOllamaProviderModels(models: string[]): void {
@@ -564,7 +565,10 @@ function buildCustomBlockInputMappingSchema(
   }
 }
 
-type BlockToolParamsFn = (params: Record<string, any>) => Record<string, any>
+type BlockToolParamsFn = (
+  params: Record<string, any>,
+  context?: BlockToolParamsContext
+) => Record<string, any>
 
 /**
  * Builds the transform that turns a tool row's stored sub-block values into the
@@ -588,6 +592,7 @@ type BlockToolParamsFn = (params: Record<string, any>) => Record<string, any>
  * none of it, which is why it needed a new version rather than a fix in place.
  */
 export function buildBlockToolParamsTransform(config: {
+  operation?: string
   blockSubBlocks: SubBlockConfig[] | undefined
   blockParamsFn: BlockToolParamsFn | undefined
   blockInputDefs: Record<string, unknown> | undefined
@@ -599,6 +604,7 @@ export function buildBlockToolParamsTransform(config: {
   jsonShapedParamKeys: string[]
 } {
   const {
+    operation,
     blockSubBlocks,
     blockParamsFn,
     blockInputDefs,
@@ -654,7 +660,7 @@ export function buildBlockToolParamsTransform(config: {
         }
 
         if (blockParamsFn) {
-          const transformed = blockParamsFn(result)
+          const transformed = blockParamsFn(result, { operation })
           result = { ...result, ...transformed }
         }
 
@@ -1039,6 +1045,9 @@ export async function transformBlockTool(
   }
 
   const { paramsTransform, jsonShapedParamKeys } = buildBlockToolParamsTransform({
+    operation:
+      selectedOperation ??
+      (typeof userProvidedParams.operation === 'string' ? userProvidedParams.operation : undefined),
     blockSubBlocks: blockDef?.subBlocks,
     blockParamsFn: blockDef?.tools?.config?.params as BlockToolParamsFn | undefined,
     blockInputDefs: blockDef?.inputs as Record<string, unknown> | undefined,

@@ -597,12 +597,12 @@ async function buildMinimalResult(
     }
 
     if (isDangerousKey(blockId)) {
-      logger.warn(`[${requestId}] Blocked dangerous blockId: ${blockId}`)
+      logger.warn(`Blocked dangerous blockId: ${blockId}`, { requestId })
       continue
     }
 
     if (isDangerousKey(path)) {
-      logger.warn(`[${requestId}] Blocked dangerous path: ${path}`)
+      logger.warn(`Blocked dangerous path: ${path}`, { requestId })
       continue
     }
 
@@ -856,7 +856,7 @@ export async function createStreamingResponse(
       const onStreamCallback = async (streamingExec: StreamingExecution) => {
         const blockId = streamingExec.blockId
         if (!blockId) {
-          logger.warn(`[${requestId}] Streaming execution missing blockId`)
+          logger.warn('Streaming execution missing blockId', { requestId })
           return
         }
 
@@ -947,8 +947,9 @@ export async function createStreamingResponse(
           }
         } catch (error) {
           logger.error(
-            `[${requestId}] Error reading stream for block ${blockId}`,
-            projectResolvedSecretDiagnosticError(error, undefined)
+            `Error reading stream for block ${blockId}`,
+            projectResolvedSecretDiagnosticError(error, undefined),
+            { requestId }
           )
           const frame: ChatStreamStreamErrorFrame = {
             event: 'stream_error',
@@ -1089,7 +1090,8 @@ export async function createStreamingResponse(
               })
             }
           } catch (error) {
-            logger.warn(`[${requestId}] Failed to materialize selected output`, {
+            logger.warn('Failed to materialize selected output', {
+              requestId,
               blockId: selectedOutputBlockId,
               outputId: descriptor.outputId,
               ...projectResolvedSecretDiagnosticError(error, undefined),
@@ -1168,7 +1170,8 @@ export async function createStreamingResponse(
           !requestAborted
         ) {
           const timeoutErrorMessage = getTimeoutErrorMessage(timeoutController.timeoutMs)
-          logger.info(`[${requestId}] Streaming execution timed out`, {
+          logger.info('Streaming execution timed out', {
+            requestId,
             timeoutMs: timeoutController.timeoutMs,
           })
           if (result._streamingMetadata?.loggingSession) {
@@ -1177,7 +1180,7 @@ export async function createStreamingResponse(
           const frame: ChatStreamErrorFrame = { event: 'error', error: timeoutErrorMessage }
           enqueue(encodeSSE(frame))
         } else if (result.status === 'cancelled' && requestAborted) {
-          logger.info(`[${requestId}] Streaming execution aborted by client disconnect`)
+          logger.info('Streaming execution aborted by client disconnect', { requestId })
           if (result._streamingMetadata?.loggingSession) {
             // LoggingSession has no cancelled status; match workflow execute route wording.
             await result._streamingMetadata.loggingSession.markAsFailed('Client cancelled request')
@@ -1234,10 +1237,9 @@ export async function createStreamingResponse(
 
         if (!streamCancelled) controller.close()
       } catch (error) {
-        logger.error(
-          `[${requestId}] Stream error`,
-          projectResolvedSecretDiagnosticError(error, undefined)
-        )
+        logger.error('Stream error', projectResolvedSecretDiagnosticError(error, undefined), {
+          requestId,
+        })
         const errorMessage =
           streamConfig.selectedOutputs?.length && isExecutionResourceLimitError(error)
             ? SELECTED_OUTPUT_TOO_LARGE_MESSAGE
@@ -1261,8 +1263,9 @@ export async function createStreamingResponse(
     async cancel(reason) {
       streamCancelled = true
       logger.info(
-        `[${requestId}] Streaming response cancelled`,
-        projectResolvedSecretDiagnosticError(reason, undefined)
+        'Streaming response cancelled',
+        projectResolvedSecretDiagnosticError(reason, undefined),
+        { requestId }
       )
       requestAborted = true
       stopKeepalive()
@@ -1274,8 +1277,9 @@ export async function createStreamingResponse(
           await cleanupExecutionBase64Cache(executionId)
         } catch (error) {
           logger.error(
-            `[${requestId}] Failed to cleanup base64 cache`,
-            projectResolvedSecretDiagnosticError(error, undefined)
+            'Failed to cleanup base64 cache',
+            projectResolvedSecretDiagnosticError(error, undefined),
+            { requestId }
           )
         }
       }

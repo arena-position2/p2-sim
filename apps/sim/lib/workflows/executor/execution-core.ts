@@ -286,7 +286,7 @@ async function clearExecutionCancellationSafely(
   try {
     await clearExecutionCancellation(executionId)
   } catch (error) {
-    logger.error(`[${requestId}] Failed to clear execution cancellation`, { error, executionId })
+    logger.error('Failed to clear execution cancellation', { requestId, error, executionId })
   }
 }
 
@@ -327,7 +327,7 @@ async function recordSettledRun(
   try {
     await updateWorkflowRunCounts(workflowId)
   } catch (error) {
-    logger.error(`[${requestId}] Failed to update run counts`, { error })
+    logger.error('Failed to update run counts', { requestId, error })
   }
 }
 
@@ -346,8 +346,9 @@ function buildTraceSpansForLog(
     return buildTraceSpans(result)
   } catch (error) {
     logger.error(
-      `[${requestId}] Failed to build trace spans; finalizing without them`,
-      loggingSession.projectDiagnosticError(error, { executionId })
+      'Failed to build trace spans; finalizing without them',
+      loggingSession.projectDiagnosticError(error, { executionId }),
+      { requestId }
     )
     return { traceSpans: [], totalDuration: result.metadata?.duration ?? 0 }
   }
@@ -447,11 +448,12 @@ async function finalizeExecutionOutcome(params: {
     }
   } catch (error) {
     logger.warn(
-      `[${requestId}] Post-execution finalization failed`,
+      'Post-execution finalization failed',
       loggingSession.projectDiagnosticError(error, {
         executionId,
         status: result.status,
-      })
+      }),
+      { requestId }
     )
   }
 
@@ -491,8 +493,9 @@ async function finalizeExecutionError(params: {
     }
   } catch (postExecError) {
     logger.error(
-      `[${requestId}] Post-execution error logging failed`,
-      loggingSession.projectDiagnosticError(postExecError, { executionId })
+      'Post-execution error logging failed',
+      loggingSession.projectDiagnosticError(postExecError, { executionId }),
+      { requestId }
     )
   }
 
@@ -795,7 +798,7 @@ async function executeWorkflowCoreImpl(
           resumeDeploymentVersionId,
           providedWorkspaceId
         )
-        logger.info(`[${requestId}] Using admitted historical deployment state (resumed execution)`)
+        logger.info('Using admitted historical deployment state (resumed execution)', { requestId })
         return {
           blocks: deployedData.blocks,
           edges: deployedData.edges,
@@ -807,7 +810,8 @@ async function executeWorkflowCoreImpl(
 
       if (metadata.workflowStateOverride) {
         const override = metadata.workflowStateOverride
-        logger.info(`[${requestId}] Using workflow state override (diff workflow execution)`, {
+        logger.debug('Using workflow state override (diff workflow execution)', {
+          requestId,
           blocksCount: Object.keys(override.blocks).length,
           edgesCount: override.edges.length,
         })
@@ -827,9 +831,9 @@ async function executeWorkflowCoreImpl(
           throw new Error('Workflow not found or not yet saved')
         }
 
-        logger.info(
-          `[${requestId}] Using draft workflow state from normalized tables (client execution)`
-        )
+        logger.info('Using draft workflow state from normalized tables (client execution)', {
+          requestId,
+        })
         return {
           blocks: draftData.blocks,
           edges: draftData.edges,
@@ -840,7 +844,7 @@ async function executeWorkflowCoreImpl(
       }
 
       const deployedData = await loadDeployedWorkflowState(workflowId, providedWorkspaceId)
-      logger.info(`[${requestId}] Using deployed workflow state (deployed execution)`)
+      logger.debug('Using deployed workflow state (deployed execution)', { requestId })
       return {
         blocks: deployedData.blocks,
         edges: deployedData.edges,
@@ -1090,7 +1094,8 @@ async function executeWorkflowCoreImpl(
       (resumePendingQueue !== undefined || resumeRemainingEdges !== undefined || resumeTerminalNoop)
     ) {
       resolvedTriggerBlockId = undefined
-      logger.info(`[${requestId}] Skipping trigger resolution for resume execution`, {
+      logger.info('Skipping trigger resolution for resume execution', {
+        requestId,
         pendingQueueLength: resumePendingQueue?.length ?? 0,
         remainingEdgeCount: resumeRemainingEdges?.length ?? 0,
         resumeTerminalNoop,
@@ -1110,7 +1115,8 @@ async function executeWorkflowCoreImpl(
       }
 
       resolvedTriggerBlockId = startBlock.blockId
-      logger.info(`[${requestId}] Identified trigger block for ${executionKind} execution:`, {
+      logger.debug(`Identified trigger block for ${executionKind} execution:`, {
+        requestId,
         blockId: resolvedTriggerBlockId,
         blockType: startBlock.block.type,
         path: startBlock.path,
@@ -1163,7 +1169,8 @@ async function executeWorkflowCoreImpl(
 
     // Create and execute workflow with callbacks
     if (resumeFromSnapshot) {
-      logger.info(`[${requestId}] Resume execution detected`, {
+      logger.info('Resume execution detected', {
+        requestId,
         resumePendingQueue,
         hasState: !!snapshot.state,
         stateBlockStatesCount: snapshot.state
@@ -1188,12 +1195,13 @@ async function executeWorkflowCoreImpl(
         persistenceSucceeded = true
       })().catch((error) => {
         logger.warn(
-          `[${requestId}] Block completion persistence failed`,
+          'Block completion persistence failed',
           loggingSession.projectDiagnosticError(error, {
             executionId,
             blockId,
             blockType,
-          })
+          }),
+          { requestId }
         )
       })
 
@@ -1212,12 +1220,13 @@ async function executeWorkflowCoreImpl(
           )
         } catch (error) {
           logger.warn(
-            `[${requestId}] Block completion callback failed`,
+            'Block completion callback failed',
             loggingSession.projectDiagnosticError(error, {
               executionId,
               blockId,
               blockType,
-            })
+            }),
+            { requestId }
           )
         }
       })()
@@ -1240,12 +1249,13 @@ async function executeWorkflowCoreImpl(
         persistenceSucceeded = true
       })().catch((error) => {
         logger.warn(
-          `[${requestId}] Block start persistence failed`,
+          'Block start persistence failed',
           loggingSession.projectDiagnosticError(error, {
             executionId,
             blockId,
             blockType,
-          })
+          }),
+          { requestId }
         )
       })
 
@@ -1264,12 +1274,13 @@ async function executeWorkflowCoreImpl(
           )
         } catch (error) {
           logger.warn(
-            `[${requestId}] Block start callback failed`,
+            'Block start callback failed',
             loggingSession.projectDiagnosticError(error, {
               executionId,
               blockId,
               blockType,
-            })
+            }),
+            { requestId }
           )
         }
       })()
@@ -1563,14 +1574,16 @@ async function executeWorkflowCoreImpl(
           })
         } catch (postExecError) {
           logger.error(
-            `[${requestId}] Post-execution logging failed`,
-            loggingSession.projectDiagnosticError(postExecError, { executionId })
+            'Post-execution logging failed',
+            loggingSession.projectDiagnosticError(postExecError, { executionId }),
+            { requestId }
           )
         }
       })()
     )
 
-    logger.info(`[${requestId}] Workflow execution completed`, {
+    logger.info('Workflow execution completed', {
+      requestId,
       success: result.success,
       status: result.status,
       duration: result.metadata?.duration,
@@ -1578,13 +1591,16 @@ async function executeWorkflowCoreImpl(
 
     return result
   } catch (error: unknown) {
-    logFailureOnce(logger, `[${requestId}] Execution failed:`, error, {
+    logFailureOnce(logger, 'Execution failed', error, {
       metadata: () => {
         const errorCause = describeErrorCause(error)
-        return projectResolvedSecretDiagnosticError(error, resolvedSecretTraceRegistry, {
-          workflowId,
-          ...(errorCause ? { cause: errorCause } : {}),
-        })
+        return {
+          requestId,
+          ...projectResolvedSecretDiagnosticError(error, resolvedSecretTraceRegistry, {
+            workflowId,
+            ...(errorCause ? { cause: errorCause } : {}),
+          }),
+        }
       },
       executionId,
     })
@@ -1628,8 +1644,9 @@ async function executeWorkflowCoreImpl(
           }
         } catch (postExecError) {
           logger.error(
-            `[${requestId}] Post-execution error logging failed`,
-            loggingSession.projectDiagnosticError(postExecError, { executionId })
+            'Post-execution error logging failed',
+            loggingSession.projectDiagnosticError(postExecError, { executionId }),
+            { requestId }
           )
         }
       })()

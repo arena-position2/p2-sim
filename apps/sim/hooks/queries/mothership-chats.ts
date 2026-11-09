@@ -355,7 +355,8 @@ export function useMothershipChats(
 /** Private organization conversations use their own cache scope and current membership. */
 export function useOrganizationMothershipChats(
   organizationId: string,
-  scope: MothershipChatScope = 'active'
+  scope: MothershipChatScope = 'active',
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
     queryKey: mothershipChatKeys.organizationList(organizationId, scope),
@@ -366,6 +367,7 @@ export function useOrganizationMothershipChats(
       })
       return data.data.map(mapChat)
     },
+    enabled: options?.enabled ?? true,
     staleTime: MOTHERSHIP_CHAT_LIST_STALE_TIME,
   })
 }

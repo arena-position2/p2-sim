@@ -49,6 +49,7 @@ import {
 } from '@/lib/billing/subscriptions/utils'
 import { buildUpgradeHref } from '@/lib/billing/upgrade-reasons'
 import { getBaseUrl } from '@/lib/core/utils/urls'
+import { AwsMarketplaceSubscriptionSection } from '@/app/workspace/[workspaceId]/settings/components/billing/components/aws-marketplace-subscription-section/aws-marketplace-subscription-section'
 import { CancelPlanModal } from '@/app/workspace/[workspaceId]/settings/components/billing/components/cancel-plan-modal/cancel-plan-modal'
 import { CreditUsageSection } from '@/app/workspace/[workspaceId]/settings/components/billing/components/credit-usage-section/credit-usage-section'
 import { PrepaidTopUpSection } from '@/app/workspace/[workspaceId]/settings/components/billing/components/prepaid-top-up-section/prepaid-top-up-section'
@@ -58,6 +59,7 @@ import { SettingsQueryErrorState } from '@/app/workspace/[workspaceId]/settings/
 import { SettingsPanel } from '@/app/workspace/[workspaceId]/settings/components/settings-panel'
 import { RESOURCE_ROW_ARROW_CLASSES } from '@/app/workspace/[workspaceId]/settings/components/settings-resource-row'
 import { SettingsSection } from '@/app/workspace/[workspaceId]/settings/components/settings-section/settings-section'
+import { useAwsMarketplaceBilling } from '@/hooks/queries/aws-marketplace'
 import {
   useBillingUsageNotifications,
   useUpdateGeneralSetting,
@@ -139,6 +141,8 @@ export function Billing({ scope, organizationId, creditUsageHref }: BillingProps
     enabled: !isOrganizationScope,
   })
   const billingOrganizationId = isOrganizationScope ? (organizationId ?? null) : null
+  const marketplaceBilling = useAwsMarketplaceBilling(billingOrganizationId)
+  const { billedThroughMarketplace } = marketplaceBilling
 
   const {
     data: organizationBillingData,
@@ -468,8 +472,11 @@ export function Billing({ scope, organizationId, creditUsageHref }: BillingProps
       ? `Organization ${planName} plan ended`
       : `Organization ${planName} plan`
     : `Personal ${planName} plan`
-  const priceText =
-    organizationSubscriptionState === 'free'
+  const priceText = billedThroughMarketplace
+    ? subscription.isFree
+      ? 'AWS Marketplace setup in progress'
+      : 'Billed through AWS Marketplace'
+    : organizationSubscriptionState === 'free'
       ? 'No active organization subscription'
       : organizationSubscriptionState === 'lapsed'
         ? 'Choose a new plan for this organization'
@@ -536,6 +543,8 @@ export function Billing({ scope, organizationId, creditUsageHref }: BillingProps
           </div>
         </div>
         {!subscription.isEnterprise &&
+          marketplaceBilling.isResolved &&
+          !billedThroughMarketplace &&
           (canExplorePlans && upgradeHref ? (
             <ChipLink
               href={upgradeHref}
@@ -684,6 +693,14 @@ export function Billing({ scope, organizationId, creditUsageHref }: BillingProps
             )}
           </div>
         </SettingsSection>
+      )}
+
+      <AwsMarketplaceSubscriptionSection organizationId={billingOrganizationId} />
+      {isOrganizationScope && (
+        <AwsMarketplaceSubscriptionSection
+          organizationId={null}
+          label='AWS Marketplace subscription on your account'
+        />
       )}
 
       {!subscription.isFree && invoices.length > 0 && (

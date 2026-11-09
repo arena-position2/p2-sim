@@ -301,14 +301,14 @@ export const POST = withRouteHandler(
         .limit(1)
 
       if (deploymentResult.length === 0) {
-        logger.warn(`[${requestId}] Chat not found for identifier: ${identifier}`)
+        logger.warn(`Chat not found for identifier: ${identifier}`)
         return createCodedErrorResponse('Chat not found', 404)
       }
 
       const deployment = deploymentResult[0]
 
       if (!deployment.isActive) {
-        logger.warn(`[${requestId}] Chat is not active: ${identifier}`)
+        logger.warn(`Chat is not active: ${identifier}`)
         return createCodedErrorResponse('This chat is currently unavailable', 403)
       }
 
@@ -540,7 +540,7 @@ export const POST = withRouteHandler(
       })
 
       if (!preprocessResult.success) {
-        logger.warn(`[${requestId}] Preprocessing failed: ${preprocessResult.error?.message}`)
+        logger.warn(`Preprocessing failed: ${preprocessResult.error?.message}`)
         return createCodedErrorResponse(
           preprocessResult.error?.message || 'Failed to process request',
           preprocessResult.error?.statusCode || 500
@@ -552,7 +552,7 @@ export const POST = withRouteHandler(
       const resolvedActorUserId = actorUserId!
       const workspaceId = workflowRecord?.workspaceId
       if (!workspaceId) {
-        logger.error(`[${requestId}] Workflow ${deployment.workflowId} has no workspaceId`)
+        logger.error(`Workflow ${deployment.workflowId} has no workspaceId`)
         // preprocessExecution reserved a billing concurrency slot; release it on
         // this early exit since no LoggingSession will finalize to free it.
         await releaseExecutionSlot(executionId)
@@ -653,10 +653,10 @@ export const POST = withRouteHandler(
               await updateExecutionHistoryData(executionId, {
                 userAttachments: uploadedFiles.map(toPersistedChatAttachment),
               })
-              logger.info(`[${requestId}] Successfully processed ${uploadedFiles.length} files`)
+              logger.info(`Successfully processed ${uploadedFiles.length} files`, { requestId })
             }
           } catch (fileError: any) {
-            logger.error(`[${requestId}] Failed to process chat files:`, fileError)
+            logger.error('Failed to process chat files:', fileError)
 
             await loggingSession.safeStart({
               userId: resolvedActorUserId,
@@ -1128,14 +1128,14 @@ export const POST = withRouteHandler(
         })
         return streamResponse
       } catch (error: any) {
-        logger.error(`[${requestId}] Error processing chat request:`, error)
+        logger.error('Error processing chat request:', error)
         // Setup failed before the workflow stream took over slot release;
         // free the reserved billing slot (idempotent if already released).
         await releaseExecutionSlot(executionId)
         return createCodedErrorResponse(error.message || 'Failed to process request', 500)
       }
     } catch (error: any) {
-      logger.error(`[${requestId}] Error processing chat request:`, error)
+      logger.error('Error processing chat request:', error)
       return createCodedErrorResponse(error.message || 'Failed to process request', 500)
     } finally {
       ticket.release()
@@ -1256,14 +1256,14 @@ export const GET = withRouteHandler(
         .limit(1)
 
       if (deploymentResult.length === 0) {
-        logger.warn(`[${requestId}] Chat not found for identifier: ${identifier}`)
+        logger.warn(`Chat not found for identifier: ${identifier}`)
         return createCodedErrorResponse('Chat not found', 404)
       }
 
       const deployment = deploymentResult[0]
 
       if (!deployment.isActive) {
-        logger.warn(`[${requestId}] Chat is not active: ${identifier}`)
+        logger.warn(`Chat is not active: ${identifier}`)
         return createCodedErrorResponse('This chat is currently unavailable', 403)
       }
 
@@ -1358,9 +1358,7 @@ export const GET = withRouteHandler(
 
       const authResult = await validateChatAuth(requestId, deployment, request)
       if (!authResult.authorized) {
-        logger.info(
-          `[${requestId}] Authentication required for chat: ${identifier}, type: ${deployment.authType}`
-        )
+        logger.info(`Authentication required for chat: ${identifier}, type: ${deployment.authType}`)
         return createCodedErrorResponse(authResult.error || 'Authentication required', 401)
       }
 
@@ -1385,7 +1383,7 @@ export const GET = withRouteHandler(
       // return addCorsHeaders(response, request)
       return response
     } catch (error: any) {
-      logger.error(`[${requestId}] Error fetching chat info:`, error)
+      logger.error('Error fetching chat info:', error)
       return createCodedErrorResponse(error.message || 'Failed to fetch chat information', 500)
     }
   }

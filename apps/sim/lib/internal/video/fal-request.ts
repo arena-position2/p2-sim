@@ -1,10 +1,14 @@
+import { getErrorMessage } from '@sim/utils/errors'
 import type { VideoGenerationInput } from '@/lib/internal/video/client'
-import { getFalVideoModel } from '@/lib/media/fal-video-catalog'
+import { assertNoCustomModelSettings, parseCustomModelId } from '@/lib/media/custom-model'
+import { getFalVideoModel, getFalVideoVariant } from '@/lib/media/fal-video-catalog'
 
 type FalAIDurationFormat = 'number' | 'seconds' | 'string'
 
 interface FalAIModelConfig {
   endpoint: string
+  /** Request field that carries the start frame on an image-to-video endpoint. */
+  imageField?: string
   durationFormat?: FalAIDurationFormat
   durationOptions?: readonly number[]
   supportsAspectRatio?: boolean
@@ -16,6 +20,8 @@ interface FalAIModelConfig {
   requestDefaults?: Readonly<Record<string, string>>
   maxDurationByResolution?: Readonly<Record<string, number>>
   maxPromptLength?: number
+  /** Typed endpoint path outside the catalog: sent with the prompt only. */
+  custom?: boolean
 }
 
 const LEGACY_FALAI_MODELS: Record<string, FalAIModelConfig> = {
@@ -71,12 +77,26 @@ const LEGACY_FALAI_MODELS: Record<string, FalAIModelConfig> = {
   },
 }
 
-function getFalModelConfig(id: string): FalAIModelConfig | undefined {
-  const model = getFalVideoModel(id)
-  if (!model) return Object.hasOwn(LEGACY_FALAI_MODELS, id) ? LEGACY_FALAI_MODELS[id] : undefined
+/** A typed Fal endpoint path such as `fal-ai/some-model/text-to-video`, not a catalog model. */
+export function isCustomFalVideoModel(id: string | undefined): boolean {
+  return Boolean(
+    id?.includes('/') && !getFalVideoModel(id) && !Object.hasOwn(LEGACY_FALAI_MODELS, id)
+  )
+}
+
+/** Only catalog models with an image-to-video endpoint take a start frame. */
+function getFalModelConfig(id: string, withImage: boolean): FalAIModelConfig | undefined {
+  const model = getFalVideoVariant(id, withImage)
+  if (!model) {
+    if (withImage) return undefined
+    if (Object.hasOwn(LEGACY_FALAI_MODELS, id)) return LEGACY_FALAI_MODELS[id]
+    if (!isCustomFalVideoModel(id)) return undefined
+    return { endpoint: parseCustomModelId(id, 'Fal.ai'), custom: true }
+  }
   const sample = model.durations?.[0]
   return {
     endpoint: model.endpoint,
+    imageField: model.imageField,
     durationFormat:
       sample === undefined
         ? undefined
@@ -116,9 +136,34 @@ function formatAllowedValues(allowed: readonly (number | string)[]): string {
 export function getFalAIValidationError(input: VideoGenerationInput): string | undefined {
   const { model, prompt, duration, aspectRatio, resolution } = input
   if (!model) return 'Model is required for Fal.ai provider'
-  const modelConfig = getFalModelConfig(model)
+  const withImage = Boolean(input.visualReference)
+  let modelConfig: FalAIModelConfig | undefined
+  let promptOnlyConfig: FalAIModelConfig | undefined
+  try {
+    modelConfig = getFalModelConfig(model, withImage)
+    if (!modelConfig && withImage) promptOnlyConfig = getFalModelConfig(model, false)
+  } catch (error) {
+    return getErrorMessage(error)
+  }
   if (!modelConfig) {
-    return `Unknown Fal.ai model: ${model}`
+    return promptOnlyConfig
+      ? `Fal.ai model ${model} does not accept a start frame image`
+      : `Unknown Fal.ai model: ${model}`
+  }
+  if (modelConfig.custom) {
+    if (input.useHostedCostTracking)
+      return `Custom Fal.ai endpoints need your own Fal.ai API key: ${model} is not a listed model`
+    try {
+      assertNoCustomModelSettings(model, {
+        duration,
+        aspectRatio,
+        resolution,
+        promptOptimizer: input.promptOptimizer,
+        generateAudio: input.generateAudio,
+      })
+    } catch (error) {
+      return getErrorMessage(error)
+    }
   }
 
   if (modelConfig.maxPromptLength && prompt.length > modelConfig.maxPromptLength) {
@@ -160,10 +205,13 @@ export function getFalAIValidationError(input: VideoGenerationInput): string | u
   return undefined
 }
 
-/** Builds the provider request without submitting or billing a generation. */
+/**
+ * Builds the provider request without submitting or billing a generation. With a start frame the
+ * request targets the model's image-to-video endpoint, and the caller sets `imageField` to the image.
+ */
 export function buildFalVideoRequest(input: VideoGenerationInput) {
   const { model, prompt, duration, aspectRatio, resolution, promptOptimizer, generateAudio } = input
-  const modelConfig = model ? getFalModelConfig(model) : undefined
+  const modelConfig = model ? getFalModelConfig(model, Boolean(input.visualReference)) : undefined
   if (!modelConfig) {
     throw new Error(`Unknown Fal.ai model: ${model}`)
   }
@@ -191,5 +239,5 @@ export function buildFalVideoRequest(input: VideoGenerationInput) {
     requestBody[modelConfig.audioField] = generateAudio
   }
 
-  return { endpoint: modelConfig.endpoint, body: requestBody }
+  return { endpoint: modelConfig.endpoint, imageField: modelConfig.imageField, body: requestBody }
 }

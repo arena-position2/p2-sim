@@ -249,6 +249,8 @@ export const env = createEnv({
     STRIPE_PRICE_TEAM_100_MO:              z.string().min(1).optional(),           // Team Max: $100/org/mo (Arena flat) / $100/seat/mo (upstream)
     STRIPE_PRICE_TEAM_100_YR:              z.string().min(1).optional(),           // Team Max: $1,020/org/yr (Arena flat) / $1,020/seat/yr (upstream)
     OVERAGE_THRESHOLD_DOLLARS:             z.number().optional().default(100),     // Dollar threshold for incremental overage billing (default: $100)
+    AWS_MARKETPLACE_PRODUCT_CODE:          z.string().min(1).optional(),           // AWS Marketplace SaaS product code; unset turns the Marketplace registration, claim, and reconcile surfaces off
+    AWS_MARKETPLACE_EVENTS_QUEUE_URL:      z.string().url().optional(),            // SQS queue receiving the Marketplace agreement EventBridge events the reconcile cron drains
 
      //browseruse
      BROWSER_USE_API_KEY:                   z.string().min(1).optional(),           // BrowserUse API key for browser automation
@@ -438,6 +440,8 @@ export const env = createEnv({
     AWS_ACCESS_KEY_ID:                     z.string().optional(),                  // AWS access key ID
     AWS_SECRET_ACCESS_KEY:                 z.string().optional(),                  // AWS secret access key
     TRIGGER_AWS_ROLE_ARN:                  z.string().optional(),                  // Role Trigger.dev runs assume through workload identity, instead of static keys
+    AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: z.string().optional(),                 // Set by ECS: path of the task-role credential endpoint
+    AWS_CONTAINER_CREDENTIALS_FULL_URI:    z.string().optional(),                  // Set by ECS Anywhere/EKS Pod Identity: full task-role credential endpoint URL
     S3_BUCKET_NAME:                        z.string().optional(),                  // S3 bucket for general file storage
     S3_KB_BUCKET_NAME:                     z.string().optional(),                  // S3 bucket for knowledge base files
     S3_EXECUTION_FILES_BUCKET_NAME:        z.string().optional(),                  // S3 bucket for workflow execution files
