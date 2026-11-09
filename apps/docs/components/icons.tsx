@@ -1,7 +1,7 @@
 import type { SVGProps } from 'react'
 import { useId } from 'react'
 import { cn } from '@sim/emcn'
-import Image, { type ImageProps } from 'next/image'
+import Image from 'next/image'
 
 interface FlowIconProps extends SVGProps<SVGSVGElement> {}
 
@@ -293,29 +293,38 @@ export function Spinner() {
   )
 }
 
-/**
- * Arena Agent glyph — vimi sparkle PNG on the purple→teal gradient.
- * Rendered via next/image so tiled surfaces that opt in with `[&_img]:size-full`
- * get the same full-bleed presence as Image Generator's colored tile.
- */
-export function AgentIcon({
-  className,
-  style,
-  ...props
-}: Omit<ImageProps, 'src' | 'alt' | 'fill'>) {
+export function AgentIcon(props: SVGProps<SVGSVGElement>) {
   return (
-    <Image
-      src='https://arenav2image.s3.us-west-1.amazonaws.com/vimi-sparkle.png'
-      alt='Agent'
-      width={14}
-      height={14}
+    <svg
       {...props}
-      style={{
-        backgroundImage: 'linear-gradient(179.65deg, #7B4796 -0.59%, #017496 102.42%)',
-        ...style,
-      }}
-      className={cn('box-border size-full rounded-[4px] object-contain p-[20%]', className)}
-    />
+      width='21'
+      height='24'
+      viewBox='0 0 21 24'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      <path
+        d='M15.67 9.25H4.67C2.64 9.25 1 10.89 1 12.92V18.42C1 20.44 2.64 22.08 4.67 22.08H15.67C17.69 22.08 19.33 20.44 19.33 18.42V12.92C19.33 10.89 17.69 9.25 15.67 9.25Z'
+        stroke='currentColor'
+        strokeWidth='2'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+      />
+      <path
+        d='M10.17 5.58C11.18 5.58 12 4.76 12 3.75C12 2.74 11.18 1.92 10.17 1.92C9.15 1.92 8.33 2.74 8.33 3.75C8.33 4.76 9.15 5.58 10.17 5.58Z'
+        stroke='currentColor'
+        strokeWidth='2'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+      />
+      <path
+        d='M10.17 5.59V9.25M7.42 16.59V14.75M12.92 14.75V16.59'
+        stroke='currentColor'
+        strokeWidth='2'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+      />
+    </svg>
   )
 }
 

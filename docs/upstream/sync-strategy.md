@@ -163,7 +163,7 @@ After `bun install`, run `bun run type-check`. A new dependency that is in `pack
 
 Record the symbol, the Arena caller, and `restore`, `port`, or `drop`. An unclassified missing export blocks the sync. A stale `tsconfig.tsbuildinfo` can keep reporting the export missing after it is restored. Delete that file and run the package `tsc --noEmit` again before treating the error as real.
 
-Generated catalogs taken from upstream omit Arena tools until they are regenerated. Run `bun run generate:tool-metadata`, then `bun run scripts/generate-docs.ts`, before the output-contract diff and before type-check. Do not hand-merge those files. The docs generator then copies `apps/sim/components/icons.tsx` over `apps/docs/components/icons.tsx`. Re-apply an Arena icon that exists only in the docs copy, such as `CostIcon`, or the docs icon map fails type-check.
+Generated catalogs taken from upstream omit Arena tools until they are regenerated. Run `bun run generate:tool-metadata`, then `bun run scripts/generate-docs.ts`, before the output-contract diff and before type-check. Do not hand-merge those files. The docs generator then copies `apps/sim/components/icons.tsx` over `apps/docs/components/icons.tsx`. Re-apply an Arena icon that exists only in the docs copy, such as `CostIcon`. The docs icon map types every icon as an SVG component, so restore the docs SVG `AgentIcon` after that copy. The sim app keeps its `next/image` Agent glyph. Either miss fails the docs type-check.
 
 ### 8. Verify
 
