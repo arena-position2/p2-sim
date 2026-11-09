@@ -11,8 +11,6 @@ export interface LoadingAgentProps {
 }
 
 export function LoadingAgentP2({ size = 'md' }: LoadingAgentProps) {
-  const pathLength = 120
-
   const sizes = {
     sm: { width: 16, height: 18 },
     md: { width: 21, height: 24 },

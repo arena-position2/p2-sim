@@ -140,9 +140,6 @@ export function useChatForm(initialData?: Partial<ChatFormData>) {
       (formData.authType === 'email' || formData.authType === 'sso')
     ) {
       const sessionEmail = Cookies.get('email')
-      const deletableEmails = formData.emails.filter(
-        (email) => email !== sessionEmail && email !== '@position2.com'
-      )
 
       // Check total email limit (5 additional + 1 session email = 6 total)
       if (formData.emails.length > 6) {

@@ -112,7 +112,7 @@ export const shopifyCustomersOverTimeTool: ToolConfig<
     },
   },
 
-  transformResponse: async (response, params) => {
+  transformResponse: async (_response, params) => {
     let allCustomers: any[] = []
 
     const fetchAllCustomers = async (currentCursor: string | null) => {

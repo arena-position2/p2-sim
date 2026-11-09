@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { Button, cn, Input, Label } from '@sim/emcn'
 import { Trash } from '@sim/emcn/icons/trash'
+import { createLogger } from '@sim/logger'
 import Cookies from 'js-cookie'
 import { Check, Copy, Eye, EyeOff, Loader2, Plus, RefreshCw } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { getEnv, isTruthy } from '@/lib/core/config/env'
 import { generatePassword } from '@/lib/core/security/encryption'
 import type { AuthType } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/deploy/hooks/hooks/use-chat-form'
+
+const logger = createLogger('AuthSelector')
 
 interface AuthSelectorProps {
   authType: AuthType
@@ -27,7 +30,6 @@ export function AuthSelector({
   authType,
   password,
   emails,
-  onAuthTypeChange,
   onPasswordChange,
   onEmailsChange,
   disabled = false,
@@ -102,7 +104,7 @@ export function AuthSelector({
         }
       } catch (error) {
         // Block on validation error to prevent invalid emails
-        console.error('Error validating email:', error)
+        logger.error('Error validating email', { error })
         setEmailError('Failed to validate email. Please try again.')
         setIsValidatingEmail(false)
         return
@@ -126,9 +128,6 @@ export function AuthSelector({
   }
 
   const ssoEnabled = isTruthy(getEnv('NEXT_PUBLIC_SSO_ENABLED'))
-  const authOptions = ssoEnabled
-    ? (['public', 'password', 'email', 'sso'] as const)
-    : (['public', 'password', 'email'] as const)
 
   return (
     <div className='space-y-2'>

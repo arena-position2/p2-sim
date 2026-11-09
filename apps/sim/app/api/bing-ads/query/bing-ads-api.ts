@@ -537,48 +537,6 @@ async function parseCsvToRecords(csvText: string): Promise<Array<Record<string, 
   }
 }
 
-// NEW function for search queries - uses SearchQuery field instead of CampaignName
-function buildSearchQueryMetrics(
-  rows: Array<Record<string, any>>,
-  parsedQuery: ParsedBingQuery
-): any {
-  const requested = requestedColumnSet(parsedQuery.columns)
-  const searchQueriesByName = new Map<string, any>()
-
-  for (const row of rows) {
-    // Use SearchQuery for search query reports
-    const name = String(row.SearchQuery || '').trim()
-    if (!name) continue
-
-    const existing = searchQueriesByName.get(name) || {
-      id: undefined, // Search queries don't have IDs in the same way
-      name,
-      ...copyNonMetricFields(row, requested),
-    }
-    accumulateMetrics(existing, row, requested)
-    searchQueriesByName.set(name, existing)
-  }
-
-  const searchQueries = Array.from(searchQueriesByName.values()).map((c) =>
-    withDerivedMetrics(c, requested)
-  )
-
-  const totals: Record<string, number> = {}
-  for (const row of rows) {
-    accumulateMetrics(totals, row, requested)
-  }
-
-  return {
-    campaigns: searchQueries, // Keep same structure for compatibility
-    account_totals: withDerivedMetrics({ ...totals }, requested),
-    report_type: parsedQuery.reportType,
-    date_preset: parsedQuery.datePreset,
-    time_range: parsedQuery.timeRange,
-    aggregation: parsedQuery.aggregation,
-    columns_requested: parsedQuery.columns,
-  }
-}
-
 function buildCampaignPerformanceMetrics(
   rows: Array<Record<string, any>>,
   parsedQuery: ParsedBingQuery
@@ -868,44 +826,5 @@ export async function makeBingAdsRequest(
 
     // Fail loudly — never return empty/mock success payloads
     throw error instanceof Error ? error : new Error(errorMessage)
-  }
-}
-
-/**
- * Format Bing Ads API response
- */
-function formatBingAdsResponse(data: any, parsedQuery: ParsedBingQuery): any {
-  let campaigns = data.Campaigns || []
-
-  // Apply campaign filter if specified
-  if (parsedQuery.campaignFilter) {
-    const filterLower = parsedQuery.campaignFilter.toLowerCase()
-    campaigns = campaigns.filter((campaign: any) => {
-      const campaignName = (campaign.Name || '').toLowerCase()
-      // Match if campaign name contains the filter or equals it
-      return campaignName.includes(filterLower) || campaignName === filterLower
-    })
-
-    logger.info('Applied campaign filter', {
-      filter: parsedQuery.campaignFilter,
-      matchedCount: campaigns.length,
-      originalCount: data.Campaigns?.length || 0,
-    })
-  }
-
-  return {
-    campaigns: campaigns.map((campaign: any) => ({
-      id: campaign.Id,
-      name: campaign.Name,
-      status: campaign.Status,
-      budget: campaign.DailyBudget,
-      budgetType: campaign.BudgetType,
-    })),
-    report_type: parsedQuery.reportType,
-    date_preset: parsedQuery.datePreset,
-    time_range: parsedQuery.timeRange,
-    aggregation: parsedQuery.aggregation,
-    columns_requested: parsedQuery.columns,
-    campaign_filter: parsedQuery.campaignFilter,
   }
 }

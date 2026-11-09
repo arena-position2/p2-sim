@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { Combobox, type ComboboxOption, cn } from '@sim/emcn'
+import { createLogger } from '@sim/logger'
 import axios from 'axios'
 import { getArenaToken } from '@/lib/arena-utils/cookie-utils'
 import { getEnv } from '@/lib/core/config/env'
@@ -13,6 +14,8 @@ import {
 import { useSubBlockValue } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/hooks/use-sub-block-value'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { useSubBlockStore } from '@/stores/workflows/subblock/store'
+
+const logger = createLogger('ArenaGroupSelector')
 
 interface Group {
   id: string
@@ -32,7 +35,6 @@ interface ArenaGroupSelectorProps {
 export function ArenaGroupSelector({
   blockId,
   subBlockId,
-  title,
   layout,
   isPreview = false,
   subBlockValues,
@@ -109,7 +111,7 @@ export function ArenaGroupSelector({
         }))
         if (!cancelled) setGroups(formattedGroups)
       } catch (error) {
-        console.error('Error fetching groups:', error)
+        logger.error('Error fetching groups', { error })
         if (!cancelled) setGroups([])
       } finally {
         if (!cancelled) setIsLoading(false)

@@ -250,7 +250,7 @@ export const spyfuRequestTool: ToolConfig<SpyfuRequestParams, SpyfuResponse> = {
       } else {
         payload = responseText
       }
-    } catch (parseError) {
+    } catch {
       // If JSON parsing fails, use the raw text
       payload = responseText
       logger.warn('Failed to parse response as JSON, using raw text', {

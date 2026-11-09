@@ -1,6 +1,9 @@
+import { createLogger } from '@sim/logger'
 import Cookies from 'js-cookie'
 import mixpanel from 'mixpanel-browser'
 import { getEnv } from '@/lib/core/config/env'
+
+const logger = createLogger('Mixpanel')
 
 /**
  * Gets the Mixpanel token from environment variables
@@ -18,7 +21,7 @@ if (typeof window !== 'undefined' && mixpanel) {
       mixpanel.init(token)
     }
   } catch (error) {
-    console.warn('Failed to initialize Mixpanel:', error)
+    logger.warn('Failed to initialize Mixpanel:', error)
   }
 }
 
@@ -43,7 +46,7 @@ export const identityMP = (name: string) => {
       mixpanel.identify(name)
     }
   } catch (error) {
-    console.warn('Failed to identify user in Mixpanel:', error)
+    logger.warn('Failed to identify user in Mixpanel:', error)
   }
 }
 
@@ -59,7 +62,7 @@ export const registerMP = (instanceValue: string | null | number) => {
       })
     }
   } catch (error) {
-    console.warn('Failed to register properties in Mixpanel:', error)
+    logger.warn('Failed to register properties in Mixpanel:', error)
   }
 }
 
@@ -70,7 +73,6 @@ const getPlatformVersion = () => {
 export const setPeople = async ({
   email,
   name,
-  organizationId,
   organizationRole,
   userType,
   department,
@@ -125,7 +127,7 @@ export const setPeople = async ({
       identityMP('Guest User')
     }
   } catch (error) {
-    console.warn('Failed to set people properties in Mixpanel:', error)
+    logger.warn('Failed to set people properties in Mixpanel:', error)
   }
 }
 
@@ -151,7 +153,7 @@ export const trackMp = async (PageName?: string, eventName?: string, properties?
       mixpanel.track(eventName, eventProperties)
     }
   } catch (error) {
-    console.warn('Failed to track event in Mixpanel:', error)
+    logger.warn('Failed to track event in Mixpanel:', error)
   }
 }
 
@@ -173,6 +175,6 @@ export const fetchUserProfileSetPeopleMP = async () => {
       })
     }
   } catch (error) {
-    console.warn('Failed to fetch user profile for Mixpanel:', error)
+    logger.warn('Failed to fetch user profile for Mixpanel:', error)
   }
 }

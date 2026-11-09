@@ -126,10 +126,8 @@ export const shopifyGrossSalesOverTimeTool: ToolConfig<
     },
   },
 
-  transformResponse: async (response, params) => {
+  transformResponse: async (_response, params) => {
     let allOrders: any[] = []
-    const hasNextPage = true
-    const cursor: string | null = null
 
     const fetchAllOrders = async (currentCursor: string | null) => {
       if (!params) throw new Error('Missing parameters for Shopify API request')

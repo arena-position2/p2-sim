@@ -38,7 +38,6 @@ export function SlackMentionInput({
   credential,
   disabled = false,
   workflowId,
-  isForeignCredential = false,
   placeholder = 'Type your message... Use @ to mention users',
   blockId,
   useUserToken = false,

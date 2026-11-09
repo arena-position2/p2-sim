@@ -132,7 +132,7 @@ export const shopifyRevenueByProductTool: ToolConfig<
     },
   },
 
-  transformResponse: async (response, params) => {
+  transformResponse: async (_response, params) => {
     let allOrders: any[] = []
 
     function buildDateQuery(p: any) {

@@ -29,7 +29,6 @@ interface ArenaStatesSelectorProps {
 export function ArenaStatesSelector({
   blockId,
   subBlockId,
-  title,
   layout,
   isPreview = false,
   subBlockValues,

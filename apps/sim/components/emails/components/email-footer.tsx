@@ -5,32 +5,6 @@ import { isHosted } from '@/lib/core/config/env-flags'
 import { getBaseUrl } from '@/lib/core/utils/urls'
 import { getBrandConfig } from '@/ee/whitelabeling'
 
-/**
- * Social mark display size. Every `static/*-icon.png` is 40×40, so 20px is a
- * clean 2x source — email clients do no responsive image selection, so the
- * asset must be authored at 2x and pinned here. This is deliberately NOT the
- * platform's 14px UI-icon size: these are brand marks in an image, not
- * `--text-icon` glyphs, and 14px renders them illegibly.
- */
-const SOCIAL_ICON_SIZE = 20
-
-/**
- * `display: block` removes the 2–3px gap Outlook adds under inline images;
- * `border: 0` prevents the blue link border older Outlook draws around a linked
- * image.
- */
-const socialIconStyle = { display: 'block' as const, border: 0 }
-
-/** Trailing gap only, so the row starts flush with the gutter. */
-const SOCIAL_CELL_STYLE = { paddingRight: 16 } as const
-
-const SOCIAL_LINKS = [
-  { path: 'x', label: 'X', icon: 'x-icon.png' },
-  { path: 'linkedin', label: 'LinkedIn', icon: 'linkedin-icon.png' },
-  { path: 'github', label: 'GitHub', icon: 'github-icon.png' },
-  { path: 'slack', label: 'Slack', icon: 'slack-icon.png' },
-] as const
-
 interface EmailFooterProps {
   baseUrl?: string
   messageId?: string

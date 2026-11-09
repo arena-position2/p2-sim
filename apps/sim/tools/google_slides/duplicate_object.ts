@@ -125,7 +125,6 @@ export const duplicateObjectTool: ToolConfig<DuplicateObjectParams, DuplicateObj
 
     const presentationId = params?.presentationId?.trim() || ''
     const objectId = params?.objectId?.trim() || ''
-    let reordered = false
 
     // Check if the duplicated object is a slide and reorder it to the end
     if (duplicatedObjectId) {
@@ -174,7 +173,6 @@ export const duplicateObjectTool: ToolConfig<DuplicateObjectParams, DuplicateObj
             )
 
             if (reorderResponse.ok) {
-              reordered = true
               logger.info('Successfully reordered duplicated slide to end')
             } else {
               const reorderError = await reorderResponse.json()

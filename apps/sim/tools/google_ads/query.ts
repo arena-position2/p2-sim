@@ -135,75 +135,6 @@ function buildQueryFromParams(params: GoogleAdsQueryParams): string {
   return query
 }
 
-function formatResults(data: any, outputFormat: string): any {
-  if (!data) return data
-
-  switch (outputFormat) {
-    case 'summary':
-      return {
-        summary: {
-          query: data.query,
-          accounts_found: data.accounts_found,
-          date_range: data.date_range,
-          grand_totals: data.grand_totals,
-        },
-        account_summaries: data.results?.map((result: any) => ({
-          account_name: result.account_name,
-          total_campaigns: result.total_campaigns,
-          account_totals: result.account_totals,
-        })),
-      }
-
-    case 'csv': {
-      // Convert to CSV-like structure
-      const csvData: any[] = []
-      data.results?.forEach((account: any) => {
-        account.campaigns?.forEach((campaign: any) => {
-          csvData.push({
-            account_name: account.account_name,
-            campaign_name: campaign.name,
-            status: campaign.status,
-            clicks: campaign.clicks,
-            impressions: campaign.impressions,
-            cost: campaign.cost,
-            conversions: campaign.conversions,
-            ctr: campaign.ctr,
-            avg_cpc: campaign.avg_cpc,
-          })
-        })
-      })
-      return { csv_data: csvData, original_data: data }
-    }
-
-    case 'chart': {
-      // Format for chart visualization
-      const chartData = {
-        accounts: data.results?.map((account: any) => ({
-          name: account.account_name,
-          clicks: account.account_totals?.clicks || 0,
-          impressions: account.account_totals?.impressions || 0,
-          cost: account.account_totals?.cost || 0,
-          conversions: account.account_totals?.conversions || 0,
-        })),
-        campaigns: data.results?.flatMap((account: any) =>
-          account.campaigns?.map((campaign: any) => ({
-            account: account.account_name,
-            campaign: campaign.name,
-            clicks: campaign.clicks,
-            cost: campaign.cost,
-            conversions: campaign.conversions,
-          }))
-        ),
-        totals: data.grand_totals,
-      }
-      return { chart_data: chartData, original_data: data }
-    }
-
-    default:
-      return data
-  }
-}
-
 export const googleAdsQueryTool: ToolConfig<GoogleAdsQueryParams, any> = {
   id: 'google_ads_query',
   name: 'Google Ads Query',
@@ -272,7 +203,7 @@ export const googleAdsQueryTool: ToolConfig<GoogleAdsQueryParams, any> = {
     }),
   },
 
-  transformResponse: async (response: Response, params?: GoogleAdsQueryParams) => {
+  transformResponse: async (response: Response) => {
     try {
       if (!response.ok) {
         const errorText = await response.text()

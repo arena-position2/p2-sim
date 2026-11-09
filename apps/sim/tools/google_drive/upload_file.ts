@@ -73,7 +73,7 @@ export const uploadFileTool: ToolConfig<GoogleDriveToolParams, GoogleDriveUpload
     },
   },
 
-  transformResponse: async (response: Response, params?: GoogleDriveToolParams) => {
+  transformResponse: async (response: Response) => {
     try {
       const data = await response.json()
 

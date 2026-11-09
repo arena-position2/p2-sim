@@ -3,8 +3,6 @@ import { Plus } from '@sim/emcn/icons'
 import { EmptyState, type EmptyStateProps } from '@/components/empty-state/empty-state'
 import { KnowledgeIsoMark } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state/knowledge-iso'
 
-const KNOWLEDGE_DOCS_URL = 'https://docs.sim.ai/knowledgebase'
-
 interface CreateKnowledgeEmptyStateProps {
   /** Opens the create-base modal — the same action the header's primary chip runs. */
   onCreate: () => void

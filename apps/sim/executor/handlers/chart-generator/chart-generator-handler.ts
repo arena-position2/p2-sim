@@ -17,7 +17,7 @@ export class ChartGeneratorBlockHandler implements BlockHandler {
 
   async execute(
     ctx: ExecutionContext,
-    block: SerializedBlock,
+    _block: SerializedBlock,
     inputs: Record<string, unknown>
   ): Promise<BlockOutput> {
     const operation = String(inputs.operation || 'generate')

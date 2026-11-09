@@ -93,10 +93,7 @@ export const clientUpdatedTasks: ToolConfig<
     },
   },
 
-  transformResponse: async (
-    response: Response,
-    params?: ArenaClientUpdatedTasksParams
-  ): Promise<ArenaClientUpdatedTasksResponse> => {
+  transformResponse: async (response: Response): Promise<ArenaClientUpdatedTasksResponse> => {
     const data = await response.json()
     return {
       success: true,

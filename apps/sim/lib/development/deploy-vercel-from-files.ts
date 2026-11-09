@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { join } from 'path'
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { sleep } from '@sim/utils/helpers'
@@ -217,7 +216,6 @@ export async function deployVercelProjectFromFiles(
     })
 
     for (const sourceFile of sourceFiles) {
-      const absolutePath = join(input.outputDir, sourceFile.path)
       const content = Buffer.from(sourceFile.content, 'utf-8')
       if (content.length > MAX_INLINE_FILE_BYTES) {
         throw new Error(`File ${sourceFile.path} exceeds Vercel inline upload limit`)

@@ -24,7 +24,6 @@ interface ArenaClientsSelectorProps {
 export function ArenaClientsSelector({
   blockId,
   subBlockId,
-  title,
   layout,
   isPreview = false,
   subBlockValues,

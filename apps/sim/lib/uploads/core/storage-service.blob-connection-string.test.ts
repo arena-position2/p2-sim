@@ -38,8 +38,19 @@ vi.mock('@/lib/uploads/providers/blob/client', () => ({
 
 const STORAGE_FLAGS = ['USE_S3_STORAGE', 'USE_BLOB_STORAGE', 'USE_GCS_STORAGE'] as const
 
+function readStorageFlag(flag: (typeof STORAGE_FLAGS)[number]): boolean {
+  switch (flag) {
+    case 'USE_S3_STORAGE':
+      return uploadsConfig.USE_S3_STORAGE
+    case 'USE_BLOB_STORAGE':
+      return uploadsConfig.USE_BLOB_STORAGE
+    case 'USE_GCS_STORAGE':
+      return uploadsConfig.USE_GCS_STORAGE
+  }
+}
+
 const originalFlagValues = STORAGE_FLAGS.map(
-  (flag) => [flag, uploadsConfig[flag]] as [string, boolean]
+  (flag) => [flag, readStorageFlag(flag)] as [string, boolean]
 )
 
 function setFlag(flag: (typeof STORAGE_FLAGS)[number], value: boolean): void {

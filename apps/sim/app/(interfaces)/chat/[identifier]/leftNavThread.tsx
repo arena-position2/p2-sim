@@ -313,7 +313,6 @@ function ThreadRow({
   renameValue,
   isStreaming,
   onSelect,
-  onRefresh,
   onStartRename,
   onRenameChange,
   onRenameSave,

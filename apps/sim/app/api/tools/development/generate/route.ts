@@ -18,16 +18,6 @@ const logger = createLogger('DevelopmentGenerateAPI')
 export const runtime = 'nodejs'
 export const maxDuration = 600
 
-const ReferenceImageFileSchema = z
-  .object({
-    name: z.string(),
-    key: z.string().optional(),
-    url: z.string().optional(),
-    type: z.string().optional(),
-    base64: z.string().optional(),
-  })
-  .passthrough()
-
 const RequestSchema = z.object({
   userInput: z.string().min(1, 'userInput is required'),
   repoName: z.string().optional(),

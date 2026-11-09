@@ -303,7 +303,7 @@ export async function pushRepoChangesToGitHub(
   }
 
   try {
-    const { data: user, status: userStatus } = await githubFetch<GitHubUserResponse>(token, '/user')
+    const { status: userStatus } = await githubFetch<GitHubUserResponse>(token, '/user')
     if (userStatus !== 200) {
       return { success: false, error: 'Invalid GitHub token or insufficient API access' }
     }

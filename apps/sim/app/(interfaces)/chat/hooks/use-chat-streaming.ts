@@ -21,7 +21,6 @@ import {
   extractGeneratedImagesFromData,
 } from '@/lib/chat/assistant-assets'
 import { readSSEEvents } from '@/lib/core/utils/sse'
-import { isUserFileWithMetadata } from '@/lib/core/utils/user-file'
 import {
   isChatChunkFrame,
   isChatChunkResetFrame,
@@ -36,45 +35,6 @@ import { CHAT_ERROR_MESSAGES } from '@/app/(interfaces)/chat/constants'
 import { resolveMessageImagesAndProse } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/chat/components/chat-message/constants'
 
 const logger = createLogger('UseChatStreaming')
-
-function extractFilesFromData(
-  data: any,
-  files: ChatFile[] = [],
-  seenIds = new Set<string>()
-): ChatFile[] {
-  if (!data || typeof data !== 'object') {
-    return files
-  }
-
-  if (isUserFileWithMetadata(data)) {
-    if (!seenIds.has(data.id)) {
-      seenIds.add(data.id)
-      files.push({
-        id: data.id,
-        name: data.name,
-        url: data.url,
-        key: data.key,
-        size: data.size,
-        type: data.type,
-        context: data.context,
-      })
-    }
-    return files
-  }
-
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      extractFilesFromData(item, files, seenIds)
-    }
-    return files
-  }
-
-  for (const value of Object.values(data)) {
-    extractFilesFromData(value, files, seenIds)
-  }
-
-  return files
-}
 
 export interface StreamingOptions {
   outputConfigs?: Array<{ blockId: string; path?: string }>

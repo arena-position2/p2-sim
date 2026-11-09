@@ -117,7 +117,7 @@ export const shopifyTopCustomersTool: ToolConfig<TopCustomersParams, TopCustomer
     },
   },
 
-  transformResponse: async (response, params) => {
+  transformResponse: async (_response, params) => {
     let allOrders: any[] = []
 
     function buildDateQuery(p: any) {

@@ -88,12 +88,7 @@ export async function rerankContent<T extends RerankableItem>(
   const topN = Math.min(rerankConfig?.topN ?? items.length, candidateCount)
   const maxContentLength = rerankConfig?.maxContentLength ?? 4000
 
-  // Extract candidates and their content
   const candidates = items.slice(0, candidateCount)
-  const documents = candidates.map((item) => {
-    const content = extractContent(item)
-    return content ? content.slice(0, maxContentLength) : ''
-  })
 
   // Filter out items with no content
   const validCandidates: T[] = []

@@ -82,7 +82,7 @@ export const createTool: ToolConfig<PresentationCreateParams, PresentationCreate
         if (typeof params.slides_markdown === 'string') {
           try {
             slidesArray = JSON.parse(params.slides_markdown)
-          } catch (error) {
+          } catch {
             throw new Error(
               'slides_markdown must be a valid JSON array. Example: ["slide 1", "slide 2"]'
             )
@@ -124,10 +124,7 @@ export const createTool: ToolConfig<PresentationCreateParams, PresentationCreate
     },
   },
 
-  transformResponse: async (
-    response: Response,
-    params?: PresentationCreateParams
-  ): Promise<PresentationCreateResponse> => {
+  transformResponse: async (response: Response): Promise<PresentationCreateResponse> => {
     const data = await response.json()
 
     // Ensure proper file format when present; emit standard file shape

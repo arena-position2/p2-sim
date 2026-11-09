@@ -23,12 +23,9 @@ export const saveSummary: ToolConfig<ArenaSaveSummaryParams, ArenaSaveSummaryRes
   },
 
   request: {
-    url: (params: ArenaSaveSummaryParams) => {
-      const url = `/api/tools/arena/save-summary`
-      return url
-    },
+    url: () => `/api/tools/arena/save-summary`,
     method: 'POST',
-    headers: (params: ArenaSaveSummaryParams) => {
+    headers: () => {
       return {
         Accept: 'application/json',
         'Content-Type': 'application/json',
@@ -54,10 +51,7 @@ export const saveSummary: ToolConfig<ArenaSaveSummaryParams, ArenaSaveSummaryRes
     },
   },
 
-  transformResponse: async (
-    response: Response,
-    params?: ArenaSaveSummaryParams
-  ): Promise<ArenaSaveSummaryResponse> => {
+  transformResponse: async (response: Response): Promise<ArenaSaveSummaryResponse> => {
     const data = await response.json()
     return {
       success: true,

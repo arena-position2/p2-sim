@@ -221,7 +221,7 @@ function LineChartComponent({
     try {
       const f = formatDate(timestamp, timezone)
       return `${f.compactDate} ${f.compactTime}`
-    } catch (e) {
+    } catch {
       const d = new Date(timestamp)
       if (Number.isNaN(d.getTime())) return ''
       return d.toLocaleString('en-US', {
@@ -425,7 +425,7 @@ function LineChartComponent({
               )
             })()}
 
-          {visibleSeries.map((s, idx) => {
+          {visibleSeries.map((s) => {
             const isActive = activeSeriesId ? activeSeriesId === s.id : true
             const isHovered = hoverSeriesId ? hoverSeriesId === s.id : false
             const baseOpacity = isActive ? 1 : 0.12

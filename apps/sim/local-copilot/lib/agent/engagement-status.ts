@@ -68,7 +68,7 @@ function isOpenAiFamilyModel(model: string): boolean {
  */
 export function resolveEngagementProvider(
   model: string,
-  config: LocalCopilotConfig = getLocalCopilotConfig()
+  _config: LocalCopilotConfig = getLocalCopilotConfig()
 ): LocalCopilotProvider {
   if (isOpenAiFamilyModel(model)) {
     const apiKey = resolveOpenAiApiKey()

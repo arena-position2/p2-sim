@@ -643,81 +643,6 @@ function formatTableWithSpacing(tableLines: string[]): string {
   return allFormattedLines.join('\n')
 }
 
-function addCodeBlockRequest(
-  requests: Array<Record<string, any>>,
-  code: string,
-  language: string,
-  index: number
-): number {
-  requests.push({
-    insertText: {
-      location: { index },
-      text: `${code}\n`,
-    },
-  })
-
-  requests.push({
-    updateTextStyle: {
-      range: {
-        startIndex: index,
-        endIndex: index + code.length,
-      },
-      textStyle: {
-        weightedFontFamily: { fontFamily: 'Courier New' },
-        fontSize: { magnitude: 10, unit: 'PT' },
-        backgroundColor: { color: { rgbColor: { red: 0.95, green: 0.95, blue: 0.95 } } },
-      },
-      fields: 'weightedFontFamily,fontSize,backgroundColor',
-    },
-  })
-
-  return index + code.length + 1
-}
-
-function addBlockquoteRequest(
-  requests: Array<Record<string, any>>,
-  text: string,
-  index: number
-): number {
-  const cleanTextBuilder: string[] = []
-  const formatRanges: FormatRange[] = []
-  const linkRanges: LinkRange[] = []
-
-  parseInlineFormatting(text, cleanTextBuilder, formatRanges, linkRanges)
-  const cleanText = cleanTextBuilder.join('')
-
-  requests.push({
-    insertText: {
-      location: { index },
-      text: `${cleanText}\n`,
-    },
-  })
-
-  requests.push({
-    updateParagraphStyle: {
-      range: {
-        startIndex: index,
-        endIndex: index + cleanText.length + 1,
-      },
-      paragraphStyle: {
-        indentStart: { magnitude: 36, unit: 'PT' },
-        borderLeft: {
-          color: { color: { rgbColor: { red: 0.8, green: 0.8, blue: 0.8 } } },
-          width: { magnitude: 3, unit: 'PT' },
-          padding: { magnitude: 8, unit: 'PT' },
-          dashStyle: 'SOLID',
-        },
-      },
-      fields: 'indentStart,borderLeft',
-    },
-  })
-
-  // Apply inline formatting
-  applyInlineFormatting(requests, formatRanges, linkRanges, index)
-
-  return index + cleanText.length + 1
-}
-
 function addHorizontalRuleRequest(requests: Array<Record<string, any>>, index: number): number {
   // Insert a newline for the border to apply to
   requests.push({
@@ -897,58 +822,6 @@ function addListBlockRequests(
   return currentIndex - totalTabs
 }
 
-function addNumberedListRequest(
-  requests: Array<Record<string, any>>,
-  text: string,
-  index: number,
-  indentLevel = 0
-): number {
-  const cleanTextBuilder: string[] = []
-  const formatRanges: FormatRange[] = []
-  const linkRanges: LinkRange[] = []
-
-  parseInlineFormatting(text, cleanTextBuilder, formatRanges, linkRanges)
-  const cleanText = cleanTextBuilder.join('')
-
-  // Add tab characters for nesting level
-  const tabs = '\t'.repeat(indentLevel)
-  const textWithTabs = tabs + cleanText
-
-  requests.push({
-    insertText: {
-      location: { index },
-      text: `${textWithTabs}\n`,
-    },
-  })
-
-  // Adjust format ranges to account for the tabs
-  const adjustedFormatRanges = formatRanges.map((range) => ({
-    ...range,
-    start: range.start + indentLevel,
-    end: range.end + indentLevel,
-  }))
-
-  const adjustedLinkRanges = linkRanges.map((range) => ({
-    ...range,
-    start: range.start + indentLevel,
-    end: range.end + indentLevel,
-  }))
-
-  applyInlineFormatting(requests, adjustedFormatRanges, adjustedLinkRanges, index)
-
-  requests.push({
-    createParagraphBullets: {
-      range: {
-        startIndex: index,
-        endIndex: index + textWithTabs.length + 1,
-      },
-      bulletPreset: 'NUMBERED_DECIMAL_ALPHA_ROMAN',
-    },
-  })
-
-  return index + textWithTabs.length + 1
-}
-
 function addTaskListRequest(
   requests: Array<Record<string, any>>,
   text: string,
@@ -1047,58 +920,6 @@ function addHeadingRequest(
   applyInlineFormatting(requests, formatRanges, linkRanges, index)
 
   return index + cleanText.length + 1
-}
-
-function addBulletPointRequest(
-  requests: Array<Record<string, any>>,
-  text: string,
-  index: number,
-  indentLevel = 0
-): number {
-  const cleanTextBuilder: string[] = []
-  const formatRanges: FormatRange[] = []
-  const linkRanges: LinkRange[] = []
-
-  parseInlineFormatting(text, cleanTextBuilder, formatRanges, linkRanges)
-  const cleanText = cleanTextBuilder.join('')
-
-  // Add tab characters for nesting level
-  const tabs = '\t'.repeat(indentLevel)
-  const textWithTabs = tabs + cleanText
-
-  requests.push({
-    insertText: {
-      location: { index },
-      text: `${textWithTabs}\n`,
-    },
-  })
-
-  // Adjust format ranges to account for the tabs
-  const adjustedFormatRanges = formatRanges.map((range) => ({
-    ...range,
-    start: range.start + indentLevel,
-    end: range.end + indentLevel,
-  }))
-
-  const adjustedLinkRanges = linkRanges.map((range) => ({
-    ...range,
-    start: range.start + indentLevel,
-    end: range.end + indentLevel,
-  }))
-
-  applyInlineFormatting(requests, adjustedFormatRanges, adjustedLinkRanges, index)
-
-  requests.push({
-    createParagraphBullets: {
-      range: {
-        startIndex: index,
-        endIndex: index + textWithTabs.length + 1,
-      },
-      bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE',
-    },
-  })
-
-  return index + textWithTabs.length + 1
 }
 
 function addParagraphWithFormattingRequest(
@@ -1465,7 +1286,7 @@ function parseInlineFormattingWithoutLinks(
   text: string,
   cleanTextBuilder: string[],
   formatRanges: FormatRange[],
-  linkRanges: LinkRange[]
+  _linkRanges: LinkRange[]
 ): void {
   let i = 0
 

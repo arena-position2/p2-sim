@@ -16,7 +16,9 @@ describe('org logo storage keys', () => {
   })
 
   it('extracts the organization id from a storage key', () => {
-    expect(extractOrganizationIdFromOrgLogoKey('SIM_ORG_LOGOS/org-abc/123-logo.png')).toBe('org-abc')
+    expect(extractOrganizationIdFromOrgLogoKey('SIM_ORG_LOGOS/org-abc/123-logo.png')).toBe(
+      'org-abc'
+    )
     expect(extractOrganizationIdFromOrgLogoKey('workspace-logos/logo.png')).toBeNull()
   })
 })

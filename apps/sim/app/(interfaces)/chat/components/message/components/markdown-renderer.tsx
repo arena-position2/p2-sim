@@ -3,27 +3,6 @@ import { Code } from '@sim/emcn'
 import { Check, Copy } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import 'streamdown/styles.css'
-import { Tooltip } from '@sim/emcn'
-
-function LinkWithPreview({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Tooltip.Root delayDuration={300}>
-      <Tooltip.Trigger asChild>
-        <a
-          href={href}
-          className='text-[var(--text-primary)] underline decoration-dashed underline-offset-4'
-          target='_blank'
-          rel='noopener noreferrer'
-        >
-          {children}
-        </a>
-      </Tooltip.Trigger>
-      <Tooltip.Content side='top' align='center' sideOffset={5} className='max-w-sm'>
-        <span className='truncate text-xs'>{href}</span>
-      </Tooltip.Content>
-    </Tooltip.Root>
-  )
-}
 
 const COMPONENTS = {
   p: ({ children }: React.HTMLAttributes<HTMLParagraphElement>) => (

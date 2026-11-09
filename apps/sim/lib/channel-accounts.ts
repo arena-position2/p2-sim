@@ -273,7 +273,7 @@ export async function getFacebookAdsAccounts(
 
     return accounts
   } catch (error) {
-    console.error('Error fetching facebook accounts from database:', error)
+    logger.error('Error fetching facebook accounts from database', { error })
     return {}
   }
 }

@@ -781,63 +781,6 @@ function projectUsesSrcAppDir(files: GeneratedAppFile[]): boolean {
   return files.some((file) => normalizePath(file.path).startsWith('src/app/'))
 }
 
-const ALIAS_IMPORT_PATTERNS = [
-  /from\s+['"]@\/([^'"]+)['"]/g,
-  /import\s*\(\s*['"]@\/([^'"]+)['"]\s*\)/g,
-  /import\s+['"]@\/([^'"]+)['"]/g,
-]
-
-function isComponentAliasPath(importPath: string): boolean {
-  return (
-    importPath.startsWith('components/') ||
-    /^components\//.test(importPath) ||
-    importPath
-      .split('/')
-      .pop()
-      ?.match(/^[A-Z]/) !== null
-  )
-}
-
-function resolveAliasToCandidatePaths(importPath: string, useSrcDir: boolean): string[] {
-  const prefix = useSrcDir ? 'src/' : ''
-  const base = `${prefix}${importPath.replace(/\/$/, '')}`
-  const componentCandidates = [`${base}.tsx`, `${base}.ts`, `${base}/index.tsx`, `${base}/index.ts`]
-  const moduleCandidates = [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]
-
-  if (
-    importPath.startsWith('lib/') ||
-    importPath.startsWith('hooks/') ||
-    importPath.startsWith('utils/') ||
-    importPath.startsWith('types/')
-  ) {
-    return moduleCandidates
-  }
-
-  return isComponentAliasPath(importPath) ? componentCandidates : moduleCandidates
-}
-
-function collectAliasImportsFromSource(content: string): string[] {
-  const imports: string[] = []
-  for (const pattern of ALIAS_IMPORT_PATTERNS) {
-    for (const match of content.matchAll(pattern)) {
-      if (match[1]) {
-        imports.push(match[1])
-      }
-    }
-  }
-  return imports
-}
-
-function toComponentName(filePath: string): string {
-  const base = filePath.split('/').pop() ?? 'Component'
-  const withoutExt = base.replace(/\.(tsx|ts|jsx|js)$/, '') || 'Component'
-  return withoutExt
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join('')
-}
-
 /**
  * Collects external npm package names imported across generated source files.
  */

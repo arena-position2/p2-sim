@@ -36,7 +36,6 @@ interface CancelPlanModalProps {
 export function CancelPlanModal({
   open,
   onOpenChange,
-  planName,
   isArena,
   onConfirmCancel,
   isConfirming = false,

@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { Combobox, type ComboboxOption, cn } from '@sim/emcn'
+import { createLogger } from '@sim/logger'
 import axios from 'axios'
 import { getArenaToken } from '@/lib/arena-utils/cookie-utils'
 import { getEnv } from '@/lib/core/config/env'
@@ -10,6 +11,8 @@ import { arenaSiblingSubBlockStoreKey } from '@/app/workspace/[workspaceId]/w/[w
 import { useSubBlockValue } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/hooks/use-sub-block-value'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { useSubBlockStore } from '@/stores/workflows/subblock/store'
+
+const logger = createLogger('ArenaTaskAndSubtaskSelector')
 
 interface Task {
   id: string
@@ -38,7 +41,6 @@ interface ArenaTaskAndSubtaskSelectorProps {
 export function ArenaTaskAndSubtaskSelector({
   blockId,
   subBlockId,
-  title,
   layout,
   isPreview = false,
   subBlockValues,
@@ -106,7 +108,7 @@ export function ArenaTaskAndSubtaskSelector({
         const taskList = response.data?.response?.TaskList || response.data?.TaskList || []
         if (!cancelled) setTasks(taskList)
       } catch (error) {
-        console.error('Error fetching tasks and subtasks:', error)
+        logger.error('Error fetching tasks and subtasks', { error })
         if (!cancelled) setTasks([])
       } finally {
         if (!cancelled) setIsLoading(false)

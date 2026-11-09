@@ -1,6 +1,9 @@
+import { createLogger } from '@sim/logger'
 import type { ArenaCommentsParams, ArenaCommentsResponse } from '@/tools/arena/types'
 import type { ToolConfig } from '@/tools/types'
 import { extractMentionedUserIds } from './utils'
+
+const logger = createLogger('ArenaAddComment')
 
 /**
  * Selector-based add comment: always uses `/api/tools/arena/comments`.
@@ -76,7 +79,7 @@ export const addComment: ToolConfig<ArenaCommentsParams, ArenaCommentsResponse> 
         const hasDataUserId = commentText.includes('data-user-id')
 
         if (hasMentionTag || hasDataUserId) {
-          console.warn('[Arena Comments] Mention tags found but no user IDs extracted:', {
+          logger.warn('Mention tags found but no user IDs extracted', {
             commentTextLength: commentText.length,
             commentTextPreview: commentText.substring(0, 300),
             hasMentionClass: hasMentionTag,

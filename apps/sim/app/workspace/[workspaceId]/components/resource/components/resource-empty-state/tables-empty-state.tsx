@@ -102,8 +102,6 @@ function TablesGraphic() {
   )
 }
 
-const TABLES_DOCS_URL = 'https://docs.sim.ai/tables'
-
 interface CreateTableEmptyStateProps {
   /** Creates a table — the same action the header's primary chip runs. */
   onCreate: () => void
