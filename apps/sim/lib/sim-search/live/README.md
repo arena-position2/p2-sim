@@ -5,7 +5,7 @@ This describes the live enterprise-search path. Credential Groups and ordinary k
 ## Admin and member surfaces
 
 - **Sources** controls integration availability and account mode per integration.
-- **Member accounts** has no resource configuration. A member connects their own account under Integrations, and searches content that account can access through the provider API. Old member resource filters are ignored and cleared when settings are saved.
+- **Member accounts** has no resource configuration. A member connects their own account under Integrations, and searches content that account can access through the provider API. A member can add several accounts of one provider, such as Google Drive in two tenants; each is searched and cited separately, and every search counts them toward its account limit. Old member resource filters are ignored and cleared when settings are saved.
 - **Service account** selects an admin-managed source. Its connection owns the resource settings; Sources does not duplicate them. GitHub uses one GitHub App source per repository instead of a single selected source. A member still connects their own account, except for GitLab. Search returns the intersection of the member's provider permissions and the source's current resource boundary.
 - GitLab is always service-account mode. Slack and Jira currently support member mode only.
 - Removing a source integration prevents subsequent account resolution, searches, and reads. Paused, archived, deleted, wrong-organization, wrong-provider, and unapproved service sources cannot authorize search.
@@ -84,6 +84,12 @@ MCP search covers page and table-row content, permits empty-query recency listin
 
 In service mode, the source's selected document IDs restrict MCP retrieval. Every candidate's parent document must also be currently visible to the source token. With an Enterprise organization ID, the Admin API must return that exact document in the configured organization; deleted documents and revoked key access are rejected. Personal MCP still enforces the member's permission to read the actual content. [Official MCP tool catalog](https://coda.io/resources/mcp/tools-and-endpoints).
 
+### Hex
+
+Member mode uses managed OAuth against `https://app.hex.tech/mcp`. Only `get_me`, `search_projects`, `get_project`, and `list_cells` are allowed. The current workspace ID from `get_me` binds search results, references, and canonical draft-editor citations; a changed workspace requires a fresh search. Every candidate is hydrated through `get_project`, and search previews are explicitly project metadata rather than notebook evidence. Search verifies at most ten unique projects and has no continuation. Date filtering and sorting apply only to those candidates.
+
+Reads verify the project revision before and after paging through its draft cells. SQL, Python, and Markdown source are included; other cell types retain their labels with an explicit unavailable-content marker. Rendered outputs, attachments, published app snapshots, and warehouse data are not retrieved. Reads fail instead of returning incomplete source when cells are malformed, project access changes, a cursor repeats, or the eight-page / 512 KiB text limit is exceeded. This path never executes projects or queries. Hex requires a Team or Enterprise plan and the Editor workspace role or above for these project-read tools; view access to each project is sufficient.
+
 ### GitLab
 
 Service mode only, with no member GitLab connection. Each configured source fixes the instance, project, token, and permission strategy. Members search the configured project through that token, but each result must separately match their verified organization identity and source ACLs.
@@ -116,7 +122,7 @@ Paths below are relative to `apps/sim`.
 
 The provider catalog holds a trusted origin, not an arbitrary URL supplied by a model. Actual endpoint paths and query translation belong in the provider module. `http.ts` supplies bounded responses, a per-client request budget, timeout/cancellation, configured-endpoint validation, and no credential-bearing redirects. Use its origin-bound path API; do not return tokens to UI or model tools.
 
-Self-managed GitLab is resolved from the saved source's validated host/project instead of the catalog's default origin. Managed MCP providers resolve the current member server/grant through `mcp-accounts.ts` and `managed-mcp.ts`, discover tool schemas and permit only fixed read tools. Coda, Fireflies, Granola and Notion each have an adapter for their actual search/read formats. Neither exception lets a search query choose a credential destination.
+Self-managed GitLab is resolved from the saved source's validated host/project instead of the catalog's default origin. Managed MCP providers resolve the current member server/grant through `mcp-accounts.ts` and `managed-mcp.ts`, discover tool schemas and permit only fixed read tools. Coda, Fireflies, Granola, Hex and Notion each have an adapter for their actual search/read formats. Neither exception lets a search query choose a credential destination.
 
 ### Provider endpoint map
 
@@ -198,3 +204,11 @@ For end-to-end verification, use authorized fixture accounts on localhost: add t
 GitHub issue/PR reads include ordinary comments, submitted review decisions and inline review comments with author, date, source link and diff context. Issue-search previews prefer the matching comment fragment. `in:comments` does not guarantee discovery of inline review text. Drive comments and nested replies enrich document reads; Drive file search does not index those discussions. Both adapters report pagination, permission or text caps as incomplete at the start of the read.
 
 Fireflies and Granola use `eventStartAt` for generic date filters; modification filters require independent provider modification metadata. Granola semantic answers are never substituted for source notes: only identifiable cited meetings that can be read become documents. Notion MCP searches content rather than REST titles; plan-dependent tool access, ignored filters and bounded results must remain visible to callers.
+
+## Personal saved credentials
+
+Jama Connect and Flow Engineering use the existing encrypted saved-credential framework in member mode. Search lists only credentials created by the acting user in the current scope, then compares a fresh provider identity with the member's verified Sim email. Organization setup, reconnect, and disconnect use the personal Search credential operation; ordinary service-account sharing does not grant another person Search access.
+
+Jama exchanges personal client credentials against the configured instance, preserving deployment context paths. Flow uses a saved API host and workspace identifier with its API key. Neither a query nor a returned item may change those destinations. Document references include a connection binding derived from the provider host, tenant, and user identity; changing a saved connection cannot silently reuse an older item ID in another instance.
+
+Both adapters use the existing bounded native HTTP client. Jama returns one page of up to 50 abstract items. Flow searches up to six projects and reads the current entities within each project, with explicit incomplete-result reporting when provider limits apply. Neither adapter creates an indexing connector or background crawl.

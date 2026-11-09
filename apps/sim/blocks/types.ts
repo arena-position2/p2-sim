@@ -183,6 +183,7 @@ export type GenerationType =
   | 'json-schema'
   | 'json-object'
   | 'json-array'
+  | 'json-value'
   | 'table-schema'
   | 'system-prompt'
   | 'custom-tool-schema'
@@ -305,6 +306,16 @@ export interface SubBlockConfig {
    * silently writes and persists a value the user never picked.
    */
   emptyIsValid?: boolean
+  /**
+   * The `model` options are image or video generation models, not LLMs, so a combobox does not
+   * run them through the permission group's LLM model filter (a dropdown never did).
+   */
+  mediaModelOptions?: boolean
+  /**
+   * Refills a combobox's default when a dependency change clears it, as a dropdown does. Text
+   * the user deletes themselves stays empty while they edit, so they can type a new value.
+   */
+  restoreDefaultWhenCleared?: boolean
   /** Clears a persisted id after its authoritative single-option fetch confirms deletion. */
   clearOnMissingOption?: boolean
   /**
@@ -596,6 +607,12 @@ export type CanvasSentenceClause =
 /** An ordered set of clauses forming one card summary sentence. */
 export type CanvasSentence = readonly CanvasSentenceClause[]
 
+/** Trusted mapper context kept separate from user-configured and model-supplied arguments. */
+export interface BlockToolParamsContext {
+  /** Operation selected by the configuring surface. */
+  operation?: string
+}
+
 export interface BlockConfig {
   type: string
   name: string
@@ -668,7 +685,10 @@ export interface BlockConfig {
     access: string[]
     config?: {
       tool: (params: Record<string, any>) => string
-      params?: (params: Record<string, any>) => Record<string, any>
+      params?: (
+        params: Record<string, any>,
+        context?: BlockToolParamsContext
+      ) => Record<string, any>
     }
   }
   inputs: Record<string, ParamConfig>

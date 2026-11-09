@@ -105,6 +105,8 @@ export type OAuthProvider =
   | 'hubspot'
   | 'harmonic'
   | 'coda'
+  | 'gauge'
+  | 'higgsfield'
   | 'salesforce'
   | 'linkedin'
   | 'instagram'
@@ -118,6 +120,8 @@ export type OAuthProvider =
   | 'zoho-desk'
 
 export type OAuthService =
+  | 'jama'
+  | 'flow'
   | 'oracledb'
   | 'oracle-epm'
   | 'oracle-fusion'
@@ -179,6 +183,8 @@ export type OAuthService =
   | 'hubspot'
   | 'harmonic'
   | 'coda'
+  | 'gauge'
+  | 'higgsfield'
   | 'salesforce'
   | 'linkedin'
   | 'instagram'

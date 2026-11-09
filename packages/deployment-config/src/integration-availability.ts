@@ -32,6 +32,9 @@ integrationTypesByOAuthServiceId.set('github-repositories', ['github_v2'])
 /** Stored API-token credentials for api-key blocks are available without a deployment OAuth client. */
 const tokenCredentialIntegrationTypes = new Map([
   ['coda', 'coda'],
+  ['gauge', 'gauge'],
+  ['higgsfield', 'higgsfield'],
+  ['flow', 'flow'],
   ['claude-platform', 'managed_agent'],
 ])
 for (const [serviceId, integrationType] of tokenCredentialIntegrationTypes) {

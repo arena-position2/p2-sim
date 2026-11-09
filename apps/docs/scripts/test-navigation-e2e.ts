@@ -1435,6 +1435,108 @@ try {
 
   const interactive = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   try {
+    await check('Docs reference: wrapped sidebar labels stay left aligned', async () => {
+      const page = await interactive.newPage()
+      try {
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: 900 })
+          await open(page, '/integrations/zoominfo')
+          if (width < 1024) await page.getByRole('button', { name: 'Menu', exact: true }).click()
+          const guide = page.getByRole('button', { name: /Shared credential guides/ })
+          await guide.scrollIntoViewIfNeeded()
+          const lines = await guide.locator('span').evaluate((element) => {
+            const range = document.createRange()
+            range.selectNodeContents(element)
+            return [...range.getClientRects()].map((rect) => ({
+              left: rect.left,
+              labelLeft: element.getBoundingClientRect().left,
+            }))
+          })
+          expect(lines.length).toBeGreaterThan(width >= 1024 ? 1 : 0)
+          for (const line of lines) expect(Math.abs(line.left - line.labelLeft)).toBeLessThan(1)
+          await page.screenshot({ path: join(directory, `sidebar-wrapped-label-${width}.png`) })
+          if (width < 1024) await page.keyboard.press('Escape')
+        }
+      } finally {
+        await page.close()
+      }
+    })
+    for (const path of ['/integrations/zoom', '/integrations/zoominfo']) {
+      await check(`Docs reference: field tables start collapsed on ${path}`, async () => {
+        const page = await interactive.newPage()
+        try {
+          await open(page, path)
+          const tables = page.locator('article table').filter({
+            has: page.getByRole('columnheader', {
+              name: 'Parameter',
+              exact: true,
+              includeHidden: true,
+            }),
+          })
+          expect(await tables.count()).toBeGreaterThan(0)
+          for (const table of await tables.all()) await expect(table).toBeHidden()
+          const disclosures = page.locator('article details')
+          for (const disclosure of await disclosures.all()) {
+            const summary = disclosure.locator(':scope > summary')
+            await summary.click()
+            await expect(disclosure.getByRole('table').first()).toBeVisible()
+            await summary.focus()
+            await page.keyboard.press('Enter')
+            await expect(disclosure.getByRole('table').first()).toBeHidden()
+          }
+          await page.screenshot({
+            path: join(directory, `${path.split('/').at(-1)}-collapsed.png`),
+          })
+        } finally {
+          await page.close()
+        }
+      })
+    }
+    await check('Docs reference: TOC hover keeps a single active underline', async () => {
+      const page = await interactive.newPage()
+      try {
+        for (const theme of ['light', 'dark'] as const) {
+          await page.emulateMedia({ colorScheme: theme })
+          await open(page, '/getting-started')
+          const toc = page
+            .getByRole('navigation', { name: 'On this page' })
+            .filter({ visible: true })
+          const link = toc.getByRole('link', { name: 'Create a workflow', exact: true })
+          await link.click()
+          await expect(link).toHaveAttribute('aria-current', 'location')
+          await expect
+            .poll(() => link.evaluate((element) => getComputedStyle(element).textDecorationLine))
+            .toBe('underline')
+          const next = toc.getByRole('link', { name: 'Next steps', exact: true })
+          const color = await next.evaluate((element) => getComputedStyle(element).color)
+          await next.hover()
+          await next.evaluate((element) =>
+            Promise.all(element.getAnimations().map((animation) => animation.finished))
+          )
+          await expect
+            .poll(() => next.evaluate((element) => getComputedStyle(element).backgroundColor))
+            .toBe('rgba(0, 0, 0, 0)')
+          await expect(next).toHaveCSS('color', color)
+          await expect(next).toHaveCSS('text-decoration-line', 'none')
+          await expect
+            .poll(() =>
+              toc
+                .getByRole('link')
+                .filter({ visible: true })
+                .evaluateAll(
+                  (links) =>
+                    links.filter((element) =>
+                      getComputedStyle(element).textDecorationLine.includes('underline')
+                    ).length
+                )
+            )
+            .toBe(1)
+          await page.screenshot({ path: join(directory, `toc-hover-${theme}.png`) })
+        }
+      } finally {
+        await page.close()
+      }
+    })
     await check(
       'Docs polish: nested TOC anchors track the selected section across breakpoints',
       async () => {
@@ -1579,6 +1681,25 @@ try {
         ).toBeFocused()
       }
     )
+    await check('A stalled search request stops searching and offers a retry', async () => {
+      const page = await interactive.newPage()
+      try {
+        await open(page, '/introduction')
+        await page.route('**/api/search?query=timeout-probe', () => {})
+        await page
+          .getByRole('button', { name: /^(Search documentation|Search docs)$/, exact: true })
+          .click()
+        await page.getByRole('combobox', { name: 'Search documentation' }).fill('timeout-probe')
+        await page
+          .getByRole('button', { name: 'Try again', exact: true })
+          .waitFor({ timeout: 7000 })
+        await expect(page.getByRole('status')).toContainText('Search is unavailable')
+        await page.screenshot({ path: join(directory, 'search-timeout-retry.png') })
+      } finally {
+        await page.unrouteAll({ behavior: 'ignoreErrors' })
+        await page.close()
+      }
+    })
     await check('Closing search aborts a pending request', async () => {
       const page = await interactive.newPage()
       try {
@@ -1590,12 +1711,12 @@ try {
         const requested = page.waitForRequest((request) =>
           request.url().includes('query=cancel-request')
         )
-        const failed = page.waitForEvent('requestfailed', {
-          predicate: (request) => request.url().includes('query=cancel-request'),
-          timeout: 10000,
-        })
         await page.getByRole('combobox', { name: 'Search documentation' }).fill('cancel-request')
         await requested
+        const failed = page.waitForEvent('requestfailed', {
+          predicate: (request) => request.url().includes('query=cancel-request'),
+          timeout: 2000,
+        })
         await page.keyboard.press('Escape')
         expect((await failed).failure()?.errorText).toMatch(/abort|cancel/i)
         await expect(page.getByRole('dialog')).toHaveCount(0)

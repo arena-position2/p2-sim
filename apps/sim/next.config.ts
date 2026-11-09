@@ -493,6 +493,16 @@ const nextConfig: NextConfig = {
         source: '/team',
         destination: 'https://cal.com/team/sim/demo',
         permanent: false,
+      },
+      {
+        source: '/security',
+        destination: 'https://trust.sim.ai/',
+        permanent: false,
+      },
+      {
+        source: '/trust',
+        destination: 'https://trust.sim.ai/',
+        permanent: false,
       }
     )
 
@@ -639,6 +649,20 @@ const nextConfig: NextConfig = {
       {
         source: '/comparison/:path*',
         destination: '/comparisons/:path*',
+        permanent: true,
+      }
+    )
+
+    /** Readers and agents guess the product's full name; the page's slug is `microsoft-copilot`. */
+    redirects.push(
+      {
+        source: '/comparisons/microsoft-copilot-studio',
+        destination: '/comparisons/microsoft-copilot',
+        permanent: true,
+      },
+      {
+        source: '/comparisons/copilot-studio',
+        destination: '/comparisons/microsoft-copilot',
         permanent: true,
       }
     )

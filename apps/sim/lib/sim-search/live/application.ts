@@ -11,7 +11,6 @@ import type {
 } from '@/lib/api/contracts/mothership-assistant-tools'
 import {
   type LiveSearchAccountStatus,
-  liveSearchProviderSchema,
   type NativeSearchQuery,
   nativeSearchQueriesSchema,
   workspaceSearchFiltersSchema,
@@ -76,6 +75,13 @@ import { loadLiveSearchPolicies } from '@/lib/sim-search/live/policy-store'
 import { LIVE_SEARCH_PROVIDER_IDS } from '@/lib/sim-search/live/provider-catalog'
 import { liveSearchGuidance } from '@/lib/sim-search/live/providers'
 import { LiveReadError } from '@/lib/sim-search/live/read-error'
+import {
+  encodeLiveReference,
+  includesLiveDocument,
+  liveDocumentKey,
+  liveReferenceOwner,
+  readLiveReference,
+} from '@/lib/sim-search/live/reference'
 import { queryRelevance } from '@/lib/sim-search/live/text-match'
 import type { LiveAccount, NativeDocument } from '@/lib/sim-search/live/types'
 import { projectResolvedSecretModelContent } from '@/executor/utils/resolved-secret-content-projection'
@@ -140,42 +146,6 @@ function writeBoundContinuation(provider: BoundProvider, value: BoundContinuatio
   return cursor
 }
 
-const referenceSchema = z
-  .object({
-    v: z.literal(1),
-    user: z.string().min(1),
-    scope: z.string().min(1),
-    account: z.string().min(1),
-    provider: liveSearchProviderSchema,
-    id: z.string().min(1).max(1000),
-    container: z.string().max(500).optional(),
-    kind: z.string().max(200).optional(),
-    revision: z.string().max(200).optional(),
-    threadId: z
-      .string()
-      .regex(/^\d+\.\d+$/)
-      .optional(),
-  })
-  .strict()
-type Reference = z.output<typeof referenceSchema>
-
-export function encodeLiveReference(reference: Reference): string {
-  const result = `live:${Buffer.from(JSON.stringify(referenceSchema.parse(reference))).toString('base64url')}`
-  if (result.length > 4000) throw new Error('Provider document reference is too long')
-  return result
-}
-export function decodeLiveReference(value: string): Reference {
-  if (!value.startsWith('live:') || value.length > 4000)
-    throw new OrchestrationError('not_found', 'Search again to select a live document')
-  try {
-    return referenceSchema.parse(
-      JSON.parse(Buffer.from(value.slice(5), 'base64url').toString('utf8'))
-    )
-  } catch {
-    throw new OrchestrationError('not_found', 'Invalid live document reference')
-  }
-}
-
 interface LiveSearchOptions {
   surface?: SearchKnowledgeInput['surface']
   query: string
@@ -202,7 +172,7 @@ export function matchesLiveFilters(
 ): boolean {
   if (!matchesSourceDates(document, provider, filters)) return false
   if (filters?.source && filters.source !== provider) return false
-  if (filters?.documentIds && !filters.documentIds.includes(documentId)) return false
+  if (filters?.documentIds && !includesLiveDocument(filters.documentIds, documentId)) return false
   if (filters?.modifiedAfter || filters?.modifiedBefore) {
     const modified = Date.parse(document.modifiedAt ?? '')
     if (!Number.isFinite(modified)) return false
@@ -221,7 +191,7 @@ export function matchesLiveFilters(
   }
   return true
 }
-/** A provider result with the reference that binds it to this member, scope, and account. */
+/** A provider result with the ID that locates it within its account. */
 interface LiveCandidate {
   document: NativeDocument
   documentId: string
@@ -230,23 +200,23 @@ interface LiveCandidate {
 function candidateFor(
   document: NativeDocument,
   account: LiveAccount,
-  owner: ResourceOwner,
-  userId: string
+  owner: string
 ): LiveCandidate {
   return {
     document,
-    documentId: encodeLiveReference({
-      v: 1,
-      user: userId,
-      scope: resourceScopeKey(resourceScopeFromOwner(owner)),
-      account: account.id,
-      provider: account.provider,
-      id: document.id,
-      ...(document.container ? { container: document.container } : {}),
-      ...(document.kind ? { kind: document.kind } : {}),
-      ...(document.revision ? { revision: document.revision } : {}),
-      ...(document.threadId ? { threadId: document.threadId } : {}),
-    }),
+    documentId: encodeLiveReference(
+      {
+        account: account.id,
+        provider: account.provider,
+        id: document.id,
+        ...(document.container ? { container: document.container } : {}),
+        ...(document.kind ? { kind: document.kind } : {}),
+        ...(document.revision ? { revision: document.revision } : {}),
+        ...(document.connectionBinding ? { connectionBinding: document.connectionBinding } : {}),
+        ...(document.threadId ? { threadId: document.threadId } : {}),
+      },
+      owner
+    ),
   }
 }
 
@@ -303,6 +273,18 @@ const ACCOUNT_START_FLOOR_MS = 1500
 /** Candidates verified at once; each verification is one or more provider requests. */
 const VERIFY_CONCURRENCY = 5
 const MAX_ACCOUNTS = 20
+
+/** Account status when a merge cut results that its cursor would skip. */
+export const LIVE_MORE_RANKED_BELOW_MESSAGE =
+  'More matches ranked below the returned results. Search this account alone to see them.'
+/** Account status on every date-sorted search. */
+export const LIVE_DATE_ORDER_MESSAGE =
+  'Date order covers retrieved results; follow continuation before claiming an overall earliest or latest match.'
+/** Account status when the search deadline arrives before the account gets its turn. */
+export const LIVE_NOT_STARTED_MESSAGE =
+  'Not searched before the search deadline. Search this account alone or narrow the query.'
+/** Account status for each eligible account beyond {@link MAX_ACCOUNTS}. */
+export const LIVE_OVER_ACCOUNT_LIMIT_MESSAGE = `Not searched: one search covers at most ${MAX_ACCOUNTS} accounts. Search this source or account alone.`
 /** Previews center on the query's longest matching term, like indexed passages. */
 const PREVIEW_CHARACTERS = 1800
 /** Characters one read returns, the same page budget indexed document reads use. */
@@ -469,6 +451,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
     const userId = requirePrincipalSubjectUserId(principal)
     if (input.organizationId) await requireOrganizationSearchAvailable(input.organizationId)
     input.signal?.throwIfAborted()
+    const owner = liveReferenceOwner(userId, resourceScopeKey(resourceScopeFromOwner(input)))
     const queries = input.nativeQueries
       ? nativeSearchQueriesSchema.parse(input.nativeQueries)
       : undefined
@@ -569,7 +552,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
             modifiedAfter: instantScopePart(requestedFilters?.modifiedAfter),
             modifiedBefore: instantScopePart(requestedFilters?.modifiedBefore),
             documentIds: requestedFilters?.documentIds
-              ? [...new Set(requestedFilters.documentIds)].sort(compareStrings)
+              ? [...new Set(requestedFilters.documentIds.map(liveDocumentKey))].sort(compareStrings)
               : undefined,
           })
         )
@@ -607,7 +590,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
       )
       const candidates = page.documents
         .filter((document) => document.id)
-        .map((document) => candidateFor(document, account, input, userId))
+        .map((document) => candidateFor(document, account, owner))
       const matchingOf = (verified: LiveCandidate[]) =>
         firstOfEachDocument(
           verified.filter(({ document, documentId }) =>
@@ -683,9 +666,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
             undatedExcluded
               ? 'Some results lacked date metadata and were excluded; date coverage is incomplete.'
               : undefined,
-            dateSorted
-              ? 'Date order covers retrieved results; follow continuation before claiming an overall earliest or latest match.'
-              : undefined,
+            dateSorted ? LIVE_DATE_ORDER_MESSAGE : undefined,
             moreUnreachable
               ? 'More matches exist than this search could return. Narrow the query or target one source.'
               : undefined,
@@ -832,7 +813,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
             failed(
               new NativeSearchError(
                 'timeout',
-                'Not searched before the search deadline. Search this account alone or narrow the query.',
+                LIVE_NOT_STARTED_MESSAGE,
                 undefined,
                 undefined,
                 'not_started'
@@ -923,10 +904,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
       const { nextCursor: _, ...rest } = status
       return {
         ...rest,
-        message: joinMessages([
-          status.message,
-          'More matches ranked below the returned results. Search this account alone to see them.',
-        ]),
+        message: joinMessages([status.message, LIVE_MORE_RANKED_BELOW_MESSAGE]),
       }
     })
     /** Live coverage guides the providers this call searched or tried to search. */
@@ -946,7 +924,7 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
           displayName: account.displayName,
           ...(queryIndex === undefined ? {} : { queryIndex }),
           status: 'unavailable',
-          message: `Not searched: one search covers at most ${MAX_ACCOUNTS} accounts. Search this source or account alone.`,
+          message: LIVE_OVER_ACCOUNT_LIMIT_MESSAGE,
         })
     }
     for (const [queryIndex, query] of (queries ?? []).entries()) {
@@ -970,7 +948,17 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
     })
     return {
       query: input.query,
-      results: ranked.slice(0, input.topK).map(({ result }) => result),
+      results: ranked.slice(0, input.topK).map(({ result, queries: matched }) => {
+        const queryIndexes = [
+          ...new Set(
+            matched.flatMap((index) => {
+              const queryIndex = searched[index]?.status.queryIndex
+              return queryIndex === undefined ? [] : [queryIndex]
+            })
+          ),
+        ].sort((a, b) => a - b)
+        return queryIndexes.length ? { ...result, queryIndexes } : result
+      }),
       retrieval: {
         status: retrievalStatus,
         timedOutLegs: [],
@@ -1060,15 +1048,14 @@ export const readLiveDocument = defineAuthorizedKnowledgeUseCase({
     if (input.organizationId) await requireOrganizationSearchAvailable(input.organizationId)
     if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 8)
       throw new OrchestrationError('validation', 'Invalid document read limit')
-    const reference = decodeLiveReference(input.documentId)
-    if (
-      reference.user !== userId ||
-      reference.scope !== resourceScopeKey(resourceScopeFromOwner(input))
+    const reference = readLiveReference(
+      input.documentId,
+      liveReferenceOwner(userId, resourceScopeKey(resourceScopeFromOwner(input)))
     )
-      throw new OrchestrationError('not_found', 'Document not found in this search scope')
     if (
       (input.filters?.source && input.filters.source !== reference.provider) ||
-      (input.filters?.documentIds && !input.filters.documentIds.includes(input.documentId))
+      (input.filters?.documentIds &&
+        !includesLiveDocument(input.filters.documentIds, input.documentId))
     )
       throw new OrchestrationError('not_found', 'Document is outside the selected search filters')
     /** Cancellation by the caller passes through unclassified. */
