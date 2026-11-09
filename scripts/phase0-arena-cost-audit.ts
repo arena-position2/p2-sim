@@ -245,7 +245,9 @@ async function main() {
   `)
   )
 
-  console.log('\n--- Potential mothership double-count (workflow + mothership_block on same execution) ---')
+  console.log(
+    '\n--- Potential mothership double-count (workflow + mothership_block on same execution) ---'
+  )
   console.log(`Cases (last ${DAYS}d): ${mothershipDoubleCount.length}`)
   for (const r of mothershipDoubleCount.slice(0, 10)) {
     console.log(
@@ -338,7 +340,9 @@ async function main() {
   )
 
   console.log(`\n--- Data health ---`)
-  console.log(`usage_log rows with NULL workspace_id (last ${DAYS}d): ${nullWorkspace[0]?.count ?? '0'}`)
+  console.log(
+    `usage_log rows with NULL workspace_id (last ${DAYS}d): ${nullWorkspace[0]?.count ?? '0'}`
+  )
 
   const executionFeeRows = queryRows(
     await db.execute<{ count: string; total: string }>(sql`
@@ -354,10 +358,10 @@ async function main() {
 
   const externalRows = queryRows(
     await db.execute<{
-    count: string
-    total: string
-    with_vendor: string
-  }>(sql`
+      count: string
+      total: string
+      with_vendor: string
+    }>(sql`
     SELECT
       COUNT(*)::text AS count,
       COALESCE(SUM(cost::numeric), 0)::text AS total,

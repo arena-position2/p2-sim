@@ -53,15 +53,15 @@ import {
   HISTORICAL_RECONCILE_DEFAULT_CONCURRENCY,
   HISTORICAL_RECONCILE_DEFAULT_EXECUTION_TIMEOUT_MS,
   HISTORICAL_RECONCILE_ROLLOUT_STEPS,
-  loadHistoricalReconcileShadowArtifact,
-  resolveShadowArtifactWorkspaceScope,
-  repairLedgerProjections,
-  verifyLedgerProjection,
-  verifyPostApplyReconciliation,
   type HistoricalReconcileProgress,
   type HistoricalReconcileShadowRecord,
+  loadHistoricalReconcileShadowArtifact,
   type ReconciliationClass,
   type ReconciliationConfidence,
+  repairLedgerProjections,
+  resolveShadowArtifactWorkspaceScope,
+  verifyLedgerProjection,
+  verifyPostApplyReconciliation,
 } from '../apps/sim/lib/billing/core/historical-workflow-reconciliation'
 
 interface Options {
@@ -367,7 +367,8 @@ async function runDryRun(options: Options): Promise<number> {
     }
   }
 
-  const allRecords = priorRecords.length > 0 ? [...priorRecords, ...summary.records] : summary.records
+  const allRecords =
+    priorRecords.length > 0 ? [...priorRecords, ...summary.records] : summary.records
 
   if (options.reviewDeltas) {
     printDeltaReview(allRecords)
