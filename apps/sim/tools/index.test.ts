@@ -69,6 +69,7 @@ import { executeBitbucketTool } from '@/lib/internal/bitbucket/execute-tool'
 import { createInternalToolFileResult } from '@/lib/internal/tool-operations/file-result'
 import type { InternalToolOperationCall } from '@/lib/internal/tool-operations/types'
 import { executeVantaTool } from '@/lib/internal/vanta/execute-tool'
+import type { VideoGenerationInput } from '@/lib/internal/video/client'
 import { buildDirectVideoRequest } from '@/lib/internal/video/direct-request'
 import { buildFalVideoRequest } from '@/lib/internal/video/fal-request'
 import { projectToolResultForCopilot } from '@/lib/mothership/request/tools/resolved-secret-result'
@@ -5168,8 +5169,10 @@ describe('File Parameter Normalization', () => {
       {},
       'call-video-audio'
     )
-    const input = videoToolBodySchema.parse(prepared.toolParams)
-    const request = buildDirectVideoRequest({ ...input, provider: 'runway' })
+    const request = buildDirectVideoRequest({
+      ...(prepared.toolParams as VideoGenerationInput),
+      provider: 'runway',
+    })
     expect(request.body.audio).toBe(testCase.expected)
   })
 
@@ -5187,30 +5190,25 @@ describe('File Parameter Normalization', () => {
         {},
         'call-minimax-endpoint'
       )
-      const params = videoToolBodySchema.parse(prepared.toolParams)
-      const input = videoToolBodySchema.parse(
-        minimaxVideoTool.operation.input({
-          ...params,
-          provider: 'minimax',
-          cameraControl: undefined,
-        })
-      )
-      expect(() => buildDirectVideoRequest({ ...input, provider: 'minimax' })).toThrow(
+      const input = minimaxVideoTool.operation.input({
+        ...(prepared.toolParams as VideoGenerationInput),
+        provider: 'minimax',
+        cameraControl: undefined,
+      }) as VideoGenerationInput
+      expect(() => buildDirectVideoRequest(input)).toThrow(
         'MiniMax H3 does not support quality endpoints; select a resolution instead'
       )
     }
   )
 
   it('uses H3 resolution defaults when the MiniMax tool has no legacy endpoint', () => {
-    const input = videoToolBodySchema.parse(
-      minimaxVideoTool.operation.input({
-        provider: 'minimax',
-        apiKey: 'test-minimax-key',
-        model: 'MiniMax-H3',
-        prompt: 'Animate the boat',
-      })
-    )
-    const request = buildDirectVideoRequest({ ...input, provider: 'minimax' })
+    const input = minimaxVideoTool.operation.input({
+      provider: 'minimax',
+      apiKey: 'test-minimax-key',
+      model: 'MiniMax-H3',
+      prompt: 'Animate the boat',
+    }) as VideoGenerationInput
+    const request = buildDirectVideoRequest(input)
     expect(request.body.resolution).toBe('768P')
   })
 

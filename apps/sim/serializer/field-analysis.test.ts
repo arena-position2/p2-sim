@@ -15,6 +15,7 @@ vi.mock('@/blocks', () => ({
 }))
 
 import { videoToolBodySchema } from '@/lib/api/contracts/tools/media/video'
+import type { VideoGenerationInput } from '@/lib/internal/video/client'
 import { buildDirectVideoRequest } from '@/lib/internal/video/direct-request'
 import { buildFalVideoRequest } from '@/lib/internal/video/fal-request'
 import { VideoGeneratorV3Block } from '@/blocks/blocks/video_generator'
@@ -141,11 +142,11 @@ describe('collectBlockFieldIssues', () => {
 const FRAME_FILE = { id: 'f', name: 'frame.png', url: '', size: 3, type: 'image/png', key: 'k' }
 const FAL_VALUES = { provider: 'falai', apiKey: 'test-key', prompt: 'A cinematic sunrise' }
 
-/** Serializes a Video Generator block and maps its params to the video tool body. */
-function serializeVideoBlock(
+/** Maps a Video Generator block to the params its tool would send. */
+function mapVideoBlock(
   values: Record<string, unknown>,
   canonicalModes?: Record<string, string>
-) {
+): VideoGenerationInput {
   svcConfig.value = VideoGeneratorV3Block
   const params = extractBlockParams(
     block({
@@ -156,7 +157,18 @@ function serializeVideoBlock(
       ),
     })
   )
-  return videoToolBodySchema.parse(VideoGeneratorV3Block.tools.config?.params?.(params))
+  const mapped = VideoGeneratorV3Block.tools.config?.params?.(params)
+  if (!mapped || typeof mapped !== 'object')
+    throw new Error('Video Generator params were not mapped')
+  return mapped as VideoGenerationInput
+}
+
+/** Serializes a Video Generator block and maps its params to the video tool body. */
+function serializeVideoBlock(
+  values: Record<string, unknown>,
+  canonicalModes?: Record<string, string>
+) {
+  return videoToolBodySchema.parse(mapVideoBlock(values, canonicalModes))
 }
 
 describe('extractBlockParams', () => {
@@ -213,7 +225,7 @@ describe('extractBlockParams', () => {
     },
   ])('preserves $name through serialization into the provider request', ({ settings, payload }) => {
     const request = buildDirectVideoRequest({
-      ...serializeVideoBlock({ apiKey: 'test-key', prompt: 'A cinematic sunrise', ...settings }),
+      ...mapVideoBlock({ apiKey: 'test-key', prompt: 'A cinematic sunrise', ...settings }),
       provider: settings.provider,
     })
     expect(request.body).toMatchObject(payload)
@@ -281,7 +293,7 @@ describe('extractBlockParams', () => {
 
   it('sends the model default for a Runway setting the start frame endpoint rejects', () => {
     const request = buildDirectVideoRequest({
-      ...serializeVideoBlock({
+      ...mapVideoBlock({
         provider: 'runway',
         apiKey: 'test-key',
         model: 'kling_4',

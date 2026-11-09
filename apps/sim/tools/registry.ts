@@ -6573,14 +6573,7 @@ import {
   vercelUpdateProjectTool,
   vercelVerifyProjectDomainTool,
 } from '@/tools/vercel'
-import {
-  falaiVideoTool,
-  higgsfieldVideoTool,
-  lumaVideoTool,
-  minimaxVideoTool,
-  runwayVideoTool,
-  veoVideoTool,
-} from '@/tools/video'
+import { falaiVideoTool } from '@/tools/video'
 import { visionTool, visionToolV2 } from '@/tools/vision'
 import {
   wealthboxReadContactTool,
@@ -11409,11 +11402,6 @@ export const tools: Record<string, ExecutableToolConfig> = {
   tts_google: googleTtsTool,
   tts_azure: azureTtsTool,
   tts_playht: playhtTtsTool,
-  video_runway: runwayVideoTool,
-  video_veo: veoVideoTool,
-  video_luma: lumaVideoTool,
-  video_higgsfield: higgsfieldVideoTool,
-  video_minimax: minimaxVideoTool,
   video_falai: falaiVideoTool,
   s3_get_object: s3GetObjectTool,
   s3_put_object: s3PutObjectTool,

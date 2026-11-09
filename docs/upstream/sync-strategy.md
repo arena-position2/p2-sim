@@ -152,9 +152,22 @@ A name that is still referenced, whose implementation was deleted or whose expor
 
 A hit with no decision blocks the sync, the same way a breaking output path does. Record every hit under "Upstream removals Arena still calls". When the behavior stays, add a row to [manual-regression-checklist.md](manual-regression-checklist.md) in the same sync.
 
+The same block applies when Git auto-merges a shared file and drops an export. Upstream can delete a type or value because nothing upstream imports it, while the Arena file that imports it has no conflict and stays. `HelpFormBody` was that case on the 2026-11-09 sync: `apps/sim/lib/api/contracts/common.ts` lost `export type HelpFormBody`, and Arena `apps/sim/lib/help/support-issue.ts` still imported it. `TS2305` was the only signal.
+
+After `bun install`, run `bun run type-check`. A new dependency that is in `package.json` and missing from `node_modules` is `TS2307` and is fixed by the install, not by a code change. For each remaining missing export:
+
+- Compare the symbol with the pre-sync tip (`git show <pre-sync>:path`).
+- If that tip exported it and an Arena-only caller still imports it, restore the export on upstream's file. Do not take the whole file. Do not copy the type into the caller while the schema or value it names still exists.
+- If upstream renamed it, port the caller.
+- If Arena no longer needs it, drop the caller.
+
+Record the symbol, the Arena caller, and `restore`, `port`, or `drop`. An unclassified missing export blocks the sync. A stale `tsconfig.tsbuildinfo` can keep reporting the export missing after it is restored. Delete that file and run the package `tsc --noEmit` again before treating the error as real.
+
+Generated catalogs taken from upstream omit Arena tools until they are regenerated. Run `bun run generate:tool-metadata`, then `bun run scripts/generate-docs.ts`, before the output-contract diff and before type-check. Do not hand-merge those files. The docs generator then copies `apps/sim/components/icons.tsx` over `apps/docs/components/icons.tsx`. Re-apply an Arena icon that exists only in the docs copy, such as `CostIcon`, or the docs icon map fails type-check.
+
 ### 8. Verify
 
-Use `bun` and `bunx`. Run `bun run type-check`, `bun run check:api-validation`, and the tests that cover each affected customization. Run the build and integration or e2e tests when the sync touches those paths.
+Use `bun` and `bunx`. Run `bun install` before `bun run type-check`, then `bun run check:api-validation`, and the tests that cover each affected customization. Run the build and integration or e2e tests when the sync touches those paths. Classify every missing export from type-check with the rule in step 7.
 
 When a test fails, decide whether the cause is an upstream behavior change, a bad merge, obsolete Arena code, a dependency change, or an intentional product difference. Do not edit a test so that it passes. Tests that encode required product behavior stay.
 
@@ -168,7 +181,7 @@ Write the sync report below before calling the sync done. Merge the integration 
 - **Dependencies.** Read version bumps, breaking changes, peer dependencies, and security updates. Do not downgrade an upstream dependency only to make a conflict disappear.
 - **APIs.** Adapt Arena code to the new upstream API. Keep a compatibility surface when an external consumer still depends on the old one.
 - **UI.** Take upstream's component structure. Re-apply Arena as the minimum: labels, a hub return link, an org-admin gate, and behavior that whitelabeling cannot express.
-- **Generated files.** Do not hand-merge them.
+- **Generated files.** Do not hand-merge them. Take upstream, then regenerate, as in step 7. An Arena-only icon that the docs copy drops must be put back.
 
 ## Standing Arena seams
 

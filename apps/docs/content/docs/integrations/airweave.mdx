@@ -6,6 +6,7 @@ integration:
   color: "#6366F1"
 ---
 
+import { ReferenceDetails } from "@/components/ui/reference-details"
 
 ## Use the block [#usage-instructions]
 
@@ -16,6 +17,8 @@ Search across your synced data sources using Airweave. Supports semantic search 
 ### Airweave Search
 
 Search your synced data collections using Airweave. Supports semantic search with hybrid, neural, or keyword retrieval strategies. Optionally generate AI-powered answers from search results.
+
+<ReferenceDetails>
 
 #### Input
 
@@ -43,5 +46,7 @@ Search your synced data collections using Airweave. Supports semantic search wit
 |   ↳ `breadcrumbs` | array | Navigation path to the result within its source |
 |   ↳ `url` | string | URL to the original content |
 | `completion` | string | AI-generated answer to the query \(when generateAnswer is enabled\) |
+
+</ReferenceDetails>
 
 

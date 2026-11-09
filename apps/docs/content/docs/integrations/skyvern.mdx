@@ -6,6 +6,7 @@ integration:
   color: "#7C3AED"
 ---
 
+import { ReferenceDetails } from "@/components/ui/reference-details"
 
 ## Use the block [#usage-instructions]
 
@@ -16,6 +17,8 @@ Integrate with Skyvern to create UI automation workflows, list existing workflow
 ### Skyvern Create Workflow
 
 Create a new Skyvern browser automation workflow
+
+<ReferenceDetails>
 
 #### Input
 
@@ -44,9 +47,13 @@ Create a new Skyvern browser automation workflow
 | `version` | number | Workflow version number |
 | `agentId` | string | Agent ID \(wpid_...\) associated with the workflow |
 
+</ReferenceDetails>
+
 ### Skyvern List Workflows
 
 List Skyvern workflows for the organization
+
+<ReferenceDetails>
 
 #### Input
 
@@ -75,9 +82,13 @@ List Skyvern workflows for the organization
 |   ↳ `modifiedAt` | string | Last modified timestamp |
 | `count` | number | Number of workflows returned |
 
+</ReferenceDetails>
+
 ### Skyvern Run Workflow
 
 Run a Skyvern workflow by permanent workflow ID (agent_id)
+
+<ReferenceDetails>
 
 #### Input
 
@@ -99,9 +110,13 @@ Run a Skyvern workflow by permanent workflow ID (agent_id)
 | `agentId` | string | Agent ID associated with the run |
 | `agentRunId` | string | Run ID \(wr_...\) — same as workflowRunId |
 
+</ReferenceDetails>
+
 ### Skyvern Get Run
 
 Get the status and output of a Skyvern workflow run
+
+<ReferenceDetails>
 
 #### Input
 
@@ -128,5 +143,7 @@ Get the status and output of a Skyvern workflow run
 | `appUrl` | string | URL to view the run in the Skyvern app |
 | `stepCount` | number | Number of steps executed |
 | `runType` | string | Run type \(e.g. workflow_run\) |
+
+</ReferenceDetails>
 
 

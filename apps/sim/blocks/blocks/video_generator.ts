@@ -327,14 +327,7 @@ function withDirectVideoCatalog(subBlocks: SubBlockConfig[]): SubBlockConfig[] {
       return [
         {
           ...field,
-          options: [
-            { id: 'runway', label: 'Runway' },
-            { id: 'veo', label: 'Google Gemini' },
-            { id: 'luma', label: 'Luma' },
-            { id: 'minimax', label: 'MiniMax' },
-            { id: 'higgsfield', label: 'Higgsfield' },
-            { id: 'falai', label: 'Fal.ai (Multi-Model)' },
-          ],
+          options: [{ id: 'falai', label: 'Fal.ai (Multi-Model)' }],
         },
         ...(['runway', 'veo', 'luma', 'minimax', 'higgsfield'] as const).map(
           (provider): SubBlockConfig => ({
@@ -438,13 +431,7 @@ export const VideoGeneratorBlock: BlockConfig = {
       id: 'provider',
       title: 'Provider',
       type: 'dropdown',
-      options: [
-        // { label: 'Runway Gen-4', id: 'runway' },
-        // { label: 'Google Veo 3', id: 'veo' },
-        // { label: 'Luma Dream Machine', id: 'luma' },
-        // { label: 'MiniMax Hailuo', id: 'minimax' },
-        { label: 'Fal.ai (Multi-Model)', id: 'falai' },
-      ],
+      options: [{ label: 'Fal.ai (Multi-Model)', id: 'falai' }],
       value: () => 'falai',
       required: true,
     },
@@ -1124,28 +1111,15 @@ export const VideoGeneratorBlock: BlockConfig = {
       password: true,
       required: true,
       hideWhenHosted: true,
+      // The fal catalog reads this condition and inserts its setting fields ahead of the key.
+      condition: { field: 'provider', value: 'falai' },
     },
   ],
 
   tools: {
-    access: ['video_runway', 'video_veo', 'video_luma', 'video_minimax', 'video_falai'],
+    access: ['video_falai'],
     config: {
-      tool: (params) => {
-        switch (params.provider) {
-          case 'runway':
-            return 'video_runway'
-          case 'veo':
-            return 'video_veo'
-          case 'luma':
-            return 'video_luma'
-          case 'minimax':
-            return 'video_minimax'
-          case 'falai':
-            return 'video_falai'
-          default:
-            return 'video_runway'
-        }
-      },
+      tool: () => 'video_falai',
       params: (params) => ({
         provider: params.provider,
         apiKey: params.apiKey,
@@ -1235,13 +1209,7 @@ export const VideoGeneratorV2Block: BlockConfig = {
       id: 'provider',
       title: 'Provider',
       type: 'dropdown',
-      options: [
-        // { label: 'Runway Gen-4', id: 'runway' },
-        // { label: 'Google Veo 3', id: 'veo' },
-        // { label: 'Luma Dream Machine', id: 'luma' },
-        // { label: 'MiniMax Hailuo', id: 'minimax' },
-        { label: 'Fal.ai (Multi-Model)', id: 'falai' },
-      ],
+      options: [{ label: 'Fal.ai (Multi-Model)', id: 'falai' }],
       commandSearchable: true,
       value: () => 'falai',
       required: true,
@@ -1888,27 +1856,14 @@ export const VideoGeneratorV2Block: BlockConfig = {
       password: true,
       required: true,
       hideWhenHosted: true,
+      // The fal catalog reads this condition and inserts its setting fields ahead of the key.
+      condition: { field: 'provider', value: 'falai' },
     },
   ],
   tools: {
-    access: ['video_runway', 'video_veo', 'video_luma', 'video_minimax', 'video_falai'],
+    access: ['video_falai'],
     config: {
-      tool: (params) => {
-        switch (params.provider) {
-          case 'runway':
-            return 'video_runway'
-          case 'veo':
-            return 'video_veo'
-          case 'luma':
-            return 'video_luma'
-          case 'minimax':
-            return 'video_minimax'
-          case 'falai':
-            return 'video_falai'
-          default:
-            return 'video_runway'
-        }
-      },
+      tool: () => 'video_falai',
       params: (params) => {
         const model = params.provider === 'falai' ? getFalVideoModel(params.model) : undefined
         const useFalFields = model && !model.legacyId
@@ -2009,7 +1964,7 @@ export const VideoGeneratorV3Block: BlockConfig = {
   name: 'Video Generator',
   description: 'Generate videos from text using AI',
   longDescription:
-    'Generate high-quality videos from text prompts using leading AI providers. Supports Runway, Google Gemini, Luma, MiniMax, Higgsfield, and Fal.ai multi-model generation with provider-specific durations, aspect ratios, resolutions, prompt optimization, and native audio controls.',
+    'Generate high-quality videos from text prompts via hosted Fal.ai. Supports multiple models (including Veo, Sora, Kling, MiniMax, WAN, and LTX), aspect ratios, resolutions, prompt optimization, and native audio controls.',
   docsLink: 'https://docs.sim.ai/integrations/video_generator',
   category: 'blocks',
   integrationType: IntegrationType.AI,
@@ -2021,12 +1976,9 @@ export const VideoGeneratorV3Block: BlockConfig = {
   ),
   tools: {
     ...VideoGeneratorV2Block.tools,
-    access: [...VideoGeneratorV2Block.tools.access, 'video_higgsfield'],
+    access: ['video_falai'],
     config: {
-      tool: (params) =>
-        params.provider === 'higgsfield'
-          ? 'video_higgsfield'
-          : (VideoGeneratorV2Block.tools.config?.tool(params) ?? 'video_runway'),
+      tool: () => 'video_falai',
       params: (params) => {
         if (params.provider === 'falai') {
           const falParams = VideoGeneratorV2Block.tools.config?.params?.(params) ?? params
@@ -2097,7 +2049,7 @@ export const VideoGeneratorV3Block: BlockConfig = {
     ...VideoGeneratorV2Block.inputs,
     provider: {
       type: 'string',
-      description: 'Video generation provider (runway, veo, luma, minimax, higgsfield, falai)',
+      description: 'Video generation provider (falai)',
     },
     duration: { type: 'number', description: 'Duration for the selected provider model' },
     aspectRatio: {

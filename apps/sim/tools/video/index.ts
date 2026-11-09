@@ -5,11 +5,20 @@ import { minimaxVideoTool } from '@/tools/video/minimax'
 import { runwayVideoTool } from '@/tools/video/runway'
 import { veoVideoTool } from '@/tools/video/veo'
 
-export {
+/**
+ * Upstream video providers Arena does not offer. Importing them keeps the modules
+ * in the tree for the next sync; the registry only registers Fal.ai.
+ */
+const hiddenVideoTools = [
   runwayVideoTool,
   veoVideoTool,
   lumaVideoTool,
   minimaxVideoTool,
-  falaiVideoTool,
   higgsfieldVideoTool,
+]
+
+if (hiddenVideoTools.some((tool) => tool.id === falaiVideoTool.id)) {
+  throw new Error('Fal.ai cannot be a hidden video provider')
 }
+
+export { falaiVideoTool }

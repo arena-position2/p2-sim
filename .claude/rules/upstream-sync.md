@@ -33,6 +33,8 @@ A removed path or a type change blocks the sync until an alias still writes the 
 
 Also diff deleted files (`git diff --diff-filter=D --name-only origin/version-6.2-main...HEAD`) against Local Copilot callers: `MOTHERSHIP_DELEGATED_TOOL_NAMES`, the copilot prompt, and `@/lib/mothership` / `@/lib/copilot` imports from `apps/sim/local-copilot` and `apps/sim/ee`. A name Arena still calls whose implementation disappeared blocks the sync until the report records `port`, `wrapper`, or `drop`. That check is step 7 of the strategy.
 
+A clean auto-merge can drop an export Arena still imports. `HelpFormBody` was that case on the 2026-11-09 sync. Run `bun install`, then `bun run type-check`. Restore the export on upstream's file when the pre-sync tip had it and an Arena-only caller remains. Regenerate tool and integration catalogs after taking upstream's generated files. An unclassified missing export blocks the sync.
+
 ## Any other task
 
 Do not treat `main` as the product branch. Do not overwrite Arena behavior while editing an upstream file.

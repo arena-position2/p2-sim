@@ -1068,14 +1068,7 @@ const INSTAGRAM_TOOL_IDS = [
   'instagram_publish_video',
 ] as const
 
-const VIDEO_TOOL_IDS = [
-  'video_falai',
-  'video_higgsfield',
-  'video_luma',
-  'video_minimax',
-  'video_runway',
-  'video_veo',
-] as const
+const VIDEO_TOOL_IDS = ['video_falai'] as const
 
 const A2A_TOOL_IDS = [
   'a2a_cancel_task',

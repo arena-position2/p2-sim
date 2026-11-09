@@ -1119,6 +1119,7 @@ Creates a new DNS record for a zone.
 |   ↳ `is_glue` | boolean | Whether this A or AAAA record is glue for a subdomain NS delegation. See \[Glue records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records#glue-records). |
 |   ↳ `shadowed_by` | array | IDs of the NS records that shadow this record. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
 |   ↳ `shadowed_records_count` | number | Number of records shadowed by this NS delegation. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
+|   ↳ `source` | string | Where the DNS record metadata originated. |
 | `modified_on` | string | When the record was last modified. |
 | `proxiable` | boolean | Whether the record can be proxied by Cloudflare or not. |
 | `tags_modified_on` | string | When the record tags were last modified. Omitted if there are no tags. |
@@ -3715,6 +3716,7 @@ Retrieves details for a specific DNS record in the zone.
 |   ↳ `is_glue` | boolean | Whether this A or AAAA record is glue for a subdomain NS delegation. See \[Glue records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records#glue-records). |
 |   ↳ `shadowed_by` | array | IDs of the NS records that shadow this record. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
 |   ↳ `shadowed_records_count` | number | Number of records shadowed by this NS delegation. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
+|   ↳ `source` | string | Where the DNS record metadata originated. |
 | `modified_on` | string | When the record was last modified. |
 | `proxiable` | boolean | Whether the record can be proxied by Cloudflare or not. |
 | `tags_modified_on` | string | When the record tags were last modified. Omitted if there are no tags. |
@@ -6063,6 +6065,7 @@ Lists DNS records for a specific zone.
 |     ↳ `is_glue` | boolean | Whether this A or AAAA record is glue for a subdomain NS delegation. See \[Glue records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records#glue-records). |
 |     ↳ `shadowed_by` | array | IDs of the NS records that shadow this record. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
 |     ↳ `shadowed_records_count` | number | Number of records shadowed by this NS delegation. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
+|     ↳ `source` | string | Where the DNS record metadata originated. |
 |   ↳ `modified_on` | string | When the record was last modified. |
 |   ↳ `proxiable` | boolean | Whether the record can be proxied by Cloudflare or not. |
 |   ↳ `tags_modified_on` | string | When the record tags were last modified. Omitted if there are no tags. |
@@ -7966,6 +7969,7 @@ Updates an existing DNS record for a zone.
 |   ↳ `is_glue` | boolean | Whether this A or AAAA record is glue for a subdomain NS delegation. See \[Glue records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records#glue-records). |
 |   ↳ `shadowed_by` | array | IDs of the NS records that shadow this record. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
 |   ↳ `shadowed_records_count` | number | Number of records shadowed by this NS delegation. See \[Shadowed records\]\(https://developers.cloudflare.com/dns/manage-dns-records/reference/shadowed-records). |
+|   ↳ `source` | string | Where the DNS record metadata originated. |
 | `modified_on` | string | When the record was last modified. |
 | `proxiable` | boolean | Whether the record can be proxied by Cloudflare or not. |
 | `tags_modified_on` | string | When the record tags were last modified. Omitted if there are no tags. |

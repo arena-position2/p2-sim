@@ -6,6 +6,7 @@ integration:
   color: "#F4B400"
 ---
 
+import { ReferenceDetails } from "@/components/ui/reference-details"
 
 ## Use the block [#usage-instructions]
 
@@ -16,6 +17,8 @@ Internal Position2 presentation helpers: fetch template JSON schemas, browse the
 ### Get Template Schema
 
 Return the JSON schema for a presentation template (e.g. position2_2026)
+
+<ReferenceDetails>
 
 #### Input
 
@@ -29,9 +32,13 @@ Return the JSON schema for a presentation template (e.g. position2_2026)
 | --------- | ---- | ----------- |
 | `schema` | json | Full presentation template schema \(slides, blocks, shapeIds, etc.\) |
 
+</ReferenceDetails>
+
 ### Get Icons Library
 
 Return the presentation icon catalog (ids, labels, categories, tags, and image URLs) for template slides
+
+<ReferenceDetails>
 
 #### Input
 
@@ -49,9 +56,13 @@ Return the presentation icon catalog (ids, labels, categories, tags, and image U
 | `icons` | json | Icon entries \(id, label, category, color, tags, pngUrl, optional svgUrl\) |
 | `count` | number | Number of icons returned |
 
+</ReferenceDetails>
+
 ### Get P2 Team Members
 
 Returns the list of Position2 (P2) team members — name, designation, and profile image URL — for use when populating team or speaker slides. Optionally filter by name or designation keyword.
+
+<ReferenceDetails>
 
 #### Input
 
@@ -65,5 +76,7 @@ Returns the list of Position2 (P2) team members — name, designation, and profi
 | --------- | ---- | ----------- |
 | `users` | array | List of matched P2 team members. |
 | `total` | number | Total number of users returned. |
+
+</ReferenceDetails>
 
 

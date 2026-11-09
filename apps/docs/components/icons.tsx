@@ -1,5 +1,7 @@
 import type { SVGProps } from 'react'
 import { useId } from 'react'
+import { cn } from '@sim/emcn'
+import Image, { type ImageProps } from 'next/image'
 
 interface FlowIconProps extends SVGProps<SVGSVGElement> {}
 
@@ -264,38 +266,56 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
-export function AgentIcon(props: SVGProps<SVGSVGElement>) {
+export function Spinner() {
   return (
-    <svg
+    <div className='absolute top-0 right-0 bottom-0 flex items-center justify-center'>
+      <svg
+        className='-ml-1 mr-3 h-5 w-5 animate-spin text-gray-700'
+        xmlns='http://www.w3.org/2000/svg'
+        fill='none'
+        viewBox='0 0 24 24'
+      >
+        <circle
+          className='opacity-25'
+          cx='12'
+          cy='12'
+          r='10'
+          stroke='currentColor'
+          strokeWidth='4'
+        />
+        <path
+          className='opacity-75'
+          fill='currentColor'
+          d='M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z'
+        />
+      </svg>
+    </div>
+  )
+}
+
+/**
+ * Arena Agent glyph — vimi sparkle PNG on the purple→teal gradient.
+ * Rendered via next/image so tiled surfaces that opt in with `[&_img]:size-full`
+ * get the same full-bleed presence as Image Generator's colored tile.
+ */
+export function AgentIcon({
+  className,
+  style,
+  ...props
+}: Omit<ImageProps, 'src' | 'alt' | 'fill'>) {
+  return (
+    <Image
+      src='https://arenav2image.s3.us-west-1.amazonaws.com/vimi-sparkle.png'
+      alt='Agent'
+      width={14}
+      height={14}
       {...props}
-      width='21'
-      height='24'
-      viewBox='0 0 21 24'
-      fill='none'
-      xmlns='http://www.w3.org/2000/svg'
-    >
-      <path
-        d='M15.67 9.25H4.67C2.64 9.25 1 10.89 1 12.92V18.42C1 20.44 2.64 22.08 4.67 22.08H15.67C17.69 22.08 19.33 20.44 19.33 18.42V12.92C19.33 10.89 17.69 9.25 15.67 9.25Z'
-        stroke='currentColor'
-        strokeWidth='2'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-      />
-      <path
-        d='M10.17 5.58C11.18 5.58 12 4.76 12 3.75C12 2.74 11.18 1.92 10.17 1.92C9.15 1.92 8.33 2.74 8.33 3.75C8.33 4.76 9.15 5.58 10.17 5.58Z'
-        stroke='currentColor'
-        strokeWidth='2'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-      />
-      <path
-        d='M10.17 5.59V9.25M7.42 16.59V14.75M12.92 14.75V16.59'
-        stroke='currentColor'
-        strokeWidth='2'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-      />
-    </svg>
+      style={{
+        backgroundImage: 'linear-gradient(179.65deg, #7B4796 -0.59%, #017496 102.42%)',
+        ...style,
+      }}
+      className={cn('box-border size-full rounded-[4px] object-contain p-[20%]', className)}
+    />
   )
 }
 
@@ -680,6 +700,21 @@ export function CodeIcon(props: SVGProps<SVGSVGElement>) {
         strokeLinecap='round'
         strokeLinejoin='round'
       />
+    </svg>
+  )
+}
+
+export function DevelopmentIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+      <path
+        d='M8 6L4 10L8 14M16 6L20 10L16 14M14 4L10 20'
+        stroke='currentColor'
+        strokeWidth='2'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+      />
+      <path d='M3 19H21' stroke='currentColor' strokeWidth='2' strokeLinecap='round' />
     </svg>
   )
 }
@@ -2038,6 +2073,32 @@ export function AirtableIcon(props: SVGProps<SVGSVGElement>) {
           fill='#000000'
         />
       </g>
+    </svg>
+  )
+}
+
+export function AirweaveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      width='143'
+      height='143'
+      viewBox='0 0 143 143'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      <path
+        d='M89.89 128.87C79.92 123.34 66.75 115.15 60.57 107.64L60.04 107.02C58.78 105.5 57.48 104.01 56.17 102.59C51.92 97.96 47.36 93.8 42.65 90.2C40.74 88.75 38.77 87.35 36.81 86.08C35.8 85.42 34.83 84.82 33.92 84.27C31.62 82.9 28.83 82.53 26.27 83.25C23.84 83.94 21.89 85.54 20.76 87.75C18.56 92.03 20.08 97.33 24.2 99.81C27.52 101.79 30.76 104.11 33.84 106.72C34.24 107.05 34.4 107.58 34.26 108.06C33.13 112.19 32 118.96 31.57 121.67C30.64 127.43 33.47 133.08 38.6 135.75L38.78 135.85C41.02 137 43.65 136.95 45.82 135.7C47.99 134.46 49.35 132.23 49.48 129.73C49.54 128.66 49.6 127.58 49.68 126.59C49.72 126.06 50.04 125.63 50.53 125.46C50.68 125.41 50.85 125.37 51 125.37C51.36 125.37 51.68 125.51 51.95 125.78C56.24 130.19 60.88 134.17 65.72 137.63C70.37 140.95 75.87 142.71 81.64 142.71C83.74 142.71 85.84 142.47 87.89 142L88.12 141.94C90.99 141.27 93.03 139.02 93.45 136.09C93.87 133.15 92.45 130.32 89.87 128.88H89.86L89.89 128.87Z'
+        fill='currentColor'
+      />
+      <path
+        d='M142.55 58.17L142.53 58.06C142.04 55.59 140.12 53.71 137.6 53.25C135.11 52.81 132.75 53.86 131.48 55.99L131.41 56.11C126.7 64.16 120.06 71.61 111.65 78.3C109.45 80.05 107.29 81.9 105.23 83.81C103.64 85.27 101.27 85.53 99.45 84.42C97.65 83.33 95.85 82.14 94.11 80.87C90.33 78.12 86.68 74.95 83.28 71.43C81.5 69.6 79.8 67.69 78.19 65.73C76.04 63.12 73.75 60.55 71.37 58.13C66.32 52.99 56.61 45.91 53.75 43.88C53.38 43.63 53.16 43.24 53.1 42.8C53.05 42.36 53.16 41.95 53.45 41.61C55.27 39.43 57 37.18 58.57 34.92C60.24 32.53 60.79 29.6 60.09 26.89C59.41 24.25 57.64 22.11 55.13 20.88C50.91 18.79 45.9 20.1 43.23 23.93C40.84 27.36 38.02 30.73 34.87 33.93C34.57 34.23 34.13 34.34 33.72 34.19C30.52 33.14 27.23 32.29 23.95 31.66C23.71 31.62 23.35 31.55 22.91 31.5C16.41 30.53 10.11 33.78 7.22 39.57L7.12 39.75C6.18 41.63 6.27 43.83 7.32 45.67C8.4 47.52 10.33 48.7 12.46 48.82C13.46 48.87 14.44 48.94 15.37 49C15.8 49.03 16.14 49.28 16.3 49.69C16.45 50.11 16.37 50.54 16.07 50.85C12.15 54.88 8.61 59.2 5.53 63.69C1.14 70.08 -0.48 78.21 1.08 85.98L1.1 86.1C1.7 89.07 4.05 91.2 7.08 91.53C9.98 91.84 12.61 90.32 13.76 87.67L13.83 87.51C18.69 75.86 26.76 65.52 37.79 56.75C38.32 56.34 39.01 56.28 39.57 56.59C45.34 59.77 50.86 63.9 55.97 68.89C56.6 69.49 56.61 70.5 56.02 71.13C53.48 73.81 51.09 76.61 48.91 79.47C47.21 81.71 47.53 84.89 49.62 86.74L53.33 90L53.28 90.04C53.86 90.56 54.45 91.07 55.03 91.59L55.81 92.19C56.93 93.18 58.35 93.64 59.84 93.49C61.3 93.34 62.67 92.56 63.56 91.38C65.14 89.29 66.86 87.25 68.66 85.3C68.96 84.97 69.37 84.8 69.81 84.79C70.27 84.79 70.63 84.94 70.92 85.23C75.81 90.06 81.11 94.37 86.68 98C88.86 99.42 89.5 102.26 88.13 104.48C86.92 106.45 85.77 108.49 84.72 110.54C83.5 112.92 83.3 115.74 84.17 118.26C85 120.68 86.71 122.59 88.98 123.64C90.25 124.23 91.6 124.53 92.99 124.53C96.51 124.53 99.68 122.6 101.29 119.45C102.73 116.61 104.42 113.8 106.28 111.13C107.37 109.56 109.36 108.84 111.26 109.32C115.26 110.36 120.64 111.42 124.45 112.14C128.31 112.86 132.12 111.02 133.96 107.58L134.14 107.23C135.52 104.63 135.53 101.51 134.16 98.89C132.79 96.25 130.18 94.47 127.21 94.12C126.48 94.03 125.78 93.95 125.11 93.86C124.97 93.84 124.85 93.82 124.74 93.8L123.36 93.48L124.36 92.45C124.43 92.38 124.53 92.28 124.66 92.19C128.77 88.8 132.57 85.2 135.96 81.47C141.67 75.2 144.12 66.5 142.52 58.17H142.53H142.55Z'
+        fill='currentColor'
+      />
+      <path
+        d='M56.65 14.34C65.59 19.63 77.41 27.37 82.98 34.17C83.64 34.95 84.3 35.74 84.95 36.49C86.16 37.88 86.3 39.87 85.3 41.42C83.49 44.21 81.41 46.96 79.14 49.59C77.47 51.51 77.41 54.31 78.98 56.25L79.04 56.32C79.23 56.56 79.43 56.81 79.61 57.04C81.29 59.18 83.08 61.22 84.92 63.14C85.9 64.16 87.22 64.73 88.64 64.73L88.76 65.53L88.74 64.73C90.21 64.7 91.62 64.05 92.6 62.93C94.84 60.4 96.92 57.74 98.83 55.06C100.13 53.22 102.63 52.8 104.53 54.11C106.46 55.44 108.47 56.71 110.46 57.88C112.79 59.25 115.61 59.51 118.17 58.56C120.75 57.6 122.76 55.57 123.66 52.95C125.06 48.91 123.26 44.25 119.38 41.91C116.76 40.31 114.15 38.52 111.67 36.58C110.38 35.56 109.83 33.88 110.3 32.29C111.44 28.3 112.48 23.12 113.15 19.48C113.84 15.73 112.15 11.88 108.94 9.94L108.56 9.73C105.87 8.13 102.59 8.01 99.77 9.41C96.92 10.82 95.03 13.54 94.69 16.67L94.66 16.87C94.62 17.25 94.38 17.55 94.02 17.66C93.65 17.78 93.29 17.69 93.02 17.43C89 13.14 84.74 9.26 80.31 5.86C74.37 1.31 66.78 -0.58 59.49 0.68L59.18 0.73C56.11 1.27 53.75 3.6 53.19 6.68C52.64 9.73 53.99 12.72 56.67 14.3H56.66L56.65 14.34Z'
+        fill='currentColor'
+      />
     </svg>
   )
 }
@@ -6680,6 +6741,23 @@ export function LitellmIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+export const SambaNovaIcon: React.FC<{ className?: string }> = ({ className }) => {
+  return (
+    <div className={`relative ${className || 'h-4 w-4'}`}>
+      <Image
+        src={
+          'https://sambanova.ai/hs-fs/hubfs/sambanova_favicon.png?width=200&name=sambanova_favicon.png'
+        }
+        alt='SambaNova'
+        fill
+        className='rounded-sm object-contain'
+        sizes='(max-width: 768px) 16px, 20px'
+        priority={false}
+      />
+    </div>
+  )
+}
+
 export function PosthogIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -7054,6 +7132,23 @@ export function SftpIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+export function SkyvernIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+      <path
+        d='M4 14.5C7.5 11 10.5 9.5 13.5 9.5C16 9.5 18 10.5 20 12.5C18.5 16 15.5 18.5 11.5 19.5C8 20.3 5.5 19 4 14.5Z'
+        fill='currentColor'
+      />
+      <path
+        d='M6 8.5C9 6.5 12 5.5 15 6C17.5 6.4 19.5 7.5 21 9.5C19 8 16.5 7.5 14 8C11 8.5 8.5 9.5 6 11.5C5.5 10.2 5.7 9.2 6 8.5Z'
+        fill='currentColor'
+        opacity='0.75'
+      />
+      <circle cx='17.5' cy='8' r='1.25' fill='currentColor' />
+    </svg>
+  )
+}
+
 export function ApifyIcon(props: SVGProps<SVGSVGElement>) {
   const id = useId()
   const clipId = `apify_clip_${id}`
@@ -7113,6 +7208,210 @@ export function RDSIcon(props: SVGProps<SVGSVGElement>) {
           fill='currentColor'
         />
       </g>
+    </svg>
+  )
+}
+
+export function PresentationIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      xmlns='http://www.w3.org/2000/svg'
+      viewBox='0 0 48 48'
+      width='96px'
+      height='96px'
+    >
+      <path
+        fill='#F4B400'
+        d='M37,45H11c-1.657,0-3-1.343-3-3V6c0-1.657,1.343-3,3-3h19l10,10v29C40,43.657,38.657,45,37,45z'
+      />
+      <path fill='#FFF9C4' d='M40 13L30 13 30 3z' />
+      <path fill='#F57F17' d='M30 13L40 23 40 13z' />
+      <path fill='#FFFDE7' d='M15 23H33V25H15zM15 27H33V29H15zM15 31H33V33H15zM15 35H25V37H15z' />
+    </svg>
+  )
+}
+
+/**
+ * Arena product mark. Sized like {@link AgentIcon}: `viewBox` + `size-full`,
+ * no hardcoded width/height, so toolbar tiles and canvas chips control the box.
+ */
+export function ArenaIcon({ className, style, ...props }: SVGProps<SVGSVGElement>) {
+  const uid = useId()
+  const mask0 = `${uid}-m0`
+  const mask1 = `${uid}-m1`
+  const mask2 = `${uid}-m2`
+  const mask3 = `${uid}-m3`
+  const mask4 = `${uid}-m4`
+  const mask5 = `${uid}-m5`
+  const mask6 = `${uid}-m6`
+
+  return (
+    <svg
+      viewBox='0 0 34 34'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      role='img'
+      aria-label='Arena'
+      className={cn('box-border size-full', className)}
+      style={style}
+      {...props}
+    >
+      <path
+        d='M29 0.5C31.4853 0.5 33.5 2.51472 33.5 5V29C33.5 31.4853 31.4853 33.5 29 33.5H5C2.51472 33.5 0.5 31.4853 0.5 29V5C0.5 2.51472 2.51472 0.5 5 0.5H29Z'
+        fill='#F3F8FE'
+      />
+      <path
+        d='M29 0.5C31.4853 0.5 33.5 2.51472 33.5 5V29C33.5 31.4853 31.4853 33.5 29 33.5H5C2.51472 33.5 0.5 31.4853 0.5 29V5C0.5 2.51472 2.51472 0.5 5 0.5H29Z'
+        stroke='white'
+      />
+      <mask
+        id={mask0}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x='19'
+        y='19'
+        width='8'
+        height='8'
+      >
+        <path
+          d='M25.2616 19.1885L26.5746 23.2843C27.1901 25.2505 25.5191 27.1259 23.4092 26.5892L19.2812 25.6202L25.2616 19.1885Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask0})`}>
+        <path d='M19.2812 19.1885H26.7038V26.6823H19.2812V19.1885Z' fill='#93CB99' />
+      </g>
+      <mask
+        id={mask1}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x='14'
+        y='5'
+        width='9'
+        height='6'
+      >
+        <path
+          d='M17.1793 5.87803C18.5867 4.44847 20.8732 5.0736 21.4886 6.95018L22.5442 10.4344L14.7163 8.55781L17.1793 5.87803Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask1})`}>
+        <path d='M14.7163 5.09424H22.5442V10.4344H14.7163V5.09424Z' fill='#93CB99' />
+      </g>
+      <mask
+        id={mask2}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x='5'
+        y='14'
+        width='7'
+        height='10'
+      >
+        <path
+          d='M8.73045 14.9883L11.457 23.7424L6.97116 22.4922C5.03657 22.0464 4.33286 19.5446 5.74027 18.1151L8.73045 14.9883Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask2})`}>
+        <path d='M5 14.9883H11.457V23.7424H5V14.9883Z' fill='#93CB99' />
+      </g>
+      <mask
+        id={mask3}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x='7'
+        y='7'
+        width='8'
+        height='8'
+      >
+        <path
+          d='M7.59534 10.8794C7.06817 8.91435 8.73919 7.03899 10.7608 7.4848L14.7195 8.55697L8.73919 14.9887L7.59534 10.8794Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask3})`}>
+        <path d='M7.49707 7.41846H14.7195V14.9887H7.49707V7.41846Z' fill='#93CDEC' />
+      </g>
+      <mask
+        id={mask4}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x='22'
+        y='10'
+        width='7'
+        height='10'
+      >
+        <path
+          d='M22.543 10.4321L27.0289 11.5939C28.9634 12.041 29.6671 14.5427 28.2597 15.971L25.2695 19.1875L22.543 10.4321Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask4})`}>
+        <path d='M22.543 10.4321H29V19.1875H22.543V10.4321Z' fill='#93CDEC' />
+      </g>
+      <mask
+        id={mask5}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x='8'
+        y='8'
+        width='18'
+        height='18'
+      >
+        <path
+          d='M14.7157 8.55859L22.5435 10.4352L25.27 19.1893L19.2885 25.621L11.4607 23.7457L8.73535 14.9904L14.7157 8.55859Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask5})`}>
+        <path d='M8.73535 8.55859H25.27V25.621H8.73535V8.55859Z' fill='#55BE8C' />
+      </g>
+      <mask
+        id={mask6}
+        style={{ maskType: 'luminance' }}
+        maskUnits='userSpaceOnUse'
+        x={11}
+        y={23}
+        width={9}
+        height='6'
+      >
+        <path
+          d='M11.4546 23.7451L19.2812 25.6205L16.9065 28.1222C15.4991 29.5518 13.2126 28.9266 12.5972 27.0501L11.4546 23.7451Z'
+          fill='white'
+        />
+      </mask>
+      <g mask={`url(#${mask6})`}>
+        <path d='M11.4546 23.7451H19.2812V28.906H11.4546V23.7451Z' fill='#93CDEC' />
+      </g>
+    </svg>
+  )
+}
+export function SpyfuIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      width='32'
+      height='32'
+      viewBox='0 0 32 32'
+      xmlns='http://www.w3.org/2000/svg'
+      fill='none'
+    >
+      <rect width='32' height='32' rx='8' fill='#14213D' />
+      <path
+        d='M8 20C8 14.477 12.477 10 18 10C22.418 10 26 13.582 26 18C26 22.418 22.418 26 18 26'
+        stroke='#FCA311'
+        strokeWidth='2'
+        strokeLinecap='round'
+      />
+      <path
+        d='M8 20C8 22.2091 9.79086 24 12 24H18'
+        stroke='#E5E5E5'
+        strokeWidth='2'
+        strokeLinecap='round'
+      />
+      <circle cx='12' cy='24' r='2' fill='#E5E5E5' />
+      <circle cx='18' cy='26' r='2' fill='#FCA311' />
     </svg>
   )
 }
@@ -7587,17 +7886,6 @@ export function AgiloftIcon(props: SVGProps<SVGSVGElement>) {
       <path d='M47.3,8.6H8.6L17.2,0h30.1V8.6z' fill='#001028' />
       <path d='M0,25.7h47.3V30L43,34.4H0V25.7z' fill='#4A6587' />
       <path d='M0,38.7h38.8l-8.6,8.5H0V38.7z' fill='#6D8DAF' />
-    </svg>
-  )
-}
-
-export function SemrushIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...props} xmlns='http://www.w3.org/2000/svg' viewBox='0 0 43.3 26'>
-      <path
-        fill='#FF642D'
-        d='M37.4,12.8c0,0.8-0.4,0.9-1.4,0.9c-1.1,0-1.3-0.2-1.4-1c-0.2-2.1-1.6-3.9-4-4c-0.7-0.1-0.9-0.3-0.9-1.3 c0-0.9,0.1-1.3,0.8-1.3C34.5,6.2,37.4,9.5,37.4,12.8z M43.3,12.8c0-6.2-4.2-12.8-14-12.8H10C9.6,0,9.3,0.2,9.3,0.6 c0,0.2,0.1,0.4,0.3,0.5c0.7,0.6,1.7,1.2,3.1,1.9c1.3,0.7,2.4,1.1,3.4,1.5c0.4,0.2,0.6,0.4,0.6,0.6c0,0.3-0.2,0.6-0.7,0.6H0.7 C0.2,5.6,0,5.9,0,6.2c0,0.3,0.1,0.5,0.3,0.7c1.2,1.3,3.2,2.9,6.1,4.7c2.5,1.6,5.7,3.3,8.2,4.5c0.4,0.2,0.6,0.4,0.6,0.7 c0,0.3-0.2,0.5-0.7,0.5H7.4c-0.4,0-0.6,0.2-0.6,0.5c0,0.2,0.1,0.4,0.3,0.6c1.6,1.5,4.2,3,7.6,4.5c4.6,1.9,9.2,3.1,14.4,3.1 C39,26,43.3,18.6,43.3,12.8z M30.4,21.7c-4.8,0-8.9-3.9-8.9-8.9c0-4.8,4-8.7,8.9-8.7c5,0,8.9,3.9,8.9,8.7 C39.3,17.7,35.4,21.7,30.4,21.7z'
-      />
     </svg>
   )
 }
@@ -8150,6 +8438,24 @@ export function CursorIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+export function SemrushIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      xmlns='http://www.w3.org/2000/svg'
+      width='30'
+      height='18'
+      viewBox='0 0 30 18'
+      fill='none'
+    >
+      <path
+        d='M25.87 8.88c0 .56-.28.65-.98.65-.75 0-.89-.12-.97-.68-.14-1.45-1.11-2.67-2.75-2.8-.5-.04-.65-.24-.65-.89 0-.6.08-.87.56-.87a4.69 4.69 0 014.8 4.6zm4.13 0C30 4.56 27.08 0 20.33 0H6.95c-.55 0-.65.48-.17.78 1.22.8 2.93 1.71 4.44 2.29.64.23.5.8-.13.8H.5c-.52 0-.67.44-.24.83a37.05 37.05 0 009.84 6.4c.64.28.51.85-.12.85H5.22c-.54 0-.68.44-.24.8C7.54 14.67 13.5 18 20.33 18S30 12.87 30 8.88zM21.08 15a6.16 6.16 0 01-6.14-6.14 6.1 6.1 0 016.14-6.03 6.08 6.08 0 110 12.17z'
+        fill='#FF642D'
+      />
+    </svg>
+  )
+}
+
 export function DubIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...props} viewBox='0 0 64 64' fill='none' xmlns='http://www.w3.org/2000/svg'>
@@ -8204,6 +8510,25 @@ export function DuckDuckGoIcon(props: SVGProps<SVGSVGElement>) {
         d='M-23-32c-5-6-18-1-15 7 1-4 8-10 15-7m32 0c1-6 11-7 14-1-4-2-10-2-14 1m-33 16a2 2 0 1 1 0 1m-8 3a7 7 0 1 0 0-1m52-6a2 2 0 1 1 0 1m-6 3a6 6 0 1 0 0-1'
         fill='#148'
       />
+    </svg>
+  )
+}
+
+export function FigmaIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      xmlns='http://www.w3.org/2000/svg'
+      stroke='currentColor'
+      strokeWidth='2'
+      strokeLinecap='round'
+      strokeLinejoin='round'
+    >
+      <path d='M12 2H8a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h4V2z' />
+      <path d='M12 10H8a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h4v-8z' />
+      <path d='M20 2h-4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h4V2z' />
+      <path d='M20 10h-4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h4v-8z' />
+      <path d='M12 18H8a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h4v-6z' />
     </svg>
   )
 }
@@ -9602,6 +9927,25 @@ export function CloudflareIcon(props: SVGProps<SVGSVGElement>) {
       <path
         fill='#faae40'
         d='M381 224c-4 0-6-1-7 1l-5 21c-5 16 3 30 20 31l32 2c4 0 4 6-1 7l-33 1c-36 4-46 39-46 39 0 2 0 3 2 3h113l3-2a81 81 0 0 0-78-103'
+      />
+    </svg>
+  )
+}
+
+export function UnipileIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} xmlns='http://www.w3.org/2000/svg' viewBox='0 0 265 214.96'>
+      <path
+        fill='#45bab9'
+        d='m114.42 117.57-44.717 56.275a14.746 14.746 0 0 1-23.211-.189L3.055 117.381a14.784 14.784 0 0 1 0-18l43.438-56.276a14.746 14.746 0 0 1 23.211-.189L114.42 99.19a14.8 14.8 0 0 1 0 18.38'
+      />
+      <path
+        fill='#43b072'
+        d='m188.6 99.242-44.716-56.278a14.746 14.746 0 0 0-23.211.189L105.42 62.906l28.9 36.332a14.736 14.736 0 0 1 0 18.332l-28.9 36.332 15.253 19.753a14.746 14.746 0 0 0 23.211.189L188.6 117.57a14.736 14.736 0 0 0 0-18.328'
+      />
+      <path
+        fill='#dddf4c'
+        d='m259.984 99.242-44.716-56.278a14.746 14.746 0 0 0-23.211.189l-13.263 17.195 30.932 38.89a14.736 14.736 0 0 1 0 18.332l-30.932 38.89 13.263 17.195a14.746 14.746 0 0 0 23.211.189l44.716-56.274a14.61 14.61 0 0 0 0-18.328'
       />
     </svg>
   )

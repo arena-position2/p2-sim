@@ -9,14 +9,7 @@ import { VideoOperationError } from '@/lib/internal/video/errors'
 import { executeVideoOperation } from '@/lib/internal/video/operations'
 import { FalAIResultError } from '@/lib/media/falai-result'
 
-const VIDEO_TOOL_IDS = new Set([
-  'video_falai',
-  'video_higgsfield',
-  'video_luma',
-  'video_minimax',
-  'video_runway',
-  'video_veo',
-])
+const VIDEO_TOOL_IDS = new Set(['video_falai'])
 
 function parseInput(input: unknown): Response | ReturnType<typeof videoToolBodySchema.parse> {
   let serialized: string

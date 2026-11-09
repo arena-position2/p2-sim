@@ -6,6 +6,7 @@ integration:
   color: "#1877F2"
 ---
 
+import { ReferenceDetails } from "@/components/ui/reference-details"
 
 ## OAuth scopes [#oauth-scopes]
 
@@ -32,6 +33,8 @@ Connect to Facebook Ads API and query campaign performance, ad set metrics, and 
 
 Query Facebook Ads API for campaign performance, ad set metrics, and account insights using natural language. Supports all Position2 Facebook ad accounts.
 
+<ReferenceDetails>
+
 #### Input
 
 | Parameter | Type | Required | Description |
@@ -51,5 +54,7 @@ Query Facebook Ads API for campaign performance, ad set metrics, and account ins
 | `account_id` | string | Facebook ad account ID |
 | `account_name` | string | Facebook ad account name |
 | `query` | string | Original query |
+
+</ReferenceDetails>
 
 
