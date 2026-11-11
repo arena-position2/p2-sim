@@ -1,7 +1,9 @@
 import { useMemo, useRef } from 'react'
 import { Button, cn, Input, Label, Textarea, Tooltip } from '@sim/emcn'
 import { Plus, Trash } from '@sim/emcn/icons'
+import { toStringOrNull } from '@sim/utils/coerce'
 import { generateId } from '@sim/utils/id'
+import { isRecordLike } from '@sim/utils/object'
 import { formatDisplayText } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/formatted-text'
 import { TagDropdown } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/tag-dropdown/tag-dropdown'
 import { getActiveWorkflowSearchHighlight } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/workflow-search-highlight'
@@ -15,8 +17,8 @@ interface EvalMetric {
   name: string
   description: string
   range: {
-    min: number
-    max: number
+    min: number | undefined
+    max: number | undefined
   }
 }
 
@@ -35,6 +37,53 @@ const createDefaultMetric = (): EvalMetric => ({
   description: '',
   range: { min: 0, max: 1 },
 })
+
+/**
+ * Reads a score bound out of an untyped metric. A cleared field is stored as
+ * `undefined` and must stay blank; numeric strings show up from imports.
+ */
+function toOptionalFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  const text = toStringOrNull(value)?.trim()
+  if (!text) return undefined
+  const parsed = Number(text)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function tryParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Stored metrics are not always `EvalMetric[]`: imports and copilot writes hand
+ * back a JSON string, one object, or a row with no `range`. Reading those as an
+ * array throws while the editor is rendering, and the workflow error boundary
+ * replaces the canvas.
+ */
+function toMetrics(value: unknown, fallback: EvalMetric): EvalMetric[] {
+  const parsed = typeof value === 'string' ? tryParseJson(value) : value
+  const items = Array.isArray(parsed) ? parsed : isRecordLike(parsed) ? [parsed] : null
+  if (!items || items.length === 0) return [fallback]
+
+  return items.map((item, index) => {
+    const record = isRecordLike(item) ? item : {}
+    const range = isRecordLike(record.range) ? record.range : {}
+    const id = toStringOrNull(record.id)
+    return {
+      id: id && id.length > 0 ? id : `metric-${index}`,
+      name: toStringOrNull(record.name) ?? '',
+      description: toStringOrNull(record.description) ?? '',
+      range: {
+        min: toOptionalFiniteNumber(range.min),
+        max: toOptionalFiniteNumber(range.max),
+      },
+    }
+  })
+}
 
 export function EvalInput({
   blockId,
@@ -65,7 +114,7 @@ export function EvalInput({
   const value = isPreview ? previewValue : storeValue
 
   const defaultMetric = useMemo(() => createDefaultMetric(), [])
-  const metrics: EvalMetric[] = value || [defaultMetric]
+  const metrics = useMemo(() => toMetrics(value, defaultMetric), [value, defaultMetric])
 
   const getMetricSearchHighlight = (metricIndex: number, metricPath: Array<string | number>) =>
     getActiveWorkflowSearchHighlight({
