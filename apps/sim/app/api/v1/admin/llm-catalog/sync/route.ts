@@ -35,10 +35,17 @@ export const POST = withRouteHandler(async (request) => {
     logger.info('Admin API: Synced LLM provider catalog', { requestId, ...result })
     return singleResponse(result)
   } catch (error) {
+    const err = toError(error)
+    const cause =
+      error instanceof Error && error.cause instanceof Error
+        ? error.cause.message
+        : undefined
     logger.error('Admin API: Failed to sync LLM provider catalog', {
       requestId,
-      error: toError(error),
+      error: err,
+      cause,
     })
-    return adminInternalErrorResponse('Failed to sync LLM provider catalog')
+    const detail = cause ? `${err.message}: ${cause}` : err.message
+    return adminInternalErrorResponse(`Failed to sync LLM provider catalog: ${detail}`)
   }
 })
