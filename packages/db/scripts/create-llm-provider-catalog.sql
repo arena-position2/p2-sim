@@ -46,13 +46,3 @@ CREATE TABLE IF NOT EXISTS llm_model (
 
 CREATE INDEX IF NOT EXISTS llm_model_provider_id_sort_idx
   ON llm_model (provider_id, sort_order);
-
-CREATE TABLE IF NOT EXISTS llm_embedding_model_pricing (
-  id text PRIMARY KEY,
-  pricing jsonb NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS llm_rerank_model_pricing (
-  id text PRIMARY KEY,
-  pricing jsonb NOT NULL
-);

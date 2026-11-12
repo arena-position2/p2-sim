@@ -1,11 +1,7 @@
 import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
-import {
-  EMBEDDING_MODEL_PRICING,
-  PROVIDER_DEFINITIONS,
-  RERANK_MODEL_PRICING,
-} from '@/providers/models'
+import { PROVIDER_DEFINITIONS } from '@/providers/models'
 
 const logger = createLogger('LlmCatalogSync')
 
@@ -14,8 +10,6 @@ export interface LlmCatalogSyncResult {
   modelsInserted: number
   modelsUpdated: number
   modelsDeactivatedMissing: number
-  embeddingsUpserted: number
-  rerankUpserted: number
 }
 
 function iconName(icon: unknown): string | null {
@@ -163,33 +157,11 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
     modelsDeactivatedMissing = deactivated.length
   }
 
-  let embeddingsUpserted = 0
-  for (const [id, pricing] of Object.entries(EMBEDDING_MODEL_PRICING)) {
-    await db.execute(sql`
-      INSERT INTO llm_embedding_model_pricing (id, pricing)
-      VALUES (${id}, ${jsonb(pricing)})
-      ON CONFLICT (id) DO UPDATE SET pricing = EXCLUDED.pricing
-    `)
-    embeddingsUpserted++
-  }
-
-  let rerankUpserted = 0
-  for (const [id, pricing] of Object.entries(RERANK_MODEL_PRICING)) {
-    await db.execute(sql`
-      INSERT INTO llm_rerank_model_pricing (id, pricing)
-      VALUES (${id}, ${jsonb(pricing)})
-      ON CONFLICT (id) DO UPDATE SET pricing = EXCLUDED.pricing
-    `)
-    rerankUpserted++
-  }
-
   const result = {
     providersUpserted,
     modelsInserted,
     modelsUpdated,
     modelsDeactivatedMissing,
-    embeddingsUpserted,
-    rerankUpserted,
   }
   logger.info('LLM catalog sync completed', result)
   return result
