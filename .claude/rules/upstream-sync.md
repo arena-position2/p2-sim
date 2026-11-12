@@ -35,6 +35,8 @@ Also diff deleted files (`git diff --diff-filter=D --name-only origin/version-6.
 
 A clean auto-merge can drop an export Arena still imports. `HelpFormBody` was that case on the 2026-11-09 sync. Run `bun install`, then `bun run type-check`. Restore the export on upstream's file when the pre-sync tip had it and an Arena-only caller remains. Regenerate tool and integration catalogs after taking upstream's generated files. An unclassified missing export blocks the sync.
 
+After those checks, run `bun run test:sanity:suggest` and give the user that command. It names the Arena unit-test batch the diff affects. `bun run test:sanity:affected` runs it. The full `bun run test` suite stays the gate. See [docs/upstream/sanity-batches.md](docs/upstream/sanity-batches.md).
+
 ## Any other task
 
 Do not treat `main` as the product branch. Do not overwrite Arena behavior while editing an upstream file.
