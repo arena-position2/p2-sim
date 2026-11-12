@@ -28,7 +28,7 @@ export const POST = withRouteHandler(async (request) => {
       return authResponse
     }
 
-    const parsed = await parseRequest(adminSyncLlmCatalogContract, request, undefined)
+    const parsed = await parseRequest(adminSyncLlmCatalogContract, request, {})
     if (!parsed.success) return parsed.response
 
     const result = await syncLlmCatalogFromDefinitions()
