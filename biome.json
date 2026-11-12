@@ -35,6 +35,7 @@
       "!**/apps/sim/lib/mothership/generated/**",
       "!**/packages/desktop-bridge/src/computer-use.generated.ts",
       "!**/apps/docs/.content",
+      "!**/apps/docs/.source",
       "!**/apps/desktop/release",
       "!**/venv",
       "!**/.venv",
