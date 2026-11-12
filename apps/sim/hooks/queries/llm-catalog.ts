@@ -15,7 +15,11 @@ import { llmCatalogKeys } from '@/hooks/queries/utils/llm-catalog-keys'
 import type { ActiveLlmCatalogSnapshot, ModelCapabilities } from '@/providers/models'
 import type { ModelPricing } from '@/providers/types'
 
-export const LLM_CATALOG_ACTIVE_STALE_TIME = 5 * 60 * 1000
+/**
+ * Always treat the catalog as stale so a Postman/admin sync is picked up on
+ * window focus or remount without a full browser refresh.
+ */
+export const LLM_CATALOG_ACTIVE_STALE_TIME = 0
 
 function sunsetFromWire(
   sunset: Record<string, unknown> | undefined
@@ -58,5 +62,7 @@ export function useActiveLlmCatalog(options?: { enabled?: boolean }) {
     queryFn: ({ signal }) => fetchActiveLlmCatalog(signal),
     enabled: options?.enabled ?? true,
     staleTime: LLM_CATALOG_ACTIVE_STALE_TIME,
+    refetchOnWindowFocus: true,
+    refetchOnMount: 'always',
   })
 }

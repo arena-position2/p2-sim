@@ -6716,18 +6716,31 @@ export function applyActiveLlmCatalog(catalog: ActiveLlmCatalogSnapshot): void {
       continue
     }
 
-    // Replace the static model list with the active DB rows (pricing, caps, etc.).
-    provider.models = fromCatalog.models.map((model) => ({
-      id: model.id,
-      pricing: model.pricing,
-      capabilities: model.capabilities ?? {},
-      contextWindow: model.contextWindow,
-      releaseDate: model.releaseDate,
-      featured: model.featured,
-      recommended: model.recommended,
-      speedOptimized: model.speedOptimized,
-      sunset: model.sunset,
-    }))
+    // Replace with active DB rows, but keep the pre-catalog picker order
+    // (newer releaseDate first, then declaration index) — same as orderModelIdsByReleaseDate.
+    provider.models = fromCatalog.models
+      .map((model) => ({
+        id: model.id,
+        pricing: model.pricing,
+        capabilities: model.capabilities ?? {},
+        contextWindow: model.contextWindow,
+        releaseDate: model.releaseDate,
+        featured: model.featured,
+        recommended: model.recommended,
+        speedOptimized: model.speedOptimized,
+        sunset: model.sunset,
+      }))
+      .sort((a, b) => {
+        const metaA = MODEL_CATALOG_INDEX.get(a.id.toLowerCase())
+        const metaB = MODEL_CATALOG_INDEX.get(b.id.toLowerCase())
+        if (metaA && metaB) {
+          if (metaA.releaseTime !== metaB.releaseTime) return metaB.releaseTime - metaA.releaseTime
+          return metaA.declIndex - metaB.declIndex
+        }
+        if (metaA) return -1
+        if (metaB) return 1
+        return 0
+      })
 
     if (fromCatalog.defaultModel) {
       provider.defaultModel = fromCatalog.defaultModel

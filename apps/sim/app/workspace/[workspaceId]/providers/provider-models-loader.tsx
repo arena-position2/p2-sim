@@ -14,7 +14,7 @@ import { createLogger } from '@sim/logger'
 import { useParams, usePathname } from 'next/navigation'
 import { useActiveLlmCatalog } from '@/hooks/queries/llm-catalog'
 import { useProviderModels } from '@/hooks/queries/providers'
-import { getBaseModelProviders } from '@/providers/models'
+import { getBaseModelProviders, orderModelIdsByReleaseDate } from '@/providers/models'
 import {
   applyActiveLlmCatalogToProviders,
   updateBasetenProviderModels,
@@ -70,7 +70,10 @@ function useSyncProvider(provider: ProviderName, enabled: boolean, workspaceId?:
         // After catalog hydrate, definitions are the source of truth for base models.
         // Fall back to /api/providers/base/models if hydrate has not run yet.
         const fromDefinitions = Object.keys(getBaseModelProviders())
-        setProviderModels('base', fromDefinitions.length > 0 ? fromDefinitions : data.models)
+        setProviderModels(
+          'base',
+          fromDefinitions.length > 0 ? orderModelIdsByReleaseDate(fromDefinitions) : data.models
+        )
         return
       }
       if (provider === 'ollama') {
@@ -135,7 +138,7 @@ export function ProviderModelsLoader({
 /** Fetches active DB catalog and writes it into PROVIDER_DEFINITIONS + base store. */
 function useSyncActiveCatalog(enabled: boolean) {
   const setProviderModels = useProvidersStore((state) => state.setProviderModels)
-  const { data, error } = useActiveLlmCatalog({ enabled })
+  const { data, dataUpdatedAt, error } = useActiveLlmCatalog({ enabled })
 
   useEffect(() => {
     if (!data) return
@@ -143,11 +146,12 @@ function useSyncActiveCatalog(enabled: boolean) {
       // Mutate PROVIDER_DEFINITIONS so getProviderModels / pickers see active only.
       applyActiveLlmCatalogToProviders(data)
       // Keep the Zustand base list aligned with the hydrated definitions.
-      setProviderModels('base', Object.keys(getBaseModelProviders()))
+      // dataUpdatedAt re-runs this after every refetch (e.g. tab focus post-sync).
+      setProviderModels('base', orderModelIdsByReleaseDate(Object.keys(getBaseModelProviders())))
     } catch (syncError) {
       logger.warn('Failed to apply active LLM catalog to PROVIDER_DEFINITIONS', syncError as Error)
     }
-  }, [data, setProviderModels])
+  }, [data, dataUpdatedAt, setProviderModels])
 
   useEffect(() => {
     if (error) {
