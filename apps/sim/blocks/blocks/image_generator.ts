@@ -453,11 +453,21 @@ export const ImageGeneratorV2Block: BlockConfig = {
       id: 'apiKey',
       title: 'API Key',
       type: 'short-input',
+      placeholder: 'Enter your provider API key',
+      password: true,
+      connectionDroppable: false,
+      hideWhenHosted: true,
+      condition: { field: 'provider', value: ['openai', 'gemini'] },
+    },
+    {
+      id: 'apiKey',
+      title: 'API Key',
+      type: 'short-input',
       required: true,
       placeholder: 'Enter your provider API key',
       password: true,
       connectionDroppable: false,
-      condition: { field: 'provider', value: 'falai', not: true },
+      condition: { field: 'provider', value: 'higgsfield' },
     },
   ],
   tools: {
@@ -466,7 +476,7 @@ export const ImageGeneratorV2Block: BlockConfig = {
       tool: () => 'image_generate',
       params: (params) => {
         const provider = params.provider || 'openai'
-        if (provider !== 'falai' && !params.apiKey) {
+        if (provider === 'higgsfield' && !params.apiKey) {
           throw new Error('API key is required')
         }
         if (!params.prompt) {
@@ -491,7 +501,7 @@ export const ImageGeneratorV2Block: BlockConfig = {
           provider,
           model: modelId,
           prompt: params.prompt,
-          apiKey: params.apiKey,
+          ...(params.apiKey ? { apiKey: params.apiKey } : {}),
           ...settings,
           ...(params.inputImage ? { inputImage: params.inputImage } : {}),
           ...(params.inputImages ? { inputImages: params.inputImages } : {}),

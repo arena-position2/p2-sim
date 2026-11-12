@@ -6,6 +6,7 @@ import { assertKnownSizeWithinLimit } from '@/lib/core/utils/stream-limits'
 import { getBaseUrl } from '@/lib/core/utils/urls'
 import { assertGeminiImageModel } from '@/lib/image-generation/block-model-config'
 import { IMAGE_GENERATION_PROVIDER_TIMEOUT_MS } from '@/lib/image-generation/constants'
+import { getImageModel } from '@/lib/media/image-catalog'
 import { buildImageBillingMetadata } from '@/lib/tools/image-pricing'
 import type { StorageContext } from '@/lib/uploads'
 import { S3_AGENT_GENERATED_IMAGES_CONFIG } from '@/lib/uploads/config'
@@ -891,6 +892,21 @@ export interface NanoBananaGenerationResult {
 }
 
 /**
+ * Keeps a model the legacy allowlist already accepts. Catalog-only ids, such as
+ * gemini-3.1-flash-image, are sent under their catalog id.
+ */
+function resolveGeminiImageModel(modelId: string): string {
+  try {
+    assertGeminiImageModel(modelId)
+    return modelId.trim()
+  } catch (error) {
+    const catalogModel = getImageModel('gemini', modelId.trim())
+    if (catalogModel) return catalogModel.id
+    throw error
+  }
+}
+
+/**
  * Generate a Nano Banana image in-process (avoids nested internal HTTP calls that can deadlock dev servers).
  */
 export async function generateNanoBananaImage(
@@ -918,8 +934,9 @@ export async function generateNanoBananaImage(
     }
   }
 
+  let resolvedModel = model
   try {
-    assertGeminiImageModel(model)
+    resolvedModel = resolveGeminiImageModel(model)
   } catch (error) {
     return {
       toolResponse: {
@@ -933,7 +950,7 @@ export async function generateNanoBananaImage(
 
   try {
     const apiKey = resolveGoogleGenerativeLanguageApiKey(params.apiKey)
-    const url = buildGenerateContentUrl(model)
+    const url = buildGenerateContentUrl(resolvedModel)
     const requestBody = await buildNanoBananaRequestBody({
       prompt,
       aspectRatio,
@@ -945,7 +962,7 @@ export async function generateNanoBananaImage(
 
     const imageCount = inputImages?.length ?? (inputImage ? 1 : 0)
     logger.info('Sending Nano Banana request', {
-      model,
+      model: resolvedModel,
       aspectRatio,
       imageCount,
     })
@@ -1002,7 +1019,7 @@ export async function generateNanoBananaImage(
 
     const userId = _context?.sessionUserId ?? _context?.userId
     const toolResponse = await buildNanoBananaToolResponse(data, {
-      model,
+      model: resolvedModel,
       aspectRatio,
       imageSize,
       inputImage,
