@@ -12,9 +12,14 @@
 import { useEffect } from 'react'
 import { createLogger } from '@sim/logger'
 import { useParams, usePathname } from 'next/navigation'
+import { llmCatalogProviderRank } from '@/lib/llm-catalog/display-order'
 import { useActiveLlmCatalog } from '@/hooks/queries/llm-catalog'
 import { useProviderModels } from '@/hooks/queries/providers'
-import { getBaseModelProviders, orderModelIdsByReleaseDate } from '@/providers/models'
+import {
+  type ActiveLlmCatalogSnapshot,
+  DYNAMIC_MODEL_PROVIDERS,
+  PROVIDER_DEFINITIONS,
+} from '@/providers/models'
 import {
   applyActiveLlmCatalogToProviders,
   updateBasetenProviderModels,
@@ -30,6 +35,24 @@ import { useSearchModalStore } from '@/stores/modals/search/store'
 import { type ProviderName, useProvidersStore } from '@/stores/providers'
 
 const logger = createLogger('ProviderModelsLoader')
+
+/** Flatten providers in display order (openai → google → anthropic → …). */
+function baseModelIdsFromDefinitions(): string[] {
+  return Object.entries(PROVIDER_DEFINITIONS)
+    .filter(([providerId]) => !(DYNAMIC_MODEL_PROVIDERS as readonly string[]).includes(providerId))
+    .sort(([a], [b]) => llmCatalogProviderRank(a) - llmCatalogProviderRank(b))
+    .flatMap(([, provider]) => provider.models.map((model) => model.id))
+}
+
+/** Flatten active catalog in API key order (openai → google → anthropic → …). */
+function baseModelIdsFromCatalog(catalog: ActiveLlmCatalogSnapshot): string[] {
+  const ids: string[] = []
+  for (const [providerId, provider] of Object.entries(catalog)) {
+    if ((DYNAMIC_MODEL_PROVIDERS as readonly string[]).includes(providerId)) continue
+    for (const model of provider.models) ids.push(model.id)
+  }
+  return ids
+}
 
 function shouldLoadProviderModels(
   pathname: string | null,
@@ -67,13 +90,9 @@ function useSyncProvider(provider: ProviderName, enabled: boolean, workspaceId?:
 
     try {
       if (provider === 'base') {
-        // After catalog hydrate, definitions are the source of truth for base models.
-        // Fall back to /api/providers/base/models if hydrate has not run yet.
-        const fromDefinitions = Object.keys(getBaseModelProviders())
-        setProviderModels(
-          'base',
-          fromDefinitions.length > 0 ? orderModelIdsByReleaseDate(fromDefinitions) : data.models
-        )
+        // Prefer hydrated definitions in display order; fall back to the base models API.
+        const fromDefinitions = baseModelIdsFromDefinitions()
+        setProviderModels('base', fromDefinitions.length > 0 ? fromDefinitions : data.models)
         return
       }
       if (provider === 'ollama') {
@@ -145,9 +164,8 @@ function useSyncActiveCatalog(enabled: boolean) {
     try {
       // Mutate PROVIDER_DEFINITIONS so getProviderModels / pickers see active only.
       applyActiveLlmCatalogToProviders(data)
-      // Keep the Zustand base list aligned with the hydrated definitions.
-      // dataUpdatedAt re-runs this after every refetch (e.g. tab focus post-sync).
-      setProviderModels('base', orderModelIdsByReleaseDate(Object.keys(getBaseModelProviders())))
+      // Flatten in API key order (openai → google → anthropic → …).
+      setProviderModels('base', baseModelIdsFromCatalog(data))
     } catch (syncError) {
       logger.warn('Failed to apply active LLM catalog to PROVIDER_DEFINITIONS', syncError as Error)
     }

@@ -1,6 +1,7 @@
 import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
+import { llmCatalogProviderRank } from '@/lib/llm-catalog/display-order'
 import { PROVIDER_DEFINITIONS } from '@/providers/models'
 
 const logger = createLogger('LlmCatalogSync')
@@ -63,9 +64,14 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
   let providersUpserted = 0
   let modelsInserted = 0
   let modelsUpdated = 0
-  let providerSort = 0
 
-  for (const [providerId, provider] of Object.entries(PROVIDER_DEFINITIONS)) {
+  // Stable picker order: openai → google → anthropic → … (see display-order.ts).
+  const providersInDisplayOrder = Object.entries(PROVIDER_DEFINITIONS).sort(
+    ([a], [b]) => llmCatalogProviderRank(a) - llmCatalogProviderRank(b)
+  )
+
+  for (const [providerId, provider] of providersInDisplayOrder) {
+    const providerSort = llmCatalogProviderRank(providerId)
     await db.execute(sql`
       INSERT INTO llm_provider (
         id, name, description, default_model, color, is_reseller,
@@ -101,7 +107,6 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
         updated_at = now()
     `)
     providersUpserted++
-    providerSort++
 
     let modelSort = 0
     for (const model of provider.models) {

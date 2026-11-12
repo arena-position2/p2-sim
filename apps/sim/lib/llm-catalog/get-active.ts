@@ -1,6 +1,10 @@
 import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
+import {
+  compareLlmCatalogReleaseDates,
+  llmCatalogProviderRank,
+} from '@/lib/llm-catalog/display-order'
 
 const logger = createLogger('LlmCatalogGetActive')
 
@@ -55,6 +59,8 @@ type CatalogJoinRow = {
   recommended: boolean | null
   speed_optimized: boolean | null
   sunset: Record<string, unknown> | null
+  provider_sort: number
+  model_sort: number | null
 } & Record<string, unknown>
 
 function omitNullish<T extends Record<string, unknown>>(value: T): T {
@@ -66,6 +72,31 @@ function omitNullish<T extends Record<string, unknown>>(value: T): T {
 }
 
 /**
+ * Rebuilds the catalog object so JSON key order is:
+ * openai → google (Gemini) → anthropic → …, with models newest-first inside each.
+ */
+function orderCatalogForDisplay(catalog: LlmCatalogDefinitions): LlmCatalogDefinitions {
+  const ordered: LlmCatalogDefinitions = {}
+  const providerIds = Object.keys(catalog).sort((a, b) => {
+    const rank = llmCatalogProviderRank(a) - llmCatalogProviderRank(b)
+    if (rank !== 0) return rank
+    return a.localeCompare(b)
+  })
+
+  for (const providerId of providerIds) {
+    const provider = catalog[providerId]
+    provider.models.sort((a, b) => {
+      const byDate = compareLlmCatalogReleaseDates(a.releaseDate, b.releaseDate)
+      if (byDate !== 0) return byDate
+      return a.id.localeCompare(b.id)
+    })
+    ordered[providerId] = provider
+  }
+
+  return ordered
+}
+
+/**
  * DB → API: loads providers with only `model_status = 'active'` models.
  *
  * Shape mirrors PROVIDER_DEFINITIONS (camelCase, keyed by provider id) so the
@@ -73,8 +104,8 @@ function omitNullish<T extends Record<string, unknown>>(value: T): T {
  * - `icon` is the component name string (not a React component)
  * - `modelPatterns` are regex source strings (not RegExp instances)
  *
- * Those fields are not applied on hydrate — the static code definitions keep
- * the real icon component and RegExp patterns.
+ * Response key order is openai → google → anthropic → … so clients that flatten
+ * `Object.values` get the previous picker provider order without extra sorting.
  */
 export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
   const rows = await db.execute<CatalogJoinRow>(sql`
@@ -90,6 +121,7 @@ export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
       to_jsonb(p.model_patterns) AS model_patterns,
       p.file_attachment,
       p.capabilities AS provider_capabilities,
+      p.sort_order AS provider_sort,
       m.id AS model_id,
       m.pricing,
       m.capabilities AS model_capabilities,
@@ -98,7 +130,8 @@ export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
       m.featured,
       m.recommended,
       m.speed_optimized,
-      m.sunset
+      m.sunset,
+      m.sort_order AS model_sort
     FROM llm_provider p
     LEFT JOIN llm_model m
       ON m.provider_id = p.id
@@ -145,10 +178,12 @@ export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
     )
   }
 
+  const ordered = orderCatalogForDisplay(catalog)
+
   logger.info('Loaded active LLM catalog', {
-    providers: Object.keys(catalog).length,
-    models: Object.values(catalog).reduce((sum, provider) => sum + provider.models.length, 0),
+    providers: Object.keys(ordered).length,
+    models: Object.values(ordered).reduce((sum, provider) => sum + provider.models.length, 0),
   })
 
-  return catalog
+  return ordered
 }
