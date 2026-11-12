@@ -30,6 +30,9 @@ import { assembleCustomBlockInputMapping, isCustomBlockType } from '@/blocks/cus
 import type { BlockToolParamsContext, SubBlockConfig } from '@/blocks/types'
 import { isCustomTool } from '@/executor/constants'
 import {
+  type ActiveLlmCatalogSnapshot,
+  applyActiveLlmCatalog,
+  DYNAMIC_MODEL_PROVIDERS,
   findProviderFromModel,
   getComputerUseModels,
   getHostedModels,
@@ -175,6 +178,22 @@ export const providers: Record<ProviderId, ProviderMetadata> = {
   baseten: buildProviderMetadata('baseten'),
   nebius: buildProviderMetadata('nebius'),
   thinkingmachines: buildProviderMetadata('thinkingmachines'),
+}
+
+/**
+ * Browser entry point after GET /api/llm-catalog:
+ * 1. Mutate PROVIDER_DEFINITIONS to the active model lists.
+ * 2. Refresh the client-safe `providers` metadata object (model id arrays) so
+ *    helpers that read `providers[id].models` stay in sync with definitions.
+ */
+export function applyActiveLlmCatalogToProviders(catalog: ActiveLlmCatalogSnapshot): void {
+  applyActiveLlmCatalog(catalog)
+
+  for (const providerId of Object.keys(providers) as ProviderId[]) {
+    if ((DYNAMIC_MODEL_PROVIDERS as readonly string[]).includes(providerId)) continue
+    providers[providerId].models = getProviderModels(providerId)
+    providers[providerId].defaultModel = getProviderDefaultModelFromDefinitions(providerId)
+  }
 }
 
 export function updateOllamaProviderModels(models: string[]): void {

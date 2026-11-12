@@ -1,10 +1,22 @@
 'use client'
 
+/**
+ * Loads provider model lists into the workspace providers store.
+ *
+ * Also hydrates PROVIDER_DEFINITIONS from GET /api/llm-catalog (active DB rows)
+ * so static model pickers automatically exclude deactive models without changing
+ * each call site. Dynamic providers (Ollama, OpenRouter, …) still sync from
+ * their own APIs afterward.
+ */
+
 import { useEffect } from 'react'
 import { createLogger } from '@sim/logger'
 import { useParams, usePathname } from 'next/navigation'
+import { useActiveLlmCatalog } from '@/hooks/queries/llm-catalog'
 import { useProviderModels } from '@/hooks/queries/providers'
+import { getBaseModelProviders } from '@/providers/models'
 import {
+  applyActiveLlmCatalogToProviders,
   updateBasetenProviderModels,
   updateFireworksProviderModels,
   updateLiteLLMProviderModels,
@@ -54,6 +66,13 @@ function useSyncProvider(provider: ProviderName, enabled: boolean, workspaceId?:
     if (!data) return
 
     try {
+      if (provider === 'base') {
+        // After catalog hydrate, definitions are the source of truth for base models.
+        // Fall back to /api/providers/base/models if hydrate has not run yet.
+        const fromDefinitions = Object.keys(getBaseModelProviders())
+        setProviderModels('base', fromDefinitions.length > 0 ? fromDefinitions : data.models)
+        return
+      }
       if (provider === 'ollama') {
         updateOllamaProviderModels(data.models)
       } else if (provider === 'ollama-cloud') {
@@ -100,6 +119,7 @@ export function ProviderModelsLoader({
   const shouldLoad =
     Boolean(scopedWorkspaceId) || shouldLoadProviderModels(pathname, workspaceId, isSearchModalOpen)
 
+  useSyncActiveCatalog(shouldLoad)
   useSyncProvider('base', shouldLoad)
   useSyncProvider('ollama', shouldLoad)
   useSyncProvider('ollama-cloud', shouldLoad, workspaceId)
@@ -110,4 +130,28 @@ export function ProviderModelsLoader({
   useSyncProvider('together', shouldLoad, workspaceId)
   useSyncProvider('baseten', shouldLoad, workspaceId)
   return null
+}
+
+/** Fetches active DB catalog and writes it into PROVIDER_DEFINITIONS + base store. */
+function useSyncActiveCatalog(enabled: boolean) {
+  const setProviderModels = useProvidersStore((state) => state.setProviderModels)
+  const { data, error } = useActiveLlmCatalog({ enabled })
+
+  useEffect(() => {
+    if (!data) return
+    try {
+      // Mutate PROVIDER_DEFINITIONS so getProviderModels / pickers see active only.
+      applyActiveLlmCatalogToProviders(data)
+      // Keep the Zustand base list aligned with the hydrated definitions.
+      setProviderModels('base', Object.keys(getBaseModelProviders()))
+    } catch (syncError) {
+      logger.warn('Failed to apply active LLM catalog to PROVIDER_DEFINITIONS', syncError as Error)
+    }
+  }, [data, setProviderModels])
+
+  useEffect(() => {
+    if (error) {
+      logger.error('Failed to load active LLM catalog', error)
+    }
+  }, [error])
 }

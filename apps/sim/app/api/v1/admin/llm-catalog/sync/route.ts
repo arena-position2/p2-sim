@@ -13,8 +13,9 @@ const logger = createLogger('AdminSyncLlmCatalogAPI')
 /**
  * POST /api/v1/admin/llm-catalog/sync
  *
- * Upserts PROVIDER_DEFINITIONS into llm_provider / llm_model.
- * Deprecated models get model_status=deactive; models removed from code are deactivated.
+ * Admin/ops endpoint: push the deployed PROVIDER_DEFINITIONS into Postgres.
+ * Run after adding/updating/removing models in models.ts on this environment.
+ * No request body — the server reads the in-process catalog and upserts.
  *
  * Auth: x-admin-key: $CRON_SECRET
  */

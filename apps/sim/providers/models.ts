@@ -6675,6 +6675,66 @@ export function supportsForcedToolUse(modelId: string): boolean {
   return capabilities?.forcedToolUse ?? capabilities?.toolUsageControl ?? false
 }
 
+/**
+ * Client-side snapshot of GET /api/llm-catalog, shaped for
+ * {@link applyActiveLlmCatalog}.
+ *
+ * Lifecycle reminder:
+ *   edit PROVIDER_DEFINITIONS in this file
+ *     → POST /api/v1/admin/llm-catalog/sync  (code → DB)
+ *     → GET /api/llm-catalog                 (DB active rows)
+ *     → applyActiveLlmCatalog                (DB → in-memory PROVIDER_DEFINITIONS)
+ *
+ * Icons / RegExp stay on the static definitions; only `models` and `defaultModel`
+ * are replaced. {@link DYNAMIC_MODEL_PROVIDERS} are skipped (Ollama, OpenRouter, …).
+ */
+export interface ActiveLlmCatalogSnapshot {
+  [providerId: string]: {
+    id: string
+    defaultModel?: string
+    models: ModelDefinition[]
+  }
+}
+
+/**
+ * Mutates {@link PROVIDER_DEFINITIONS} in place so existing call sites
+ * (`getProviderModels`, agent combobox, etc.) automatically only see active
+ * models — no per-picker filter required.
+ *
+ * Providers missing from the catalog get an empty `models` array (hidden from
+ * pickers). Dynamic providers are unchanged.
+ */
+export function applyActiveLlmCatalog(catalog: ActiveLlmCatalogSnapshot): void {
+  for (const [providerId, provider] of Object.entries(PROVIDER_DEFINITIONS)) {
+    // Live-fetched catalogs (Ollama, OpenRouter, …) keep their own sync path.
+    if ((DYNAMIC_MODEL_PROVIDERS as readonly string[]).includes(providerId)) continue
+
+    const fromCatalog = catalog[providerId]
+    if (!fromCatalog) {
+      // Not in the active DB catalog → hide every static model for this provider.
+      provider.models = []
+      continue
+    }
+
+    // Replace the static model list with the active DB rows (pricing, caps, etc.).
+    provider.models = fromCatalog.models.map((model) => ({
+      id: model.id,
+      pricing: model.pricing,
+      capabilities: model.capabilities ?? {},
+      contextWindow: model.contextWindow,
+      releaseDate: model.releaseDate,
+      featured: model.featured,
+      recommended: model.recommended,
+      speedOptimized: model.speedOptimized,
+      sunset: model.sunset,
+    }))
+
+    if (fromCatalog.defaultModel) {
+      provider.defaultModel = fromCatalog.defaultModel
+    }
+  }
+}
+
 export function updateOllamaModels(models: string[]): void {
   PROVIDER_DEFINITIONS.ollama.models = models.map((modelId) => ({
     id: modelId,

@@ -2,12 +2,19 @@
 -- Nested objects (pricing, capabilities, sunset, file_attachment) are jsonb —
 -- same shape as apps/sim/providers/models.ts PROVIDER_DEFINITIONS.
 --
+-- Lifecycle:
+--   1. Apply this script once (empty tables).
+--   2. POST /api/v1/admin/llm-catalog/sync  (x-admin-key: $CRON_SECRET)
+--      → upserts every provider/model from PROVIDER_DEFINITIONS into these tables.
+--      → deprecated / removed-from-code models become model_status = 'deactive'.
+--   3. GET /api/llm-catalog (session) returns only model_status = 'active'.
+--   4. The browser hydrates PROVIDER_DEFINITIONS from that response so pickers
+--      keep using PROVIDER_DEFINITIONS but only see active models.
+--
 -- Apply once:
 --   psql "$DATABASE_URL" -f packages/db/scripts/create-llm-provider-catalog.sql
 --
--- Populate / refresh from code via:
---   POST /api/v1/admin/llm-catalog/sync
---   Header: x-admin-key: $CRON_SECRET
+-- After adding/changing models in models.ts, re-run sync on that environment.
 
 CREATE TABLE IF NOT EXISTS llm_provider (
   id text PRIMARY KEY,

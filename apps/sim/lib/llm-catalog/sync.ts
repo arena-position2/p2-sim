@@ -43,8 +43,17 @@ function textArray(values: string[] | null) {
 }
 
 /**
- * Upserts PROVIDER_DEFINITIONS into llm_provider / llm_model.
- * Deprecated models get model_status=deactive; removed models stay but are deactivated.
+ * Code → DB sync for the LLM catalog.
+ *
+ * Reads the in-process {@link PROVIDER_DEFINITIONS} and upserts every provider /
+ * model into `llm_provider` / `llm_model`. Call this after deploying model changes
+ * (POST /api/v1/admin/llm-catalog/sync). Clients do not write the DB; they only
+ * read active rows via GET /api/llm-catalog.
+ *
+ * Status rules:
+ * - `sunset.status === 'deprecated'` → `model_status = 'deactive'`
+ * - still in code otherwise → `model_status = 'active'` (insert or update)
+ * - present in DB but no longer in code → left in place, set to `deactive`
  */
 export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncResult> {
   const existingRows = await db.execute<{ id: string }>(sql`SELECT id FROM llm_model`)
