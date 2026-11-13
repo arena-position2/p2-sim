@@ -135,7 +135,7 @@ export const imageTool: ToolConfig = {
     body: (params) => {
       const requestedModel = String(params.model || 'dall-e-3')
       const requestedSize = String(params.size || '')
-      const gptImageSizes = requestedModel.startsWith('gpt-image-2')
+      const gptImageSizes: readonly string[] = requestedModel.startsWith('gpt-image-2')
         ? GPT_IMAGE_2_SIZES
         : GPT_IMAGE_SIZES
       const isGptImageModel =
@@ -145,8 +145,7 @@ export const imageTool: ToolConfig = {
           ? ['1024x1024', '1024x1792', '1792x1024'].includes(requestedSize)
             ? requestedSize
             : '1024x1024'
-          : isGptImageModel &&
-              gptImageSizes.includes(requestedSize as (typeof gptImageSizes)[number])
+          : isGptImageModel && gptImageSizes.includes(requestedSize)
             ? requestedSize
             : 'auto'
       const body: BaseImageRequestBody = {
