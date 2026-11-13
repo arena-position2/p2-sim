@@ -12,6 +12,8 @@ export interface LlmCatalogSyncResult {
   providersUpserted: number
   modelsInserted: number
   modelsUpdated: number
+  /** Already `deactive` in DB — left untouched so ops flips survive sync. */
+  modelsSkippedDeactive: number
   modelsDeactivatedMissing: number
 }
 
@@ -59,20 +61,27 @@ function textArray(values: string[] | null) {
  * 3. Reload the full catalog from DB and push it into the cache
  *
  * Status rules:
+ * - row already `deactive` in DB → skipped entirely (ops status wins over code)
  * - `sunset.status === 'deprecated'` → `model_status = 'deactive'`
  * - still in code otherwise → `model_status = 'active'` (insert or update)
  * - present in DB but no longer in code → left in place, set to `deactive`
+ *
+ * To bring an ops-deactivated model back under code sync: PATCH it to `active`
+ * first, then sync (or PATCH alone if metadata is already current).
  */
 export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncResult> {
   await clearLlmCatalogCache()
 
-  const existingRows = await db.execute<{ id: string }>(sql`SELECT id FROM llm_model`)
-  const existingIds = new Set([...existingRows].map((row) => row.id))
+  const existingRows = await db.execute<{ id: string; model_status: 'active' | 'deactive' }>(
+    sql`SELECT id, model_status FROM llm_model`
+  )
+  const existingById = new Map([...existingRows].map((row) => [row.id, row.model_status] as const))
   const catalogModelIds = new Set<string>()
 
   let providersUpserted = 0
   let modelsInserted = 0
   let modelsUpdated = 0
+  let modelsSkippedDeactive = 0
 
   // Stable picker order: openai → google → anthropic → … (see display-order.ts).
   const providersInDisplayOrder = Object.entries(PROVIDER_DEFINITIONS).sort(
@@ -120,8 +129,17 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
     let modelSort = 0
     for (const model of provider.models) {
       catalogModelIds.add(model.id)
+      const existingStatus = existingById.get(model.id)
+
+      // Ops-deactivated rows stay as-is; sync must not revive them from code.
+      if (existingStatus === 'deactive') {
+        modelsSkippedDeactive++
+        modelSort++
+        continue
+      }
+
       const modelStatus = modelStatusFromSunset(model.sunset)
-      const alreadyExists = existingIds.has(model.id)
+      const alreadyExists = existingStatus !== undefined
 
       await db.execute(sql`
         INSERT INTO llm_model (
@@ -164,7 +182,7 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
     }
   }
 
-  const missingIds = [...existingIds].filter((id) => !catalogModelIds.has(id))
+  const missingIds = [...existingById.keys()].filter((id) => !catalogModelIds.has(id))
   let modelsDeactivatedMissing = 0
   if (missingIds.length > 0) {
     const deactivated = await db.execute<{ id: string }>(sql`
@@ -187,6 +205,7 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
     providersUpserted,
     modelsInserted,
     modelsUpdated,
+    modelsSkippedDeactive,
     modelsDeactivatedMissing,
   }
   logger.info('LLM catalog sync completed', result)

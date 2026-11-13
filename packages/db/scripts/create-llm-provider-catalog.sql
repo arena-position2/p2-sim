@@ -6,7 +6,8 @@
 --   1. Apply this script once (empty tables).
 --   2. POST /api/v1/admin/llm-catalog/sync
 --      → upserts every provider/model from PROVIDER_DEFINITIONS into these tables.
---      → deprecated / removed-from-code models become model_status = 'deactive'.
+--      → rows already model_status = 'deactive' are left untouched (ops wins).
+--      → deprecated / removed-from-code active models become model_status = 'deactive'.
 --   3. Sync clears the catalog cache, then reloads DB → cache after upserts.
 --   4. PATCH /api/v1/admin/llm-catalog/models/status flips one model_status
 --      (clear cache → update row → reload DB → cache).

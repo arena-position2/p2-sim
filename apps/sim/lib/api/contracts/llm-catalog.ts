@@ -63,6 +63,7 @@ export const adminSyncLlmCatalogContract = defineRouteContract({
         providersUpserted: z.number().int().nonnegative(),
         modelsInserted: z.number().int().nonnegative(),
         modelsUpdated: z.number().int().nonnegative(),
+        modelsSkippedDeactive: z.number().int().nonnegative(),
         modelsDeactivatedMissing: z.number().int().nonnegative(),
       }),
     }),
