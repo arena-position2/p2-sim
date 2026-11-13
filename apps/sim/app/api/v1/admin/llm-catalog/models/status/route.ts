@@ -19,7 +19,7 @@ const logger = createLogger('AdminUpdateLlmModelStatusAPI')
  *
  * Set one catalog model's `model_status` without re-syncing from
  * PROVIDER_DEFINITIONS. Clears the catalog cache, updates the row, then
- * reloads the full catalog into cache so GET /api/llm-catalog sees the change.
+ * reloads the full catalog into cache so GET /api/v1/admin/llm-catalog sees the change.
  *
  * Body: `{ "id": "<model id>", "modelStatus": "active" | "deactive" }`
  *

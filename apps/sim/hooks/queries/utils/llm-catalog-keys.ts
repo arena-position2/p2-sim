@@ -4,6 +4,6 @@
  */
 export const llmCatalogKeys = {
   all: ['llm-catalog'] as const,
-  /** Active models from GET /api/llm-catalog (used to hydrate PROVIDER_DEFINITIONS). */
+  /** Active models from GET /api/v1/admin/llm-catalog (used to hydrate PROVIDER_DEFINITIONS). */
   active: () => [...llmCatalogKeys.all, 'active'] as const,
 }

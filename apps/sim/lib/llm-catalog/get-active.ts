@@ -191,7 +191,7 @@ export async function loadLlmCatalogFromDb(): Promise<CachedLlmCatalogDefinition
 }
 
 /**
- * Active catalog for GET /api/llm-catalog.
+ * Active catalog for GET /api/v1/admin/llm-catalog.
  *
  * 1. Cache hit → filter to `model_status = 'active'` and return
  * 2. Cache miss → DB load → write cache → filter → return

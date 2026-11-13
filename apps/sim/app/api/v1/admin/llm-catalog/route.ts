@@ -13,7 +13,8 @@ const logger = createLogger('AdminGetLlmCatalogAPI')
 /**
  * GET /api/v1/admin/llm-catalog
  *
- * Admin/ops read of active catalog rows (same payload as GET /api/llm-catalog).
+ * Active catalog models (cache-first, DB on miss). Used by ProviderModelsLoader
+ * to hydrate PROVIDER_DEFINITIONS so pickers only see `model_status = 'active'`.
  *
  * Auth: signed-in session cookie OR x-admin-key: $CRON_SECRET
  */

@@ -1,10 +1,9 @@
 /**
- * Route contracts for the LLM provider catalog.
+ * Route contracts for the LLM provider catalog (all under /api/v1/admin/llm-catalog).
  *
  * Auth for every route below: signed-in session cookie OR x-admin-key: $CRON_SECRET.
  *
- * - GET   /api/llm-catalog                          — active models for UI hydrate
- * - GET   /api/v1/admin/llm-catalog                 — same active payload
+ * - GET   /api/v1/admin/llm-catalog                 — active models for UI hydrate
  * - POST  /api/v1/admin/llm-catalog/sync            — code → DB upsert
  * - PATCH /api/v1/admin/llm-catalog/models/status   — flip one model_status
  */
@@ -43,15 +42,6 @@ const llmCatalogDefinitionsSchema = z.record(z.string(), llmCatalogProviderSchem
 
 const llmCatalogDataResponseSchema = z.object({
   data: llmCatalogDefinitionsSchema,
-})
-
-export const getLlmCatalogContract = defineRouteContract({
-  method: 'GET',
-  path: '/api/llm-catalog',
-  response: {
-    mode: 'json',
-    schema: llmCatalogDataResponseSchema,
-  },
 })
 
 export const adminGetLlmCatalogContract = defineRouteContract({

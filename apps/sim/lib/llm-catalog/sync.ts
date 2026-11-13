@@ -51,7 +51,7 @@ function textArray(values: string[] | null) {
  * Reads the in-process {@link PROVIDER_DEFINITIONS} and upserts every provider /
  * model into `llm_provider` / `llm_model`. Call this after deploying model changes
  * (POST /api/v1/admin/llm-catalog/sync). Clients do not write the DB; they only
- * read active rows via GET /api/llm-catalog.
+ * read active rows via GET /api/v1/admin/llm-catalog.
  *
  * Cache flow:
  * 1. Clear the catalog cache

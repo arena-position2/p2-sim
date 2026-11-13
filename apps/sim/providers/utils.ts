@@ -181,7 +181,7 @@ export const providers: Record<ProviderId, ProviderMetadata> = {
 }
 
 /**
- * Browser entry point after GET /api/llm-catalog:
+ * Browser entry point after GET /api/v1/admin/llm-catalog:
  * 1. Mutate PROVIDER_DEFINITIONS to the active model lists.
  * 2. Refresh the client-safe `providers` metadata object (model id arrays) so
  *    helpers that read `providers[id].models` stay in sync with definitions.

@@ -6676,13 +6676,13 @@ export function supportsForcedToolUse(modelId: string): boolean {
 }
 
 /**
- * Client-side snapshot of GET /api/llm-catalog, shaped for
+ * Client-side snapshot of GET /api/v1/admin/llm-catalog, shaped for
  * {@link applyActiveLlmCatalog}.
  *
  * Lifecycle reminder:
  *   edit PROVIDER_DEFINITIONS in this file
  *     → POST /api/v1/admin/llm-catalog/sync  (code → DB)
- *     → GET /api/llm-catalog                 (DB active rows)
+ *     → GET  /api/v1/admin/llm-catalog      (DB active rows)
  *     → applyActiveLlmCatalog                (DB → in-memory PROVIDER_DEFINITIONS)
  *
  * Icons / RegExp stay on the static definitions; only `models` and `defaultModel`

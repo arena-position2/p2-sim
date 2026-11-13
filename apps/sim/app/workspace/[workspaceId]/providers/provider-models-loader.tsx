@@ -3,7 +3,7 @@
 /**
  * Loads provider model lists into the workspace providers store.
  *
- * Also hydrates PROVIDER_DEFINITIONS from GET /api/llm-catalog (active DB rows)
+ * Also hydrates PROVIDER_DEFINITIONS from GET /api/v1/admin/llm-catalog (active DB rows)
  * so static model pickers automatically exclude deactive models without changing
  * each call site. Dynamic providers (Ollama, OpenRouter, …) still sync from
  * their own APIs afterward.

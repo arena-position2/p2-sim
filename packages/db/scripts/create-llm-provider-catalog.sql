@@ -10,8 +10,8 @@
 --   3. Sync clears the catalog cache, then reloads DB → cache after upserts.
 --   4. PATCH /api/v1/admin/llm-catalog/models/status flips one model_status
 --      (clear cache → update row → reload DB → cache).
---   5. GET /api/llm-catalog and GET /api/v1/admin/llm-catalog read cache
---      (or DB on miss), return only model_status = 'active'.
+--   5. GET /api/v1/admin/llm-catalog reads cache (or DB on miss), returns only
+--      model_status = 'active'.
 --   6. The browser hydrates PROVIDER_DEFINITIONS from that response so pickers
 --      keep using PROVIDER_DEFINITIONS but only see active models.
 --

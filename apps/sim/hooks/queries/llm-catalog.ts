@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * React Query hook for GET /api/llm-catalog.
+ * React Query hook for GET /api/v1/admin/llm-catalog.
  *
  * Maps the wire JSON into {@link ActiveLlmCatalogSnapshot} so
  * ProviderModelsLoader can call applyActiveLlmCatalogToProviders and reuse
@@ -10,7 +10,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { requestJson } from '@/lib/api/client/request'
-import { getLlmCatalogContract } from '@/lib/api/contracts/llm-catalog'
+import { adminGetLlmCatalogContract } from '@/lib/api/contracts/llm-catalog'
 import { llmCatalogKeys } from '@/hooks/queries/utils/llm-catalog-keys'
 import type { ActiveLlmCatalogSnapshot, ModelCapabilities } from '@/providers/models'
 import type { ModelPricing } from '@/providers/types'
@@ -32,7 +32,7 @@ function sunsetFromWire(
 
 /** Fetches active catalog rows and coerces jsonb fields into ModelDefinition. */
 async function fetchActiveLlmCatalog(signal?: AbortSignal): Promise<ActiveLlmCatalogSnapshot> {
-  const response = await requestJson(getLlmCatalogContract, { signal })
+  const response = await requestJson(adminGetLlmCatalogContract, { signal })
   const catalog: ActiveLlmCatalogSnapshot = {}
   for (const [providerId, provider] of Object.entries(response.data)) {
     catalog[providerId] = {
