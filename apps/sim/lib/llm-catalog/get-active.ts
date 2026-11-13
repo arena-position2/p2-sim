@@ -1,6 +1,13 @@
 import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
+import { coalesceLocally } from '@/lib/concurrency/singleflight'
+import {
+  type CachedLlmCatalogDefinitions,
+  filterActiveLlmCatalog,
+  getLlmCatalogCache,
+  setLlmCatalogCache,
+} from '@/lib/llm-catalog/cache'
 import {
   compareLlmCatalogReleaseDates,
   llmCatalogProviderRank,
@@ -59,6 +66,7 @@ type CatalogJoinRow = {
   recommended: boolean | null
   speed_optimized: boolean | null
   sunset: Record<string, unknown> | null
+  model_status: 'active' | 'deactive' | null
   provider_sort: number
   model_sort: number | null
 } & Record<string, unknown>
@@ -75,8 +83,8 @@ function omitNullish<T extends Record<string, unknown>>(value: T): T {
  * Rebuilds the catalog object so JSON key order is:
  * openai → google (Gemini) → anthropic → …, with models newest-first inside each.
  */
-function orderCatalogForDisplay(catalog: LlmCatalogDefinitions): LlmCatalogDefinitions {
-  const ordered: LlmCatalogDefinitions = {}
+function orderCatalogForDisplay(catalog: CachedLlmCatalogDefinitions): CachedLlmCatalogDefinitions {
+  const ordered: CachedLlmCatalogDefinitions = {}
   const providerIds = Object.keys(catalog).sort((a, b) => {
     const rank = llmCatalogProviderRank(a) - llmCatalogProviderRank(b)
     if (rank !== 0) return rank
@@ -97,17 +105,10 @@ function orderCatalogForDisplay(catalog: LlmCatalogDefinitions): LlmCatalogDefin
 }
 
 /**
- * DB → API: loads providers with only `model_status = 'active'` models.
- *
- * Shape mirrors PROVIDER_DEFINITIONS (camelCase, keyed by provider id) so the
- * browser can write the payload back onto PROVIDER_DEFINITIONS. Wire differences:
- * - `icon` is the component name string (not a React component)
- * - `modelPatterns` are regex source strings (not RegExp instances)
- *
- * Response key order is openai → google → anthropic → … so clients that flatten
- * `Object.values` get the previous picker provider order without extra sorting.
+ * DB → cache payload: every provider with all models (active + deactive).
+ * Callers that need the public shape filter with {@link filterActiveLlmCatalog}.
  */
-export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
+export async function loadLlmCatalogFromDb(): Promise<CachedLlmCatalogDefinitions> {
   const rows = await db.execute<CatalogJoinRow>(sql`
     SELECT
       p.id AS provider_id,
@@ -131,15 +132,15 @@ export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
       m.recommended,
       m.speed_optimized,
       m.sunset,
+      m.model_status,
       m.sort_order AS model_sort
     FROM llm_provider p
     LEFT JOIN llm_model m
       ON m.provider_id = p.id
-      AND m.model_status = 'active'
     ORDER BY p.sort_order ASC, m.sort_order ASC NULLS LAST
   `)
 
-  const catalog: LlmCatalogDefinitions = {}
+  const catalog: CachedLlmCatalogDefinitions = {}
 
   for (const row of rows) {
     let provider = catalog[row.provider_id]
@@ -161,7 +162,7 @@ export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
       catalog[row.provider_id] = provider
     }
 
-    if (!row.model_id || !row.pricing) continue
+    if (!row.model_id || !row.pricing || !row.model_status) continue
 
     provider.models.push(
       omitNullish({
@@ -174,16 +175,46 @@ export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
         recommended: row.recommended ?? undefined,
         speedOptimized: row.speed_optimized ?? undefined,
         sunset: row.sunset ?? undefined,
+        modelStatus: row.model_status,
       })
     )
   }
 
   const ordered = orderCatalogForDisplay(catalog)
 
-  logger.info('Loaded active LLM catalog', {
+  logger.info('Loaded LLM catalog from DB', {
     providers: Object.keys(ordered).length,
     models: Object.values(ordered).reduce((sum, provider) => sum + provider.models.length, 0),
   })
 
   return ordered
+}
+
+/**
+ * Active catalog for GET /api/llm-catalog.
+ *
+ * 1. Cache hit → filter to `model_status = 'active'` and return
+ * 2. Cache miss → DB load → write cache → filter → return
+ */
+export async function getActiveLlmCatalog(): Promise<LlmCatalogDefinitions> {
+  const cached = await getLlmCatalogCache()
+  if (cached !== undefined) {
+    const active = filterActiveLlmCatalog(cached)
+    logger.info('Served active LLM catalog from cache', {
+      providers: Object.keys(active).length,
+      models: Object.values(active).reduce((sum, provider) => sum + provider.models.length, 0),
+    })
+    return active
+  }
+
+  const fresh = await coalesceLocally('llm-catalog:load', async () => {
+    const again = await getLlmCatalogCache()
+    if (again !== undefined) return again
+
+    const loaded = await loadLlmCatalogFromDb()
+    await setLlmCatalogCache(loaded)
+    return loaded
+  })
+
+  return filterActiveLlmCatalog(fresh)
 }

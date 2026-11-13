@@ -1,9 +1,12 @@
 /**
  * Route contracts for the LLM provider catalog.
  *
- * - GET  /api/llm-catalog              — session: active models for UI hydrate
- * - GET  /api/v1/admin/llm-catalog     — admin key: same active payload
- * - POST /api/v1/admin/llm-catalog/sync — admin key: code → DB upsert
+ * Auth for every route below: signed-in session cookie OR x-admin-key: $CRON_SECRET.
+ *
+ * - GET   /api/llm-catalog                          — active models for UI hydrate
+ * - GET   /api/v1/admin/llm-catalog                 — same active payload
+ * - POST  /api/v1/admin/llm-catalog/sync            — code → DB upsert
+ * - PATCH /api/v1/admin/llm-catalog/models/status   — flip one model_status
  */
 import { z } from 'zod'
 import { defineRouteContract } from '@/lib/api/contracts/types'
@@ -71,6 +74,27 @@ export const adminSyncLlmCatalogContract = defineRouteContract({
         modelsInserted: z.number().int().nonnegative(),
         modelsUpdated: z.number().int().nonnegative(),
         modelsDeactivatedMissing: z.number().int().nonnegative(),
+      }),
+    }),
+  },
+})
+
+const llmModelStatusSchema = z.enum(['active', 'deactive'])
+
+export const adminUpdateLlmModelStatusContract = defineRouteContract({
+  method: 'PATCH',
+  path: '/api/v1/admin/llm-catalog/models/status',
+  body: z.object({
+    id: z.string().min(1),
+    modelStatus: llmModelStatusSchema,
+  }),
+  response: {
+    mode: 'json',
+    schema: z.object({
+      data: z.object({
+        id: z.string(),
+        modelStatus: llmModelStatusSchema,
+        previousStatus: llmModelStatusSchema,
       }),
     }),
   },

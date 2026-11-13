@@ -1,7 +1,9 @@
 import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
+import { clearLlmCatalogCache, setLlmCatalogCache } from '@/lib/llm-catalog/cache'
 import { llmCatalogProviderRank } from '@/lib/llm-catalog/display-order'
+import { loadLlmCatalogFromDb } from '@/lib/llm-catalog/get-active'
 import { PROVIDER_DEFINITIONS } from '@/providers/models'
 
 const logger = createLogger('LlmCatalogSync')
@@ -51,12 +53,19 @@ function textArray(values: string[] | null) {
  * (POST /api/v1/admin/llm-catalog/sync). Clients do not write the DB; they only
  * read active rows via GET /api/llm-catalog.
  *
+ * Cache flow:
+ * 1. Clear the catalog cache
+ * 2. Upsert providers/models into Postgres
+ * 3. Reload the full catalog from DB and push it into the cache
+ *
  * Status rules:
  * - `sunset.status === 'deprecated'` → `model_status = 'deactive'`
  * - still in code otherwise → `model_status = 'active'` (insert or update)
  * - present in DB but no longer in code → left in place, set to `deactive`
  */
 export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncResult> {
+  await clearLlmCatalogCache()
+
   const existingRows = await db.execute<{ id: string }>(sql`SELECT id FROM llm_model`)
   const existingIds = new Set([...existingRows].map((row) => row.id))
   const catalogModelIds = new Set<string>()
@@ -130,7 +139,7 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
           ${model.recommended ?? null},
           ${model.speedOptimized ?? null},
           ${jsonb(model.sunset ?? null)},
-          ${modelStatus},
+          ${modelStatus}::llm_model_status,
           ${modelSort},
           now()
         )
@@ -160,16 +169,19 @@ export async function syncLlmCatalogFromDefinitions(): Promise<LlmCatalogSyncRes
   if (missingIds.length > 0) {
     const deactivated = await db.execute<{ id: string }>(sql`
       UPDATE llm_model
-      SET model_status = 'deactive', updated_at = now()
+      SET model_status = 'deactive'::llm_model_status, updated_at = now()
       WHERE id IN (${sql.join(
         missingIds.map((id) => sql`${id}`),
         sql`, `
       )})
-        AND model_status IS DISTINCT FROM 'deactive'
+        AND model_status IS DISTINCT FROM 'deactive'::llm_model_status
       RETURNING id
     `)
     modelsDeactivatedMissing = deactivated.length
   }
+
+  const catalog = await loadLlmCatalogFromDb()
+  await setLlmCatalogCache(catalog)
 
   const result = {
     providersUpserted,

@@ -4,8 +4,8 @@ import { adminGetLlmCatalogContract } from '@/lib/api/contracts/llm-catalog'
 import { parseRequest } from '@/lib/api/server'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
+import { authenticateLlmCatalogRequest } from '@/lib/llm-catalog/auth'
 import { getActiveLlmCatalog } from '@/lib/llm-catalog/get-active'
-import { authenticateCronSecretRequest } from '@/app/api/v1/admin/cron-secret-auth'
 import { adminInternalErrorResponse, singleResponse } from '@/app/api/v1/admin/responses'
 
 const logger = createLogger('AdminGetLlmCatalogAPI')
@@ -13,19 +13,16 @@ const logger = createLogger('AdminGetLlmCatalogAPI')
 /**
  * GET /api/v1/admin/llm-catalog
  *
- * Admin read of active catalog rows (same payload as GET /api/llm-catalog).
- * Useful for ops/debugging without a user session cookie.
+ * Admin/ops read of active catalog rows (same payload as GET /api/llm-catalog).
  *
- * Auth: x-admin-key: $CRON_SECRET
+ * Auth: signed-in session cookie OR x-admin-key: $CRON_SECRET
  */
 export const GET = withRouteHandler(async (request) => {
   const requestId = generateRequestId()
 
   try {
-    const authResponse = authenticateCronSecretRequest(request)
-    if (authResponse) {
-      return authResponse
-    }
+    const authResponse = await authenticateLlmCatalogRequest(request)
+    if (authResponse) return authResponse
 
     const parsed = await parseRequest(adminGetLlmCatalogContract, request, {})
     if (!parsed.success) return parsed.response
