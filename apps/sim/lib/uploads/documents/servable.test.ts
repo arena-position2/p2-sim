@@ -376,6 +376,30 @@ describe('resolveServableDocBytes', () => {
     expect(mockRunSandboxTask).not.toHaveBeenCalled()
   })
 
+  it('renders a self-contained document when an authorized caller has no stored artifact', async () => {
+    mockLoadCompiledDoc.mockResolvedValue(null)
+    setEnvFlags({ isDocSandboxEnabled: true })
+    mockExecuteInSandbox.mockResolvedValue({
+      exportedFileContent: Buffer.from('%PDF-rendered').toString('base64'),
+    })
+
+    const result = await resolveServableDocBytes({
+      rawBuffer: PDF_SOURCE,
+      fileName: 'report.pdf',
+      workspaceId: WORKSPACE_ID,
+      filePrincipal: FILE_PRINCIPAL,
+    })
+
+    expect(result).toMatchObject({
+      buffer: Buffer.from('%PDF-rendered'),
+      contentType: 'application/pdf',
+      dependsOnReferencedFiles: false,
+    })
+    expect(mockExecuteInSandbox).toHaveBeenCalled()
+    expect(mockStoreCompiledDoc).toHaveBeenCalled()
+    expect(mockRunSandboxTask).not.toHaveBeenCalled()
+  })
+
   it('compiles via the sandbox when E2B is disabled and no artifact is stored', async () => {
     mockLoadCompiledDoc.mockResolvedValue(null)
     setEnvFlags({ isDocSandboxEnabled: false })

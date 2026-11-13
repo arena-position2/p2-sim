@@ -547,9 +547,8 @@ export default function ChatClient({ identifier }: { identifier: string }) {
             return
           }
 
-          // Skip email auth screen; rely on server to auto-auth or deny
           if (errorData.error === 'auth_required_email') {
-            setError('You do not have access to this chat')
+            setAuthRequired('email')
             return
           }
 

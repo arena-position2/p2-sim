@@ -214,6 +214,46 @@ describe('Chat API Utils', () => {
       expect(result3.error).toBe('Email not authorized')
     })
 
+    it('lets a logged-in allowed email open the chat on GET', async () => {
+      const deployment = {
+        id: 'chat-id',
+        authType: 'email',
+        allowedEmails: ['user@example.com'],
+      }
+      const mockRequest = {
+        method: 'GET',
+        cookies: { get: vi.fn().mockReturnValue(null) },
+      } as any
+      mockGetSession.mockResolvedValue({ user: { email: 'User@Example.com' } })
+      mockIsEmailAllowed.mockReturnValue(true)
+
+      const result = await validateChatAuth('request-id', deployment, mockRequest)
+
+      expect(result).toEqual({
+        authorized: true,
+        authenticatedEmail: 'user@example.com',
+      })
+      expect(mockIsEmailAllowed).toHaveBeenCalledWith('User@Example.com', deployment.allowedEmails)
+    })
+
+    it('still asks for an email when the logged-in address is not on the list', async () => {
+      const deployment = {
+        id: 'chat-id',
+        authType: 'email',
+        allowedEmails: ['user@example.com'],
+      }
+      const mockRequest = {
+        method: 'GET',
+        cookies: { get: vi.fn().mockReturnValue(null) },
+      } as any
+      mockGetSession.mockResolvedValue({ user: { email: 'other@example.com' } })
+      mockIsEmailAllowed.mockReturnValue(false)
+
+      const result = await validateChatAuth('request-id', deployment, mockRequest)
+
+      expect(result).toEqual({ authorized: false, error: 'auth_required_email' })
+    })
+
     describe('SSO auth', () => {
       const ssoDeployment = {
         id: 'chat-id',
