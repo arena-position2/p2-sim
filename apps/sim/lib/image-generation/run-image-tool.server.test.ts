@@ -55,6 +55,69 @@ describe('buildImageToolBodyFromExecutionParams', () => {
 })
 
 describe('runImageToolGeneration validation', () => {
+  it('sends a catalog Fal endpoint that is not in the legacy allowlist', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('fal rejected', {
+        status: 422,
+        headers: { 'Content-Type': 'text/plain' },
+      })
+    )
+
+    await expect(
+      runImageToolGeneration(
+        buildImageToolBodyFromExecutionParams({
+          provider: 'falai',
+          apiKey: 'fal-key',
+          model: 'fal-ai/minimax/image-01',
+          prompt: 'A red paper lantern',
+          aspectRatio: '16:9',
+        }),
+        { userId: 'user-123', requestId: 'req-fal-catalog-model' }
+      )
+    ).rejects.toThrow('Fal.ai API error: 422')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://queue.fal.run/fal-ai/minimax/image-01',
+      expect.objectContaining({ method: 'POST' })
+    )
+    const requestInit = fetchMock.mock.calls[0]?.[1]
+    const requestBody =
+      requestInit && typeof requestInit === 'object' && 'body' in requestInit
+        ? requestInit.body
+        : undefined
+    expect(JSON.parse(String(requestBody))).toMatchObject({
+      prompt: 'A red paper lantern',
+      aspect_ratio: '16:9',
+      num_images: 1,
+    })
+  })
+
+  it('sends a catalog Gemini model that is not in the legacy allowlist', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('gemini rejected', {
+        status: 400,
+        headers: { 'Content-Type': 'text/plain' },
+      })
+    )
+
+    await expect(
+      runImageToolGeneration(
+        buildImageToolBodyFromExecutionParams({
+          provider: 'gemini',
+          model: 'gemini-3.1-flash-image',
+          prompt: 'A red paper lantern',
+          aspectRatio: '16:9',
+        }),
+        { userId: 'user-123', requestId: 'req-gemini-catalog-model' }
+      )
+    ).rejects.toThrow('Gemini API error: 400')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent',
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
   it('rejects an invalid OpenAI model before calling the provider API', async () => {
     await expect(
       runImageToolGeneration(

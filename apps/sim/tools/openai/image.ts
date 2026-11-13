@@ -16,12 +16,6 @@ const logger = createLogger('ImageTool')
 
 const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536'] as const
 const GPT_IMAGE_2_SIZES = [...GPT_IMAGE_SIZES, '2560x1440', '3840x2160'] as const
-const GPT_IMAGE_MODELS = [
-  'gpt-image-2',
-  'gpt-image-1.5',
-  'gpt-image-1',
-  'gpt-image-1-mini',
-] as const
 
 export const imageTool: ToolConfig = {
   id: 'openai_image',
@@ -141,18 +135,19 @@ export const imageTool: ToolConfig = {
     body: (params) => {
       const requestedModel = String(params.model || 'dall-e-3')
       const requestedSize = String(params.size || '')
+      const gptImageSizes: readonly string[] = requestedModel.startsWith('gpt-image-2')
+        ? GPT_IMAGE_2_SIZES
+        : GPT_IMAGE_SIZES
+      const isGptImageModel =
+        requestedModel.startsWith('gpt-image') || requestedModel.startsWith('chatgpt-image')
       const size =
         requestedModel === 'dall-e-3'
           ? ['1024x1024', '1024x1792', '1792x1024'].includes(requestedSize)
             ? requestedSize
             : '1024x1024'
-          : requestedModel === 'gpt-image-2' &&
-              GPT_IMAGE_2_SIZES.includes(requestedSize as (typeof GPT_IMAGE_2_SIZES)[number])
+          : isGptImageModel && gptImageSizes.includes(requestedSize)
             ? requestedSize
-            : GPT_IMAGE_MODELS.includes(requestedModel as (typeof GPT_IMAGE_MODELS)[number]) &&
-                GPT_IMAGE_SIZES.includes(requestedSize as (typeof GPT_IMAGE_SIZES)[number])
-              ? requestedSize
-              : 'auto'
+            : 'auto'
       const body: BaseImageRequestBody = {
         model: requestedModel,
         prompt: params.prompt,
@@ -163,7 +158,7 @@ export const imageTool: ToolConfig = {
       if (requestedModel === 'dall-e-3') {
         if (params.quality) body.quality = params.quality
         if (params.style) body.style = params.style
-      } else if (GPT_IMAGE_MODELS.includes(requestedModel as (typeof GPT_IMAGE_MODELS)[number])) {
+      } else if (isGptImageModel) {
         if (params.quality) body.quality = params.quality
         if (params.background) body.background = params.background
         if (params.outputFormat) body.output_format = params.outputFormat

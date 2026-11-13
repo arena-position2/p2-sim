@@ -176,6 +176,10 @@ export async function validateDeploymentCredentials(
 
   if (authType === 'email') {
     if (request.method === 'GET') {
+      const sessionEmail = request.sessionEmail
+      if (sessionEmail && isEmailAllowed(sessionEmail, resource.allowedEmails)) {
+        return { authorized: true, authenticatedEmail: normalizeEmail(sessionEmail) }
+      }
       return { authorized: false, error: 'auth_required_email' }
     }
 

@@ -404,6 +404,7 @@ export async function readUserFileContentWithContributors(
   try {
     const servable = await downloadServableFileFromStorage(file, requestId, log, {
       maxBytes: maxSourceBytes,
+      ...(options.principal ? { filePrincipal: options.principal } : {}),
     })
     buffer = servable.buffer
     renderedContributingFiles = servable.contributingFiles

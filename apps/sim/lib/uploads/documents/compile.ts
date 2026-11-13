@@ -1205,9 +1205,21 @@ export async function resolveServableDocBytes(args: {
       filePrincipal,
       sourceMime,
     })
-    // Reached only where the source references nothing, so the artifact is keyed by the source
-    // alone and cannot change while that source does not.
+    // The artifact is keyed by the source alone. A saved compile is reused; an authorized
+    // caller can render a missing one. Anonymous reads stay pending so file serve can
+    // answer 409 instead of executing the source.
     if (stored) return { ...stored, dependsOnReferencedFiles: false }
+    if (filePrincipal) {
+      return compileDoc({
+        source,
+        fileName,
+        sourceMime,
+        workspaceId,
+        filePrincipal,
+        ownerKey,
+        signal,
+      })
+    }
     throw new DocCompileUserError('Document is still being generated', { pending: true })
   }
 

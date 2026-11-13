@@ -24,15 +24,21 @@ export async function validateDeploymentAuth(
 ): Promise<DeploymentAuthResult> {
   let sessionEmail: string | null | undefined
   let sessionPresent = false
-  if (resource.authType === 'sso' && (request.method === 'GET' || parsedBody)) {
+  const readsSession =
+    (resource.authType === 'sso' && (request.method === 'GET' || parsedBody)) ||
+    (resource.authType === 'email' && request.method === 'GET')
+  if (readsSession) {
     try {
       const { getSession } = await import('@/lib/auth')
       const session = await getSession()
       sessionPresent = Boolean(session?.user)
       sessionEmail = session?.user?.email
     } catch (error) {
-      logger.error('Error validating SSO:', error, { requestId })
-      return { authorized: false, error: 'SSO authentication error' }
+      logger.error('Error reading deployment session:', error, { requestId })
+      return {
+        authorized: false,
+        error: resource.authType === 'sso' ? 'SSO authentication error' : 'Authentication error',
+      }
     }
   }
   return validateDeploymentCredentials(

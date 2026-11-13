@@ -26,6 +26,8 @@ import {
 } from '@/lib/image-generation/block-model-config'
 import { IMAGE_GENERATION_PROVIDER_TIMEOUT_MS } from '@/lib/image-generation/constants'
 import { generateOpenAIImageEdit } from '@/lib/image-generation/openai-reference.server'
+import { buildImageGenerationRequest } from '@/lib/internal/image/request'
+import { getImageModel } from '@/lib/media/image-catalog'
 import { type FalAICostMetadata, getFalAICostMetadata } from '@/lib/tools/falai-pricing'
 import { buildImageBillingMetadata } from '@/lib/tools/image-pricing'
 import { generateFileId } from '@/lib/uploads/contexts/execution/utils'
@@ -586,7 +588,11 @@ async function generateWithOpenAI(
   logger: ReturnType<typeof createLogger>,
   userId: string
 ): Promise<GeneratedImageResult> {
-  const model = resolveAllowedParam(body.model, OPENAI_IMAGE_MODELS, 'gpt-image-1.5', 'model')
+  const requestedModel = typeof body.model === 'string' ? body.model.trim() : undefined
+  const catalogModel = requestedModel ? getImageModel('openai', requestedModel) : undefined
+  const model = catalogModel
+    ? catalogModel.id
+    : resolveAllowedParam(body.model, OPENAI_IMAGE_MODELS, 'gpt-image-1.5', 'model')
   const bodyRecord = body as Record<string, unknown>
   const inputImage = bodyRecord.inputImage
   const inputImages = bodyRecord.inputImages
@@ -621,10 +627,11 @@ async function generateWithOpenAI(
     const editParams = {
       model,
       prompt: body.prompt,
-      size:
-        model === 'gpt-image-2'
-          ? pickAllowed(body.size, OPENAI_IMAGE_2_SIZES, 'auto')
-          : pickAllowed(body.size, OPENAI_IMAGE_SIZES, 'auto'),
+      size: pickAllowed(
+        body.size,
+        model.startsWith('gpt-image-2') ? OPENAI_IMAGE_2_SIZES : OPENAI_IMAGE_SIZES,
+        'auto'
+      ),
       quality: body.quality ? pickAllowed(body.quality, OPENAI_IMAGE_QUALITIES, 'auto') : undefined,
       background: body.background
         ? pickAllowed(body.background, OPENAI_IMAGE_BACKGROUNDS, 'auto')
@@ -676,10 +683,11 @@ async function generateWithOpenAI(
       revisedPrompt: editResult.revisedPrompt,
     }
   }
-  const size =
-    model === 'gpt-image-2'
-      ? pickAllowed(body.size, OPENAI_IMAGE_2_SIZES, 'auto')
-      : pickAllowed(body.size, OPENAI_IMAGE_SIZES, 'auto')
+  const size = pickAllowed(
+    body.size,
+    model.startsWith('gpt-image-2') ? OPENAI_IMAGE_2_SIZES : OPENAI_IMAGE_SIZES,
+    'auto'
+  )
   const outputFormat = pickAllowed(body.outputFormat, IMAGE_OUTPUT_FORMATS, 'png')
   const requestBody: Record<string, string | number> = {
     model,
@@ -839,16 +847,24 @@ async function generateWithGemini(
   requestId: string,
   logger: ReturnType<typeof createLogger>
 ): Promise<GeneratedImageResult> {
-  const model = resolveAllowedParam(
-    body.model,
-    GEMINI_IMAGE_MODELS,
-    'gemini-3.1-flash-image-preview',
-    'model'
-  )
+  const requestedModel = typeof body.model === 'string' ? body.model.trim() : undefined
+  const catalogModel = requestedModel ? getImageModel('gemini', requestedModel) : undefined
+  const model =
+    catalogModel && !(GEMINI_IMAGE_MODELS as readonly string[]).includes(requestedModel ?? '')
+      ? catalogModel.id
+      : resolveAllowedParam(
+          body.model,
+          GEMINI_IMAGE_MODELS,
+          'gemini-3.1-flash-image-preview',
+          'model'
+        )
+  const catalogRatios = catalogModel?.options?.aspectRatio?.values.map((value) => String(value))
   const aspectRatios =
-    model === 'gemini-3.1-flash-image-preview'
-      ? [...GEMINI_BASE_ASPECT_RATIOS, ...GEMINI_EXTREME_ASPECT_RATIOS]
-      : GEMINI_BASE_ASPECT_RATIOS
+    catalogRatios && catalogRatios.length > 0
+      ? catalogRatios
+      : model === 'gemini-3.1-flash-image-preview'
+        ? [...GEMINI_BASE_ASPECT_RATIOS, ...GEMINI_EXTREME_ASPECT_RATIOS]
+        : GEMINI_BASE_ASPECT_RATIOS
   const imageConfig: Record<string, string> = {}
 
   if (body.aspectRatio) {
@@ -860,7 +876,15 @@ async function generateWithGemini(
     )
   }
 
-  if (model === 'gemini-3.1-flash-image-preview' && body.resolution) {
+  const catalogResolutions = catalogModel?.options?.resolution?.values.map((value) => String(value))
+  if (body.resolution && catalogResolutions && catalogResolutions.length > 0) {
+    imageConfig.imageSize = resolveAllowedParam(
+      body.resolution,
+      catalogResolutions,
+      catalogResolutions[0] ?? '1K',
+      'resolution'
+    )
+  } else if (model === 'gemini-3.1-flash-image-preview' && body.resolution) {
     imageConfig.imageSize = resolveAllowedParam(
       body.resolution,
       GEMINI_IMAGE_SIZES,
@@ -1075,111 +1099,153 @@ async function generateWithFalAI(
   logger: ReturnType<typeof createLogger>,
   userId: string
 ): Promise<GeneratedImageResult> {
-  const falaiModelIds = Object.keys(FALAI_IMAGE_MODEL_CONFIGS)
-  const model = resolveAllowedParam(body.model, falaiModelIds, 'nano-banana-2', 'model')
-  const modelConfig = FALAI_IMAGE_MODEL_CONFIGS[model]
-  if (!modelConfig) {
-    throw new Error(`Unknown Fal.ai image model: ${model}`)
-  }
+  const requestedModel = typeof body.model === 'string' ? body.model.trim() : undefined
+  const catalogModel = requestedModel ? getImageModel('falai', requestedModel) : undefined
+  const legacyModelId =
+    catalogModel && FALAI_IMAGE_MODEL_CONFIGS[catalogModel.id] ? catalogModel.id : undefined
 
-  const referenceUrls = await collectProviderReferenceUrls(
-    userId,
-    requestId,
-    body.inputImage,
-    body.inputImages,
-    body.inputImageUrl,
-    body.inputImageUrls
-  )
-  const endpoint =
-    referenceUrls.length > 0 && modelConfig.editEndpoint
-      ? modelConfig.editEndpoint
-      : modelConfig.endpoint
+  let model: string
+  let endpoint: string
+  let requestBody: Record<string, unknown>
 
-  const requestBody: Record<string, string | number | boolean | string[]> = {
-    prompt: body.prompt,
-    sync_mode: false,
-  }
-
-  if (referenceUrls.length > 0 && modelConfig.editEndpoint) {
-    requestBody.image_urls = referenceUrls
-    logger.info(`[${requestId}] Fal.ai image edit references resolved`, {
-      model,
-      endpoint,
-      referenceCount: referenceUrls.length,
-      referenceUrlLengths: referenceUrls.map((url) => url.length),
+  if (catalogModel && !legacyModelId) {
+    if (!catalogModel.endpoint) {
+      throw new Error(`Unknown Fal.ai image model: ${catalogModel.id}`)
+    }
+    const prepared = buildImageGenerationRequest({
+      provider: 'falai',
+      apiKey,
+      model: catalogModel.id,
+      prompt: body.prompt,
+      size: body.size,
+      aspectRatio: body.aspectRatio,
+      resolution: body.resolution,
+      quality: body.quality,
+      background: body.background,
+      outputFormat: body.outputFormat,
+      moderation: body.moderation,
+      safetyTolerance: body.safetyTolerance,
+      numImages: 1,
+      seed: body.seed,
+      enableSafetyChecker: body.enableSafetyChecker,
+      enableWebSearch: body.enableWebSearch,
+      thinkingLevel: body.thinkingLevel,
     })
-  } else if (referenceUrls.length > 0) {
-    logger.warn(`[${requestId}] Fal.ai model does not support reference image edit endpoint`, {
-      model,
-      referenceCount: referenceUrls.length,
-    })
-  }
+    model = prepared.model.id
+    endpoint = catalogModel.endpoint
+    requestBody = prepared.body
+  } else {
+    const falaiModelIds = Object.keys(FALAI_IMAGE_MODEL_CONFIGS)
+    model = resolveAllowedParam(
+      legacyModelId ?? body.model,
+      falaiModelIds,
+      'nano-banana-2',
+      'model'
+    )
+    const modelConfig = FALAI_IMAGE_MODEL_CONFIGS[model]
+    if (!modelConfig) {
+      throw new Error(`Unknown Fal.ai image model: ${model}`)
+    }
 
-  if (modelConfig.maxNumImages) {
-    requestBody.num_images = 1
-  }
-  if (modelConfig.supportsSeed && body.seed !== undefined) {
-    requestBody.seed = body.seed
-  }
-  if (modelConfig.sizeOptions && modelConfig.defaultSize) {
-    requestBody.image_size = pickAllowed(
-      body.size,
-      modelConfig.sizeOptions,
-      modelConfig.defaultSize
+    const referenceUrls = await collectProviderReferenceUrls(
+      userId,
+      requestId,
+      body.inputImage,
+      body.inputImages,
+      body.inputImageUrl,
+      body.inputImageUrls
     )
-  }
-  if (modelConfig.aspectRatios && modelConfig.defaultAspectRatio) {
-    requestBody.aspect_ratio = resolveAllowedParam(
-      body.aspectRatio,
-      modelConfig.aspectRatios,
-      modelConfig.defaultAspectRatio,
-      'aspect ratio'
-    )
-  }
-  if (modelConfig.resolutionOptions && modelConfig.defaultResolution) {
-    requestBody.resolution = resolveAllowedParam(
-      body.resolution,
-      modelConfig.resolutionOptions,
-      modelConfig.defaultResolution,
-      'resolution'
-    )
-  }
-  if (modelConfig.outputFormats && modelConfig.defaultOutputFormat) {
-    requestBody.output_format = pickAllowed(
-      body.outputFormat,
-      modelConfig.outputFormats,
-      modelConfig.defaultOutputFormat
-    )
-  }
-  if (modelConfig.qualityOptions && modelConfig.defaultQuality) {
-    requestBody.quality = pickAllowed(
-      body.quality,
-      modelConfig.qualityOptions,
-      modelConfig.defaultQuality
-    )
-  }
-  if (modelConfig.backgroundOptions && modelConfig.defaultBackground) {
-    requestBody.background = pickAllowed(
-      body.background,
-      modelConfig.backgroundOptions,
-      modelConfig.defaultBackground
-    )
-  }
-  if (modelConfig.safetyToleranceOptions && modelConfig.defaultSafetyTolerance) {
-    requestBody.safety_tolerance = pickAllowed(
-      body.safetyTolerance,
-      modelConfig.safetyToleranceOptions,
-      modelConfig.defaultSafetyTolerance
-    )
-  }
-  if (modelConfig.supportsEnableSafetyChecker && body.enableSafetyChecker !== undefined) {
-    requestBody.enable_safety_checker = body.enableSafetyChecker
-  }
-  if (modelConfig.supportsEnableWebSearch && body.enableWebSearch !== undefined) {
-    requestBody.enable_web_search = body.enableWebSearch
-  }
-  if (modelConfig.supportsThinkingLevel && body.thinkingLevel) {
-    requestBody.thinking_level = pickAllowed(body.thinkingLevel, ['minimal', 'high'], 'minimal')
+    endpoint =
+      referenceUrls.length > 0 && modelConfig.editEndpoint
+        ? modelConfig.editEndpoint
+        : modelConfig.endpoint
+
+    requestBody = {
+      prompt: body.prompt,
+      sync_mode: false,
+    }
+
+    if (referenceUrls.length > 0 && modelConfig.editEndpoint) {
+      requestBody.image_urls = referenceUrls
+      logger.info(`[${requestId}] Fal.ai image edit references resolved`, {
+        model,
+        endpoint,
+        referenceCount: referenceUrls.length,
+        referenceUrlLengths: referenceUrls.map((url) => url.length),
+      })
+    } else if (referenceUrls.length > 0) {
+      logger.warn(`[${requestId}] Fal.ai model does not support reference image edit endpoint`, {
+        model,
+        referenceCount: referenceUrls.length,
+      })
+    }
+
+    if (modelConfig.maxNumImages) {
+      requestBody.num_images = 1
+    }
+    if (modelConfig.supportsSeed && body.seed !== undefined) {
+      requestBody.seed = body.seed
+    }
+    if (modelConfig.sizeOptions && modelConfig.defaultSize) {
+      requestBody.image_size = pickAllowed(
+        body.size,
+        modelConfig.sizeOptions,
+        modelConfig.defaultSize
+      )
+    }
+    if (modelConfig.aspectRatios && modelConfig.defaultAspectRatio) {
+      requestBody.aspect_ratio = resolveAllowedParam(
+        body.aspectRatio,
+        modelConfig.aspectRatios,
+        modelConfig.defaultAspectRatio,
+        'aspect ratio'
+      )
+    }
+    if (modelConfig.resolutionOptions && modelConfig.defaultResolution) {
+      requestBody.resolution = resolveAllowedParam(
+        body.resolution,
+        modelConfig.resolutionOptions,
+        modelConfig.defaultResolution,
+        'resolution'
+      )
+    }
+    if (modelConfig.outputFormats && modelConfig.defaultOutputFormat) {
+      requestBody.output_format = pickAllowed(
+        body.outputFormat,
+        modelConfig.outputFormats,
+        modelConfig.defaultOutputFormat
+      )
+    }
+    if (modelConfig.qualityOptions && modelConfig.defaultQuality) {
+      requestBody.quality = pickAllowed(
+        body.quality,
+        modelConfig.qualityOptions,
+        modelConfig.defaultQuality
+      )
+    }
+    if (modelConfig.backgroundOptions && modelConfig.defaultBackground) {
+      requestBody.background = pickAllowed(
+        body.background,
+        modelConfig.backgroundOptions,
+        modelConfig.defaultBackground
+      )
+    }
+    if (modelConfig.safetyToleranceOptions && modelConfig.defaultSafetyTolerance) {
+      requestBody.safety_tolerance = pickAllowed(
+        body.safetyTolerance,
+        modelConfig.safetyToleranceOptions,
+        modelConfig.defaultSafetyTolerance
+      )
+    }
+    if (modelConfig.supportsEnableSafetyChecker && body.enableSafetyChecker !== undefined) {
+      requestBody.enable_safety_checker = body.enableSafetyChecker
+    }
+    if (modelConfig.supportsEnableWebSearch && body.enableWebSearch !== undefined) {
+      requestBody.enable_web_search = body.enableWebSearch
+    }
+    if (modelConfig.supportsThinkingLevel && body.thinkingLevel) {
+      requestBody.thinking_level = pickAllowed(body.thinkingLevel, ['minimal', 'high'], 'minimal')
+    }
   }
 
   const createResponse = await fetch(`https://queue.fal.run/${endpoint}`, {
