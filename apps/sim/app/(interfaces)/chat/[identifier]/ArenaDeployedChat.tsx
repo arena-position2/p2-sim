@@ -1,6 +1,14 @@
 'use client'
 
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type RefObject,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { ToastProvider, toast } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
@@ -36,6 +44,10 @@ import {
 } from '@/app/(interfaces)/chat/constants'
 import { useChatKeyboardShortcuts, useChatStreaming } from '@/app/(interfaces)/chat/hooks'
 import { downloadTextFile, exportChatAsMarkdown } from '@/app/(interfaces)/chat/utils/export-chat'
+import {
+  routeStreamMessagesUpdate,
+  shouldApplyHistoryMessages,
+} from '@/app/(interfaces)/chat/utils/thread-stream-cache'
 // import { getFormattedGitHubStars } from '@/app/(landing)/actions/github'
 import {
   deployedChatPromptSentEvent,
@@ -172,6 +184,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     if (typeof window === 'undefined') return null
     return new URLSearchParams(window.location.search).get('chatId')
   })
+  const [streamingChatId, setStreamingChatId] = useState<string | null>(null)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('deployed-chat-sidebar-collapsed') === 'true'
@@ -186,6 +199,10 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [userHasScrolled, setUserHasScrolled] = useState(false)
   const isUserScrollingRef = useRef(false)
+  const currentChatIdRef = useRef(currentChatId)
+  const messagesRef = useRef(messages)
+  const streamingChatIdRef = useRef<string | null>(null)
+  const messagesByChatIdRef = useRef(new Map<string, ChatMessage[]>())
 
   const [authRequired, setAuthRequired] = useState<'password' | 'email' | 'sso' | null>(null)
 
@@ -218,6 +235,45 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   )
 
   const { isStreamingResponse, stopStreaming, handleStreamedResponse } = useChatStreaming()
+  const isViewingActiveStream = isStreamingResponse && streamingChatId === currentChatId
+
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId
+  }, [currentChatId])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    if (!isStreamingResponse) {
+      streamingChatIdRef.current = null
+      setStreamingChatId(null)
+    }
+  }, [isStreamingResponse])
+
+  const applyStreamMessages = useCallback((updater: SetStateAction<ChatMessage[]>) => {
+    const { nextViewingMessages } = routeStreamMessagesUpdate({
+      updater,
+      viewingChatId: currentChatIdRef.current,
+      streamingChatId: streamingChatIdRef.current,
+      cache: messagesByChatIdRef.current,
+      viewingMessages: messagesRef.current,
+    })
+
+    if (nextViewingMessages === undefined) return
+
+    messagesRef.current = nextViewingMessages
+    setMessages(nextViewingMessages)
+  }, [])
+
+  const cacheThreadMessages = useCallback(
+    (chatId: string | null, threadMessages: ChatMessage[]) => {
+      if (!chatId) return
+      messagesByChatIdRef.current.set(chatId, threadMessages)
+    },
+    []
+  )
 
   const [chatDepartment, setChatDepartment] = useState<string | null>('Default')
 
@@ -368,6 +424,29 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       hasHistory: boolean
     ) => {
       if (historyRequestChatIdRef.current !== requestChatId) return
+
+      const cachedMessages = messagesByChatIdRef.current.get(requestChatId)
+      if (
+        !shouldApplyHistoryMessages({
+          requestChatId,
+          streamingChatId: streamingChatIdRef.current,
+          historyMessages: nextMessages,
+          cachedMessages,
+        })
+      ) {
+        if (cachedMessages) {
+          messagesRef.current = cachedMessages
+          setMessages(cachedMessages)
+        }
+        hasShownModalRef.current =
+          hasHistory || Boolean(cachedMessages?.some((m) => !m.isInitialMessage))
+        setIsHistoryLoading(false)
+        setHasCheckedHistory(true)
+        return
+      }
+
+      messagesByChatIdRef.current.set(requestChatId, nextMessages)
+      messagesRef.current = nextMessages
       setMessages(nextMessages)
       hasShownModalRef.current = hasHistory
       setIsHistoryLoading(false)
@@ -494,6 +573,19 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         setHasCheckedHistory(true)
       }
       return
+    }
+
+    // Keep the live SSE message list while this chat is still streaming — a
+    // history fetch would wipe the ephemeral assistant id and leave an empty reply.
+    if (streamingChatIdRef.current === currentChatId) {
+      const cachedMessages = messagesByChatIdRef.current.get(currentChatId)
+      if (cachedMessages) {
+        messagesRef.current = cachedMessages
+        setMessages(cachedMessages)
+        setIsHistoryLoading(false)
+        setHasCheckedHistory(true)
+        return
+      }
     }
 
     historyAbortRef.current?.abort()
@@ -772,7 +864,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
           const lastUserIndex = [...prev].reverse().findIndex((m) => m.type === 'user')
           if (lastUserIndex === -1) return prev
           const index = prev.length - 1 - lastUserIndex
-          return prev.slice(0, index + 1)
+          const next = prev.slice(0, index + 1)
+          messagesRef.current = next
+          if (currentChatId) {
+            messagesByChatIdRef.current.set(currentChatId, next)
+          }
+          return next
         })
       } else if (messageToSend.trim() || combinedFiles.length > 0) {
         // Add the user's message to the chat
@@ -790,7 +887,14 @@ export default function ChatClient({ identifier }: { identifier: string }) {
           })),
         }
         userMessageId = userMessage.id
-        setMessages((prev) => [...prev, userMessage])
+        setMessages((prev) => {
+          const next = [...prev, userMessage]
+          messagesRef.current = next
+          if (currentChatId) {
+            messagesByChatIdRef.current.set(currentChatId, next)
+          }
+          return next
+        })
       }
 
       setInputValue('')
@@ -880,7 +984,13 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       logger.info('Starting to handle streamed response')
       setIsConversationFinished(true)
 
-      await handleStreamedResponse(response, setMessages, setIsLoading, scrollToBottom, {
+      streamingChatIdRef.current = currentChatId
+      setStreamingChatId(currentChatId)
+      if (currentChatId) {
+        messagesByChatIdRef.current.set(currentChatId, messagesRef.current)
+      }
+
+      await handleStreamedResponse(response, applyStreamMessages, setIsLoading, scrollToBottom, {
         outputConfigs: chatConfig?.outputConfigs,
         abortController,
       })
@@ -893,6 +1003,8 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     } catch (error: any) {
       // Clear timeout in case of error
       clearTimeout(timeoutId)
+      streamingChatIdRef.current = null
+      setStreamingChatId(null)
 
       if (error.name === 'AbortError') {
         logger.info('Request aborted by user or timeout')
@@ -914,7 +1026,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         type: 'assistant',
         timestamp: new Date(),
       }
-      setMessages((prev) => [...prev, errorMessage])
+      applyStreamMessages((prev) => [...prev, errorMessage])
     }
   }
 
@@ -1124,7 +1236,14 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   useEffect(() => {
     const syncChatIdFromUrl = () => {
       const chatId = new URLSearchParams(window.location.search).get('chatId')
-      setCurrentChatId(chatId)
+      setCurrentChatId((prev) => {
+        if (prev === chatId) return prev
+        if (prev) {
+          messagesByChatIdRef.current.set(prev, messagesRef.current)
+        }
+        currentChatIdRef.current = chatId
+        return chatId
+      })
     }
 
     syncChatIdFromUrl()
@@ -1181,12 +1300,35 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const handleSelectThread = useCallback(
     (chatId: string) => {
       if (currentChatId === chatId) return
+
+      cacheThreadMessages(currentChatId, messagesRef.current)
+
       setShowFeedbackView(false)
       setIsGoldenQueriesOpen(false)
       setFeedbackError(null)
       setShowScrollButton(false)
-      setIsHistoryLoading(true)
-      setHasCheckedHistory(false)
+
+      const cachedMessages = messagesByChatIdRef.current.get(chatId)
+      const returningToActiveStream = streamingChatIdRef.current === chatId
+
+      if (
+        cachedMessages &&
+        (returningToActiveStream || cachedMessages.some((m) => m.isStreaming))
+      ) {
+        messagesRef.current = cachedMessages
+        setMessages(cachedMessages)
+        setIsHistoryLoading(false)
+        setHasCheckedHistory(true)
+      } else {
+        setIsHistoryLoading(true)
+        setHasCheckedHistory(false)
+        if (cachedMessages) {
+          messagesRef.current = cachedMessages
+          setMessages(cachedMessages)
+        }
+      }
+
+      currentChatIdRef.current = chatId
       setCurrentChatId(chatId)
       updateUrlChatId(chatId)
 
@@ -1204,6 +1346,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       chatDepartment,
       identifier,
       updateUrlChatId,
+      cacheThreadMessages,
     ]
   )
 
@@ -1218,6 +1361,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   }, [currentChatId])
 
   const handleNewChat = useCallback(() => {
+    cacheThreadMessages(currentChatId, messagesRef.current)
     setShowFeedbackView(false)
     setIsGoldenQueriesOpen(false)
     setFeedbackError(null)
@@ -1226,6 +1370,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     setHasCheckedHistory(false)
     hasShownModalRef.current = false
     const id = generateId()
+    currentChatIdRef.current = id
     setCurrentChatId(id)
     // Clear messages except initial messages (greeting + welcome)
     setMessages((prev) => {
@@ -1253,8 +1398,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
             isInitialMessage: true,
           })
         }
+        messagesRef.current = newInitialMessages
+        messagesByChatIdRef.current.set(id, newInitialMessages)
         return newInitialMessages
       }
+      messagesRef.current = initialMessages
+      messagesByChatIdRef.current.set(id, initialMessages)
       return initialMessages
     })
     updateUrlChatId(id)
@@ -1272,7 +1421,15 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       'Agent ID': identifier,
       'Conversation(chat) ID': id,
     })
-  }, [updateUrlChatId, chatConfig, userName, chatDepartment, identifier])
+  }, [
+    updateUrlChatId,
+    chatConfig,
+    userName,
+    chatDepartment,
+    identifier,
+    currentChatId,
+    cacheThreadMessages,
+  ])
 
   const fetchFeedbackPage = useCallback(
     async (page: number) => {
@@ -1574,7 +1731,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                   onSubmit={(value, _isVoiceInput, files) => {
                     void handleSendMessage(value, false, files)
                   }}
-                  onStopStreaming={() => stopStreaming(setMessages)}
+                  onStopStreaming={() => stopStreaming(applyStreamMessages)}
                   selectedGeneratedImages={effectiveGeneratedImages}
                   onRemoveSelectedGeneratedImage={removeSelectedGeneratedImage}
                   inputWrapperRef={chatInputWrapperRef}
@@ -1585,8 +1742,10 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                   <div className='relative flex min-h-0 flex-1 flex-col overflow-hidden'>
                     <ChatMessageContainer
                       messages={messages}
-                      isLoading={isLoading}
-                      isStreaming={isStreamingResponse}
+                      isLoading={
+                        isLoading && (!streamingChatId || streamingChatId === currentChatId)
+                      }
+                      isStreaming={isViewingActiveStream}
                       showScrollButton={showScrollButton}
                       messagesContainerRef={messagesContainerRef as RefObject<HTMLDivElement>}
                       messagesEndRef={messagesEndRef as RefObject<HTMLDivElement>}
@@ -1631,7 +1790,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                           void handleSendMessage(value, false, files)
                         }}
                         isStreaming={isLoading || isStreamingResponse}
-                        onStopStreaming={() => stopStreaming(setMessages)}
+                        onStopStreaming={() => stopStreaming(applyStreamMessages)}
                         selectedGeneratedImages={effectiveGeneratedImages}
                         onRemoveSelectedGeneratedImage={removeSelectedGeneratedImage}
                       />
