@@ -441,13 +441,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const parsed = await parseRequest(chatAgentsListContract, request, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json(
-          { success: false, error: getValidationErrorMessage(error) },
-          { status: 400 }
-        ),
-    })
+    const parsed = await parseRequest(
+      chatAgentsListContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json(
+            { success: false, error: getValidationErrorMessage(error) },
+            { status: 400 }
+          ),
+      }
+    )
     if (!parsed.success) return parsed.response
     const { tabName, emailId, departmentName, onlyAgentAccess, GENERIC_AGENTS_WORKSPACE_ID } =
       parsed.data.query

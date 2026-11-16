@@ -17,9 +17,14 @@ const logger = createLogger('UnipileHostedNotifyAPI')
  * Persists the linked account for the Sim user identified by the hosted link `name` field.
  */
 export const POST = withRouteHandler(async (request: NextRequest) => {
-  const parsed = await parseRequest(unipileHostedNotifyContract, request, {}, {
-    invalidJsonResponse: () => NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
-  })
+  const parsed = await parseRequest(
+    unipileHostedNotifyContract,
+    request,
+    {},
+    {
+      invalidJsonResponse: () => NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
+    }
+  )
   if (!parsed.success) return parsed.response
   const body = parsed.data.body
 

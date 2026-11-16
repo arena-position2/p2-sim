@@ -6,10 +6,15 @@ import { env } from '@/lib/core/config/env'
 const PRESENTATION_API_BASE_URL = env.PRESENTATION_API_BASE_URL
 export async function POST(req: NextRequest) {
   try {
-    const parsed = await parseRequest(presentationCreateContract, req, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-    })
+    const parsed = await parseRequest(
+      presentationCreateContract,
+      req,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+      }
+    )
     if (!parsed.success) return parsed.response
     const { numberOfSlides, tone, verbosity, template, content, slides_markdown, instructions } =
       parsed.data.body

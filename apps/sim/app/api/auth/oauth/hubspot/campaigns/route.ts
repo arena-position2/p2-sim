@@ -28,10 +28,15 @@ export async function GET(request: NextRequest) {
     }
 
     // Get parameters from query
-    const parsed = await parseRequest(hubspotCampaignsContract, request, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-    })
+    const parsed = await parseRequest(
+      hubspotCampaignsContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+      }
+    )
     if (!parsed.success) return parsed.response
     const { credentialId } = parsed.data.query
     const limit = parsed.data.query.limit || '100'

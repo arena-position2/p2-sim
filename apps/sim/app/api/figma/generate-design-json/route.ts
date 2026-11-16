@@ -28,13 +28,18 @@ export const maxDuration = 300 // 5 minutes for design generation
  */
 export async function POST(request: NextRequest) {
   try {
-    const parsed = await parseRequest(figmaGenerateDesignContract, request, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json(
-          { success: false, error: getValidationErrorMessage(error) },
-          { status: 400 }
-        ),
-    })
+    const parsed = await parseRequest(
+      figmaGenerateDesignContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json(
+            { success: false, error: getValidationErrorMessage(error) },
+            { status: 400 }
+          ),
+      }
+    )
     if (!parsed.success) return parsed.response
     const {
       projectId,

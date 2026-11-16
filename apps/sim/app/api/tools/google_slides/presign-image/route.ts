@@ -40,10 +40,15 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const parsed = await parseRequest(googleSlidesPresignContract, request, {}, {
-    validationErrorResponse: (error) =>
-      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-  })
+  const parsed = await parseRequest(
+    googleSlidesPresignContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    }
+  )
   if (!parsed.success) return parsed.response
   const { imageUrl } = parsed.data.body
 

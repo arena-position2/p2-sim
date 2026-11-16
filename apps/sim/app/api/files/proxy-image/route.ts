@@ -41,10 +41,15 @@ function isAllowedProxyUrl(targetUrl: URL, requestHost: string): boolean {
  * Only allows URLs for the same app host or *.thearena.ai.
  */
 export async function GET(request: NextRequest) {
-  const parsed = await parseRequest(proxyImageContract, request, {}, {
-    validationErrorResponse: (error) =>
-      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-  })
+  const parsed = await parseRequest(
+    proxyImageContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    }
+  )
   if (!parsed.success) return parsed.response
   const urlParam = parsed.data.query.url
 

@@ -339,10 +339,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const parsed = await parseRequest(statsPopulateDailyContract, request, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-    })
+    const parsed = await parseRequest(
+      statsPopulateDailyContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+      }
+    )
     if (!parsed.success) return parsed.response
     const {
       startDate: startDateParam,

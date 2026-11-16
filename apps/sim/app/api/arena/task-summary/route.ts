@@ -25,13 +25,18 @@ export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(arenaTaskSummaryQueryContract, request, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json(
-          { success: false, error: { message: getValidationErrorMessage(error) } },
-          { status: 400 }
-        ),
-    })
+    const parsed = await parseRequest(
+      arenaTaskSummaryQueryContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json(
+            { success: false, error: { message: getValidationErrorMessage(error) } },
+            { status: 400 }
+          ),
+      }
+    )
     if (!parsed.success) return parsed.response
     const clientId = parsed.data.query.cid
     const summaryType = parsed.data.query.type
@@ -125,13 +130,18 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(arenaTaskSummaryBodyContract, request, {}, {
-      validationErrorResponse: (error) =>
-        NextResponse.json(
-          { success: false, error: { message: getValidationErrorMessage(error) } },
-          { status: 400 }
-        ),
-    })
+    const parsed = await parseRequest(
+      arenaTaskSummaryBodyContract,
+      request,
+      {},
+      {
+        validationErrorResponse: (error) =>
+          NextResponse.json(
+            { success: false, error: { message: getValidationErrorMessage(error) } },
+            { status: 400 }
+          ),
+      }
+    )
     if (!parsed.success) return parsed.response
     const {
       client_id,

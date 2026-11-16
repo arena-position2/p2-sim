@@ -37,10 +37,15 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
   const auth = checkInternalApiKey(request)
   if (!auth.success) return createUnauthorizedResponse()
 
-  const parsed = await parseRequest(videoAgentUsageQueryContract, request, {}, {
-    validationErrorResponse: (error) =>
-      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-  })
+  const parsed = await parseRequest(
+    videoAgentUsageQueryContract,
+    request,
+    {},
+    {
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    }
+  )
   if (!parsed.success) return parsed.response
   const { email } = parsed.data.query
 
@@ -62,12 +67,17 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
   const auth = checkInternalApiKey(request)
   if (!auth.success) return createUnauthorizedResponse()
 
-  const parsed = await parseRequest(videoAgentUsageBodyContract, request, {}, {
-    invalidJsonResponse: () =>
-      NextResponse.json({ error: 'Invalid request body.' }, { status: 400 }),
-    validationErrorResponse: (error) =>
-      NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
-  })
+  const parsed = await parseRequest(
+    videoAgentUsageBodyContract,
+    request,
+    {},
+    {
+      invalidJsonResponse: () =>
+        NextResponse.json({ error: 'Invalid request body.' }, { status: 400 }),
+      validationErrorResponse: (error) =>
+        NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
+    }
+  )
   if (!parsed.success) return parsed.response
   const email = parsed.data.body.email.toLowerCase()
   const { endpointId, requestId } = parsed.data.body
