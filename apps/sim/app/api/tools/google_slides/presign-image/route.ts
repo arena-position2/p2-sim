@@ -40,7 +40,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const parsed = await parseRequest(googleSlidesPresignContract, request, undefined, {
+  const parsed = await parseRequest(googleSlidesPresignContract, request, {}, {
     validationErrorResponse: (error) =>
       NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
   })

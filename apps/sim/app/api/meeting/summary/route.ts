@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(meetingSummaryQueryContract, request, undefined, {
+    const parsed = await parseRequest(meetingSummaryQueryContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: { message: getValidationErrorMessage(error) } },
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(meetingSummaryBodyContract, request, undefined, {
+    const parsed = await parseRequest(meetingSummaryBodyContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: { message: getValidationErrorMessage(error) } },

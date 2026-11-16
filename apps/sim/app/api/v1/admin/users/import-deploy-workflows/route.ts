@@ -331,7 +331,7 @@ export const POST = withRouteHandler(async (request) => {
       return authResponse
     }
 
-    const parsed = await parseRequest(adminImportDeployWorkflowsContract, request, undefined, {
+    const parsed = await parseRequest(adminImportDeployWorkflowsContract, request, {}, {
       invalidJsonResponse: () => adminBadRequestResponse('Request body must be a JSON object.'),
       validationErrorResponse: (error) => adminBadRequestResponse(getValidationErrorMessage(error)),
     })

@@ -33,7 +33,7 @@ const logger = createLogger('ChatAgentsAPI')
 export async function GET(request: NextRequest) {
   try {
     // Extract emailId from query parameters
-    const parsed = await parseRequest(chatAgentsContract, request, undefined, {
+    const parsed = await parseRequest(chatAgentsContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: getValidationErrorMessage(error) },

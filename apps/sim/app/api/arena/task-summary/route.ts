@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(arenaTaskSummaryQueryContract, request, undefined, {
+    const parsed = await parseRequest(arenaTaskSummaryQueryContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: { message: getValidationErrorMessage(error) } },
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(arenaTaskSummaryBodyContract, request, undefined, {
+    const parsed = await parseRequest(arenaTaskSummaryBodyContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: { message: getValidationErrorMessage(error) } },

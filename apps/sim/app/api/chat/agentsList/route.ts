@@ -441,7 +441,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const parsed = await parseRequest(chatAgentsListContract, request, undefined, {
+    const parsed = await parseRequest(chatAgentsListContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: getValidationErrorMessage(error) },

@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const parsed = await parseRequest(statsPopulateMonthlyContract, request, undefined, {
+    const parsed = await parseRequest(statsPopulateMonthlyContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
     })

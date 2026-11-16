@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get parameters from query
-    const parsed = await parseRequest(hubspotCampaignsContract, request, undefined, {
+    const parsed = await parseRequest(hubspotCampaignsContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),
     })

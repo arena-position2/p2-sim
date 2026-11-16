@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   logger.info(`[${requestId}] Create spreadsheet request received`)
 
   try {
-    const parsed = await parseRequest(googleSheetsCreateContract, request, undefined, {
+    const parsed = await parseRequest(googleSheetsCreateContract, request, {}, {
       invalidJsonResponse: () => NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
       validationErrorResponse: (error) =>
         NextResponse.json({ error: getValidationErrorMessage(error) }, { status: 400 }),

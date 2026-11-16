@@ -42,7 +42,7 @@ export const SERVICE_ACCOUNT_PROVIDER_BY_OAUTH_SERVICE_ID = {
   wealthbox: 'wealthbox-service-account',
   webflow: 'webflow-service-account',
   'zoho-desk': 'zoho-desk-service-account',
-  zoom: 'zoom-service-account',
+  'zoom-client': 'zoom-service-account',
 } as const
 
 /** OAuth services whose users supply app credentials when connecting an account. */

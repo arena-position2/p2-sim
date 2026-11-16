@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(slackSummaryQueryContract, request, undefined, {
+    const parsed = await parseRequest(slackSummaryQueryContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: { message: getValidationErrorMessage(error) } },
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
   const requestId = generateRequestId()
 
   try {
-    const parsed = await parseRequest(slackSummaryBodyContract, request, undefined, {
+    const parsed = await parseRequest(slackSummaryBodyContract, request, {}, {
       validationErrorResponse: (error) =>
         NextResponse.json(
           { success: false, error: { message: getValidationErrorMessage(error) } },
