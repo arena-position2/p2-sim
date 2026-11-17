@@ -121,16 +121,19 @@ async function ensureCopilotToolRuntime(): Promise<Set<string>> {
   const { getRegisteredServerToolNames } = await import('@/lib/mothership/tools/server/router')
   copilotServerToolNames = new Set(getRegisteredServerToolNames())
 
+  const { registerHandler, hasHandler } = await import('@/lib/mothership/tool-executor/executor')
+
   // Hot-reload safety: older handler snapshots may lack Arena leaf names even
   // when create_empty_file / manage_knowledge_base / web_search are present.
   if (!arenaFileAliasesRegistered) {
-    const { registerHandler, hasHandler } = await import('@/lib/mothership/tool-executor/executor')
     const { createServerToolHandler } = await import(
       '@/lib/mothership/tools/registry/server-tool-adapter'
     )
     for (const arenaName of ARENA_ALIASED_SERVER_TOOL_NAMES) {
-      // Schema-only aliases (function_execute → run_function, materialize_file →
-      // save_upload) execute via executeTool fallthrough — not ServerToolAdapter.
+      // Dual-registered leaf names get ServerToolAdapter wrappers. Schema-only
+      // aliases (function_execute → run_function, materialize_file → save_upload)
+      // execute via executeTool under the Cloud id — Local registers save_upload
+      // below so Sim merges never restore a mothership handler Sim deleted.
       if (!(ARENA_DUAL_REGISTERED_SERVER_TOOL_NAMES as readonly string[]).includes(arenaName)) {
         continue
       }
@@ -148,6 +151,14 @@ async function ensureCopilotToolRuntime(): Promise<Set<string>> {
     logger.info('Arena Copilot aliased server tools registered', {
       tools: [...ARENA_ALIASED_SERVER_TOOL_NAMES],
     })
+  }
+
+  // Cloud runs save_upload remotely. Arena keeps the in-process impl under
+  // local-copilot (same seam as vfs-read-tools) to avoid mothership merge conflicts.
+  if (!hasHandler('save_upload')) {
+    const { executeMaterializeFile } = await import('@/local-copilot/lib/tools/materialize-file')
+    registerHandler('save_upload', executeMaterializeFile)
+    logger.info('Arena Copilot registered local save_upload handler')
   }
 
   return copilotServerToolNames

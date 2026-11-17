@@ -17,6 +17,7 @@ import { readWorkspaceFileText } from '@/lib/workspace-files/application/read-wo
 import { clampReadResultForLocalModel } from '@/local-copilot/lib/tools/clamp-read-result'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'
+import { withLocalWorkspaceFileDeliveryObservation } from '@/local-copilot/lib/tools/observe-workspace-file-delivery'
 
 const logger = createLogger('LocalCopilotVfsReadTools')
 
@@ -243,13 +244,15 @@ async function executeLocalVfsRead(
   const reference = stripContentSuffix(path)
   const delegation = toCopilotServerToolContext(ctx)
 
-  const { text, truncated } = await executeCopilotFileUseCase(delegation, readWorkspaceFileText, {
-    workspaceId: ctx.workspaceId,
-    reference,
-    chatId: ctx.chatId,
-    allowPlainText: true,
-    maxBytes: MAX_TEXT_READ_BYTES,
-  })
+  const { text, truncated } = await withLocalWorkspaceFileDeliveryObservation(ctx, () =>
+    executeCopilotFileUseCase(delegation, readWorkspaceFileText, {
+      workspaceId: ctx.workspaceId,
+      reference,
+      chatId: ctx.chatId,
+      allowPlainText: true,
+      maxBytes: MAX_TEXT_READ_BYTES,
+    })
+  )
 
   const raw = {
     content: text,
@@ -289,13 +292,15 @@ async function buildWorkspaceFilesPathMap(ctx: ToolExecutionContext): Promise<Ma
 
 async function readFileTextForGrep(ctx: ToolExecutionContext, reference: string): Promise<string> {
   const delegation = toCopilotServerToolContext(ctx)
-  const { text } = await executeCopilotFileUseCase(delegation, readWorkspaceFileText, {
-    workspaceId: ctx.workspaceId,
-    reference,
-    chatId: ctx.chatId,
-    allowPlainText: true,
-    maxBytes: MAX_GREP_FILE_BYTES,
-  })
+  const { text } = await withLocalWorkspaceFileDeliveryObservation(ctx, () =>
+    executeCopilotFileUseCase(delegation, readWorkspaceFileText, {
+      workspaceId: ctx.workspaceId,
+      reference,
+      chatId: ctx.chatId,
+      allowPlainText: true,
+      maxBytes: MAX_GREP_FILE_BYTES,
+    })
+  )
   return text
 }
 
