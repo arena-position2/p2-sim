@@ -182,6 +182,8 @@ export function useVisibleSettingsNavigation(workspaceId: string): NavigationIte
         return false
       }
 
+      // Arena: NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS gate for Agent access requests.
+      // settings-sidebar.tsx duplicates this — keep both when resolving sync conflicts.
       if (item.requiresPlatformAdminEmail && !isListedPlatformAdminEmail) {
         return false
       }

@@ -29,6 +29,7 @@ import { getSubscriptionAccessState } from '@/lib/billing/client'
 import { canViewWorkspaceBillingSettings } from '@/lib/billing/workspace-permissions'
 import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
 import { hasBrowserAgent, hasDesktopSettings, hasTerminal } from '@/lib/desktop'
+import { isPlatformAdminEmail } from '@/lib/permissions/platform-admin-emails'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import { useWorkspacePermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import type { SettingsSection } from '@/app/workspace/[workspaceId]/settings/navigation'
@@ -121,6 +122,10 @@ export function SettingsSidebar({
   const isEnterprisePlan = subscriptionAccess.isEnterprise
 
   const isSuperUser = session?.user?.role === 'admin'
+  // Arena: Agent access requests is email-gated via NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS
+  // (not Better Auth `role === 'admin'`). Keep in sync with
+  // use-visible-settings-navigation.ts and components/settings/navigation.ts.
+  const isListedPlatformAdminEmail = isPlatformAdminEmail(session?.user?.email)
 
   const isSSOProviderOwner =
     hosted || !userId || isLoadingSSO
@@ -265,6 +270,13 @@ export function SettingsSidebar({
         return false
       }
 
+      // Arena: hide Agent access requests unless the signed-in email is in
+      // NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS. Upstream may omit this flag — keep the
+      // gate on merge so non-listed users never see the Platform nav row.
+      if (item.requiresPlatformAdminEmail && !isListedPlatformAdminEmail) {
+        return false
+      }
+
       return true
     })
   }, [
@@ -283,6 +295,7 @@ export function SettingsSidebar({
     permissionConfig,
     requestableFeatureKeys,
     isSuperUser,
+    isListedPlatformAdminEmail,
     generalSettings?.superUserModeEnabled,
     forkingAvailable,
     canAdminWorkspace,
