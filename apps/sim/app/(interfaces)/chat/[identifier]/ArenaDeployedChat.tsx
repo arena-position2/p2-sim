@@ -325,6 +325,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     }
   }, [])
 
+  /** Stick-to-bottom only while viewing the chat that owns the active stream. */
+  const scrollActiveStreamToBottom = useCallback(() => {
+    if (currentChatIdRef.current !== streamingChatIdRef.current) return
+    scrollToBottom()
+  }, [scrollToBottom])
+
   useEffect(() => {
     const incoming = chatConfig?.customizations?.goldenQueries ?? []
     const normalized = incoming.map((item: any) =>
@@ -380,8 +386,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
       setShowScrollButton(distanceFromBottom > 100)
 
-      // Track if user is manually scrolling during streaming
-      if (isStreamingResponse && !isUserScrollingRef.current) {
+      // Only treat scroll as "user interrupted stream stickiness" on the running thread.
+      if (
+        isStreamingResponse &&
+        currentChatIdRef.current === streamingChatIdRef.current &&
+        !isUserScrollingRef.current
+      ) {
         setUserHasScrolled(true)
       }
     }, 100),
@@ -606,19 +616,20 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     return () => container.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
-  // Reset user scroll tracking when streaming starts
+  // Reset user scroll tracking when streaming starts on the thread being viewed.
   useEffect(() => {
-    if (isStreamingResponse) {
-      // Reset userHasScrolled when streaming starts
-      setUserHasScrolled(false)
+    if (!isViewingActiveStream) return
 
-      // Give a small delay to distinguish between programmatic scroll and user scroll
-      isUserScrollingRef.current = true
-      setTimeout(() => {
-        isUserScrollingRef.current = false
-      }, 1000)
-    }
-  }, [isStreamingResponse])
+    setUserHasScrolled(false)
+
+    // Give a small delay to distinguish between programmatic scroll and user scroll
+    isUserScrollingRef.current = true
+    const timeoutId = setTimeout(() => {
+      isUserScrollingRef.current = false
+    }, 1000)
+
+    return () => clearTimeout(timeoutId)
+  }, [isViewingActiveStream])
 
   const fetchChatConfig = async () => {
     try {
@@ -990,10 +1001,16 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         messagesByChatIdRef.current.set(currentChatId, messagesRef.current)
       }
 
-      await handleStreamedResponse(response, applyStreamMessages, setIsLoading, scrollToBottom, {
-        outputConfigs: chatConfig?.outputConfigs,
-        abortController,
-      })
+      await handleStreamedResponse(
+        response,
+        applyStreamMessages,
+        setIsLoading,
+        scrollActiveStreamToBottom,
+        {
+          outputConfigs: chatConfig?.outputConfigs,
+          abortController,
+        }
+      )
       deployedChatPromptSentEvent({
         'Prompt Content': messageToSend,
         'Prompt Type': 'Text',
