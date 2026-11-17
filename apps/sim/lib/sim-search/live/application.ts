@@ -38,9 +38,14 @@ import { defineAuthorizedKnowledgeUseCase } from '@/lib/knowledge/application/au
 import { resolveKnowledgeOwnerContext } from '@/lib/knowledge/application/contexts'
 import { knowledgeOperations } from '@/lib/knowledge/application/operations'
 import type { SearchKnowledgeInput } from '@/lib/knowledge/application/search'
-import { instrumentSearchUseCase } from '@/lib/knowledge/application/search-diagnostics'
+import {
+  instrumentReadUseCase,
+  instrumentSearchUseCase,
+} from '@/lib/knowledge/application/search-diagnostics'
 import {
   annotateSearchDiagnostics,
+  describeSearchRequest,
+  documentKindLabel,
   measureSearchStage,
   recordSearchProviderResult,
   withSearchProviderDiagnostics,
@@ -75,6 +80,7 @@ import { loadLiveSearchPolicies } from '@/lib/sim-search/live/policy-store'
 import { LIVE_SEARCH_PROVIDER_IDS } from '@/lib/sim-search/live/provider-catalog'
 import { liveSearchGuidance } from '@/lib/sim-search/live/providers'
 import { LiveReadError } from '@/lib/sim-search/live/read-error'
+import { encodedWindowEnd, READ_WINDOW_CHARACTERS } from '@/lib/sim-search/live/read-window'
 import {
   encodeLiveReference,
   includesLiveDocument,
@@ -287,8 +293,26 @@ export const LIVE_NOT_STARTED_MESSAGE =
 export const LIVE_OVER_ACCOUNT_LIMIT_MESSAGE = `Not searched: one search covers at most ${MAX_ACCOUNTS} accounts. Search this source or account alone.`
 /** Previews center on the query's longest matching term, like indexed passages. */
 const PREVIEW_CHARACTERS = 1800
-/** Characters one read returns, the same page budget indexed document reads use. */
-const READ_WINDOW_CHARACTERS = 8000
+/**
+ * Characters a scaled read returns for one document. Two documents at this size, with about a
+ * thousand characters of metadata each, stay under the 50,000-character size at which MCP clients
+ * such as Claude Code save a tool result to a file rather than show it; a call of more documents
+ * shares that budget, as the MCP server's batched read sizes it.
+ */
+const SCALED_READ_DOCUMENT_CHARACTERS = 20_000
+
+/**
+ * Where one read's window ends: the standard page, or for a caller that scales its window, up to
+ * {@link SCALED_READ_DOCUMENT_CHARACTERS} as the result encodes it. A live document is one chunk,
+ * so its window is sized by characters, not by the chunk limit. The window is never shorter than
+ * the standard page.
+ */
+function readWindowEnd(content: string, start: number, scaledWindow: boolean | undefined): number {
+  const standardEnd = Math.min(content.length, start + READ_WINDOW_CHARACTERS)
+  return scaledWindow
+    ? encodedWindowEnd(content, start, SCALED_READ_DOCUMENT_CHARACTERS, standardEnd)
+    : standardEnd
+}
 
 /**
  * Verifies candidates in rank order. A revoked grant fails the whole account; any other
@@ -464,6 +488,9 @@ const liveKnowledgeSearch = defineAuthorizedKnowledgeUseCase({
       queries?.some((query) => !query.query)
     )
       input = { ...input, filters: withImpliedListingBound(input.filters, new Date()) }
+    annotateSearchDiagnostics(
+      describeSearchRequest({ query: input.query, filters: input.filters, nativeQueries: queries })
+    )
     if (
       (!input.query.trim() &&
         !hasDateBounds(input.filters) &&
@@ -977,9 +1004,12 @@ export const searchLiveKnowledge = instrumentSearchUseCase(
 )
 
 export type LiveReadInput = ResourceOwner & {
+  surface?: SearchKnowledgeInput['surface']
   documentId: string
   filters?: WorkspaceSearchFilters
   limit: number
+  /** Lengthens the window past the standard page, as {@link readWindowEnd} sizes it. */
+  scaledWindow?: boolean
   startChunkIndex?: number
   startOffset?: number
   resultSecretRegistry: ResolvedSecretTraceRegistry
@@ -1038,7 +1068,7 @@ function liveReadFailure(error: unknown, provider: string, deadline?: AbortSigna
   return error
 }
 
-export const readLiveDocument = defineAuthorizedKnowledgeUseCase({
+const liveDocumentRead = defineAuthorizedKnowledgeUseCase({
   operation: knowledgeOperations.readDocument,
   resolveContext: ({ input }: { input: LiveReadInput }) => resolveKnowledgeOwnerContext(input),
   async execute({ principal, input }) {
@@ -1048,6 +1078,11 @@ export const readLiveDocument = defineAuthorizedKnowledgeUseCase({
     if (input.organizationId) await requireOrganizationSearchAvailable(input.organizationId)
     if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 8)
       throw new OrchestrationError('validation', 'Invalid document read limit')
+    if (input.startChunkIndex && input.startChunkIndex !== 0)
+      throw new OrchestrationError(
+        'validation',
+        'Live documents use chunk index zero; continue using next.startOffset'
+      )
     const reference = readLiveReference(
       input.documentId,
       liveReferenceOwner(userId, resourceScopeKey(resourceScopeFromOwner(input)))
@@ -1061,71 +1096,75 @@ export const readLiveDocument = defineAuthorizedKnowledgeUseCase({
     /** Cancellation by the caller passes through unclassified. */
     const readFailure = (error: unknown, deadline?: AbortSignal) =>
       input.signal?.aborted ? error : liveReadFailure(error, reference.provider, deadline)
+    annotateSearchDiagnostics({ provider: reference.provider })
     const deadline = AbortSignal.timeout(READ_DEADLINE_MS)
     const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline
-    const [resolved, policies] = await Promise.all([
-      waitWithAbort(resolveLiveAccount(input, userId, reference.account, signal), signal),
-      loadLiveSearchPolicies(input),
-    ]).catch((error: unknown) => {
+    const { resolved, document } = await withSearchProviderDiagnostics(
+      { provider: reference.provider },
+      async () => {
+        const [resolved, policies] = await Promise.all([
+          measureSearchStage('live.resolve', () =>
+            waitWithAbort(resolveLiveAccount(input, userId, reference.account, signal), signal)
+          ),
+          measureSearchStage('live.policies', () => loadLiveSearchPolicies(input)),
+        ])
+        if (resolved.account.provider !== reference.provider)
+          throw new OrchestrationError('not_found', 'Document account changed')
+        const pool = createPinnedConnectionPool()
+        let session: LiveAccountSession | undefined
+        try {
+          const opened = await measureSearchStage('live.session', () =>
+            openLiveAccountSession({ owner: input, userId, resolved, policies, signal, pool })
+          )
+          session = opened
+          if (!(await measureSearchStage('live.verify', () => opened.verify(reference))))
+            throw new OrchestrationError(
+              'not_found',
+              'Document is outside your organization’s search scope'
+            )
+          const document = await measureSearchStage('live.read', () =>
+            opened.read(reference, input.filters)
+          )
+          /** Readers degrade section failures to warnings, so the signal decides cancellation. */
+          signal.throwIfAborted()
+          const current = await measureSearchStage('live.verify', () =>
+            opened.verifyCurrent(document)
+          )
+          /** A verifier may report a check cut short by cancellation as a normal result. */
+          signal.throwIfAborted()
+          if (!current)
+            throw new OrchestrationError(
+              'not_found',
+              'Document is outside your organization’s search scope'
+            )
+          return { resolved, document }
+        } finally {
+          try {
+            await session?.close()
+          } finally {
+            pool.destroy()
+          }
+        }
+      }
+    ).catch((error: unknown) => {
       throw readFailure(error, deadline)
     })
-    if (resolved.account.provider !== reference.provider)
-      throw new OrchestrationError('not_found', 'Document account changed')
-    const pool = createPinnedConnectionPool()
-    let document: NativeDocument
-    let session: LiveAccountSession | undefined
-    try {
-      session = await openLiveAccountSession({
-        owner: input,
-        userId,
-        resolved,
-        policies,
-        signal,
-        pool,
-      })
-      if (!(await session.verify(reference)))
-        throw new OrchestrationError(
-          'not_found',
-          'Document is outside your organization’s search scope'
-        )
-      const currentSession = session
-      document = await measureSearchStage('live.read', () =>
-        currentSession.read(reference, input.filters)
-      )
-      /** Readers degrade section failures to warnings, so the signal decides cancellation. */
-      signal.throwIfAborted()
-      const current = await session.verifyCurrent(document)
-      /** A verifier may report a check cut short by cancellation as a normal result. */
-      signal.throwIfAborted()
-      if (!current)
-        throw new OrchestrationError(
-          'not_found',
-          'Document is outside your organization’s search scope'
-        )
-    } catch (error) {
-      throw readFailure(error, deadline)
-    } finally {
-      try {
-        await session?.close()
-      } finally {
-        pool.destroy()
-      }
-    }
     if (!matchesLiveFilters(document, input.documentId, reference.provider, input.filters))
       throw new OrchestrationError('not_found', 'Document is outside the selected search filters')
     const content = safeContent(document.content, input.resultSecretRegistry)
-    if (input.startChunkIndex && input.startChunkIndex !== 0)
-      throw new OrchestrationError(
-        'validation',
-        'Live documents use chunk index zero; continue using next.startOffset'
-      )
     const start = input.startOffset ?? 0
     if (!Number.isSafeInteger(start) || start < 0 || start > content.length)
       throw new OrchestrationError(
         'validation',
         'This document changed. Read again from the beginning'
       )
-    const end = Math.min(content.length, start + READ_WINDOW_CHARACTERS)
+    const end = readWindowEnd(content, start, input.scaledWindow)
+    annotateSearchDiagnostics({
+      documentKind: documentKindLabel(document.kind ?? reference.kind),
+      contentCharacters: content.length,
+      returnedCharacters: end - start,
+      hasMore: end < content.length,
+    })
     return {
       documentId: input.documentId,
       knowledgeBaseId: '',
@@ -1155,6 +1194,8 @@ export const readLiveDocument = defineAuthorizedKnowledgeUseCase({
     }
   },
 })
+
+export const readLiveDocument = instrumentReadUseCase(liveDocumentRead)
 
 /** Metadata only; the provider's token is still reauthorized at search/read time. */
 export const listLiveSearchAccounts = defineAuthorizedKnowledgeUseCase({

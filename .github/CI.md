@@ -1,16 +1,18 @@
 # CI selection and acceptance ownership
 
-The `changes` job runs Turborepo 2.9.14's `affectedTasks` query before installing application dependencies or provisioning services. `turbo.json` records package dependency propagation; `apps/sim/turbo.json` partitions the app into shared runtime, server, workspace UI, and acceptance tasks. `.github/ci-suites.json` turns those tasks into job matrices. The uploaded `ci-plan` artifact names changed files, selected tasks, attribution reasons, and any fallback.
+The `changes` job runs Turborepo 2.11.10's `affectedTasks` query before installing application dependencies or provisioning services. `turbo.json` records package dependency propagation; `apps/sim/turbo.json` partitions the app into shared runtime, server, workspace UI, and acceptance tasks. `.github/ci-suites.json` turns those tasks into job matrices. The uploaded `ci-plan` artifact names changed files, selected tasks, attribution reasons, and any fallback.
 
 A PR compares the checked-out GitHub merge commit with its first parent: the actual target revision tested by that merge. The PR event's base SHA can become stale when the target advances. Scoping requires a matching GitHub merge ref and SHA, exactly two merge parents, and a usable target parent; otherwise every check runs. This works with the existing depth-two checkout without fetching older ancestry. Main/staging pushes execute all checks; the parent `ci` workflow skips checks on `dev` pushes, while PRs targeting `dev` still run checks. A manual `checks` run executes all checks unless supplied a full base commit SHA to reproduce a scoped plan. Missing history, an empty diff, unknown files outside the workspace graph, root script/CI changes, or a planner error run every check. Missing selection outputs fail the aggregate gate. The gate also rejects an omitted dependency, any failed/cancelled job, and any skip that its explicit selection flag did not authorize.
 
-Dedicated docs verification uses the same planner, comparing pushes with their previous commit and PRs with the tested merge's first parent. Site acceptance follows `docs#build` and its transitive package dependencies. The app's docs-consumer task depends on server runtime and that docs build: backend-only changes run the platform consumer against the docs app, while site changes also run corpus and browser checks. Independent SDK and unit-only edits skip those production jobs. The required `docs HTTP` gate verifies explicit site/platform selections before accepting any skip.
+Changes exclusively to the reviewed library-content or utils-enforcement audit scripts and their adjacent tests run the always-on lint/audit job and a separate job for the complete root script test suite. The lint job defaults to Blacksmith; the root test job uses one GitHub runner. They do not change application runtime. Mixed changes, deleted inputs, unknown scripts, and CI or generator changes retain full fallback. The attribution artifact records this explicit audit-only owner.
+
+Dedicated docs verification uses the same planner, comparing pushes with their previous commit and PRs with the tested merge's first parent. Site acceptance follows `docs#build` and its transitive package dependencies. The app's docs-consumer task depends on server runtime and that docs build: backend-only changes run the platform consumer against the docs app, while site changes also run corpus and browser checks. Standalone package and unit-only edits skip those production jobs. The required `docs HTTP` gate verifies explicit site/platform selections before accepting any skip.
 
 Docs production builds run once and publish an artifact to isolated HTTP, corpus, Chromium, and WebKit jobs. Source checks keep their own checkout because generator verification mutates inputs. Content caches use separate lint/source/build namespaces; generation validates every restore, repairs missing declarations, and removes obsolete modules. The Next build cache keeps its supported incremental behavior. Content and Next caches have size limits, and Next cache files expire after seven days; successful content eviction happens after all consumers finish.
 
 | Change | Expensive checks selected |
 | --- | --- |
-| Independent SDK | That workspace's tests and type-check; no app build, services, or browsers |
+| Standalone package | That workspace's tests and type-check; no app build, services, or browsers |
 | App unit test | App test shards and test type check |
 | Integration test | Both provision paths; no HTTP/browser job merely for the test edit |
 | Workspace UI | Database integration, mobile, SEO and live Electron, plus app tests/build |
@@ -24,7 +26,7 @@ Integration also depends on workspace UI because the desktop executor integratio
 
 SEO depends on workspace UI and server code: landing pages reuse workspace pricing and preview components, provider models/pricing, and the block registry. These directory boundaries are not isolated application dependency graphs.
 
-`affectedTasks` already uses task inputs. Do not enable `futureFlags.affectedUsingTaskInputs` just for this planner: that flag also changes pruning, which can pull CI-only cross-app task dependencies into production Docker contexts.
+`affectedTasks` matches task inputs only under a task-level future flag; without one it reports every task of an affected package. The root `turbo.json` enables `futureFlags.filterUsingTasks`, which CI's package-name `--filter` calls are unaffected by. Do not use `futureFlags.affectedUsingTaskInputs` instead: that flag also changes pruning, which pulls CI-only cross-app task dependencies into production Docker contexts. `affectedTasks.items` also lists the prerequisites of affected tasks, so the planner selects `docs#build` through its own task filter, which applies before prerequisites are added.
 
 Affected type-checks follow the package graph too; repository audits and lint run whenever the checks workflow runs. Workspace-only unit jobs use a free GitHub runner and do not start the app test shards.
 

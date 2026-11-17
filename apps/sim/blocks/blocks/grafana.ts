@@ -1,9 +1,12 @@
 import { GrafanaIcon } from '@/components/icons'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
+import { mapperOperation, toolCallArg, withSavedCredential } from '@/blocks/utils'
 
 export const GrafanaBlock: BlockConfig = {
   type: 'grafana',
+  hideFromToolbar: true,
+  sunset: { status: 'legacy', replacedBy: 'grafana_v2' },
   name: 'Grafana',
   description: 'Interact with Grafana dashboards, alerts, and annotations',
   authMode: AuthMode.ApiKey,
@@ -1107,9 +1110,9 @@ Return ONLY the JSON object - no explanations, no markdown, no extra text.`,
     ],
     config: {
       tool: (params) => params.operation,
-      params: (params) => {
+      params: (params, context) => {
         const result: Record<string, unknown> = {}
-        switch (params.operation) {
+        switch (mapperOperation(params, context)) {
           case 'grafana_list_dashboards':
             if (params.page) result.page = Number(params.page)
             if (params.limit) result.limit = Number(params.limit)
@@ -1141,17 +1144,17 @@ Return ONLY the JSON object - no explanations, no markdown, no extra text.`,
             if (params.contactPointSettings) result.settings = params.contactPointSettings
             break
           case 'grafana_query_data_source':
-            result.queries = params.dataSourceQueries
+            result.queries = params.dataSourceQueries ?? toolCallArg(context, params.queries)
             if (params.queryFrom) result.from = params.queryFrom
             if (params.queryTo) result.to = params.queryTo
             break
           case 'grafana_move_folder':
-            result.folderUid = params.manageFolderUid
-            result.parentUid = params.newParentUid ?? ''
+            result.folderUid = params.manageFolderUid ?? toolCallArg(context, params.folderUid)
+            result.parentUid = params.newParentUid ?? toolCallArg(context, params.parentUid) ?? ''
             break
           case 'grafana_get_alert_rule_group':
-            result.folderUid = params.manageFolderUid
-            result.ruleGroup = params.ruleGroupName
+            result.folderUid = params.manageFolderUid ?? toolCallArg(context, params.folderUid)
+            result.ruleGroup = params.ruleGroupName ?? toolCallArg(context, params.ruleGroup)
             break
           case 'grafana_create_annotation':
             if (params.annotationTags) result.tags = params.annotationTags
@@ -1596,3 +1599,17 @@ export const GrafanaBlockMeta = {
     },
   ],
 } as const satisfies BlockMeta
+
+export const GrafanaV2Block: BlockConfig = {
+  ...GrafanaBlock,
+  type: 'grafana_v2',
+  authMode: AuthMode.OAuth,
+  hideFromToolbar: false,
+  sunset: undefined,
+  ...withSavedCredential(GrafanaBlock, {
+    id: 'credential',
+    type: 'oauth-input',
+    serviceId: 'grafana',
+    title: 'Grafana Credential',
+  }),
+}
