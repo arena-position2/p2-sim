@@ -1,10 +1,27 @@
 'use client'
 
+/**
+ * Loads provider model lists into the workspace providers store.
+ *
+ * Also hydrates PROVIDER_DEFINITIONS from GET /api/v1/admin/llm-catalog (active DB rows)
+ * so static model pickers automatically exclude deactive models without changing
+ * each call site. Dynamic providers (Ollama, OpenRouter, …) still sync from
+ * their own APIs afterward.
+ */
+
 import { useEffect } from 'react'
 import { createLogger } from '@sim/logger'
 import { useParams, usePathname } from 'next/navigation'
+import { llmCatalogProviderRank } from '@/lib/llm-catalog/display-order'
+import { useActiveLlmCatalog } from '@/hooks/queries/llm-catalog'
 import { useProviderModels } from '@/hooks/queries/providers'
 import {
+  type ActiveLlmCatalogSnapshot,
+  DYNAMIC_MODEL_PROVIDERS,
+  PROVIDER_DEFINITIONS,
+} from '@/providers/models'
+import {
+  applyActiveLlmCatalogToProviders,
   updateBasetenProviderModels,
   updateFireworksProviderModels,
   updateLiteLLMProviderModels,
@@ -18,6 +35,24 @@ import { useSearchModalStore } from '@/stores/modals/search/store'
 import { type ProviderName, useProvidersStore } from '@/stores/providers'
 
 const logger = createLogger('ProviderModelsLoader')
+
+/** Flatten providers in display order (openai → google → anthropic → …). */
+function baseModelIdsFromDefinitions(): string[] {
+  return Object.entries(PROVIDER_DEFINITIONS)
+    .filter(([providerId]) => !(DYNAMIC_MODEL_PROVIDERS as readonly string[]).includes(providerId))
+    .sort(([a], [b]) => llmCatalogProviderRank(a) - llmCatalogProviderRank(b))
+    .flatMap(([, provider]) => provider.models.map((model) => model.id))
+}
+
+/** Flatten active catalog in API key order (openai → google → anthropic → …). */
+function baseModelIdsFromCatalog(catalog: ActiveLlmCatalogSnapshot): string[] {
+  const ids: string[] = []
+  for (const [providerId, provider] of Object.entries(catalog)) {
+    if ((DYNAMIC_MODEL_PROVIDERS as readonly string[]).includes(providerId)) continue
+    for (const model of provider.models) ids.push(model.id)
+  }
+  return ids
+}
 
 function shouldLoadProviderModels(
   pathname: string | null,
@@ -54,6 +89,12 @@ function useSyncProvider(provider: ProviderName, enabled: boolean, workspaceId?:
     if (!data) return
 
     try {
+      if (provider === 'base') {
+        // Prefer hydrated definitions in display order; fall back to the base models API.
+        const fromDefinitions = baseModelIdsFromDefinitions()
+        setProviderModels('base', fromDefinitions.length > 0 ? fromDefinitions : data.models)
+        return
+      }
       if (provider === 'ollama') {
         updateOllamaProviderModels(data.models)
       } else if (provider === 'ollama-cloud') {
@@ -100,6 +141,7 @@ export function ProviderModelsLoader({
   const shouldLoad =
     Boolean(scopedWorkspaceId) || shouldLoadProviderModels(pathname, workspaceId, isSearchModalOpen)
 
+  useSyncActiveCatalog(shouldLoad)
   useSyncProvider('base', shouldLoad)
   useSyncProvider('ollama', shouldLoad)
   useSyncProvider('ollama-cloud', shouldLoad, workspaceId)
@@ -110,4 +152,28 @@ export function ProviderModelsLoader({
   useSyncProvider('together', shouldLoad, workspaceId)
   useSyncProvider('baseten', shouldLoad, workspaceId)
   return null
+}
+
+/** Fetches active DB catalog and writes it into PROVIDER_DEFINITIONS + base store. */
+function useSyncActiveCatalog(enabled: boolean) {
+  const setProviderModels = useProvidersStore((state) => state.setProviderModels)
+  const { data, dataUpdatedAt, error } = useActiveLlmCatalog({ enabled })
+
+  useEffect(() => {
+    if (!data) return
+    try {
+      // Mutate PROVIDER_DEFINITIONS so getProviderModels / pickers see active only.
+      applyActiveLlmCatalogToProviders(data)
+      // Flatten in API key order (openai → google → anthropic → …).
+      setProviderModels('base', baseModelIdsFromCatalog(data))
+    } catch (syncError) {
+      logger.warn('Failed to apply active LLM catalog to PROVIDER_DEFINITIONS', syncError as Error)
+    }
+  }, [data, dataUpdatedAt, setProviderModels])
+
+  useEffect(() => {
+    if (error) {
+      logger.error('Failed to load active LLM catalog', error)
+    }
+  }, [error])
 }
