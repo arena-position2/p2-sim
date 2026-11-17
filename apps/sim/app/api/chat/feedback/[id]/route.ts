@@ -1,12 +1,14 @@
 import { db } from '@sim/db'
-import { chatPromptFeedback, workflowExecutionLogs } from '@sim/db/schema'
+import { chatPromptFeedback, user, workflowExecutionLogs } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
-import { and, eq } from 'drizzle-orm'
+import { normalizeEmail } from '@sim/utils/string'
+import { and, eq, or } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
+import { verifyCronAuth } from '@/lib/auth/internal'
 import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('ChatFeedbackAPI')
@@ -20,23 +22,70 @@ const feedbackSchema = z.object({
   tooLong: z.boolean().default(false),
   tooShort: z.boolean().default(false),
   liked: z.union([z.boolean(), z.null()]),
+  /**
+   * Cron auth only: Sim user id to attribute the feedback to.
+   * Ignored when a browser session is present.
+   */
+  userId: z.string().min(1).optional(),
+  /**
+   * Cron auth only: resolve the Sim user by email when `userId` is omitted.
+   * Ignored when a browser session is present.
+   */
+  emailId: z.string().email().optional(),
 })
 
+/**
+ * Resolves a Sim user id from an email address.
+ */
+async function resolveUserIdByEmail(emailId: string): Promise<string | null> {
+  const normalizedEmail = normalizeEmail(emailId)
+  const [userRecord] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(or(eq(user.email, normalizedEmail), eq(user.normalizedEmail, normalizedEmail)))
+    .limit(1)
+
+  return userRecord?.id ?? null
+}
+
+/**
+ * POST /api/chat/feedback/[id]
+ * `[id]` is the workflow execution id. `workflowId` is loaded from `workflow_execution_logs`.
+ * Auth: logged-in Sim session, or `Authorization: Bearer <CRON_SECRET>`.
+ * Cron requests must include `userId` or `emailId`.
+ */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession()
+    const sessionUserId = session?.user?.id ?? null
     const executionId = (await params).id
 
-    if (!session) {
-      return createCodedErrorResponse('Unauthorized', 401)
-    }
-
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized - no active session' }, { status: 401 })
+    if (!sessionUserId) {
+      const authError = verifyCronAuth(request, 'Chat prompt feedback')
+      if (authError) {
+        return authError
+      }
     }
 
     // Parse and validate request body
     const body = feedbackSchema.parse(await request.json())
+
+    let userId = sessionUserId
+    if (!userId) {
+      if (body.userId) {
+        userId = body.userId
+      } else if (body.emailId) {
+        userId = await resolveUserIdByEmail(body.emailId)
+        if (!userId) {
+          return createCodedErrorResponse('User not found', 404)
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'userId or emailId is required when authenticating with CRON_SECRET' },
+          { status: 400 }
+        )
+      }
+    }
 
     try {
       // Check if subdomain is available
@@ -62,7 +111,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           .where(
             and(
               eq(chatPromptFeedback.executionId, executionId),
-              eq(chatPromptFeedback.userId, session.user.id)
+              eq(chatPromptFeedback.userId, userId)
             )
           )
 
@@ -76,7 +125,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       await db.insert(chatPromptFeedback).values({
         id,
-        userId: session.user.id,
+        userId,
         executionId,
         workflowId: executionLog.workflowId,
         comment: body.comment,
