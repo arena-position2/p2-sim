@@ -14,6 +14,8 @@ Updated 2026-11-08: `upstream-sync/2026-11-06` keeps the general-settings embed,
 
 Updated 2026-11-09: Circleback, Cloudflare, and Tailscale output type changes are accepted. No saved Arena workflow uses those blocks.
 
+Updated 2026-11-18: [sync-2026-11-18.md](./sync-2026-11-18.md). OAuth refresh moved to `refresh.server.ts`; Arena tool requests go through `outboundFetch`; Arena block mappers read the operation from the tool-call context.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -54,6 +56,16 @@ From [sync-2026-10-07.md](./sync-2026-10-07.md) and [sync-2026-10-14.md](./sync-
 - [ ] Local Copilot `user_memory` still reads and writes. `manage_skill` still runs through the local wrapper.
 - [ ] An existing Image Generator workflow still accepts reference images on `image_generator_v2` and `<Image Generator.images>` still resolves.
 - [ ] A new Mothership chat uses the upstream default model (`claude-opus-4-6`), not the previous local default (`claude-sonnet-4-6`).
+
+From [sync-2026-11-18.md](./sync-2026-11-18.md):
+
+- [ ] An expired Google Ads, Facebook Ads, HubSpot alias, Zoom admin, and Microsoft credential each refresh on the next run. A provider that needs a custom OAuth app and has none configured shows the `custom_app_not_configured` message.
+- [ ] As an Agent tool: Gmail read thread and advanced search, Google Slides create-from-template, P2 Docs, Chart Generator validate, Development edit, Skyvern, Unipile, and Semrush each run the selected operation.
+- [ ] Shopify analytics, HubSpot campaigns, Zoom account recordings, and Slack list users / user channels still return data. In an organization with a dedicated egress gateway, the request leaves from its static IP.
+- [ ] Slack list channels with DMs on returns DMs; a limit outside 1–200 is rejected. Agent-session tools still post with the bot token.
+- [ ] Zoom: a normal workspace hides account-recording operations and Delete Recording; a Zoom-admin workspace shows account recordings.
+- [ ] Google Drive search by prompt still reranks content; setting a shared drive narrows results.
+- [ ] A workflow using SAP S/4HANA, incident.io escalation paths, Pipedrive pipelines, Mistral parse images, Resend `replyTo`, or Hex outputs, if any exists, still resolves its references.
 
 ---
 
