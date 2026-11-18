@@ -81,6 +81,7 @@ describe('checkHybridAuth credential precedence', () => {
       workspaceId: 'workspace-1',
       keyId: 'workspace-key-1',
       keyType: 'workspace',
+      access: 'write',
     })
 
     const result = await checkHybridAuth(createRequest({ 'x-api-key': 'workspace-key' }))
@@ -89,6 +90,7 @@ describe('checkHybridAuth credential precedence', () => {
       kind: 'workspace_api_key',
       workspaceId: 'workspace-1',
       keyId: 'workspace-key-1',
+      access: 'write',
     })
     expect(apiKeyAttributionFromPrincipal(result.principal)).toEqual({
       apiKeyId: 'workspace-key-1',

@@ -233,14 +233,12 @@ describe('outbound receiver lifecycle', () => {
     let releasePoll: (() => void) | undefined
     let polls = 0
     const reconnects: Array<() => void> = []
-    mocks.sleep.mockImplementation((ms: number) => {
-      if (ms === 1_000) {
-        return new Promise<void>((resolve) => {
+    mocks.sleep.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
           reconnects.push(resolve)
         })
-      }
-      return Promise.resolve()
-    })
+    )
     mocks.fetch.mockImplementation(async (url: string) => {
       if (!url.endsWith('/poll')) return Response.json({ accepted: true })
       polls += 1

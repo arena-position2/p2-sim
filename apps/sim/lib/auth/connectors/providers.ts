@@ -2691,6 +2691,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Facebook getUserInfo', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
