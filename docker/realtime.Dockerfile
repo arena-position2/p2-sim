@@ -3,7 +3,11 @@
 # ========================================
 FROM oven/bun:1.4.2-alpine AS base
 
-RUN apk add --no-cache libc6-compat curl
+# libc6-compat for Bun native addons; curl for runtime health/egress helpers.
+# apk upgrade pulls Alpine security fixes called out by container scans
+# (curl/libcurl, libcrypto3/libssl3, musl, zlib) without floating the base tag.
+RUN apk add --no-cache libc6-compat curl \
+    && apk upgrade --no-cache
 
 # ========================================
 # Pruner Stage: Emit a minimal monorepo subset that @sim/realtime depends on
