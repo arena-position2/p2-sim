@@ -19,7 +19,7 @@ const DEFAULT_MODEL = DEFAULT_LOCAL_COPILOT_MODEL
  * Default specialist / parallel-subagent model when `COPILOT_PROVIDER=anthropic`
  * and `COPILOT_SPECIALIST_MODEL` is unset. Cheaper than Sonnet for leaf tool work.
  */
-const DEFAULT_ANTHROPIC_SPECIALIST_MODEL = 'claude-haiku-4-5'
+const DEFAULT_ANTHROPIC_SPECIALIST_MODEL = 'claude-haiku-5-5'
 /**
  * Default specialist / parallel-subagent model for Gemini (GenAI) parents.
  * Flash-Lite is the speed-optimized leaf; same API key as catalog Gemini models.
@@ -35,7 +35,7 @@ const DEFAULT_VERTEX_SPECIALIST_MODEL = 'gemini-3.5-flash-lite'
  * is the fast Claude on Bedrock; Converse uses the same AWS credentials as
  * Opus/Sonnet/GLM catalog entries.
  */
-const DEFAULT_BEDROCK_SPECIALIST_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0'
+const DEFAULT_BEDROCK_SPECIALIST_MODEL = 'anthropic.claude-haiku-5-5'
 const DEFAULT_PROVIDER: LocalCopilotProviderId = 'anthropic'
 const DEFAULT_BEDROCK_REGION = 'us-east-1'
 /** Default Gemini/Vertex thinking level — `medium` balances CoT visibility vs TTFT. */

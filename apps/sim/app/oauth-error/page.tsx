@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { SSO_REQUIRED_ERROR_CODE, SSO_REQUIRED_MESSAGE } from '@/lib/auth/constants'
-import { DesktopHandoffShell } from '@/app/desktop/components/desktop-handoff-shell'
+import { OAuthErrorContent } from '@/app/oauth-error/oauth-error-content'
 
 export const metadata: Metadata = {
   title: 'Sign-in couldn’t be completed',
@@ -16,12 +16,14 @@ interface OAuthErrorPageProps {
 /**
  * Landing page for OAuth flows that end in an error before the flow state can
  * be parsed — most commonly the user clicking "Cancel"/"Deny" at the
- * provider's consent screen (`?error=access_denied`). Better Auth redirects
- * such errors to `onAPIError.errorURL` (this page) BEFORE it can honor a
- * per-flow `errorCallbackURL`, so the desktop handoff's loopback is never
- * pinged. Without this page those errors 404'd (a dead-end); here the user
- * gets a clear message and a way back. Re-initiating the sign-in/connect from
- * the app supersedes the idle handoff, so no explicit hand-back is needed.
+ * provider's consent screen (`?error=access_denied`), or Microsoft's
+ * admin-consent *request* "Back to app" which also returns `access_denied`
+ * because no tokens were issued yet. Better Auth redirects such errors to
+ * `onAPIError.errorURL` (this page) BEFORE it can honor a per-flow
+ * `errorCallbackURL`, so the connect modal's `callbackURL` never runs.
+ *
+ * The page explains the outcome and offers a CTA back to the place Connect
+ * started (`sim.oauth-return-context`). It never restarts OAuth.
  */
 const FRIENDLY: Record<string, string> = {
   access_denied: 'You declined the request at the provider, so nothing was connected.',
@@ -56,14 +58,13 @@ function messageForError(code: string | undefined): string {
   return 'The sign-in couldn’t be completed. Please try again.'
 }
 
+function firstSearchParam(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
 export default async function OAuthErrorPage({ searchParams }: OAuthErrorPageProps) {
   const params = await searchParams
-  const code = typeof params.error === 'string' ? params.error : undefined
+  const errorCode = firstSearchParam(params.error)
 
-  return (
-    <DesktopHandoffShell
-      title='Sign-in couldn’t be completed'
-      description={`${messageForError(code)} You can close this tab and return to Arena AI.`}
-    />
-  )
+  return <OAuthErrorContent errorCode={errorCode} description={messageForError(errorCode)} />
 }
