@@ -91,7 +91,6 @@ export const updateWorkspaceBodySchema = z.object({
     })
     .nullable()
     .optional(),
-  billedAccountUserId: z.string().optional(),
   allowPersonalApiKeys: z.boolean().optional(),
 })
 

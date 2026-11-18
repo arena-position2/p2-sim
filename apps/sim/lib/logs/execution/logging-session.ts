@@ -896,12 +896,6 @@ export class LoggingSession {
         workspaceId,
         variables
       )
-      this.workflowState =
-        workflowState ??
-        (deploymentVersionId
-          ? await loadDeployedWorkflowStateForLogging(this.workflowId)
-          : await loadWorkflowStateForExecution(this.workflowId))
-
       // Store chat metadata for later use
       this.chatMetadata = {
         userId,
@@ -911,8 +905,12 @@ export class LoggingSession {
         initialInput,
       }
 
-      // Only create a new log entry if not resuming
       if (!skipLogCreation) {
+        this.workflowState =
+          workflowState ??
+          (deploymentVersionId
+            ? await loadDeployedWorkflowStateForLogging(this.workflowId)
+            : await loadWorkflowStateForExecution(this.workflowId))
         await executionLogger.startWorkflowExecution({
           workflowId: this.workflowId,
           workspaceId: workspaceId || '',

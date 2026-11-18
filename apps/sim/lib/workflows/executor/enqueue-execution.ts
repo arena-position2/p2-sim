@@ -42,6 +42,8 @@ export interface EnqueueWorkflowExecutionParams {
   /** Identity decisions the enqueuing surface made; the worker cannot re-derive them. */
   enforceCredentialAccess?: boolean
   isPublicApiAccess?: boolean
+  /** Deployment version the run executes instead of the active one. */
+  pinnedDeploymentVersionId?: string
 }
 
 /**
@@ -90,6 +92,7 @@ export async function enqueueWorkflowExecution(
     trustedInitialResolvedSecretTraceProvenance,
     enforceCredentialAccess,
     isPublicApiAccess,
+    pinnedDeploymentVersionId,
   } = params
   const asyncLogger = logger.withMetadata({
     requestId,
@@ -129,6 +132,7 @@ export async function enqueueWorkflowExecution(
     admissionCompleted: true,
     executionTimeoutMs,
     trustedInitialResolvedSecretTraceProvenance,
+    pinnedDeploymentVersionId,
   }
 
   let jobQueue: Awaited<ReturnType<typeof getJobQueue>>

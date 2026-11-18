@@ -785,7 +785,6 @@ export function useChat(
 ): UseChatReturn {
   const { toast } = useToast()
   const modelSelectorEnabled = useFeatureFlag('mothership-model-selector')
-  const computerUseEnabled = useFeatureFlag('mothership-computer-use')
   const workspaceId = typeof owner === 'string' ? owner : undefined
   const organizationId = typeof owner === 'string' ? undefined : owner.organizationId
   const scopeKey = typeof owner === 'string' ? owner : `organization:${owner.organizationId}`
@@ -4050,16 +4049,7 @@ export function useChat(
         const desktopChatCapabilities =
           options?.requestMode === 'assistant'
             ? {}
-            : await getDesktopChatCapabilities(
-                desktopScopeIdRef.current,
-                !computerUseEnabled
-                  ? null
-                  : organizationId
-                    ? { organizationId }
-                    : workspaceId
-                      ? { workspaceId }
-                      : null
-              )
+            : await getDesktopChatCapabilities(desktopScopeIdRef.current)
 
         admissionUnknown = true
         /** A reload from here on may find the server holding this id. */
@@ -4430,7 +4420,6 @@ export function useChat(
       queryClient,
       upsertChatHistory,
       modelSelectorEnabled,
-      computerUseEnabled,
       processSSEStream,
       finalize,
       resumeOrFinalize,

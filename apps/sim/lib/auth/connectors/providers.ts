@@ -9,12 +9,15 @@ import type { GenericOAuthConfig } from 'better-auth/plugins'
 import { syntheticConnectorEmail } from '@/lib/auth/connector-email'
 import { env } from '@/lib/core/config/env'
 import { inspectConfiguredOAuthClient } from '@/lib/core/config/env-capabilities.server'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
+import { isUnavailableFailure } from '@/lib/core/orchestration/types'
 import {
   DEFAULT_MAX_ERROR_BODY_BYTES,
   readResponseJsonWithLimit,
   readResponseTextWithLimit,
 } from '@/lib/core/utils/stream-limits'
 import { getBaseUrl, getInternalApiBaseUrl } from '@/lib/core/utils/urls'
+import { createApolloProvider } from '@/lib/oauth/apollo'
 import { exchangeAtlassianAuthorizationCode } from '@/lib/oauth/atlassian-token'
 import { getDocusignOAuthUrl } from '@/lib/oauth/docusign'
 import { createGitHubRepositoriesProvider } from '@/lib/oauth/github-repositories'
@@ -146,7 +149,7 @@ function salesforceConnector(providerId: string, loginHost: string): GenericOAut
     redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/${providerId}`,
     getUserInfo: async (tokens) => {
       try {
-        const response = await fetch(userInfoUrl, {
+        const response = await outboundFetch(userInfoUrl, {
           headers: {
             Authorization: `Bearer ${tokens.accessToken}`,
           },
@@ -174,6 +177,7 @@ function salesforceConnector(providerId: string, loginHost: string): GenericOAut
         }
       } catch (error) {
         logger.error('Error creating Salesforce user profile:', { error, providerId })
+        if (isUnavailableFailure(error)) throw error
         return null
       }
     },
@@ -220,7 +224,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-email`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -256,7 +260,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-calendar`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -292,7 +296,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-drive`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -328,7 +332,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-docs`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -364,7 +368,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-sheets`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -401,7 +405,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-contacts`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -437,7 +441,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-forms`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -473,7 +477,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-ads`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -508,7 +512,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-bigquery`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -545,7 +549,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-vault`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -582,7 +586,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-groups`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -619,7 +623,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-chat`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -656,7 +660,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-meet`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -692,7 +696,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/google-tasks`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -729,7 +733,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/vertex-ai`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          const response = await outboundFetch('https://openidconnect.googleapis.com/v1/userinfo', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
           if (!response.ok) {
@@ -986,7 +990,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching Wealthbox user profile')
 
-          const response = await fetch('https://api.crmworkspace.com/v1/me', {
+          const response = await outboundFetch('https://api.crmworkspace.com/v1/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -1040,10 +1044,18 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           logger.error('Error creating Wealthbox user profile:', {
             error: toError(error).message,
           })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
     },
+
+    createApolloProvider({
+      clientId: env.APOLLO_CLIENT_ID as string,
+      clientSecret: env.APOLLO_CLIENT_SECRET as string,
+      redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/apollo`,
+      scopes: getCanonicalScopesForProvider('apollo'),
+    }),
 
     {
       providerId: 'pipedrive',
@@ -1060,7 +1072,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching Pipedrive user profile')
 
-          const response = await fetch('https://api.pipedrive.com/v1/users/me', {
+          const response = await outboundFetch('https://api.pipedrive.com/v1/users/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -1088,6 +1100,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error creating Pipedrive user profile:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1107,7 +1120,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching HubSpot user profile')
 
-          const response = await fetch(
+          const response = await outboundFetch(
             `https://api.hubapi.com/oauth/v1/access-tokens/${tokens.accessToken}`
           )
 
@@ -1159,6 +1172,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error creating HubSpot user profile:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1202,7 +1216,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         // pkce:false (which connected) then restoring pkce:true + this verifier.
         if (codeVerifier) tokenParams.set('code_verifier', codeVerifier)
 
-        const response = await fetch('https://accounts.zoho.com/oauth/v2/token', {
+        const response = await outboundFetch('https://accounts.zoho.com/oauth/v2/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: tokenParams,
@@ -1249,7 +1263,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         // token response api_domain so every API call targets the correct
         // host instead of assuming desk.zoho.com. Stored inside the scope
         // string (survives refreshes, which never rewrite scope) and read
-        // back in /api/auth/oauth/token as `apiDomain`.
+        // back during credential token resolution as `apiDomain`.
         const deskBase = deriveZohoDeskBaseFromApiDomain(
           typeof data.api_domain === 'string' ? data.api_domain : undefined
         )
@@ -1270,7 +1284,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       },
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://accounts.zoho.com/oauth/user/info', {
+          const response = await outboundFetch('https://accounts.zoho.com/oauth/user/info', {
             headers: { Authorization: `Zoho-oauthtoken ${tokens.accessToken}` },
           })
 
@@ -1309,6 +1323,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Zoho Desk getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1350,7 +1365,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         // rejects the request shape (invalid_request).
         if (codeVerifier) tokenParams.set('code_verifier', codeVerifier)
 
-        const response = await fetch('https://accounts.zoho.com/oauth/v2/token', {
+        const response = await outboundFetch('https://accounts.zoho.com/oauth/v2/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: tokenParams.toString(),
@@ -1401,7 +1416,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       },
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://accounts.zoho.com/oauth/user/info', {
+          const response = await outboundFetch('https://accounts.zoho.com/oauth/user/info', {
             headers: { Authorization: `Zoho-oauthtoken ${tokens.accessToken}` },
           })
 
@@ -1445,6 +1460,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in ManageEngine ServiceDesk Plus getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1466,7 +1482,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/x`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch(
+          const response = await outboundFetch(
             'https://api.x.com/2/users/me?user.fields=profile_image_url,username,name,verified',
             {
               headers: {
@@ -1504,6 +1520,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in X getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1523,7 +1540,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         scope: getCanonicalScopesForProvider('tiktok').join(','),
       },
       getToken: async ({ code, redirectURI }) => {
-        const response = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+        const response = await outboundFetch('https://open.tiktokapis.com/v2/oauth/token/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
@@ -1554,7 +1571,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       },
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch(
+          const response = await outboundFetch(
             'https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url',
             {
               headers: {
@@ -1607,6 +1624,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in TikTok getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1638,7 +1656,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         }),
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.atlassian.com/me', {
+          const response = await outboundFetch('https://api.atlassian.com/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -1668,6 +1686,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Confluence getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1699,7 +1718,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         }),
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.atlassian.com/me', {
+          const response = await outboundFetch('https://api.atlassian.com/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -1729,6 +1748,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Jira getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1750,7 +1770,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/airtable`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.airtable.com/v0/meta/whoami', {
+          const response = await outboundFetch('https://api.airtable.com/v0/meta/whoami', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -1778,6 +1798,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Airtable getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1800,7 +1821,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         const basicAuth = Buffer.from(
           `${env.BITBUCKET_CLIENT_ID as string}:${env.BITBUCKET_CLIENT_SECRET as string}`
         ).toString('base64')
-        const response = await fetch('https://bitbucket.org/site/oauth2/access_token', {
+        const response = await outboundFetch('https://bitbucket.org/site/oauth2/access_token', {
           method: 'POST',
           headers: {
             Authorization: `Basic ${basicAuth}`,
@@ -1841,7 +1862,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       getUserInfo: async (tokens) => {
         try {
           const signal = AbortSignal.timeout(15_000)
-          const response = await fetch('https://api.bitbucket.org/2.0/user', {
+          const response = await outboundFetch('https://api.bitbucket.org/2.0/user', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -1884,6 +1905,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Bitbucket getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1904,7 +1926,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/notion`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.notion.com/v1/users/me', {
+          const response = await outboundFetch('https://api.notion.com/v1/users/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
               'Notion-Version': '2022-06-28',
@@ -1946,6 +1968,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Notion getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -1979,7 +2002,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       getUserInfo: async (tokens) => {
         try {
           const signal = AbortSignal.timeout(15_000)
-          const response = await fetch(MONDAY_API_URL, {
+          const response = await outboundFetch(MONDAY_API_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -2035,6 +2058,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Monday.com getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2056,7 +2080,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/reddit`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://oauth.reddit.com/api/v1/me', {
+          const response = await outboundFetch('https://oauth.reddit.com/api/v1/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
               'User-Agent': REDDIT_USER_AGENT,
@@ -2086,6 +2110,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Reddit getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2103,7 +2128,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/clickup`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.clickup.com/api/v2/user', {
+          const response = await outboundFetch('https://api.clickup.com/api/v2/user', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
               'Content-Type': 'application/json',
@@ -2135,6 +2160,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in ClickUp getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2154,7 +2180,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.linear.app/graphql', {
+          const response = await outboundFetch('https://api.linear.app/graphql', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -2234,7 +2260,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
            * `/v2/self` requires no scope and reports who authorized the token.
            * @see https://docs.attio.com/rest-api/endpoint-reference/meta/identify
            */
-          const selfResponse = await fetch('https://api.attio.com/v2/self', {
+          const selfResponse = await outboundFetch('https://api.attio.com/v2/self', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
           })
 
@@ -2264,7 +2290,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
            * `user_management:read`, which Sim always requests for Attio.
            * @see https://docs.attio.com/rest-api/endpoint-reference/workspace-members/get-a-workspace-member
            */
-          const memberResponse = await fetch(
+          const memberResponse = await outboundFetch(
             `https://api.attio.com/v2/workspace_members/${encodeURIComponent(memberId)}`,
             { headers: { Authorization: `Bearer ${tokens.accessToken}` } }
           )
@@ -2303,9 +2329,11 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
            * Return null rather than rethrowing: Better Auth's `handleUserInfo`
            * does not wrap `getUserInfo`, so a throw escapes the callback route
            * as a raw 500 with no way back into the app, while null redirects
-           * with `user_info_is_missing`.
+           * with `user_info_is_missing`. An egress outage is the exception: it
+           * is Sim's failure, which `withConnectDraftOutboundScope` answers as 503.
            */
           logger.error('Error in Attio getUserInfo:', error)
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2322,7 +2350,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/box`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.box.com/2.0/users/me', {
+          const response = await outboundFetch('https://api.box.com/2.0/users/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2373,12 +2401,15 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       },
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${tokens.accessToken}`,
-            },
-          })
+          const response = await outboundFetch(
+            'https://api.dropboxapi.com/2/users/get_current_account',
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${tokens.accessToken}`,
+              },
+            }
+          )
 
           if (!response.ok) {
             const errorText = await response.text()
@@ -2424,7 +2455,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/asana`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch('https://app.asana.com/api/1.0/users/me', {
+          const response = await outboundFetch('https://app.asana.com/api/1.0/users/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2455,6 +2486,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Asana getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2506,7 +2538,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
             hasUserToken: !!userAccessToken,
           })
 
-          const response = await fetch('https://slack.com/api/auth.test', {
+          const response = await outboundFetch('https://slack.com/api/auth.test', {
             headers: {
               Authorization: `Bearer ${tokenToUse}`,
             },
@@ -2566,6 +2598,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error creating Slack bot profile:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2585,7 +2618,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching Webflow user info')
 
-          const response = await fetch('https://api.webflow.com/v2/token/introspect', {
+          const response = await outboundFetch('https://api.webflow.com/v2/token/introspect', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2616,6 +2649,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Webflow getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2677,7 +2711,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching LinkedIn user profile')
 
-          const response = await fetch('https://api.linkedin.com/v2/userinfo', {
+          const response = await outboundFetch('https://api.linkedin.com/v2/userinfo', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2705,6 +2739,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in LinkedIn getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2727,7 +2762,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching Zoom user profile')
 
-          const response = await fetch('https://api.zoom.us/v2/users/me', {
+          const response = await outboundFetch('https://api.zoom.us/v2/users/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2755,6 +2790,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Zoom getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2775,7 +2811,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching Spotify user profile')
 
-          const response = await fetch('https://api.spotify.com/v1/me', {
+          const response = await outboundFetch('https://api.spotify.com/v1/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2803,6 +2839,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Spotify getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2823,7 +2860,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching WordPress.com user profile')
 
-          const response = await fetch('https://public-api.wordpress.com/rest/v1.1/me', {
+          const response = await outboundFetch('https://public-api.wordpress.com/rest/v1.1/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2853,6 +2890,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in WordPress.com getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2875,7 +2913,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching DocuSign user profile')
 
-          const response = await fetch(getDocusignOAuthUrl('/oauth/userinfo'), {
+          const response = await outboundFetch(getDocusignOAuthUrl('/oauth/userinfo'), {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
             },
@@ -2911,6 +2949,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in DocuSign getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2932,7 +2971,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
 
         try {
           const signal = AbortSignal.timeout(15_000)
-          const response = await fetch('https://api.ramp.com/developer/v1/business', {
+          const response = await outboundFetch('https://api.ramp.com/developer/v1/business', {
             headers: { Authorization: `Bearer ${tokens.accessToken}` },
             redirect: 'error',
             signal,
@@ -2970,6 +3009,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Failed to fetch Ramp business info', { errorType: toError(error).name })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -2990,7 +3030,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
 
         try {
           const signal = AbortSignal.timeout(15_000)
-          const response = await fetch('https://api.helpscout.net/v2/users/me', {
+          const response = await outboundFetch('https://api.helpscout.net/v2/users/me', {
             headers: { Authorization: `Bearer ${tokens.accessToken}`, Accept: 'application/json' },
             redirect: 'error',
             signal,
@@ -3030,6 +3070,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Failed to fetch Help Scout user info', { errorType: toError(error).name })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },
@@ -3051,7 +3092,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
         try {
           logger.info('Fetching Cal.com user profile')
 
-          const response = await fetch('https://api.cal.com/v2/me', {
+          const response = await outboundFetch('https://api.cal.com/v2/me', {
             headers: {
               Authorization: `Bearer ${tokens.accessToken}`,
               'cal-api-version': '2024-08-13',
@@ -3080,6 +3121,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
           }
         } catch (error) {
           logger.error('Error in Cal.com getUserInfo:', { error })
+          if (isUnavailableFailure(error)) throw error
           return null
         }
       },

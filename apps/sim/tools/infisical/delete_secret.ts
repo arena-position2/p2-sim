@@ -2,6 +2,8 @@ import type {
   InfisicalDeleteSecretParams,
   InfisicalDeleteSecretResponse,
 } from '@/tools/infisical/types'
+import { infisicalApiUrl } from '@/tools/infisical/utils'
+import { INFISICAL_CREDENTIAL_OAUTH } from '@/tools/shared/saved-credentials'
 import type { ToolConfig } from '@/tools/types'
 
 export const deleteSecretTool: ToolConfig<
@@ -12,6 +14,7 @@ export const deleteSecretTool: ToolConfig<
   name: 'Infisical Delete Secret',
   description: 'Delete a secret from a project environment.',
   version: '1.0.0',
+  oauth: INFISICAL_CREDENTIAL_OAUTH,
 
   params: {
     apiKey: {
@@ -23,7 +26,7 @@ export const deleteSecretTool: ToolConfig<
     baseUrl: {
       type: 'string',
       required: false,
-      visibility: 'user-or-llm',
+      visibility: 'user-only',
       description:
         'Infisical instance URL (default: "https://us.infisical.com"). Use "https://eu.infisical.com" for EU Cloud or your self-hosted URL.',
     },
@@ -62,7 +65,10 @@ export const deleteSecretTool: ToolConfig<
   request: {
     method: 'DELETE',
     url: (params) =>
-      `${params.baseUrl?.replace(/\/+$/, '') ?? 'https://us.infisical.com'}/api/v4/secrets/${encodeURIComponent(params.secretName.trim())}`,
+      infisicalApiUrl(
+        params.baseUrl,
+        `/api/v4/secrets/${encodeURIComponent(params.secretName.trim())}`
+      ),
     headers: (params) => ({
       'Content-Type': 'application/json',
       Authorization: `Bearer ${params.apiKey}`,

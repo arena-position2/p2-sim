@@ -3,6 +3,8 @@ import { toError } from '@sim/utils/errors'
 import { isRecordLike } from '@sim/utils/object'
 import { managementToolContracts } from '@/lib/api/contracts/mothership-management-tools'
 import { openResourceOutputSchema } from '@/lib/api/contracts/mothership-resource-tools'
+import { OAUTH_API_READ_SCOPE } from '@/lib/auth/oauth-provider'
+import { withDelegatedApiScopes } from '@/lib/core/application/delegated-api-scopes'
 import { messageForCopilotApplicationError } from '@/lib/mothership/application/errors'
 import { projectToolErrorMessageForCopilot } from '@/lib/mothership/request/tools/resolved-secret-result'
 import { searchResourceFromToolResult } from '@/lib/mothership/resources/search-tool-result'
@@ -20,7 +22,7 @@ const MISSING_GENERATE_IMAGE_PROMPT_ERROR =
   'prompt is required — pass { prompt: "detailed image description" }'
 
 export function createServerToolHandler(toolId: string): ToolHandler {
-  return async (params, context): Promise<ToolExecutionResult> => {
+  const execute: ToolHandler = async (params, context): Promise<ToolExecutionResult> => {
     let enrichedParams = { ...params }
     if (toolId !== 'open_resource' && !managementToolContracts.some((tool) => tool.id === toolId)) {
       if (!enrichedParams.workflowId && context.workflowId)
@@ -118,4 +120,11 @@ export function createServerToolHandler(toolId: string): ToolHandler {
       }
     }
   }
+  // A run with no caller of its own (an unattributed inbox message) executes as the workspace owner,
+  // whose live role the tools' operations authorize. It holds only the read grant, as in the CLI
+  // lane, so the router refuses any call whose arguments write.
+  return (params, context) =>
+    context.secretActorUserId === null
+      ? withDelegatedApiScopes([OAUTH_API_READ_SCOPE], () => execute(params, context))
+      : execute(params, context)
 }

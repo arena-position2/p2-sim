@@ -4,6 +4,7 @@ import { sleep } from '@sim/utils/helpers'
 import { z } from 'zod'
 import { env } from '@/lib/core/config/env'
 import { getMaxExecutionTimeout } from '@/lib/core/execution-limits'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { InternalToolOperationImplementation } from '@/lib/internal/tool-operations/types'
 import type {
   BrowserUseRunTaskParams,
@@ -108,7 +109,7 @@ async function fetchBrowserUse(
 ): Promise<Response> {
   options.signal?.throwIfAborted()
   const hasBody = options.body !== undefined
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await outboundFetch(`${API_BASE}${path}`, {
     method: options.method ?? 'GET',
     headers: {
       ...(hasBody ? { 'Content-Type': 'application/json' } : {}),

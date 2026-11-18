@@ -1,6 +1,7 @@
 import { browserUseHosting } from '@/tools/browser_use/hosting'
 import type { BrowserUseRunTaskParams, BrowserUseRunTaskResponse } from '@/tools/browser_use/types'
 import { createInternalToolOperationInput } from '@/tools/operation-input'
+import { BROWSER_USE_CREDENTIAL_OAUTH } from '@/tools/shared/saved-credentials'
 import type { InternalToolConfig, ToolHostingConfig } from '@/tools/types'
 
 export const runTaskTool: InternalToolConfig<BrowserUseRunTaskParams, BrowserUseRunTaskResponse> = {
@@ -8,6 +9,7 @@ export const runTaskTool: InternalToolConfig<BrowserUseRunTaskParams, BrowserUse
   name: 'Browser Use',
   description: 'Runs a browser automation task using BrowserUse',
   version: '1.0.0',
+  oauth: BROWSER_USE_CREDENTIAL_OAUTH,
 
   hosting: browserUseHosting as unknown as ToolHostingConfig<BrowserUseRunTaskParams>,
 

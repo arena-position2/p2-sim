@@ -24,6 +24,7 @@ import {
   slackString,
 } from '@/lib/internal/slack/client'
 import { SlackOperationError } from '@/lib/internal/slack/errors'
+import { isSlackFileHost, slackFileDownloadUrl } from '@/lib/internal/slack/file-download'
 import { forEachSlackAttachmentFile } from '@/lib/internal/slack/file-input'
 import { executeSlackReadMessages } from '@/lib/internal/slack/read-messages'
 import {
@@ -354,10 +355,9 @@ export async function executeSlackDownload(input: SlackDownloadBody, signal?: Ab
   const file = slackObject(data, 'file') ?? {}
   const name = input.fileName || slackString(file, 'name') || 'download'
   const mimeType = slackString(file, 'mimetype') || 'application/octet-stream'
-  const urlPrivate = slackString(file, 'url_private')
-  if (!urlPrivate) failure(400, 'File does not have a download URL')
-  const downloadUrl = urlPrivate
-  const validation = await validateUrlWithDNS(downloadUrl, 'urlPrivate', 'contentFetch')
+  const downloadUrl = slackFileDownloadUrl(file)?.href
+  if (!downloadUrl) failure(400, 'File has no Slack-hosted download URL')
+  const validation = await validateUrlWithDNS(downloadUrl, 'downloadUrl', 'contentFetch')
   signal?.throwIfAborted()
   if (!validation.isValid) failure(400, validation.error || 'Invalid Slack file URL')
   const response = await secureFetchWithPinnedIP(downloadUrl, validation.resolvedIP, {
@@ -365,6 +365,10 @@ export async function executeSlackDownload(input: SlackDownloadBody, signal?: Ab
     headers: { Authorization: `Bearer ${input.accessToken}` },
     maxResponseBytes: MAX_FILE_SIZE,
     signal,
+    assertRedirectTarget: (target) => {
+      if (!isSlackFileHost(target))
+        failure(400, 'Slack redirected the file download away from its file host')
+    },
   })
   signal?.throwIfAborted()
   if (!response.ok) failure(400, 'Failed to download file content')

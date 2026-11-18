@@ -14,8 +14,8 @@
  *   JSZip's UMD build) does not throw `ReferenceError: __require is not
  *   defined` during evaluation or Document construction
  *
- * All other runtime surface (`console`, `TextEncoder`, `TextDecoder`, timers)
- * is installed by the worker via `ivm.Callback` / `ivm.Reference` bridges to
+ * All other runtime surface (`console`, `TextEncoder`, `TextDecoder`, `btoa`,
+ * `atob`, timers) is installed by the worker via `ivm.Callback` / `ivm.Reference` bridges to
  * Node's native implementations — no hand-rolled polyfill logic lives in the
  * isolate.
  */

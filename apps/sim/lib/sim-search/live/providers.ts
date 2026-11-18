@@ -116,7 +116,7 @@ export const LIVE_SEARCH_PROVIDERS = {
         'from:, to:, cc:, subject:, label:, has:attachment, filename:, in:sent, from:me and is:unread; spam and trash are not searched.',
       example: 'from:jane@example.com subject:(budget OR forecast)',
       avoid:
-        'listing alternatives with spaces, which requires all of them, or lowercase or; join alternatives with uppercase OR. Search matches individual messages. Reading a match includes up to eight independently authorized messages from its conversation, with per-message dates and URLs. Context can fall outside the search dates or keywords; use the message timestamps and incomplete notices, and never claim the entire thread was searched.',
+        'listing alternatives with spaces, which requires all of them, or lowercase or; join alternatives with uppercase OR. Search matches individual messages, and a result shows only the opening of its message, not a passage around the match: read it before concluding what the rest of the message says. Reading a match includes up to eight independently authorized messages from its conversation, with per-message dates and URLs. Context can fall outside the search dates or keywords; use the message timestamps and incomplete notices, and never claim the entire thread was searched.',
     },
     search: searchGmail,
     read: (client, reference, options) => readGmail(client, reference.id, options),
@@ -177,8 +177,15 @@ export const LIVE_SEARCH_PROVIDERS = {
         'joining alternatives with OR or spaces in one query, which keyword retrieval treats as all required; send them as separate native queries.',
     },
     search: searchSlack,
-    read: (client, reference) =>
-      readSlack(client, reference.id, reference.container, reference.kind, reference.threadId),
+    read: (client, reference, options) =>
+      readSlack(
+        client,
+        reference.id,
+        reference.container,
+        reference.kind,
+        reference.threadId,
+        options.signal
+      ),
   },
   jira: {
     guide: {
@@ -259,7 +266,7 @@ export const LIVE_SEARCH_PROVIDERS = {
       avoid:
         'expecting date filters or sorting on code or wiki results, and relying on advanced-search operators (quotes, |, -) on instances that may only have basic search.',
     },
-    search: searchGitLab,
+    search: (client, input) => searchGitLab(client, input),
     read: (client, reference) =>
       readGitLab(client, reference.id, reference.container, reference.kind, reference.revision),
   },

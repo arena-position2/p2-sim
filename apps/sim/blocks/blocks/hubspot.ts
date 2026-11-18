@@ -6,6 +6,7 @@ import {
 } from '@/lib/workspaces/is-admin-workspace'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
+import { mapperOperation, toolCallArg } from '@/blocks/utils'
 import { getTrigger } from '@/triggers'
 
 const HUBSPOT_COND_NEVER = '__hubspot_cond_never__'
@@ -2332,10 +2333,10 @@ Return ONLY the JSON array of property names - no explanations, no markdown, no 
             throw new Error(`Unknown operation: ${params.operation}`)
         }
       },
-      params: (params) => {
+      params: (params, context) => {
         const {
           accounts,
-          operation,
+          oauthCredential: selectedOAuthCredential,
           propertiesToSet,
           properties,
           searchProperties,
@@ -2347,10 +2348,11 @@ Return ONLY the JSON array of property names - no explanations, no markdown, no 
           archived,
           ...rest
         } = params
+        const operation = mapperOperation(params, context)
 
         const oauthCredential = (accounts ??
           params.credential ??
-          params.oauthCredential ??
+          selectedOAuthCredential ??
           params.manualCredential) as string
 
         const cleanParams: Record<string, any> = {
@@ -2408,8 +2410,8 @@ Return ONLY the JSON array of property names - no explanations, no markdown, no 
           'search_line_items',
           'search_quotes',
         ]
-        if (searchProperties && searchOps.includes(operation as string)) {
-          cleanParams.properties = searchProperties
+        if (searchOps.includes(operation as string)) {
+          cleanParams.properties = searchProperties || toolCallArg(context, properties)
         }
 
         if (filterGroups && searchOps.includes(operation as string)) {
@@ -2433,10 +2435,6 @@ Return ONLY the JSON array of property names - no explanations, no markdown, no 
         ]
         if (associations && associationOps.includes(operation as string)) {
           cleanParams.associations = associations
-        }
-
-        if (listName && operation === 'create_list') {
-          cleanParams.name = listName
         }
 
         if (
@@ -2481,6 +2479,11 @@ Return ONLY the JSON array of property names - no explanations, no markdown, no 
             }
           }
         })
+
+        // After the copy so the row's List Name beats a model `name` on a tool call.
+        if (listName && operation === 'create_list') {
+          cleanParams.name = listName
+        }
 
         return cleanParams
       },

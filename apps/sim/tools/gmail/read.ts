@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import {
   AttachmentDownloadBudget,
   readAttachmentJson,
@@ -18,6 +19,7 @@ import {
   processMessageForSummary,
 } from '@/tools/gmail/utils'
 import type { ToolConfig, ToolResponseContext } from '@/tools/types'
+import { safeUrlPathSegment } from '@/tools/url-path'
 
 const logger = createLogger('GmailReadTool')
 
@@ -76,7 +78,7 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
     url: (params) => {
       // If a specific message ID is provided, fetch that message directly with full format
       if (params.messageId) {
-        return `${GMAIL_API_BASE}/messages/${params.messageId}?format=full`
+        return `${GMAIL_API_BASE}/messages/${safeUrlPathSegment(params.messageId, 'messageId')}?format=full`
       }
 
       // Otherwise, list messages from the specified folder or INBOX by default
@@ -135,6 +137,11 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
       return await processMessage(data, params, budget)
     }
 
+    // messages.list omits `messages` entirely when nothing matches
+    if (data && typeof data === 'object' && data.messages === undefined && !data.error) {
+      data.messages = []
+    }
+
     // If we're listing messages, we need to fetch each message's details
     if (data.messages && Array.isArray(data.messages)) {
       // Return a message if no emails found
@@ -158,7 +165,7 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
         try {
           // Get the first message details
           const messageId = data.messages[0].id
-          const messageResponse = await fetch(
+          const messageResponse = await outboundFetch(
             `${GMAIL_API_BASE}/messages/${encodeURIComponent(messageId)}?format=full`,
             {
               headers: {
@@ -205,7 +212,7 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
           const messages: GmailMessage[] = []
           for (const msg of data.messages.slice(0, maxResults)) {
             context?.signal?.throwIfAborted()
-            const messageResponse = await fetch(
+            const messageResponse = await outboundFetch(
               `${GMAIL_API_BASE}/messages/${encodeURIComponent(msg.id)}?format=full`,
               {
                 headers: { Authorization: `Bearer ${params?.accessToken || ''}` },
@@ -258,6 +265,14 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
                   from: msg.from,
                   to: msg.to,
                   date: msg.date,
+                  cc: msg.cc ?? null,
+                  bcc: msg.bcc ?? null,
+                  replyTo: msg.replyTo ?? null,
+                  rfcMessageId: msg.rfcMessageId ?? null,
+                  inReplyTo: msg.inReplyTo ?? null,
+                  references: msg.references ?? null,
+                  snippet: msg.snippet,
+                  internalDate: msg.internalDate ?? null,
                 })),
               },
               attachments: allAttachments,
@@ -296,7 +311,11 @@ export const gmailReadTool: ToolConfig<GmailReadParams, GmailToolResponse> = {
 
   outputs: {
     content: { type: 'string', description: 'Text content of the email' },
-    metadata: { type: 'json', description: 'Metadata of the email' },
+    metadata: {
+      type: 'json',
+      description:
+        'Metadata of the email (id, threadId, labelIds, from, to, cc, bcc, replyTo, subject, date, rfcMessageId, inReplyTo, references, snippet, internalDate, hasAttachments, attachmentCount), or results[] when reading multiple messages',
+    },
     attachments: { type: 'file[]', description: 'Attachments of the email' },
   },
 }
@@ -333,8 +352,16 @@ export const gmailReadV2Tool: ToolConfig<GmailReadParams, GmailToolResponse> = {
         labelIds: metadata.labelIds,
         from: metadata.from,
         to: metadata.to,
+        cc: metadata.cc,
+        bcc: metadata.bcc,
+        replyTo: metadata.replyTo,
         subject: metadata.subject,
         date: metadata.date,
+        rfcMessageId: metadata.rfcMessageId,
+        inReplyTo: metadata.inReplyTo,
+        references: metadata.references,
+        snippet: metadata.snippet,
+        internalDate: metadata.internalDate,
         body: legacy.output.content,
         content: legacy.output.content,
         hasAttachments: metadata.hasAttachments,

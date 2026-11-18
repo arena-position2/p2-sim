@@ -1,6 +1,8 @@
 import { sleep } from '@sim/utils/helpers'
 import { DEFAULT_EXECUTION_TIMEOUT_MS } from '@/lib/core/execution-limits'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { ApifyRun, RunActorParams, RunActorResult } from '@/tools/apify/types'
+import { APIFY_CREDENTIAL_OAUTH } from '@/tools/shared/saved-credentials'
 import type { ToolConfig } from '@/tools/types'
 
 const POLL_INTERVAL_MS = 5000
@@ -12,6 +14,7 @@ export const apifyRunActorAsyncTool: ToolConfig<RunActorParams, RunActorResult> 
   description:
     'Start an APIFY Actor run and poll it within the same workflow step until completion or the polling deadline',
   version: '1.0.0',
+  oauth: APIFY_CREDENTIAL_OAUTH,
 
   params: {
     apiKey: {
@@ -146,7 +149,7 @@ export const apifyRunActorAsyncTool: ToolConfig<RunActorParams, RunActorResult> 
       await sleep(POLL_INTERVAL_MS)
       elapsedTime += POLL_INTERVAL_MS
 
-      const statusResponse = await fetch(`https://api.apify.com/v2/actor-runs/${runId}`, {
+      const statusResponse = await outboundFetch(`https://api.apify.com/v2/actor-runs/${runId}`, {
         headers: {
           Authorization: `Bearer ${params.apiKey}`,
         },
@@ -171,7 +174,7 @@ export const apifyRunActorAsyncTool: ToolConfig<RunActorParams, RunActorResult> 
       ) {
         if (run.status === 'SUCCEEDED' && run.defaultDatasetId) {
           const limit = Math.max(1, Math.min(params.itemLimit || 100, 250000))
-          const itemsResponse = await fetch(
+          const itemsResponse = await outboundFetch(
             `https://api.apify.com/v2/datasets/${run.defaultDatasetId}/items?limit=${limit}`,
             {
               headers: {

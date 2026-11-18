@@ -269,12 +269,14 @@ const PERSONAL_API_KEY_PRINCIPAL = {
   kind: 'personal_api_key',
   userId: 'personal-key-user-1',
   keyId: 'personal-key-1',
+  access: 'write',
 } as const
 
 const WORKSPACE_API_KEY_PRINCIPAL = {
   kind: 'workspace_api_key',
   workspaceId: 'workspace-1',
   keyId: 'workspace-key-1',
+  access: 'write',
 } as const
 
 const EXECUTION_CALLERS: ExecutionCallerCase[] = [
@@ -2169,6 +2171,7 @@ describe('workflow execute async route', () => {
         kind: 'personal_api_key',
         userId: 'api-user-1',
         keyId: 'personal-key-1',
+        access: 'write',
       },
     })
     workflowsUtilsMockFns.mockWorkflowHasResponseBlock.mockReturnValueOnce(true)

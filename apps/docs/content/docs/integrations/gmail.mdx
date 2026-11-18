@@ -51,9 +51,10 @@ Send emails using Gmail.
 | `body` | string | Yes | Email body content |
 | `contentType` | string | No | Content type for the email body \(text or html\) |
 | `threadId` | string | No | Thread ID to reply to \(for threading\) |
-| `replyToMessageId` | string | No | Gmail message ID to reply to - use the "id" field from Gmail Read results \(not the RFC "messageId"\) |
+| `replyToMessageId` | string | No | Gmail message ID to reply to - use the "id" field from Gmail Read results \(not "rfcMessageId"\) |
 | `cc` | string | No | CC recipients \(comma-separated\) |
 | `bcc` | string | No | BCC recipients \(comma-separated\) |
+| `replyTo` | string | No | Reply-To address that replies should go to \(e.g., support@example.com\) |
 | `attachments` | file[] | No | Files to attach to the email |
 
 #### Output
@@ -83,9 +84,10 @@ Draft emails using Gmail.
 | `body` | string | Yes | Email body content |
 | `contentType` | string | No | Content type for the email body \(text or html\) |
 | `threadId` | string | No | Thread ID to reply to \(for threading\) |
-| `replyToMessageId` | string | No | Gmail message ID to reply to - use the "id" field from Gmail Read results \(not the RFC "messageId"\) |
+| `replyToMessageId` | string | No | Gmail message ID to reply to - use the "id" field from Gmail Read results \(not "rfcMessageId"\) |
 | `cc` | string | No | CC recipients \(comma-separated\) |
 | `bcc` | string | No | BCC recipients \(comma-separated\) |
+| `replyTo` | string | No | Reply-To address that replies should go to \(e.g., support@example.com\) |
 | `attachments` | file[] | No | Files to attach to the email draft |
 
 #### Output
@@ -118,9 +120,10 @@ Update an existing Gmail draft in place without deleting and recreating it.
 | `body` | string | Yes | Email body content |
 | `contentType` | string | No | Content type for the email body \(text or html\) |
 | `threadId` | string | No | Thread ID to associate the draft with \(for threading\) |
-| `replyToMessageId` | string | No | Gmail message ID to reply to - use the "id" field from Gmail Read results \(not the RFC "messageId"\) |
+| `replyToMessageId` | string | No | Gmail message ID to reply to - use the "id" field from Gmail Read results \(not "rfcMessageId"\) |
 | `cc` | string | No | CC recipients \(comma-separated\) |
 | `bcc` | string | No | BCC recipients \(comma-separated\) |
+| `replyTo` | string | No | Reply-To address that replies should go to \(e.g., support@example.com\) |
 | `attachments` | file[] | No | Files to attach to the email draft |
 
 #### Output
@@ -177,25 +180,47 @@ Read all emails in a Gmail thread by thread ID
 
 | Parameter | Type | Description |
 | --------- | ---- | ----------- |
-| `id` | string | Gmail message ID |
+| `id` | string | Gmail message ID \(thread ID for thread operations, label ID for label operations, draft ID for Get Draft\) |
 | `threadId` | string | Gmail thread ID |
 | `labelIds` | array | Email label IDs |
 | `from` | string | Sender |
 | `to` | string | To |
+| `bcc` | string | Bcc recipients \(only on messages you sent or drafted\) |
+| `replyTo` | string | Reply-To header |
 | `subject` | string | Subject |
 | `date` | string | Date |
+| `rfcMessageId` | string | RFC Message-ID header \(not the Gmail message id\) |
+| `inReplyTo` | string | In-Reply-To header |
+| `references` | string | References header |
+| `snippet` | string | Short excerpt of the message text |
+| `internalDate` | string | Gmail internal creation timestamp in epoch milliseconds |
 | `body` | string | Email body text \(best-effort\) |
 | `content` | string | Email body text \(best-effort\) |
 | `metadata` | json | Metadata including search/read summary results |
+| `results` | json | Search/read summary results \[\{id, threadId, subject, from, to, cc, bcc, replyTo, date, snippet, rfcMessageId, inReplyTo, references, internalDate\}\] |
+| `nextPageToken` | string | Token for the next page of results |
+| `resultSizeEstimate` | number | Estimated total number of results |
+| `name` | string | Label display name |
+| `type` | string | Label type \(system or user\) |
+| `messageListVisibility` | string | Message list visibility of the label |
+| `labelListVisibility` | string | Label list visibility of the label |
+| `labelId` | string | ID of the deleted label |
+| `deleted` | boolean | Whether the label or draft was deleted |
+| `drafts` | json | Drafts \[\{id, messageId, threadId\}\] |
+| `threads` | json | Threads \[\{id, snippet, historyId\}\] |
+| `messages` | json | Thread messages \[\{id, threadId, labelIds, snippet, from, to, cc, bcc, replyTo, subject, date, rfcMessageId, inReplyTo, references, internalDate, body\}\] |
+| `historyId` | string | ID of the last history record that modified the thread |
+| `trashed` | boolean | Whether the thread was moved to trash |
+| `untrashed` | boolean | Whether the thread was restored from trash |
 | `attachments` | file[] | Downloaded attachments \(if enabled\) |
 | `draftId` | string | Draft ID |
 | `messageId` | string | Gmail message ID for the draft |
 | `email_id` | string | Gmail message ID |
 | `thread_id` | string | Gmail thread ID |
-| `cc` | string | CC recipients \(comma-separated\) |
+| `cc` | string | Cc recipients \(raw Cc header, comma-separated\) |
 | `body_text` | string | Plain text email body |
 | `body_html` | string | HTML email body |
-| `labels` | string | Email labels \(comma-separated\) |
+| `labels` | json | Email labels \(trigger, comma-separated\); for List Labels, the label array \[\{id, name, type, messageListVisibility, labelListVisibility\}\] |
 | `has_attachments` | boolean | Whether email has attachments |
 | `raw_email` | json | Complete raw email data from Gmail API \(if enabled\) |
 | `timestamp` | string | Event timestamp |
@@ -213,7 +238,8 @@ Search emails in Gmail.
 | Parameter | Type | Required | Description |
 | --------- | ---- | -------- | ----------- |
 | `query` | string | Yes | Search query for emails |
-| `maxResults` | number | No | Maximum number of results to return \(e.g., 10, 25, 50\) |
+| `maxResults` | number | No | Maximum number of results to return \(e.g., 10, 25, 50; Gmail default: 100, max: 500\) |
+| `pageToken` | string | No | Page token from a previous search \(nextPageToken\) to fetch the next page |
 
 #### Output
 
@@ -250,25 +276,47 @@ Search emails in Gmail with full content and attachment parsing, returning threa
 
 | Parameter | Type | Description |
 | --------- | ---- | ----------- |
-| `id` | string | Gmail message ID |
+| `id` | string | Gmail message ID \(thread ID for thread operations, label ID for label operations, draft ID for Get Draft\) |
 | `threadId` | string | Gmail thread ID |
 | `labelIds` | array | Email label IDs |
 | `from` | string | Sender |
 | `to` | string | To |
+| `bcc` | string | Bcc recipients \(only on messages you sent or drafted\) |
+| `replyTo` | string | Reply-To header |
 | `subject` | string | Subject |
 | `date` | string | Date |
+| `rfcMessageId` | string | RFC Message-ID header \(not the Gmail message id\) |
+| `inReplyTo` | string | In-Reply-To header |
+| `references` | string | References header |
+| `snippet` | string | Short excerpt of the message text |
+| `internalDate` | string | Gmail internal creation timestamp in epoch milliseconds |
 | `body` | string | Email body text \(best-effort\) |
 | `content` | string | Email body text \(best-effort\) |
 | `metadata` | json | Metadata including search/read summary results |
+| `results` | json | Search/read summary results \[\{id, threadId, subject, from, to, cc, bcc, replyTo, date, snippet, rfcMessageId, inReplyTo, references, internalDate\}\] |
+| `nextPageToken` | string | Token for the next page of results |
+| `resultSizeEstimate` | number | Estimated total number of results |
+| `name` | string | Label display name |
+| `type` | string | Label type \(system or user\) |
+| `messageListVisibility` | string | Message list visibility of the label |
+| `labelListVisibility` | string | Label list visibility of the label |
+| `labelId` | string | ID of the deleted label |
+| `deleted` | boolean | Whether the label or draft was deleted |
+| `drafts` | json | Drafts \[\{id, messageId, threadId\}\] |
+| `threads` | json | Threads \[\{id, snippet, historyId\}\] |
+| `messages` | json | Thread messages \[\{id, threadId, labelIds, snippet, from, to, cc, bcc, replyTo, subject, date, rfcMessageId, inReplyTo, references, internalDate, body\}\] |
+| `historyId` | string | ID of the last history record that modified the thread |
+| `trashed` | boolean | Whether the thread was moved to trash |
+| `untrashed` | boolean | Whether the thread was restored from trash |
 | `attachments` | file[] | Downloaded attachments \(if enabled\) |
 | `draftId` | string | Draft ID |
 | `messageId` | string | Gmail message ID for the draft |
 | `email_id` | string | Gmail message ID |
 | `thread_id` | string | Gmail thread ID |
-| `cc` | string | CC recipients \(comma-separated\) |
+| `cc` | string | Cc recipients \(raw Cc header, comma-separated\) |
 | `body_text` | string | Plain text email body |
 | `body_html` | string | HTML email body |
-| `labels` | string | Email labels \(comma-separated\) |
+| `labels` | json | Email labels \(trigger, comma-separated\); for List Labels, the label array \[\{id, name, type, messageListVisibility, labelListVisibility\}\] |
 | `has_attachments` | boolean | Whether email has attachments |
 | `raw_email` | json | Complete raw email data from Gmail API \(if enabled\) |
 | `timestamp` | string | Event timestamp |
@@ -486,6 +534,251 @@ List all labels in a Gmail account
 
 </ReferenceDetails>
 
+### Gmail Create Label
+
+Create a new label in Gmail
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `name` | string | Yes | Display name for the new label |
+| `messageListVisibility` | string | No | Visibility of messages with this label in the message list \(show or hide\) |
+| `labelListVisibility` | string | No | Visibility of the label in the label list \(labelShow, labelShowIfUnread, or labelHide\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | Label ID |
+| `name` | string | Label display name |
+| `messageListVisibility` | string | Visibility of messages with this label |
+| `labelListVisibility` | string | Visibility of the label in the label list |
+| `type` | string | Label type \(system or user\) |
+
+</ReferenceDetails>
+
+### Gmail Update Label
+
+Update a Gmail label in place (rename or change visibility) without recreating it
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `labelId` | string | Yes | ID of the label to update \(from Gmail List Labels\) |
+| `name` | string | No | New display name for the label |
+| `messageListVisibility` | string | No | Visibility of messages with this label in the message list \(show or hide\) |
+| `labelListVisibility` | string | No | Visibility of the label in the label list \(labelShow, labelShowIfUnread, or labelHide\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | Label ID |
+| `name` | string | Label display name |
+| `messageListVisibility` | string | Visibility of messages with this label |
+| `labelListVisibility` | string | Visibility of the label in the label list |
+| `type` | string | Label type \(system or user\) |
+
+</ReferenceDetails>
+
+### Gmail Delete Label
+
+Delete a label from Gmail
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `labelId` | string | Yes | ID of the label to delete |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `deleted` | boolean | Whether the label was successfully deleted |
+| `labelId` | string | ID of the deleted label |
+
+</ReferenceDetails>
+
+### Gmail List Drafts
+
+List all drafts in a Gmail account
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `maxResults` | number | No | Maximum number of drafts to return \(default: 100, max: 500\) |
+| `pageToken` | string | No | Page token for paginated results |
+| `query` | string | No | Search query to filter drafts \(same syntax as Gmail search\) |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `drafts` | json | Array of draft objects with id, messageId, and threadId |
+| `resultSizeEstimate` | number | Estimated total number of drafts |
+| `nextPageToken` | string | Token for fetching the next page of results |
+
+</ReferenceDetails>
+
+### Gmail Get Draft
+
+Get a specific draft from Gmail by its ID
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `draftId` | string | Yes | ID of the draft to retrieve |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | Draft ID |
+| `messageId` | string | Gmail message ID |
+| `threadId` | string | Gmail thread ID |
+| `to` | string | Recipient email address |
+| `from` | string | Sender email address |
+| `cc` | string | Cc recipients |
+| `bcc` | string | Bcc recipients |
+| `replyTo` | string | Reply-To header |
+| `subject` | string | Draft subject |
+| `date` | string | Date header |
+| `rfcMessageId` | string | RFC Message-ID header \(not the Gmail message id\) |
+| `inReplyTo` | string | In-Reply-To header |
+| `references` | string | References header |
+| `snippet` | string | Short excerpt of the draft text |
+| `body` | string | Draft body text |
+| `labelIds` | array | Draft labels |
+
+</ReferenceDetails>
+
+### Gmail Delete Draft
+
+Delete a specific draft from Gmail
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `draftId` | string | Yes | ID of the draft to delete |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `deleted` | boolean | Whether the draft was successfully deleted |
+| `draftId` | string | ID of the deleted draft |
+
+</ReferenceDetails>
+
+### Gmail List Threads
+
+List email threads in a Gmail account
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `maxResults` | number | No | Maximum number of threads to return \(default: 100, max: 500\) |
+| `pageToken` | string | No | Page token for paginated results |
+| `query` | string | No | Search query to filter threads \(same syntax as Gmail search\) |
+| `labelIds` | string | No | Comma-separated label IDs to filter threads by |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `threads` | json | Array of thread objects with id, snippet, and historyId |
+| `resultSizeEstimate` | number | Estimated total number of threads |
+| `nextPageToken` | string | Token for fetching the next page of results |
+
+</ReferenceDetails>
+
+### Gmail Get Thread
+
+Get a specific email thread from Gmail, including all messages in the thread
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `threadId` | string | Yes | ID of the thread to retrieve |
+| `format` | string | No | Format to return the messages in \(full, metadata, or minimal\). Defaults to full. |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | Thread ID |
+| `historyId` | string | History ID |
+| `snippet` | string | Short excerpt of the thread |
+| `messages` | json | Array of messages in the thread with id, threadId, labelIds, snippet, from, to, cc, bcc, replyTo, subject, date, rfcMessageId, inReplyTo, references, internalDate, and body |
+
+</ReferenceDetails>
+
+### Gmail Trash Thread
+
+Move an email thread to trash in Gmail
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `threadId` | string | Yes | ID of the thread to trash |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | Thread ID |
+| `trashed` | boolean | Whether the thread was successfully trashed |
+
+</ReferenceDetails>
+
+### Gmail Untrash Thread
+
+Remove an email thread from trash in Gmail
+
+<ReferenceDetails>
+
+#### Input
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `threadId` | string | Yes | ID of the thread to untrash |
+
+#### Output
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | Thread ID |
+| `untrashed` | boolean | Whether the thread was successfully removed from trash |
+
+</ReferenceDetails>
+
 
 
 ## Triggers
@@ -522,6 +815,12 @@ Triggers when new emails are received in Gmail (requires Gmail credentials)
 |   ↳ `from` | string | Sender email address |
 |   ↳ `to` | string | Recipient email address |
 |   ↳ `cc` | string | CC recipients |
+|   ↳ `bcc` | string | BCC recipients \(only present on messages you sent\) |
+|   ↳ `replyTo` | string | Reply-To header |
+|   ↳ `rfcMessageId` | string | RFC Message-ID header \(not the Gmail message ID\) |
+|   ↳ `inReplyTo` | string | In-Reply-To header \(RFC Message-ID of the parent message\) |
+|   ↳ `references` | string | References header \(RFC Message-IDs in the thread\) |
+|   ↳ `snippet` | string | Short excerpt of the message text |
 |   ↳ `date` | string | Email date in ISO format |
 |   ↳ `bodyText` | string | Plain text email body |
 |   ↳ `bodyHtml` | string | HTML email body |

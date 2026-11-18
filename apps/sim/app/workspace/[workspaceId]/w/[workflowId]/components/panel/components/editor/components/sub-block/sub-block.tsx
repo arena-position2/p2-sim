@@ -1272,7 +1272,7 @@ function SubBlockComponent({
             subBlockId={config.id}
             content={
               typeof config.value === 'function'
-                ? config.value(subBlockValues || {})
+                ? (config.value(subBlockValues || {}) ?? '')
                 : (config.defaultValue as string) || ''
             }
           />

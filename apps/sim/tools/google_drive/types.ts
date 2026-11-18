@@ -330,6 +330,7 @@ export interface GoogleDriveListResponse extends ToolResponse {
   output: {
     files: GoogleDriveFile[]
     nextPageToken?: string
+    incompleteSearch?: boolean
   }
 }
 
@@ -365,6 +366,8 @@ export interface GoogleDriveToolParams {
   query?: string
   pageSize?: number
   pageToken?: string
+  orderBy?: string
+  driveId?: string
   exportMimeType?: string
   includeRevisions?: boolean
 }

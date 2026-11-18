@@ -951,6 +951,7 @@ function ServerDetailView({
           allowPersonalApiKeys={allowPersonalApiKeys}
           canManageWorkspaceKeys={canManageWorkspaceKeys}
           defaultKeyType={defaultKeyType}
+          fullAccessOnly
         />
       )}
     </>

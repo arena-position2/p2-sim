@@ -1189,6 +1189,128 @@ describe('authorized live retrieval', () => {
       })
     ).rejects.toBe('user_stop:test')
   })
+  describe('read diagnostics', () => {
+    async function searchedDocumentId() {
+      const [result] = (await searchLiveKnowledge.execute({ principal, input })).results
+      if (!result) throw new Error('Expected the search fixture to return a result')
+      diagnosticsLogger.info.mockClear()
+      return result.documentId
+    }
+    const logged = (message: string) =>
+      diagnosticsLogger.info.mock.calls.filter(([logged]) => logged === message).map(([, f]) => f)
+
+    it('logs the source, kind, and size of each read without its title or text', async () => {
+      const documentId = await searchedDocumentId()
+      mocks.read.mockResolvedValue({
+        ...document,
+        kind: 'file',
+        title: 'Private roadmap',
+        content: 'private text '.repeat(2_500),
+      })
+      await readLiveDocument.execute({
+        principal,
+        input: {
+          workspaceId: 'workspace',
+          surface: 'mcp',
+          documentId,
+          limit: 3,
+          scaledWindow: true,
+          resultSecretRegistry: new ResolvedSecretTraceRegistry([]),
+        },
+      })
+      expect(logged('Knowledge search completed')).toEqual([
+        expect.objectContaining({
+          operation: 'read_document',
+          surface: 'mcp',
+          continued: false,
+          provider: 'google_drive',
+          documentKind: 'file',
+          contentCharacters: 32_500,
+          returnedCharacters: 20_000,
+          hasMore: true,
+          outcome: 'success',
+          stages: expect.objectContaining({
+            document_read: expect.objectContaining({ count: 1 }),
+          }),
+        }),
+      ])
+      expect(logged('Live search provider completed')).toEqual([
+        expect.objectContaining({ operation: 'read_document', provider: 'google_drive' }),
+      ])
+      const text = JSON.stringify(diagnosticsLogger.info.mock.calls)
+      expect(text).not.toContain('Private roadmap')
+      expect(text).not.toContain('private text')
+    })
+  })
+
+  describe('read window', () => {
+    const content = 'x'.repeat(30_000)
+    async function readWindow(extra: Record<string, unknown>, text = content) {
+      const [result] = (await searchLiveKnowledge.execute({ principal, input })).results
+      if (!result) throw new Error('Expected the search fixture to return a result')
+      mocks.read.mockResolvedValue({ ...document, content: text })
+      const read = await readLiveDocument.execute({
+        principal,
+        input: {
+          workspaceId: 'workspace',
+          documentId: result.documentId,
+          limit: 3,
+          resultSecretRegistry: new ResolvedSecretTraceRegistry([]),
+          ...extra,
+        },
+      })
+      const [chunk] = read.chunks
+      if (!chunk) throw new Error('Expected the read to return a window')
+      return {
+        length: chunk.content.length,
+        encoded: JSON.stringify(chunk.content).length - 2,
+        next: read.next,
+      }
+    }
+
+    it('returns a longer window to a scaling caller, whatever its chunk limit', async () => {
+      for (const limit of [1, 3, 8]) {
+        const { length, next } = await readWindow({ limit, scaledWindow: true })
+        expect(length).toBe(20_000)
+        expect(next).toEqual({ startChunkIndex: 0, startOffset: 20_000 })
+      }
+    })
+
+    it('continues a longer window from where the previous one ended', async () => {
+      const { length, next } = await readWindow({ scaledWindow: true, startOffset: 20_000 })
+      expect(length).toBe(10_000)
+      expect(next).toBeNull()
+    })
+
+    it('keeps a quote-heavy window within its size once JSON-encoded', async () => {
+      const { length, encoded, next } = await readWindow({ scaledWindow: true }, '"'.repeat(30_000))
+      expect(encoded).toBeLessThanOrEqual(20_000)
+      expect(length).toBeGreaterThanOrEqual(8_000)
+      expect(next).toEqual({ startChunkIndex: 0, startOffset: length })
+    })
+
+    it('keeps the standard window for a caller that does not scale', async () => {
+      expect((await readWindow({ limit: 8 })).length).toBe(8_000)
+    })
+  })
+  it('refuses a chunk index other than zero before reading the document from its provider', async () => {
+    const [result] = (await searchLiveKnowledge.execute({ principal, input })).results
+    if (!result) throw new Error('Expected the search fixture to return a result')
+    mocks.read.mockClear()
+    await expect(
+      readLiveDocument.execute({
+        principal,
+        input: {
+          workspaceId: 'workspace',
+          documentId: result.documentId,
+          limit: 1,
+          startChunkIndex: 3,
+          resultSecretRegistry: new ResolvedSecretTraceRegistry([]),
+        },
+      })
+    ).rejects.toMatchObject({ message: expect.stringContaining('next.startOffset') })
+    expect(mocks.read).not.toHaveBeenCalled()
+  })
   describe('live document IDs', () => {
     const workspaceScope = resourceScopeKey(resourceScopeFromOwner({ workspaceId: 'workspace' }))
     /** The earlier wire form, spelled out so these tests pin what older conversations hold. */

@@ -4,7 +4,14 @@ import type {
   GoogleSheetsV2AppendResponse,
   GoogleSheetsV2ToolParams,
 } from '@/tools/google_sheets/types'
+import {
+  appendResponseRenderParams,
+  mapValueRange,
+  RESPONSE_RENDER_PARAMS,
+  UPDATED_DATA_OUTPUT,
+} from '@/tools/google_sheets/utils'
 import type { ToolConfig } from '@/tools/types'
+import { safeUrlPathSegment } from '@/tools/url-path'
 
 export const appendTool: ToolConfig<GoogleSheetsToolParams, GoogleSheetsAppendResponse> = {
   id: 'google_sheets_append',
@@ -69,7 +76,7 @@ export const appendTool: ToolConfig<GoogleSheetsToolParams, GoogleSheetsAppendRe
       const range = params.range || 'Sheet1'
 
       const url = new URL(
-        `https://sheets.googleapis.com/v4/spreadsheets/${params.spreadsheetId?.trim()}/values/${encodeURIComponent(range)}:append`
+        `https://sheets.googleapis.com/v4/spreadsheets/${safeUrlPathSegment(params.spreadsheetId, 'spreadsheetId')}/values/${encodeURIComponent(range)}:append`
       )
 
       // Default to USER_ENTERED if not specified
@@ -289,9 +296,10 @@ export const appendV2Tool: ToolConfig<GoogleSheetsV2ToolParams, GoogleSheetsV2Ap
     includeValuesInResponse: {
       type: 'boolean',
       required: false,
-      visibility: 'hidden',
+      visibility: 'user-or-llm',
       description: 'Whether to include the appended values in the response',
     },
+    ...RESPONSE_RENDER_PARAMS,
   },
 
   request: {
@@ -302,7 +310,7 @@ export const appendV2Tool: ToolConfig<GoogleSheetsV2ToolParams, GoogleSheetsV2Ap
       }
 
       const url = new URL(
-        `https://sheets.googleapis.com/v4/spreadsheets/${params.spreadsheetId?.trim()}/values/${encodeURIComponent(sheetName)}:append`
+        `https://sheets.googleapis.com/v4/spreadsheets/${safeUrlPathSegment(params.spreadsheetId, 'spreadsheetId')}/values/${encodeURIComponent(sheetName)}:append`
       )
 
       const valueInputOption = params.valueInputOption || 'USER_ENTERED'
@@ -315,6 +323,7 @@ export const appendV2Tool: ToolConfig<GoogleSheetsV2ToolParams, GoogleSheetsV2Ap
       if (params.includeValuesInResponse) {
         url.searchParams.append('includeValuesInResponse', 'true')
       }
+      appendResponseRenderParams(url.searchParams, params)
 
       return url.toString()
     },
@@ -406,6 +415,7 @@ export const appendV2Tool: ToolConfig<GoogleSheetsV2ToolParams, GoogleSheetsV2Ap
         updatedRows: data.updates?.updatedRows ?? 0,
         updatedColumns: data.updates?.updatedColumns ?? 0,
         updatedCells: data.updates?.updatedCells ?? 0,
+        updatedData: mapValueRange(data.updates?.updatedData),
         metadata: {
           spreadsheetId: metadata.spreadsheetId,
           spreadsheetUrl: metadata.spreadsheetUrl,
@@ -420,6 +430,7 @@ export const appendV2Tool: ToolConfig<GoogleSheetsV2ToolParams, GoogleSheetsV2Ap
     updatedRows: { type: 'number', description: 'Number of rows updated' },
     updatedColumns: { type: 'number', description: 'Number of columns updated' },
     updatedCells: { type: 'number', description: 'Number of cells updated' },
+    updatedData: UPDATED_DATA_OUTPUT,
     metadata: {
       type: 'json',
       description: 'Spreadsheet metadata including ID and URL',
