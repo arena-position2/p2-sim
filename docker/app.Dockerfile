@@ -20,7 +20,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 curl ca-certificates bash ffmpeg \
     && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs
+    && apt-get install -y nodejs \
+    && apt-get upgrade -y --no-install-recommends \
+      gzip libc-bin libc6 liblzma5 libpcre2-8-0 libsqlite3-0 \
+      libssl3t64 openssl openssl-provider-legacy zlib1g
 
 # ========================================
 # Build Base: adds the native toolchain the isolated-vm rebuild needs
@@ -210,7 +213,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
          "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip" \
          -O /tmp/chrome-dl/chromedriver-${CHROME_VERSION}.zip \
     && unzip -q /tmp/chrome-dl/chromedriver-${CHROME_VERSION}.zip -d /opt \
-    && ln -s /opt/chromedriver-linux64/chromedriver /usr/bin/chromedriver
+    && ln -s /opt/chromedriver-linux64/chromedriver /usr/bin/chromedriver \
+    && apt-get upgrade -y --no-install-recommends \
+      gzip libc-bin libc6 liblzma5 libpcre2-8-0 libsqlite3-0 \
+      libssl3t64 openssl openssl-provider-legacy zlib1g
 
 # Environment variables for Chrome
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver \

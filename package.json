@@ -141,34 +141,47 @@
   "overrides": {
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "next": "16.4.0",
-    "@next/env": "16.4.0",
+    "next": "16.4.1",
+    "@next/env": "16.4.1",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.5",
     "minimatch": "^10.2.5",
     "marked": "18.0.11",
     "mermaid": "11.16.1",
     "zod": "4.3.6",
-    "e2b": "2.50.0",
+    "e2b": "2.60.0",
     "@hono/node-server": "1.19.15",
-    "brace-expansion": "5.0.9",
+    "brace-expansion": "5.0.12",
     "deepmerge-ts": "8.0.0",
     "dompurify": "3.4.13",
     "engine.io": "6.6.8",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.9",
     "hono": "4.12.34",
-    "ip-address": "10.5.0",
+    "ip-address": "10.7.4",
     "postcss": "8.5.26",
     "protobufjs": "7.6.5",
     "socket.io": "4.8.3",
     "socket.io-parser": "4.2.7",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "axios": "1.20.0",
+    "shell-quote": "1.11.0",
+    "follow-redirects": "1.16.2",
+    "prosemirror-view": "1.42.3",
+    "source-map-js": "1.2.2",
+    "@ai-sdk/provider-utils": "3.0.28",
+    "@electron-internal/extract-zip": "1.0.8",
+    "@earendil-works/pi-coding-agent": {
+      "undici": "8.12.2"
+    },
+    "node-gyp": {
+      "undici": "6.29.1"
+    }
   },
   "optionalDependencies": {
-    "@next/swc-darwin-arm64": "16.4.0",
-    "@next/swc-darwin-x64": "16.4.0",
-    "@next/swc-linux-arm64-gnu": "16.4.0",
-    "@next/swc-linux-x64-gnu": "16.4.0"
+    "@next/swc-darwin-arm64": "16.4.1",
+    "@next/swc-darwin-x64": "16.4.1",
+    "@next/swc-linux-arm64-gnu": "16.4.1",
+    "@next/swc-linux-x64-gnu": "16.4.1"
   },
   "devDependencies": {
     "@babel/parser": "7.29.2",
