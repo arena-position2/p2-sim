@@ -274,7 +274,7 @@
     "tldts": "7.0.30",
     "twilio": "5.9.0",
     "typebox": "1.1.38",
-    "undici": "7.30.1",
+    "undici": "8.12.2",
     "unified": "11.0.5",
     "word-extractor": "1.0.4",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
