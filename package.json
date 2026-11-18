@@ -149,6 +149,7 @@
     "marked": "18.0.11",
     "mermaid": "11.16.1",
     "zod": "4.3.6",
+    "@better-auth/core": "1.6.27",
     "e2b": "2.60.0",
     "@hono/node-server": "1.19.15",
     "brace-expansion": "5.0.12",
