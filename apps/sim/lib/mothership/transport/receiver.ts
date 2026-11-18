@@ -1,6 +1,6 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
-import { interruptibleSleep } from '@sim/utils/helpers'
+import { interruptibleSleep, sleep } from '@sim/utils/helpers'
 import { type BackoffOptions, backoffWithJitter } from '@sim/utils/retry'
 import { truncate } from '@sim/utils/string'
 import { env } from '@/lib/core/config/env'

@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { TextChunker } from '@/lib/chunkers/text-chunker'
 import { rerankContent } from '@/lib/content/rerank'
-import type { GoogleDriveSearchParams } from '@/tools/google_drive/types'
+import type { GoogleDriveSearchParams, GoogleDriveSearchResponse } from '@/tools/google_drive/types'
 import {
   ALL_FILE_FIELDS,
   DEFAULT_EXPORT_FORMATS,
@@ -119,14 +119,6 @@ async function resolveFolderIdByName(
   } catch (error) {
     logger.error('Error resolving folder by name', { folderName, error })
     return null
-  }
-}
-
-interface GoogleDriveSearchResponse extends ToolResponse {
-  output: {
-    files: GoogleDriveFile[]
-    nextPageToken?: string
-    incompleteSearch?: boolean
   }
 }
 
@@ -445,7 +437,7 @@ export const searchTool: ToolConfig<GoogleDriveSearchParams, GoogleDriveSearchRe
       url.searchParams.append('supportsAllDrives', 'true')
       url.searchParams.append('includeItemsFromAllDrives', 'true')
       const orderBy = params.orderBy?.trim()
-      const queryWithoutLiterals = (params.query ?? '').replace(/'(?:[^'\\]|\\.)*'/g, "''")
+      const queryWithoutLiterals = (params.prompt ?? '').replace(/'(?:[^'\\]|\\.)*'/g, "''")
       if (orderBy && !/\bfullText\b/.test(queryWithoutLiterals)) {
         url.searchParams.append('orderBy', orderBy)
       }

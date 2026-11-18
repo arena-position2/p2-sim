@@ -378,10 +378,14 @@ export interface GoogleDriveSearchParams {
   folderId?: string
   pageSize?: number
   pageToken?: string
+  orderBy?: string
+  driveId?: string
 }
 
 export interface GoogleDriveSearchResponse extends ToolResponse {
   output: {
     files: GoogleDriveFile[]
+    nextPageToken?: string
+    incompleteSearch?: boolean
   }
 }
