@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { ToolConfig, ToolResponse } from '@/tools/types'
 import { fetchZoomRecordings, splitDateRange } from '@/tools/zoom/list_account_recordings'
 import type { ZoomListAccountRecordingsParams } from '@/tools/zoom/types'
@@ -10,7 +11,7 @@ async function downloadTranscript(downloadUrl: string, accessToken?: string): Pr
     throw new Error('Missing access token for Zoom transcript download')
   }
 
-  const response = await fetch(downloadUrl, {
+  const response = await outboundFetch(downloadUrl, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,

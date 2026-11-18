@@ -1,5 +1,6 @@
 import { createLogger } from '@sim/logger'
 import { SignJWT } from 'jose'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import {
   buildTableCellTextEndIndexMap,
   buildTableContentRequests,
@@ -128,10 +129,10 @@ function resolveKnownCatalogImageUrl(imageUrl: string): string | null {
 // --- Image URL Pre-flight Check ---
 async function isImageUrlAccessible(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, { method: 'HEAD' })
+    const res = await outboundFetch(url, { method: 'HEAD' })
     if (res.ok) return true
     // Some servers don't support HEAD; fall back to a byte-range GET
-    const getRes = await fetch(url, {
+    const getRes = await outboundFetch(url, {
       method: 'GET',
       headers: { Range: 'bytes=0-0' },
     })
@@ -219,7 +220,7 @@ async function resolveSimImageToPresignedUrl(imageUrl: string): Promise<string |
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-  const presignRes = await fetch(`${appUrl}/api/tools/google_slides/presign-image`, {
+  const presignRes = await outboundFetch(`${appUrl}/api/tools/google_slides/presign-image`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${internalToken}`,
@@ -251,7 +252,7 @@ async function fetchWithRetry(
 ): Promise<Response> {
   let delay = 1000
   for (let i = 0; i < maxRetries; i++) {
-    const res = await fetch(url, options)
+    const res = await outboundFetch(url, options)
     // Retry on Rate Limit (429) or Server Errors (5xx)
     if (res.status === 429 || res.status >= 500) {
       const jitter = Math.random() * 500
@@ -265,7 +266,7 @@ async function fetchWithRetry(
     return res
   }
   // Final attempt
-  return fetch(url, options)
+  return outboundFetch(url, options)
 }
 
 /**

@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { ToolConfig } from '@/tools/types'
 
 const logger = createLogger('GoogleSlidesReplaceListsTool')
@@ -143,7 +144,7 @@ export const replaceListsTool: ToolConfig<ReplaceListsParams, ReplaceListsRespon
       const listText = listItems.map((item) => `${item}\n`).join('')
 
       // Make the batchUpdate call to delete and insert
-      const batchUpdateResponse = await fetch(
+      const batchUpdateResponse = await outboundFetch(
         `https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`,
         {
           method: 'POST',

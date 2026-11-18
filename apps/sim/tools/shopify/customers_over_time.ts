@@ -1,3 +1,4 @@
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { ToolConfig } from '@/tools/types'
 
 export interface ShopifyCustomersOverTimeParams {
@@ -117,7 +118,7 @@ export const shopifyCustomersOverTimeTool: ToolConfig<
 
     const fetchAllCustomers = async (currentCursor: string | null) => {
       if (!params) throw new Error('Missing parameters for Shopify API request')
-      const res = await fetch(
+      const res = await outboundFetch(
         `https://${params.shopDomain || params.idToken}/admin/api/2024-10/graphql.json`,
         {
           method: 'POST',

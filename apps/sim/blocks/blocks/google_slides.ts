@@ -2971,7 +2971,7 @@ Return ONLY the text content - no explanations, no markdown formatting markers, 
           }
         }
 
-        if (params.operation === 'create_from_template') {
+        if (operation === 'create_from_template') {
           if (typeof createFromTemplatePresentationName === 'string') {
             const name = createFromTemplatePresentationName.trim()
             result.presentationName = name || undefined
@@ -2989,20 +2989,20 @@ Return ONLY the text content - no explanations, no markdown formatting markers, 
           }
         }
 
-        if (params.operation === 'duplicate_presentation') {
+        if (operation === 'duplicate_presentation') {
           result.sourcePresentationId = effectiveSourcePresentationId || undefined
           result.title = duplicateTitle
           result.folderId = effectiveFolderId || undefined
         }
 
         // Replace Text operation
-        if (params.operation === 'replace_text') {
+        if (operation === 'replace_text') {
           result.objectId = params.replaceTextObjectId
           result.text = params.replaceTextContent
         }
 
         // Replace Lists operation
-        if (params.operation === 'replace_lists') {
+        if (operation === 'replace_lists') {
           result.objectId = params.replaceListsObjectId
           // Parse JSON array string to array
           if (params.replaceListsItems) {
@@ -3022,12 +3022,12 @@ Return ONLY the text content - no explanations, no markdown formatting markers, 
         }
 
         // Replace Image operation
-        if (params.operation === 'replace_image') {
+        if (operation === 'replace_image') {
           result.objectId = params.replaceImageObjectId
           result.imageUrl = params.replaceImageUrl
         }
 
-        if (params.operation === 'add_slide' && params.insertionIndex) {
+        if (operation === 'add_slide' && params.insertionIndex) {
           result.insertionIndex = Number.parseInt(params.insertionIndex as string, 10)
         }
 

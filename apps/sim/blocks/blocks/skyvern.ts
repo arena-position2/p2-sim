@@ -1,6 +1,7 @@
 import { SkyvernIcon } from '@/components/icons'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
+import { mapperOperation } from '@/blocks/utils'
 import { parseSkyvernRunParameterRows } from '@/tools/skyvern/parameter-rows'
 
 const SKYVERN_WORKFLOW_CACHE_TTL_MS = 60_000
@@ -352,7 +353,7 @@ export const SkyvernBlock: BlockConfig = {
     ],
     config: {
       tool: (params) => params.operation,
-      params: (params) => {
+      params: (params, context) => {
         const result: Record<string, unknown> = {}
 
         if (process.env.NEXT_PUBLIC_SKYVERN_CONFIGURED !== 'true') {
@@ -360,7 +361,7 @@ export const SkyvernBlock: BlockConfig = {
           if (params.baseUrl) result.baseUrl = params.baseUrl
         }
 
-        switch (params.operation) {
+        switch (mapperOperation(params, context)) {
           case 'skyvern_create_workflow':
             result.title = params.title
             result.description = params.description

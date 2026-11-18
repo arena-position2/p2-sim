@@ -5623,6 +5623,7 @@ export type ExecuteWorkflowBody = {
 export type ExecuteWorkflowHeaders = {
   'x-run-id'?: string
   'x-sim-via'?: string
+  'x-sim-email': string
 }
 
 type ExecuteWorkflowResponseRef0 = {
@@ -8609,7 +8610,7 @@ export type ListBillingLogsQuery = {
     | 'voice-output'
     | 'api-tool'
   workspaceId?: string
-  period?: '1d' | '7d' | '30d' | 'all' | 'custom'
+  period?: '1d' | '7d' | '30d' | '90d' | 'all' | 'custom'
   startDate?: string
   endDate?: string
   limit?: number
@@ -19065,6 +19066,12 @@ export const V2_OPERATIONS = {
         describe:
           'Comma-separated workflow identifiers naming the workflow-to-workflow call chain that led to this request. Each hop appends its own workflow id, and Sim sets it automatically; supply it yourself only when relaying an existing chain. A chain at the maximum depth is rejected with `409` and `error.details.code: "CALL_CHAIN_DEPTH_EXCEEDED"`.',
       },
+      'x-sim-email': {
+        kind: 'string',
+        required: true,
+        describe:
+          'Required. Email address of the Sim user whose organization (or personal plan, when they belong to no organization) is billed for this run instead of the workspace that owns the workflow. The user is also recorded as the run actor. A missing or malformed header is rejected with `400`; an email that matches no Sim user is rejected with `400` and `error.details.code: "BILLING_EMAIL_NOT_FOUND"`.',
+      },
     },
   },
   exportKnowledgeBase: {
@@ -20420,7 +20427,7 @@ export const V2_OPERATIONS = {
       },
       period: {
         kind: 'enum',
-        values: ['1d', '7d', '30d', 'all', 'custom'] as const,
+        values: ['1d', '7d', '30d', '90d', 'all', 'custom'] as const,
         default: '30d',
         describe:
           'Relative window, all history, or a custom date range. `startDate` and `endDate` are accepted only with `custom`; every other value computes its own window.',

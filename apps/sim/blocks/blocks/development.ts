@@ -1,7 +1,7 @@
 import { DevelopmentIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
 import { IntegrationType } from '@/blocks/types'
-import { normalizeFileInput } from '@/blocks/utils'
+import { mapperOperation, normalizeFileInput } from '@/blocks/utils'
 
 let _inflightRepoFetch: Promise<Array<{ label: string; id: string }>> | null = null
 
@@ -142,8 +142,8 @@ Return ONLY the specification text. No markdown wrappers.`,
     config: {
       tool: (params) =>
         params.operation === 'edit' ? 'development_edit_app' : 'development_generate_app',
-      params: (params) =>
-        params.operation === 'edit'
+      params: (params, context) =>
+        mapperOperation(params, context) === 'edit'
           ? {
               userInput: params.userInput,
               repoName: params.existingRepo,

@@ -1,6 +1,7 @@
 import { PresentationIcon } from '@/components/icons'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { IntegrationType } from '@/blocks/types'
+import { mapperOperation } from '@/blocks/utils'
 
 export const P2DocsBlock: BlockConfig = {
   type: 'p2_docs',
@@ -85,8 +86,9 @@ export const P2DocsBlock: BlockConfig = {
             return 'p2_docs_get_template_schema'
         }
       },
-      params: (params) => {
-        if (params.operation === 'get_template_schema') {
+      params: (params, context) => {
+        const operation = mapperOperation(params, context)
+        if (operation === 'get_template_schema') {
           const template = (
             (params.templateSchemaTemplate as string) ||
             (params.template as string) ||
@@ -95,7 +97,7 @@ export const P2DocsBlock: BlockConfig = {
           return { template }
         }
 
-        if (params.operation === 'get_presentation_icons') {
+        if (operation === 'get_presentation_icons') {
           const category = (
             (params.iconsCategory as string) ||
             (params.category as string) ||
@@ -108,7 +110,7 @@ export const P2DocsBlock: BlockConfig = {
           }
         }
 
-        if (params.operation === 'get_p2_users') {
+        if (operation === 'get_p2_users') {
           const filter = (
             (params.p2UsersFilter as string) ||
             (params.filter as string) ||

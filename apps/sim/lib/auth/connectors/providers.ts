@@ -2667,7 +2667,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/facebook-ads`,
       getUserInfo: async (tokens) => {
         try {
-          const response = await fetch(
+          const response = await outboundFetch(
             `https://graph.facebook.com/v22.0/me?fields=id,name,email&access_token=${encodeURIComponent(tokens.accessToken ?? '')}`
           )
           if (!response.ok) {

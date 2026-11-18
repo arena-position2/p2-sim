@@ -535,7 +535,7 @@ export const KnowledgeBlock: BlockConfig = {
           params.enabled = params.enabled === 'true'
         }
 
-        if (params.operation === 'search') {
+        if (operation === 'search') {
           const rerankModel =
             typeof params.rerankModel === 'string' && params.rerankModel.trim().length > 0
               ? params.rerankModel.trim()

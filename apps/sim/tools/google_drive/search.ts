@@ -1,6 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { TextChunker } from '@/lib/chunkers/text-chunker'
 import { rerankContent } from '@/lib/content/rerank'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { GoogleDriveSearchParams, GoogleDriveSearchResponse } from '@/tools/google_drive/types'
 import {
   ALL_FILE_FIELDS,
@@ -92,7 +93,7 @@ async function resolveFolderIdByName(
   url.searchParams.append('supportsAllDrives', 'true')
 
   try {
-    const response = await fetch(url.toString(), {
+    const response = await outboundFetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -149,7 +150,7 @@ async function extractFileContent(
         exportFormat,
       })
 
-      const exportResponse = await fetch(
+      const exportResponse = await outboundFetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(exportFormat)}&supportsAllDrives=true`,
         {
           headers: {
@@ -182,7 +183,7 @@ async function extractFileContent(
       fileName,
     })
 
-    const downloadResponse = await fetch(
+    const downloadResponse = await outboundFetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
       {
         headers: {
@@ -593,7 +594,7 @@ export async function executeGoogleDriveSearchDirect(params: GoogleDriveSearchPa
   }
 
   try {
-    const response = await fetch(url.toString(), {
+    const response = await outboundFetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },

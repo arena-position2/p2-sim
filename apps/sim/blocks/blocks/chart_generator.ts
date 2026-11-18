@@ -4,6 +4,7 @@ import type { BlockConfig, SubBlockConfig, SuggestedSkill } from '@/blocks/types
 import {
   getModelOptions,
   getProviderCredentialSubBlocks,
+  mapperOperation,
   PROVIDER_CREDENTIAL_INPUTS,
 } from '@/blocks/utils'
 
@@ -157,8 +158,8 @@ export const ChartGeneratorBlock: BlockConfig = {
       // type) before the generic tool path, so this selector only drives agent /
       // copilot tool usage: 'generate' -> LLM chart tool, 'validate' -> normalizer.
       tool: (params) => (params.operation === 'validate' ? 'chart_validate' : 'chart_generate'),
-      params: (params) => {
-        if (params.operation === 'validate') {
+      params: (params, context) => {
+        if (mapperOperation(params, context) === 'validate') {
           return { content: params.rawContent ?? params.content }
         }
         // Forward the block's own fields as-is (model + provider credentials +

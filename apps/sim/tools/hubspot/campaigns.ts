@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type {
   HubSpotCampaignAsset,
   HubSpotCampaignMetrics,
@@ -62,7 +63,7 @@ export async function fetchHubSpotCampaigns(
   const queryString = queryParams.toString()
   const url = queryString ? `${baseUrl}?${queryString}` : baseUrl
 
-  const response = await fetch(url, {
+  const response = await outboundFetch(url, {
     method: 'GET',
     headers: buildHeaders(accessToken),
   })
@@ -301,7 +302,7 @@ export const hubspotGetCampaignSpendTool: ToolConfig<
       const spendPromises = campaignGuids.map(async (guid) => {
         try {
           const url = `https://api.hubapi.com/marketing/v3/campaigns/${encodeURIComponent(guid)}/spend/${encodeURIComponent(params.spendId)}`
-          const campaignResponse = await fetch(url, {
+          const campaignResponse = await outboundFetch(url, {
             method: 'GET',
             headers: buildHeaders(params.accessToken),
           })
@@ -462,7 +463,7 @@ export const hubspotGetCampaignMetricsTool: ToolConfig<
       const metricsPromises = campaignGuids.map(async (guid) => {
         try {
           const url = `https://api.hubapi.com/marketing/v3/campaigns/${encodeURIComponent(guid)}/reports/metrics?metrics=CLICKS&metrics=BOUNCES&metrics=OPENS`
-          const campaignResponse = await fetch(url, {
+          const campaignResponse = await outboundFetch(url, {
             method: 'GET',
             headers: buildHeaders(params.accessToken),
           })
@@ -642,7 +643,7 @@ export const hubspotGetCampaignRevenueTool: ToolConfig<
           const queryString = queryParams.toString()
           const url = queryString ? `${baseUrl}?${queryString}` : baseUrl
 
-          const campaignResponse = await fetch(url, {
+          const campaignResponse = await outboundFetch(url, {
             method: 'GET',
             headers: buildHeaders(params.accessToken),
           })

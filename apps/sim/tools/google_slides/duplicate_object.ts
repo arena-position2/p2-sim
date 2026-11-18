@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import { batchUpdateUrl } from '@/tools/google_slides/utils'
 import type { ToolConfig } from '@/tools/types'
 
@@ -131,7 +132,7 @@ export const duplicateObjectTool: ToolConfig<DuplicateObjectParams, DuplicateObj
     if (duplicatedObjectId) {
       try {
         // Fetch presentation details to check if it's a slide
-        const getPresentationResponse = await fetch(
+        const getPresentationResponse = await outboundFetch(
           `https://slides.googleapis.com/v1/presentations/${presentationId}`,
           {
             headers: {
@@ -152,7 +153,7 @@ export const duplicateObjectTool: ToolConfig<DuplicateObjectParams, DuplicateObj
             const totalSlides = slides.length
 
             // Reorder the duplicated slide to the end
-            const reorderResponse = await fetch(
+            const reorderResponse = await outboundFetch(
               `https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`,
               {
                 method: 'POST',

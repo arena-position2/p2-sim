@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { ExecutionContext } from '@/lib/uploads/contexts/execution/utils'
 import type {
   GmailAdvancedSearchParams,
@@ -79,7 +80,7 @@ async function downloadAndParseAttachment(
   accessToken: string
 ): Promise<Buffer> {
   try {
-    const attachmentResponse = await fetch(
+    const attachmentResponse = await outboundFetch(
       `${GMAIL_API_BASE}/messages/${messageId}/attachments/${attachmentId}`,
       {
         headers: {
@@ -327,12 +328,15 @@ export async function executeGmailAdvancedSearchDirect(
   searchParams.append('q', query)
   searchParams.append('maxResults', maxResults.toString())
 
-  const searchResponse = await fetch(`${GMAIL_API_BASE}/messages?${searchParams.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-  })
+  const searchResponse = await outboundFetch(
+    `${GMAIL_API_BASE}/messages?${searchParams.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  )
 
   if (!searchResponse.ok) {
     const errorData = await searchResponse.json().catch(() => ({}))
@@ -372,12 +376,15 @@ export async function executeGmailAdvancedSearchDirect(
     // Fetch full thread details for each unique thread ID
     const threadPromises = Array.from(uniqueThreadIds).map(async (threadId: string) => {
       try {
-        const threadResponse = await fetch(`${GMAIL_API_BASE}/threads/${threadId}?format=full`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        })
+        const threadResponse = await outboundFetch(
+          `${GMAIL_API_BASE}/threads/${threadId}?format=full`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        )
 
         if (!threadResponse.ok) {
           const errorData = await threadResponse.json().catch(() => ({}))
@@ -426,12 +433,15 @@ export async function executeGmailAdvancedSearchDirect(
       logger.warn('Thread API calls failed, falling back to individual message fetching')
       const messagePromises = messagesToProcess.map(async (msg: any) => {
         try {
-          const messageResponse = await fetch(`${GMAIL_API_BASE}/messages/${msg.id}?format=full`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-            },
-          })
+          const messageResponse = await outboundFetch(
+            `${GMAIL_API_BASE}/messages/${msg.id}?format=full`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          )
 
           if (!messageResponse.ok) {
             logger.warn(`Failed to fetch message ${msg.id}`)

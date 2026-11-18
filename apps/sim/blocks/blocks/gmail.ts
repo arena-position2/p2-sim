@@ -654,12 +654,12 @@ Return ONLY the search query - no explanations, no extra text.`,
           }
         }
 
-        if (rest.operation === 'read_thread_gmail') {
+        if (operation === 'read_thread_gmail') {
           rest.threadId = (readThreadId || '').trim()
         }
 
         // Handle advanced search operation
-        if (rest.operation === 'advanced_search_gmail') {
+        if (operation === 'advanced_search_gmail') {
           if (advancedSearchQuery) {
             rest.query = advancedSearchQuery
           }

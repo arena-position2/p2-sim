@@ -1,4 +1,5 @@
 import { createLogger } from '@sim/logger'
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { ToolConfig } from '@/tools/types'
 import type {
   ZoomListAccountRecordingsParams,
@@ -92,7 +93,7 @@ export async function fetchZoomRecordings(
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 300000)
-    const response = await fetch(validatedUrl.toString(), {
+    const response = await outboundFetch(validatedUrl.toString(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

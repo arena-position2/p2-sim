@@ -1,3 +1,4 @@
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import { normalizeUnipilePostPathId } from '@/tools/unipile/normalize_post_path_id'
 
 /**
@@ -83,7 +84,7 @@ export async function fetchAllUnipilePostReactionItems(
     const encoded = encodeURIComponent(postId)
     const url = `${baseUrl}/api/v1/posts/${encoded}/reactions?${qs.toString()}`
 
-    const res = await fetch(url, {
+    const res = await outboundFetch(url, {
       method: 'GET',
       headers: {
         accept: 'application/json',

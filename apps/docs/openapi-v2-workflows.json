@@ -4271,6 +4271,19 @@
               "description": "Comma-separated workflow identifiers naming the workflow-to-workflow call chain that led to this request. Each hop appends its own workflow id, and Sim sets it automatically; supply it yourself only when relaying an existing chain. A chain at the maximum depth is rejected with `409` and `error.details.code: \"CALL_CHAIN_DEPTH_EXCEEDED\"`.",
               "type": "string"
             }
+          },
+          {
+            "name": "x-sim-email",
+            "in": "header",
+            "required": true,
+            "description": "Required. Email address of the Sim user whose organization (or personal plan, when they belong to no organization) is billed for this run instead of the workspace that owns the workflow. The user is also recorded as the run actor. A missing or malformed header is rejected with `400`; an email that matches no Sim user is rejected with `400` and `error.details.code: \"BILLING_EMAIL_NOT_FOUND\"`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 320,
+              "format": "email",
+              "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+              "description": "Required. Email address of the Sim user whose organization (or personal plan, when they belong to no organization) is billed for this run instead of the workspace that owns the workflow. The user is also recorded as the run actor. A missing or malformed header is rejected with `400`; an email that matches no Sim user is rejected with `400` and `error.details.code: \"BILLING_EMAIL_NOT_FOUND\"`."
+            }
           }
         ],
         "requestBody": {

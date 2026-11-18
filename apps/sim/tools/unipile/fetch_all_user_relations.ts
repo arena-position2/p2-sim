@@ -1,3 +1,4 @@
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 /**
  * Unipile GET /api/v1/users/relations — page size and cursor extraction.
  * Docs: `limit` integer 1–1000 per page.
@@ -34,7 +35,7 @@ async function fetchRelationsPageWithRetry(
 ): Promise<Record<string, unknown>> {
   let attempt = 0
   while (true) {
-    const res = await fetch(url, {
+    const res = await outboundFetch(url, {
       method: 'GET',
       headers: {
         accept: 'application/json',

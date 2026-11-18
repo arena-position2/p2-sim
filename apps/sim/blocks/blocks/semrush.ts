@@ -1,6 +1,7 @@
 import { SemrushIcon } from '@/components/icons'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
+import { mapperOperation } from '@/blocks/utils'
 
 const DATABASE_OPTIONS = [
   { label: 'United States (us)', id: 'us' },
@@ -940,9 +941,9 @@ Return ONLY the expression - no explanations, no quotes, no extra text.`,
         const operation = raw ? (LEGACY_SEMRUSH_OPERATIONS[raw] ?? raw) : undefined
         return operation && OPERATIONS.includes(operation) ? operation : 'semrush_domain_overview'
       },
-      params: (params) => {
+      params: (params, context) => {
         const result: Record<string, unknown> = {}
-        const raw = params.operation as string | undefined
+        const raw = mapperOperation(params, context)
         const operation = raw ? (LEGACY_SEMRUSH_OPERATIONS[raw] ?? raw) : undefined
         if (params.limit) result.limit = Number(params.limit)
         else if (params.displayLimit && operation !== 'semrush_organic_positions') {

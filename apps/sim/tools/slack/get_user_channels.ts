@@ -1,3 +1,4 @@
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { SlackGetUserChannelsParams, SlackGetUserChannelsResponse } from '@/tools/slack/types'
 import { CHANNEL_OUTPUT_PROPERTIES } from '@/tools/slack/types'
 import type { ToolConfig } from '@/tools/types'
@@ -201,7 +202,7 @@ export const slackGetUserChannelsTool: ToolConfig<
 
         url.searchParams.append('cursor', nextCursor.trim())
 
-        const pageResponse = await fetch(url.toString(), {
+        const pageResponse = await outboundFetch(url.toString(), {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',

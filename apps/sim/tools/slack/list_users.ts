@@ -1,3 +1,4 @@
+import { outboundFetch } from '@/lib/core/network/outbound-fetch.server'
 import type { SlackListUsersParams, SlackListUsersResponse } from '@/tools/slack/types'
 import { USER_SUMMARY_OUTPUT_PROPERTIES } from '@/tools/slack/types'
 import type { ToolConfig } from '@/tools/types'
@@ -122,7 +123,7 @@ export const slackListUsersTool: ToolConfig<SlackListUsersParams, SlackListUsers
         url.searchParams.append('limit', String(limit))
         url.searchParams.append('cursor', nextCursor.trim())
 
-        const pageResponse = await fetch(url.toString(), {
+        const pageResponse = await outboundFetch(url.toString(), {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
