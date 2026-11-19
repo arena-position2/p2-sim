@@ -8,13 +8,10 @@ import { NextResponse } from 'next/server'
 import { recordUsage, stableEventKey } from '@/lib/billing/core/usage-log'
 import { hasAgentEmailAccess } from '@/lib/chat/agent-email-access'
 import { isVideoBuilderAgentUrl } from '@/lib/chat/video-agent-redirect'
-import { checkInternalApiKey, createUnauthorizedResponse } from '@/lib/copilot/request/http'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { getFalApiKey } from '@/lib/media/falai'
-import {
-  FALAI_HOSTED_KEY_MARKUP_MULTIPLIER,
-  getFalAICostMetadata,
-} from '@/lib/tools/falai-pricing'
+import { checkInternalApiKey, createUnauthorizedResponse } from '@/lib/mothership/request/http'
+import { FALAI_HOSTED_KEY_MARKUP_MULTIPLIER, getFalAICostMetadata } from '@/lib/tools/falai-pricing'
 
 const logger = createLogger('VideoAgentUsageAPI')
 
