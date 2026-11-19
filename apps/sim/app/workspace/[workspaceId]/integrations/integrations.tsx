@@ -13,7 +13,6 @@ import {
 } from '@sim/emcn'
 import { useParams } from 'next/navigation'
 import { useQueryStates } from 'nuqs'
-import { PermissionAccessBoundary } from '@/components/access-requests/permission-access-boundary'
 import {
   blockTypeToIconMap,
   formatIntegrationType,
@@ -21,7 +20,7 @@ import {
   type Integration,
   resolveCredentialDisplay,
 } from '@/lib/integrations'
-import { IntegrationTabsHeader } from '@/app/workspace/[workspaceId]/components'
+import { IntegrationTabsHeader } from '@/app/workspace/[workspaceId]/components/integration-tabs-header'
 import { IntegrationSection } from '@/app/workspace/[workspaceId]/integrations/components/integration-section'
 import { IntegrationTile } from '@/app/workspace/[workspaceId]/integrations/components/integrations-showcase'
 import { ShowcaseWithExplore } from '@/app/workspace/[workspaceId]/integrations/components/showcase-with-explore'
@@ -35,6 +34,7 @@ import {
 } from '@/app/workspace/[workspaceId]/integrations/search-params'
 import { SettingsEmptyState } from '@/app/workspace/[workspaceId]/settings/components/settings-empty-state'
 import { SettingsResourceRow } from '@/app/workspace/[workspaceId]/settings/components/settings-resource-row'
+import { PermissionAccessBoundary } from '@/ee/access-requests/components/permission-access-boundary'
 import { useWorkspaceCredentials, type WorkspaceCredential } from '@/hooks/queries/credentials'
 import { useDebouncedSearchSetter } from '@/hooks/use-debounced-search-setter'
 import { usePermissionConfig } from '@/hooks/use-permission-config'

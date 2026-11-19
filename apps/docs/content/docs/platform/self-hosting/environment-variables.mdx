@@ -34,6 +34,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `TRUSTED_ORIGINS` | Comma-separated additional origins to trust for auth (apex + `www`, alias domains) |
 | `AUTH_TRUSTED_PROXIES` | Comma-separated reverse-proxy IPs/CIDRs so the client IP cannot be forged through `X-Forwarded-For` |
 | `INTERNAL_API_BASE_URL` | Internal URL for server-side self-calls, e.g. `http://sim-app.simstudio.svc.cluster.local:3000`. Optional — falls back to the public base URL. Deliberately ignored inside the Trigger.dev worker runtime, where a cluster-internal address resolves to the worker itself |
+| `SIM_MCP_URL` | Public URL of the [Sim MCP server](/mcp/overview) when you serve it on its own host, e.g. `https://mcp.example.com/mcp`. Point that host at the app; Sim serves only the MCP endpoint and its OAuth metadata there, and stops serving `/api/mcp` on the app host so clients use one URL. Optional — defaults to `<NEXT_PUBLIC_APP_URL>/api/mcp` |
 | `DATABASE_REPLICA_URL` | Read-replica connection string for log listing, audit logs, and dashboard aggregations. Falls back to the primary when unset |
 
 ## AI Providers
@@ -46,6 +47,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `MISTRAL_API_KEY` | Mistral |
 | `XAI_API_KEY_1` | xAI |
 | `KIMI_API_KEY_1` | Moonshot Kimi |
+| `TYPESAFE_API_KEY_1` / `_2` / `_3` | TypeSafe Jev hosted key rotation |
 | `ZAI_API_KEY_1` | Z.ai |
 | `TOGETHER_API_KEY` | Together AI |
 | `FIREWORKS_API_KEY` | Fireworks AI |
@@ -69,7 +71,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 </Callout>
 
 <Callout type="info">
-  **Agent tool-call depth.** An Agent block ends its run after 20 model round trips of tool calling. Raise the ceiling with `MAX_TOOL_ITERATIONS` (for example `MAX_TOOL_ITERATIONS=50`). Every extra iteration is another model call, so raise it deliberately.
+  **Agent tool-call depth.** An Agent block keeps calling tools until the model answers, with no round-trip limit by default. With billing disabled there is also no execution timeout unless `EXECUTION_TIMEOUT_FREE` (sync) or `EXECUTION_TIMEOUT_ASYNC_FREE` (async) is set, so a looping agent keeps making paid model calls. Set `MAX_TOOL_ITERATIONS` (for example `MAX_TOOL_ITERATIONS=50`) to cap the model round trips per block, or set those timeouts to bound the whole run.
 </Callout>
 
 ### Catalog visibility
@@ -192,6 +194,9 @@ See [Observability](/platform/self-hosting/observability).
 
 | Variable | Description |
 |----------|-------------|
+| `KB_IMAGE_EXTRACTION_MODEL` | Gemini model that reads Confluence image attachments into searchable text. Defaults to `gemini-3.8-flash`; a value that is not a Gemini 3 model in the catalog falls back to the default. Needs `GEMINI_API_KEY` (or a workspace Gemini key); without one, image attachments are left out of syncs |
+| `KB_IMAGE_EXTRACTIONS_PER_SYNC` | New or changed images one connector sync sends for reading, at least `1`. Defaults to `500`; the rest wait for the next sync, which reports as partial |
+| `KB_CONFIG_VISION_REQUESTS_PER_MINUTE` | Image reads per minute per Gemini key, shared by every sync on the deployment. Defaults to `300`; lower it to match a key with a smaller Gemini quota |
 | `KB_EMBEDDING_MODEL` | Embedding model for new knowledge bases. Defaults to `text-embedding-3-small`; use `ollama/<model>` for a model on your own Ollama. An unrecognised hosted model id falls back to the default, but an `ollama/` id is taken at face value — if that model is not on the server, knowledge-base creation fails rather than falling back |
 | `EMBEDDING_OUTPUT_DIMS` | Vector width new knowledge bases are stored at: `384`, `768`, `1024`, `1536` (default), or `3072`. It must be a width the chosen model can emit; anything else falls back to `1536` with a warning |
 | `OPENROUTER_API_KEY` | Fallback route for the OpenAI embedding models — used when it is set and `OPENAI_API_KEY` is not the chosen path |
@@ -248,6 +253,7 @@ Enterprise features are unlocked by configuration rather than billing on self-ho
 |----------|-------------|
 | `ENTERPRISE_ENABLED`, `NEXT_PUBLIC_ENTERPRISE_ENABLED` | Enable the whole enterprise feature set |
 | `SSO_ENABLED`, `NEXT_PUBLIC_SSO_ENABLED` | Enable SAML and OIDC single sign-on on its own. See [Authentication](/platform/self-hosting/authentication#sso-saml-and-oidc) |
+| `SSO_SKIP_DOMAIN_VERIFICATION` | Skip the DNS challenge when an administrator clicks Verify on a domain. Off by default; self-hosted only. Trusts administrator claims for SSO and SCIM across the instance. See [Verified Domains](/platform/enterprise/verified-domains#skip-dns-verification) |
 | `SCIM_ENABLED`, `NEXT_PUBLIC_SCIM_ENABLED` | Enable directory provisioning on its own. Needs SSO. See [Directory provisioning](/platform/enterprise/scim) |
 | `INSTANCE_ORG_NAME` | Name of the organization every user joins automatically at signup |
 | `INSTANCE_ORG_SLUG` | Slug for that organization (derived from the name when omitted) |

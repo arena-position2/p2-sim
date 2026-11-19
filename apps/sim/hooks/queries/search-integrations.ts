@@ -6,14 +6,16 @@ import {
   type UpdateSearchIntegrationBody,
   updateSearchIntegrationContract,
 } from '@/lib/api/contracts/knowledge/search-integrations'
+import { organizationAccountsKeys } from '@/hooks/queries/organization-accounts'
 import { resetOrganizationSearchAccess } from '@/hooks/queries/utils/reset-organization-search-access'
 import { searchIntegrationKeys } from '@/hooks/queries/utils/search-integration-keys'
 
 export const SEARCH_INTEGRATIONS_STALE_TIME = 30_000
 
-export function useSearchIntegrations(organizationId: string) {
+export function useSearchIntegrations(organizationId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: searchIntegrationKeys.list(organizationId),
+    enabled: Boolean(organizationId) && (options?.enabled ?? true),
     queryFn: async ({ signal }) =>
       (await requestJson(listSearchIntegrationsContract, { query: { organizationId }, signal }))
         .data,
@@ -31,6 +33,9 @@ export function useUpdateSearchIntegration() {
       await Promise.all([
         resetOrganizationSearchAccess(queryClient, organizationId),
         queryClient.invalidateQueries({ queryKey: searchIntegrationKeys.list(organizationId) }),
+        queryClient.invalidateQueries({
+          queryKey: organizationAccountsKeys.detail(organizationId),
+        }),
       ])
       router.refresh()
     },

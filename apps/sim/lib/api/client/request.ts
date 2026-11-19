@@ -29,6 +29,7 @@ export type ApiClientRequest<C extends AnyApiRouteContract> = MaybeField<
   MaybeField<'body', ContractBodyInput<C>> &
   MaybeField<'headers', ContractHeadersInput<C>> & {
     signal?: AbortSignal
+    keepalive?: boolean
   }
 
 export interface ApiRawRequestOptions {
@@ -168,26 +169,6 @@ function isSchemaValidationError(error: unknown): boolean {
   )
 }
 
-/**
- * Compresses a ZodError's issues into a short, readable "field: reason" summary
- * so a failed response tells you which field was wrong instead of a bare
- * "Response failed contract validation".
- */
-function summarizeSchemaIssues(error: unknown): string {
-  const issues = (error as { issues?: unknown }).issues
-  if (!Array.isArray(issues)) return ''
-  const summary = issues
-    .slice(0, 3)
-    .map((issue) => {
-      const path = Array.isArray(issue?.path) ? issue.path.join('.') : ''
-      const message = typeof issue?.message === 'string' ? issue.message : 'invalid'
-      return path ? `${path}: ${message}` : message
-    })
-    .join('; ')
-  const extra = issues.length > 3 ? ` (+${issues.length - 3} more)` : ''
-  return summary ? `${summary}${extra}` : ''
-}
-
 function messageFromSchemaValidationError(error: unknown): string {
   if (
     !error ||
@@ -235,6 +216,7 @@ export async function requestJson<C extends AnyApiRouteContract>(
     headers: buildHeaders(parsedHeaders, hasBody),
     body: hasBody ? JSON.stringify(parsedBody) : undefined,
     signal: input.signal,
+    ...(input.keepalive === undefined ? {} : { keepalive: input.keepalive }),
   })
 
   const { parsed, raw } = await readResponseBody(response)
@@ -252,7 +234,6 @@ export async function requestJson<C extends AnyApiRouteContract>(
     return contract.response.schema.parse(parsed) as ContractJsonResponse<C>
   } catch (error) {
     if (isSchemaValidationError(error)) {
-      const details = summarizeSchemaIssues(error)
       throw new ApiClientError({
         status: response.status,
         message: messageFromSchemaValidationError(error),

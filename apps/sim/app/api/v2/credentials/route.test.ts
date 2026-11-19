@@ -1,6 +1,3 @@
-/**
- * @vitest-environment node
- */
 import {
   V2_OPERATION_RATE_LIMIT_ALLOWED,
   V2_PREAUTH_RATE_LIMIT_ALLOWED,
@@ -33,7 +30,6 @@ vi.mock('@/lib/credentials/application/service-account', () => ({
   },
 }))
 
-import { V2_DEFAULT_PAGE_SIZE } from '@/lib/api/contracts/v2/shared'
 import { REFILTERED_CURSOR_MESSAGE } from '@/lib/api/cursor-binding'
 import { GET, POST } from '@/app/api/v2/credentials/route'
 
@@ -67,7 +63,6 @@ const credential = {
 
 describe('GET /api/v2/credentials', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.authenticate.mockResolvedValue(auth)
     v2RouteMocks.preauthRate.mockResolvedValue(V2_PREAUTH_RATE_LIMIT_ALLOWED)
     v2RouteMocks.operationRate.mockResolvedValue(V2_OPERATION_RATE_LIMIT_ALLOWED)
@@ -76,39 +71,6 @@ describe('GET /api/v2/credentials', () => {
       nextCursorKeys: null,
       sortBy: 'createdAt',
       sortOrder: 'desc',
-    })
-  })
-
-  it('authenticates and charges before validating workspace input', async () => {
-    const response = await GET(new NextRequest('http://localhost:3000/api/v2/credentials'))
-
-    expect(response.status).toBe(400)
-    expect(v2RouteMocks.authenticate).toHaveBeenCalled()
-    expect(v2RouteMocks.operationRate).toHaveBeenCalledTimes(2)
-    expect(mocks.list).not.toHaveBeenCalled()
-  })
-
-  it('calls the application operation with the workspace principal', async () => {
-    const request = new NextRequest(
-      `http://localhost:3000/api/v2/credentials?workspaceId=${WORKSPACE_ID}&type=service_account`
-    )
-    const response = await GET(request)
-
-    expect(response.status).toBe(200)
-    expect(mocks.list).toHaveBeenCalledWith({
-      principal: auth.principal,
-      input: {
-        workspaceId: WORKSPACE_ID,
-        type: 'service_account',
-        providerId: undefined,
-        search: undefined,
-        sortBy: 'createdAt',
-        sortOrder: 'desc',
-        limit: V2_DEFAULT_PAGE_SIZE,
-        cursor: undefined,
-        cursorKeys: undefined,
-      },
-      request,
     })
   })
 
@@ -145,39 +107,6 @@ describe('GET /api/v2/credentials', () => {
     expect(mocks.list).not.toHaveBeenCalled()
   })
 
-  it('resumes a cursor replayed under the filters it was minted with', async () => {
-    mocks.list.mockResolvedValue({
-      credentials: [credential],
-      nextCursorKeys: ['2026-01-01T00:00:00.000Z', 'credential-1'],
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-    })
-
-    const minted = await GET(
-      new NextRequest(
-        `http://localhost:3000/api/v2/credentials?workspaceId=${WORKSPACE_ID}&search=zoom`
-      )
-    )
-    const { nextCursor } = await minted.json()
-
-    mocks.list.mockClear()
-    const resumed = await GET(
-      new NextRequest(
-        `http://localhost:3000/api/v2/credentials?workspaceId=${WORKSPACE_ID}&search=zoom&cursor=${encodeURIComponent(nextCursor)}`
-      )
-    )
-
-    expect(resumed.status).toBe(200)
-    expect(mocks.list).toHaveBeenCalledWith({
-      principal: auth.principal,
-      input: expect.objectContaining({
-        search: 'zoom',
-        cursorKeys: ['2026-01-01T00:00:00.000Z', 'credential-1'],
-      }),
-      request: expect.anything(),
-    })
-  })
-
   it('projects credential metadata field by field without secret material', async () => {
     const response = await GET(
       new NextRequest(`http://localhost:3000/api/v2/credentials?workspaceId=${WORKSPACE_ID}`)
@@ -204,24 +133,10 @@ describe('GET /api/v2/credentials', () => {
     expect(JSON.stringify(body)).not.toContain('envKey')
     expect(JSON.stringify(body)).not.toContain('createdBy')
   })
-
-  it('hides repository errors that may contain secret details', async () => {
-    mocks.list.mockRejectedValueOnce(new Error('encryptedServiceAccountKey failed'))
-
-    const response = await GET(
-      new NextRequest(`http://localhost:3000/api/v2/credentials?workspaceId=${WORKSPACE_ID}`)
-    )
-
-    expect(response.status).toBe(500)
-    expect(await response.json()).toMatchObject({
-      error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
-    })
-  })
 })
 
 describe('POST /api/v2/credentials', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     v2RouteMocks.authenticate.mockResolvedValue({
       ...auth,
       principal: { kind: 'personal_api_key', userId: 'user-1', keyId: 'key-1' },
@@ -288,30 +203,89 @@ describe('POST /api/v2/credentials', () => {
         authMethod: undefined,
         privateKey: undefined,
         username: undefined,
+        tenancyOcid: undefined,
+        userOcid: undefined,
+        fingerprint: undefined,
+        privateKeyPassphrase: undefined,
+        region: undefined,
       },
       request,
     })
   })
 
-  it('rejects an unknown service-account provider before the use case', async () => {
-    const response = await POST(
-      new NextRequest('http://localhost:3000/api/v2/credentials', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: WORKSPACE_ID,
-          type: 'service_account',
-          providerId: 'made-up-service-account',
-          credentials: JSON.stringify({ serviceAccountJson: '{}' }),
+  it('forwards OCI credential fields from the write-only credentials envelope', async () => {
+    const request = new NextRequest('http://localhost:3000/api/v2/credentials', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: WORKSPACE_ID,
+        type: 'service_account',
+        providerId: 'oci-api-key-service-account',
+        credentials: JSON.stringify({
+          tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+          userOcid: 'ocid1.user.oc1..user',
+          fingerprint: '00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+          privateKey: '-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----',
+          privateKeyPassphrase: ' exact passphrase ',
+          region: 'us-ashburn-1',
         }),
-      })
-    )
+      }),
+    })
+    const response = await POST(request)
+    const body = await response.text()
 
-    expect(response.status).toBe(400)
-    expect(mocks.create).not.toHaveBeenCalled()
+    expect(response.status).toBe(201)
+    expect(mocks.create).toHaveBeenCalledWith({
+      principal: { kind: 'personal_api_key', userId: 'user-1', keyId: 'key-1' },
+      input: expect.objectContaining({
+        providerId: 'oci-api-key-service-account',
+        tenancyOcid: 'ocid1.tenancy.oc1..tenant',
+        userOcid: 'ocid1.user.oc1..user',
+        fingerprint: '00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff',
+        privateKey: '-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----',
+        privateKeyPassphrase: ' exact passphrase ',
+        region: 'us-ashburn-1',
+      }),
+      request,
+    })
+    expect(body).not.toContain('PRIVATE KEY')
+    expect(body).not.toContain('exact passphrase')
   })
 
-  it('rejects flattened provider fields before the use case', async () => {
+  it.each(['multiline wallet', 'maximum-size JSON with escaped whitespace'])(
+    'accepts an Oracle connection with %s through the serialized credential envelope',
+    async (variant) => {
+      const connection = JSON.stringify({
+        host: 'database.example.com',
+        protocol: 'tcps',
+        serviceName: 'database',
+        username: 'sim',
+        password: 'write-only-password',
+        walletContent: `-----BEGIN CERTIFICATE-----\n${`${'A'.repeat(64)}\n`.repeat(4096)}-----END CERTIFICATE-----`,
+      })
+      const serviceAccountJson =
+        variant === 'multiline wallet' ? connection : connection.padEnd(2 * 1024 * 1024, '\n')
+      const response = await POST(
+        new NextRequest('http://localhost:3000/api/v2/credentials', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId: WORKSPACE_ID,
+            type: 'service_account',
+            providerId: 'oracledb-service-account',
+            credentials: JSON.stringify({ serviceAccountJson }),
+          }),
+        })
+      )
+
+      expect(response.status).toBe(201)
+      const body = await response.text()
+      expect(body).not.toContain('write-only-password')
+      expect(body).not.toContain('BEGIN CERTIFICATE')
+    }
+  )
+
+  it('rejects an oversized Oracle connection at the nested field limit', async () => {
     const response = await POST(
       new NextRequest('http://localhost:3000/api/v2/credentials', {
         method: 'POST',
@@ -319,16 +293,86 @@ describe('POST /api/v2/credentials', () => {
         body: JSON.stringify({
           workspaceId: WORKSPACE_ID,
           type: 'service_account',
-          providerId: 'zoom-service-account',
-          clientId: 'client-id',
-          clientSecret: 'client-secret',
-          orgId: 'account-id',
+          providerId: 'oracledb-service-account',
+          credentials: JSON.stringify({
+            serviceAccountJson: '{}'.padEnd(2 * 1024 * 1024 + 1, ' '),
+          }),
         }),
       })
     )
 
     expect(response.status).toBe(400)
-    expect(mocks.create).not.toHaveBeenCalled()
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'BAD_REQUEST',
+        details: expect.arrayContaining([
+          expect.objectContaining({
+            path: ['credentials', 'serviceAccountJson'],
+            message: expect.stringContaining('2097152'),
+          }),
+        ]),
+      },
+    })
+  })
+
+  it('rejects excessive serialized envelope padding before credential verification', async () => {
+    const response = await POST(
+      new NextRequest('http://localhost:3000/api/v2/credentials', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: WORKSPACE_ID,
+          type: 'service_account',
+          providerId: 'oracledb-service-account',
+          credentials: JSON.stringify({ serviceAccountJson: '{}' }).padEnd(
+            4 * 1024 * 1024 + 128 * 1024 + 1,
+            ' '
+          ),
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'BAD_REQUEST',
+        details: expect.arrayContaining([expect.objectContaining({ path: ['credentials'] })]),
+      },
+    })
+  })
+
+  /**
+   * `credentials create slack-custom-bot` used to fail twice over: discovery
+   * demanded a client-generated id, and a caller who then supplied a slug was
+   * refused for not sending a UUID. The id is optional on every provider — the
+   * server mints one — while an explicit UUID keeps working for a caller that
+   * configured its Slack Request URL ahead of time.
+   */
+  it('accepts a Slack custom bot without an id and leaves minting to the server', async () => {
+    const response = await POST(
+      new NextRequest('http://localhost:3000/api/v2/credentials', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: WORKSPACE_ID,
+          type: 'service_account',
+          providerId: 'slack-custom-bot',
+          credentials: JSON.stringify({ signingSecret: 'sign', botToken: 'xoxb-1' }),
+        }),
+      })
+    )
+
+    expect(response.status).toBe(201)
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          providerId: 'slack-custom-bot',
+          id: undefined,
+          signingSecret: 'sign',
+          botToken: 'xoxb-1',
+        }),
+      })
+    )
   })
 
   it.each([

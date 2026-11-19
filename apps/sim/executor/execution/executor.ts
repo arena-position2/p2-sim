@@ -25,7 +25,9 @@ import { type ClonedSubflowInfo, ParallelExpander } from '@/executor/utils/paral
 import { isResolvedSecretTraceProvenanceV1 } from '@/executor/utils/resolved-secret-trace-registry'
 import {
   computeExecutionSets,
+  overlayVariableInputs,
   type RunFromBlockContext,
+  RunFromBlockValidationError,
   resolveContainerToSentinelStart,
   validateRunFromBlock,
 } from '@/executor/utils/run-from-block'
@@ -39,7 +41,7 @@ import {
   extractParallelIdFromSentinel,
   stripCloneSuffixes,
   stripOuterBranchSuffix,
-} from '@/executor/utils/subflow-utils'
+} from '@/executor/utils/subflow-node-id-codec'
 import { VariableResolver } from '@/executor/variables/resolver'
 import { navigatePathAsync } from '@/executor/variables/resolvers/reference-async.server'
 import type { SerializedWorkflow } from '@/serializer/types'
@@ -85,6 +87,17 @@ export class DAGExecutor {
   }
 
   async execute(workflowId: string, triggerBlockId?: string): Promise<ExecutionResult> {
+    await this.contextExtensions.testHooks?.enterWorkflow({
+      workflowId,
+      deploymentVersionId: this.loadedDeploymentVersionId(workflowId),
+      blocks: this.workflow.blocks.map((block) => ({
+        id: block.id,
+        name: block.metadata?.name ?? block.id,
+        type: block.metadata?.id ?? '',
+        params: block.config.params ?? {},
+      })),
+      resolvedSecretTraceRegistry: this.contextExtensions.resolvedSecretTraceRegistry,
+    })
     const savedIncomingEdges = this.contextExtensions.dagIncomingEdges
     const dag = this.dagBuilder.build(this.workflow, {
       triggerBlockId,
@@ -129,8 +142,12 @@ export class DAGExecutor {
   async executeFromBlock(
     workflowId: string,
     startBlockId: string,
-    sourceSnapshot: SerializableExecutionState
+    sourceSnapshot: SerializableExecutionState,
+    variableInputs?: Record<string, unknown>
   ): Promise<ExecutionResult> {
+    if (variableInputs && Object.keys(variableInputs).length > 0) {
+      sourceSnapshot = overlayVariableInputs(this.workflow, sourceSnapshot, variableInputs)
+    }
     // Build full DAG with all blocks to compute upstream set for snapshot filtering
     // includeAllBlocks is needed because the startBlockId might be a trigger not reachable from the main trigger
     const dag = this.dagBuilder.build(this.workflow, { includeAllBlocks: true })
@@ -138,7 +155,9 @@ export class DAGExecutor {
     const executedBlocks = new Set(sourceSnapshot.executedBlocks)
     const validation = validateRunFromBlock(startBlockId, dag, executedBlocks)
     if (!validation.valid) {
-      throw new Error(validation.error)
+      throw new RunFromBlockValidationError(
+        validation.error ?? `Cannot run from block: ${startBlockId}`
+      )
     }
 
     const { dirtySet, upstreamSet, reachableUpstreamSet } = computeExecutionSets(dag, startBlockId)
@@ -266,6 +285,15 @@ export class DAGExecutor {
     return result
   }
 
+  /** The version this execution's state was loaded from, as its delegation authority records it. */
+  private loadedDeploymentVersionId(workflowId: string): string | null {
+    const current = this.contextExtensions.executorDelegationOrigin?.currentWorkflow
+    if (current?.workflowId !== workflowId) {
+      throw new Error(`Test run of workflow ${workflowId} has no loaded version`)
+    }
+    return current.mode === 'deployment' ? current.deploymentVersionId : null
+  }
+
   private restoreSavedIncomingEdges(dag: DAG, savedIncomingEdges?: Record<string, string[]>): void {
     if (!savedIncomingEdges) return
 
@@ -375,6 +403,15 @@ export class DAGExecutor {
       snapshotState?.deactivatedEdges,
       snapshotState?.nodesWithActivatedEdge
     )
+    /**
+     * Run-from-block re-executes its dirty set from scratch, so the source execution's edge state
+     * for those nodes must not carry over: a stale activation runs an unselected branch, and a
+     * stale deactivation releases a join before its live input completes.
+     */
+    const dirtySet = context.runFromBlockContext?.dirtySet
+    if (dirtySet) {
+      edgeManager.clearDeactivatedEdgesForNodes(dirtySet)
+    }
     const nodeOrchestrator = new NodeExecutionOrchestrator(
       dag,
       state,
@@ -427,6 +464,7 @@ export class DAGExecutor {
       isDeployedContext: this.contextExtensions.isDeployedContext,
       enforceCredentialAccess: this.contextExtensions.enforceCredentialAccess,
       piiBlockOutputRedaction: this.contextExtensions.piiBlockOutputRedaction,
+      testHooks: this.contextExtensions.testHooks,
       blockStates: state.getBlockStates(),
       blockLogs: restoredBlockLogs,
       /*
@@ -580,10 +618,10 @@ export class DAGExecutor {
       const isRegularBlock = this.workflow.blocks.some((b) => b.id === startBlockId)
 
       if (isRegularBlock) {
-        this.initializeStarterBlock(context, state, startBlockId)
+        this.initializeStarterBlock(state, startBlockId)
       }
     } else {
-      this.initializeStarterBlock(context, state, triggerBlockId)
+      this.initializeStarterBlock(state, triggerBlockId)
     }
 
     return { context, state }
@@ -623,11 +661,7 @@ export class DAGExecutor {
     return parentMap
   }
 
-  private initializeStarterBlock(
-    context: ExecutionContext,
-    state: ExecutionState,
-    triggerBlockId?: string
-  ): void {
+  private initializeStarterBlock(state: ExecutionState, triggerBlockId?: string): void {
     let startResolution: ReturnType<typeof resolveExecutorStartBlock> | null = null
 
     if (triggerBlockId) {

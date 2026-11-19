@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { lazy, Suspense, useId, useState } from 'react'
 import {
   Button,
   ChipButtonGroup,
@@ -17,17 +17,26 @@ import {
 } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import type { WorkflowDeploymentVersionResponse } from '@/lib/workflows/persistence/utils'
+import {
+  type ComparePair,
+  resolveComparePair,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/deploy/components/deploy-modal/components/general/compare-pair'
 import type { DeployReadiness } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/deploy/hooks/use-deploy-readiness'
 import { Preview, PreviewWorkflow } from '@/app/workspace/[workspaceId]/w/components/preview'
 import { useDeploymentVersionState, useRevertToVersion } from '@/hooks/queries/workflows'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
-import { useSubBlockStore } from '@/stores/workflows/subblock/store'
-import { useWorkflowStore } from '@/stores/workflows/workflow/store'
 import type { WorkflowState } from '@/stores/workflows/workflow/types'
 import { Versions } from './components'
 import { formatVersionLabel } from './format-version-label'
 
 const logger = createLogger('GeneralDeploy')
+
+/** The comparison canvas is heavy and rarely opened, so it stays out of the editor's initial bundle. */
+const CompareVersionsModal = lazy(() =>
+  import(
+    '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/deploy/components/deploy-modal/components/general/components/compare-versions-modal'
+  ).then((module) => ({ default: module.CompareVersionsModal }))
+)
 
 interface GeneralDeployProps {
   workflowId: string | null
@@ -63,6 +72,7 @@ export function GeneralDeploy({
   onLoadDeploymentBlocked,
 }: GeneralDeployProps) {
   const expandedPreviewDescriptionId = useId()
+  const [comparePair, setComparePair] = useState<ComparePair | null>(null)
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null)
   const [showActiveDespiteSelection, setShowActiveDespiteSelection] = useState(false)
   const previewMode: PreviewMode =
@@ -70,13 +80,6 @@ export function GeneralDeploy({
   const [showLoadDialog, setShowLoadDialog] = useState(false)
   const [showPromoteDialog, setShowPromoteDialog] = useState(false)
   const [showExpandedPreview, setShowExpandedPreview] = useState(false)
-  const blocks = useWorkflowStore((state) => state.blocks)
-  const edges = useWorkflowStore((state) => state.edges)
-  const loops = useWorkflowStore((state) => state.loops)
-  const parallels = useWorkflowStore((state) => state.parallels)
-  const subBlockValues = useSubBlockStore((state) =>
-    workflowId ? state.workflowValues[workflowId] : null
-  )
   const [versionToLoad, setVersionToLoad] = useState<{
     workflowId: string
     version: number
@@ -85,6 +88,9 @@ export function GeneralDeploy({
     workflowId: string
     version: number
   } | null>(null)
+  const handleCompareVersion = (version: number) => {
+    setComparePair(resolveComparePair(version, versions))
+  }
 
   const selectedVersionInfo = versions.find((v) => v.version === selectedVersion)
   const versionToPromoteInfo = versions.find((v) => v.version === versionToPromote?.version)
@@ -189,13 +195,13 @@ export function GeneralDeploy({
             <Skeleton className='h-[16px] w-[90px]' />
           </div>
           <div className='h-[260px] w-full overflow-hidden rounded-sm border border-[var(--border)]'>
-            <Skeleton className='h-full w-full rounded-none' />
+            <Skeleton className='size-full rounded-none' />
           </div>
         </div>
         <div>
           <Skeleton className='mb-[6.5px] h-[16px] w-[60px]' />
           <div className='h-[120px] w-full overflow-hidden rounded-sm border border-[var(--border)]'>
-            <Skeleton className='h-full w-full rounded-none' />
+            <Skeleton className='size-full rounded-none' />
           </div>
         </div>
       </div>
@@ -207,7 +213,7 @@ export function GeneralDeploy({
       <div className='space-y-3'>
         <div>
           <div className='relative mb-[6.5px]'>
-            <Label className='block truncate pl-0.5 text-[var(--text-primary)] text-small'>
+            <Label className='block truncate pl-0.5 text-small'>
               {previewMode === 'selected' && selectedVersionInfo
                 ? formatVersionLabel(selectedVersionInfo.version, selectedVersionInfo.name)
                 : 'Live Workflow'}
@@ -238,7 +244,7 @@ export function GeneralDeploy({
           >
             {workflowToShow ? (
               <>
-                <div className='h-full w-full cursor-default [&_*]:cursor-default!'>
+                <div className='size-full cursor-default [&_*]:cursor-default!'>
                   <PreviewWorkflow
                     workflowState={workflowToShow}
                     height='100%'
@@ -251,10 +257,11 @@ export function GeneralDeploy({
                 <Tooltip.Root>
                   <Tooltip.Trigger asChild>
                     <Button
+                      aria-label='See preview'
                       type='button'
                       variant='default'
                       onClick={() => setShowExpandedPreview(true)}
-                      className='absolute right-[8px] bottom-2 z-10 size-[28px] cursor-pointer border border-[var(--border)] bg-transparent p-0 backdrop-blur-xs hover-hover:bg-[var(--surface-3)]'
+                      className='absolute right-[8px] bottom-2 z-10 size-[28px] cursor-pointer bg-transparent p-0 backdrop-blur-xs hover-hover:bg-[var(--surface-3)]'
                     >
                       <Expand className='size-[14px]' />
                     </Button>
@@ -271,9 +278,7 @@ export function GeneralDeploy({
         </div>
 
         <div>
-          <Label className='mb-[6.5px] block pl-0.5 text-[var(--text-primary)] text-small'>
-            Versions
-          </Label>
+          <Label className='mb-[6.5px] block pl-0.5 text-small'>Versions</Label>
           <Versions
             workflowId={workflowId}
             versions={versions}
@@ -283,6 +288,7 @@ export function GeneralDeploy({
             onSelectVersion={handleSelectVersion}
             onPromoteToLive={handlePromoteToLive}
             onLoadDeployment={handleLoadDeployment}
+            onCompare={handleCompareVersion}
           />
         </div>
       </div>
@@ -335,6 +341,22 @@ export function GeneralDeploy({
           pending: isPromotingVersion,
         }}
       />
+
+      {workflowId && comparePair && (
+        <Suspense fallback={null}>
+          <CompareVersionsModal
+            key={JSON.stringify(comparePair)}
+            open
+            onOpenChange={(open) => {
+              if (!open) setComparePair(null)
+            }}
+            workflowId={workflowId}
+            versions={versions}
+            initialBase={comparePair.base}
+            initialTarget={comparePair.target}
+          />
+        </Suspense>
+      )}
 
       {workflowToShow && (
         <ChipModal

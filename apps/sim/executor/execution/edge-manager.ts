@@ -122,6 +122,17 @@ export class EdgeManager {
     return node.incomingEdges.size === 0 || this.countActiveIncomingEdges(node) === 0
   }
 
+  /**
+   * Whether a node that has not been queued can still run: it has received an activated edge, or
+   * an incoming edge is still undecided. False means every path into it was deactivated (a router
+   * or condition chose another route, or an error path was not taken), so nothing will queue it.
+   */
+  canNodeStillRun(nodeId: string): boolean {
+    if (this.nodesWithActivatedEdge.has(nodeId)) return true
+    const node = this.dag.nodes.get(nodeId)
+    return node !== undefined && this.countActiveIncomingEdges(node) > 0
+  }
+
   restoreIncomingEdge(targetNodeId: string, sourceNodeId: string): void {
     const targetNode = this.dag.nodes.get(targetNodeId)
     if (!targetNode) {
@@ -176,7 +187,8 @@ export class EdgeManager {
   }
 
   /**
-   * Clear deactivated edges for a set of nodes (used when restoring loop state for next iteration).
+   * Clear deactivated edges for a set of nodes that is about to re-execute (a loop's next
+   * iteration, a parallel batch, or a run-from-block dirty set).
    *
    * Only clears edges whose SOURCE is in the provided set. Edges pointing INTO a node in the set
    * whose source lives outside (e.g. an external branch whose path was cascade-deactivated) must

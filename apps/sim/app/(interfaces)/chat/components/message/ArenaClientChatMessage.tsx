@@ -43,6 +43,7 @@ import { StreamingIndicator } from '@/app/(interfaces)/chat/components/message/c
 import { WelcomeMessageWithCtas } from '@/app/(interfaces)/chat/components/message/components/welcome-message-with-ctas'
 import type {
   ChatAttachment,
+  ChatOutputSegment,
   ChatToolCall,
   KnowledgeRef,
   KnowledgeResultChunk,
@@ -50,7 +51,6 @@ import type {
 import { CHAT_ERROR_MESSAGES } from '@/app/(interfaces)/chat/constants'
 import {
   downloadImage,
-  extractAllBase64Images,
   extractBase64Image,
   getImageUrlFromContent,
   hasBase64Images,
@@ -91,6 +91,8 @@ export interface ChatMessage {
   toolCalls?: ChatToolCall[]
   /** True while any tool chip is still `running`. */
   isToolStreaming?: boolean
+  /** Per selected-output live state while a deployment streams block outputs. */
+  outputSegments?: ChatOutputSegment[]
   executionId?: string
   liked?: boolean | null
   attachments?: ChatAttachment[]
@@ -222,7 +224,6 @@ export const ArenaClientChatMessage = memo(
     onCopySegmentToInput,
     onToggleGeneratedImage,
     selectedGeneratedImageIds,
-    selectedGeneratedImageIdsKey,
     onWelcomeQueryClick,
     isLastAssistantMessage = false,
     onRegenerateMessage,
@@ -466,13 +467,14 @@ export const ArenaClientChatMessage = memo(
               ? imgRaw.replace(/\s+/g, '')
               : ''
 
+          const chartsInText = txtRaw ? resolveEChartsOptionsFromContent(txtRaw) : null
+          const textForImages = chartsInText ? stripEChartsJsonFromContent(txtRaw) : txtRaw
           const { uniqueUrls, prose: proseWithoutUrlLines } = mergeToolOutputImageUrls(
             imgRaw,
-            txtRaw,
+            textForImages,
             o.images
           )
           const proseTrim = proseWithoutUrlLines.trim()
-          const txtTrim = txtRaw.trim()
 
           const showS3 =
             o.s3UploadFailed === true && (uniqueUrls.length > 0 || Boolean(imageBase64))
@@ -481,6 +483,9 @@ export const ArenaClientChatMessage = memo(
             return (
               <>
                 {proseTrim ? renderStringContent(proseTrim) : null}
+                {chartsInText?.map((option, index) => (
+                  <ChatEChartsRenderer key={index} option={option} />
+                ))}
                 {showS3 && <S3UploadFailedAlert />}
                 {uniqueUrls.map((url) => (
                   <div key={normalizeImageUrlForCompare(url)} className='w-full'>
@@ -505,8 +510,18 @@ export const ArenaClientChatMessage = memo(
             )
           }
 
-          if (txtTrim) {
-            return renderStringContent(txtTrim)
+          if (txtRaw.trim()) {
+            if (chartsInText) {
+              return (
+                <>
+                  {proseTrim ? renderStringContent(proseTrim) : null}
+                  {chartsInText.map((option, index) => (
+                    <ChatEChartsRenderer key={index} option={option} />
+                  ))}
+                </>
+              )
+            }
+            return renderStringContent(txtRaw.trim())
           }
 
           return (
@@ -623,7 +638,7 @@ export const ArenaClientChatMessage = memo(
       )
     }, [cleanTextContent])
 
-    const timestampLabel = formatRelativeTime(message.timestamp)
+    const timestampLabel = formatRelativeTime(message.timestamp.toISOString())
 
     const handleCopy = () => {
       const contentToCopy =
@@ -633,20 +648,6 @@ export const ArenaClientChatMessage = memo(
       navigator.clipboard.writeText(contentToCopy)
       setIsCopied(true)
       setTimeout(() => setIsCopied(false), 2000)
-    }
-
-    const handleDownload = () => {
-      const imageUrl = getImageUrlFromContent(cleanTextContent)
-      if (imageUrl) {
-        downloadImage(false, undefined, imageUrl)
-        return
-      }
-      const base64Images = extractAllBase64Images(cleanTextContent)
-      if (base64Images.length > 0) {
-        base64Images.forEach((imageData) => {
-          downloadImage(true, imageData)
-        })
-      }
     }
 
     const containsBase64Images = hasBase64Images(cleanTextContent)
@@ -670,17 +671,6 @@ export const ArenaClientChatMessage = memo(
 
     /** One ref per chunk: from live (knowledgeResults) or history (knowledgeRefs). */
     const uniqueChunkRefs = useMemo(() => {
-      type ChunkRefItem = {
-        key: string
-        documentId: string
-        documentName: string
-        chunkIndex: number
-        chunks?: KnowledgeResultChunk[]
-        linkUrl: string | null
-        workspaceId: string | null
-        knowledgeBaseId?: string
-        fromHistory: boolean
-      }
       const results = message.knowledgeResults ?? []
       const refsFromHistory = message.knowledgeRefs ?? []
 

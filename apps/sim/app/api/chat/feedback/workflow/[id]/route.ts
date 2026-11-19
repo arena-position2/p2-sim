@@ -3,7 +3,7 @@ import { chat, chatPromptFeedback, user, workflow, workflowExecutionLogs } from 
 import { createLogger } from '@sim/logger'
 import { count, desc, eq, inArray } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
-import { createErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('ChatFeedbackByWorkflowAPI')
 
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const { id: workflowId } = await params
     if (!workflowId) {
-      return createErrorResponse('workflowId is required', 400)
+      return createCodedErrorResponse('workflowId is required', 400)
     }
 
     // Parse pagination parameters from query string with validation
@@ -222,6 +222,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     })
   } catch (error: any) {
     logger.error('Error fetching chat feedback by workflowId:', error)
-    return createErrorResponse(error.message || 'Failed to fetch feedback', 500)
+    return createCodedErrorResponse(error.message || 'Failed to fetch feedback', 500)
   }
 }

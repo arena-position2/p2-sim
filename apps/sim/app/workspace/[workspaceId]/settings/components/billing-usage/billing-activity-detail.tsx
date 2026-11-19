@@ -64,7 +64,7 @@ function UsageLogRow({ log }: UsageLogRowProps) {
         {rowLabel(log)}
       </span>
       <span className='flex-shrink-0 text-[var(--text-muted)] text-caption tabular-nums'>
-        {formatApportionedCreditCost(log.creditCost, log.dollarCost)}
+        {formatApportionedCreditCost(log.creditCost, log.hasCost)}
       </span>
     </div>
   )
@@ -196,7 +196,6 @@ export function BillingActivityDetail({ onRefresh }: BillingActivityDetailProps)
       action={
         <div className='flex items-center gap-2'>
           <Chip
-            flush
             leftIcon={RefreshCw}
             disabled={isRefreshing || isFetching}
             onClick={() => void handleRefresh()}
@@ -204,7 +203,6 @@ export function BillingActivityDetail({ onRefresh }: BillingActivityDetailProps)
             Refresh
           </Chip>
           <Chip
-            flush
             leftIcon={Download}
             disabled={logs.length === 0 || isPlaceholderData}
             onClick={() => void handleExport()}

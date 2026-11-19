@@ -110,25 +110,26 @@ Our maintainers will review your pull request and provide feedback. We aim to ma
 We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#specification) standard. Your commit messages should have the following format:
 
 ```
-<type>[optional scope]: <description>
+<type>(<scope>): <description>
 ```
+
+The scope is optional (`docs: …`).
 
 - **Types** may include:
   - `feat` – a new feature
   - `fix` – a bug fix
+  - `improvement` – an improvement to existing behavior
   - `docs` – documentation changes
-  - `style` – code style changes (formatting, missing semicolons, etc.)
   - `refactor` – code changes that neither fix a bug nor add a feature
+  - `perf` – a performance improvement
   - `test` – adding or correcting tests
+  - `ci` – CI workflow changes
   - `chore` – changes to tooling, build process, etc.
-  - `high priority` – a high priority feature or fix
-  - `high risk` – a high risk feature or fix
-  - `improvement` – an improvement to the codebase
 
 _Examples:_
 
-- `feat[auth]: add social login integration`
-- `fix[ui]: correct misaligned button on homepage`
+- `feat(auth): add social login integration`
+- `fix(ui): correct misaligned button on homepage`
 - `docs: update installation instructions`
 
 Using clear and consistent commit messages makes it easier for everyone to understand the project history and aids in automating changelog generation.
@@ -256,6 +257,8 @@ If you prefer not to use Docker. **All commands run from the repository root unl
 
    For ad-hoc schema iteration during development you can also use `bun run db:push` from `packages/db`, but `db:migrate` is the canonical command for staging and production. `db:push` reconciles directly to the current schema without running versioned migration guards. For disposable local/dev databases, `bun run db:push --force` accepts Drizzle's data-loss prompts, including column drops.
 
+   `db:push` treats added and removed columns, tables, and other schema objects as separate creations and deletions. It never infers a rename. For an intentional rename during local development, run `bun run db:push --interactive-renames` in a terminal and select the old object in Drizzle's chooser. This flag does not approve data loss; `--force` controls that separately. After schema reconciliation succeeds, the wrapper reconciles credential policies and OAuth providers, then backfills search vectors. A failure stops subsequent steps. Staging and production changes still use reviewed versioned migrations with expand/contract deployment steps.
+
 4. **Run the Development Servers:**
 
    ```bash
@@ -352,9 +355,8 @@ In addition, you will need to update the registries:
    // apps/sim/blocks/blocks/pinecone.ts
    import { PineconeIcon } from '@/components/icons'
    import type { BlockConfig } from '@/blocks/types'
-   import type { PineconeResponse } from '@/tools/pinecone/types'
 
-   export const PineconeBlock: BlockConfig<PineconeResponse> = {
+   export const PineconeBlock: BlockConfig = {
      type: 'pinecone',
      name: 'Pinecone',
      description: 'Use Pinecone vector database',

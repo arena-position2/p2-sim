@@ -27,6 +27,7 @@ import {
 import { buildPromoteCopySelection } from '@/ee/workspace-forking/lib/promote/copy-unmapped'
 import type { PromoteForkParams } from '@/ee/workspace-forking/lib/promote/promote'
 import { computeForkPromotePlan } from '@/ee/workspace-forking/lib/promote/promote-plan'
+import { loadForkWorkflowComparisons } from '@/ee/workspace-forking/lib/promote/sync-provenance'
 import {
   buildForkTriggerPlan,
   resolveForkTriggerPaths,
@@ -54,12 +55,14 @@ export type PreviewSyncParams = Pick<
 export async function previewForkSync(
   params: PreviewSyncParams,
   choices: Record<string, unknown>,
-  principal: Principal
+  principal: Principal,
+  workspacePrincipals?: ReadonlyMap<string, Principal>
 ) {
   const { edge, sourceWorkspaceId, targetWorkspaceId } = params
   const revision = await loadForkPreviewRevision(db, params, choices)
   await validateForkMappingTargets(sourceWorkspaceId, targetWorkspaceId, params.mappings ?? [])
-  const { deployedWorkflows, sourceStates } = await loadSourceDeployedStates(sourceWorkspaceId)
+  const { deployedWorkflows, sourceStates, sourceVersionIds } =
+    await loadSourceDeployedStates(sourceWorkspaceId)
   const mappingRows = overlayForkMappingEntries(
     await getEdgeMappingRows(db, edge.childWorkspaceId),
     edge,
@@ -79,7 +82,7 @@ export async function previewForkSync(
     sourceStates,
     items: plan.items,
     resolve: plan.resolver,
-    principal,
+    principal: workspacePrincipals?.get(targetWorkspaceId) ?? principal,
   })
   const resolveBlockId = buildForkBlockIdResolver(
     sourceWorkspaceId === edge.parentWorkspaceId,
@@ -256,8 +259,20 @@ export async function previewForkSync(
     }
   })
   const validators = new Map([
-    [sourceWorkspaceId, workflowSelectorValidator(principal, sourceWorkspaceId)],
-    [targetWorkspaceId, workflowSelectorValidator(principal, targetWorkspaceId)],
+    [
+      sourceWorkspaceId,
+      workflowSelectorValidator(
+        workspacePrincipals?.get(sourceWorkspaceId) ?? principal,
+        sourceWorkspaceId
+      ),
+    ],
+    [
+      targetWorkspaceId,
+      workflowSelectorValidator(
+        workspacePrincipals?.get(targetWorkspaceId) ?? principal,
+        targetWorkspaceId
+      ),
+    ],
   ])
   for (const field of configuration) {
     if (!field.selectorKey || !field.currentValue) continue
@@ -295,18 +310,29 @@ export async function previewForkSync(
       'conflict',
       'Workspace changed during preview; request another preview'
     )
+  const comparisons = await loadForkWorkflowComparisons(
+    db,
+    edge.childWorkspaceId,
+    plan.items,
+    sourceVersionIds
+  )
   const preview = {
     previewFingerprint: revision.fingerprint,
     sourceWorkspaceId,
     targetWorkspaceId,
     ready: blockers.length === 0,
     workflows: [
-      ...plan.items.map((item) => ({
-        action: item.mode,
-        sourceWorkflowId: item.sourceWorkflowId,
-        ...(item.mode === 'replace' ? { targetWorkflowId: item.targetWorkflowId } : {}),
-        name: item.sourceMeta.name,
-      })),
+      ...plan.items.map((item) => {
+        const comparison = comparisons.get(item.sourceWorkflowId)
+        if (!comparison) throw new Error('Missing source workflow comparison')
+        return {
+          action: item.mode,
+          sourceWorkflowId: item.sourceWorkflowId,
+          comparison,
+          ...(item.mode === 'replace' ? { targetWorkflowId: item.targetWorkflowId } : {}),
+          name: item.sourceMeta.name,
+        }
+      }),
       ...plan.archivedTargets.map((item) => ({
         action: 'archive' as const,
         targetWorkflowId: item.id,

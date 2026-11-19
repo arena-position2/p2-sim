@@ -3,9 +3,10 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
+import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { RawFileInputArraySchema } from '@/lib/uploads/utils/file-schemas'
 import { processFilesToUserFiles } from '@/lib/uploads/utils/file-utils'
-import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
+import { downloadServableFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
 import {
   appendUnipileLinkedinMentionsMultipartPart,
   mentionsToUnipileApiJson,
@@ -175,9 +176,14 @@ export async function POST(request: NextRequest) {
       if (hasBinaryAttachments && Array.isArray(data.attachments)) {
         const files = processFilesToUserFiles(data.attachments, data.account_id.trim(), logger)
         for (const userFile of files) {
-          const buffer = await downloadFileFromStorage(userFile, data.account_id.trim(), logger)
+          const { buffer, contentType } = await downloadServableFileFromStorage(
+            userFile,
+            data.account_id.trim(),
+            logger,
+            { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+          )
           const blob = new Blob([new Uint8Array(buffer)], {
-            type: userFile.type || 'application/octet-stream',
+            type: contentType || userFile.type || 'application/octet-stream',
           })
           form.append('attachments', blob, userFile.name)
         }

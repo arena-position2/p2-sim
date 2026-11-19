@@ -104,7 +104,7 @@ export function BillingOrgUsageView({ data }: BillingOrgUsageViewProps) {
   }
 
   const activeUsers = members.length
-  const totalCreditsDisplay: string | 'unlimited' | null = data.orgPool?.isUnlimited
+  const totalCreditsDisplay: number | 'unlimited' | null = data.orgPool?.isUnlimited
     ? 'unlimited'
     : data.orgPool != null
       ? data.orgPool.totalCredits
@@ -172,7 +172,6 @@ export function BillingOrgUsageView({ data }: BillingOrgUsageViewProps) {
               className='w-full sm:max-w-xs'
             />
             <Chip
-              flush
               leftIcon={Download}
               disabled={sortedMembers.length === 0}
               onClick={() => exportMemberUsageCsv(sortedMembers)}
@@ -285,10 +284,7 @@ export function BillingOrgUsageView({ data }: BillingOrgUsageViewProps) {
                   aria-label='Previous page'
                   disabled={currentPage <= 1}
                   onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                  className={cn(
-                    chipVariants({ flush: true }),
-                    'min-w-[32px] text-[var(--text-muted)]'
-                  )}
+                  className={cn(chipVariants(), 'min-w-[32px] text-[var(--text-muted)]')}
                 >
                   ‹
                 </button>
@@ -301,7 +297,7 @@ export function BillingOrgUsageView({ data }: BillingOrgUsageViewProps) {
                       aria-label={`Page ${pageNumber}`}
                       onClick={() => setPage(pageNumber)}
                       className={cn(
-                        chipVariants({ flush: true }),
+                        chipVariants(),
                         'min-w-[32px]',
                         pageNumber === currentPage
                           ? 'text-[var(--text-body)]'
@@ -316,10 +312,7 @@ export function BillingOrgUsageView({ data }: BillingOrgUsageViewProps) {
                   aria-label='Next page'
                   disabled={currentPage >= totalPages}
                   onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                  className={cn(
-                    chipVariants({ flush: true }),
-                    'min-w-[32px] text-[var(--text-muted)]'
-                  )}
+                  className={cn(chipVariants(), 'min-w-[32px] text-[var(--text-muted)]')}
                 >
                   ›
                 </button>

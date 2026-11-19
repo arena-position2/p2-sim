@@ -145,7 +145,6 @@ export const P2DocsBlock: BlockConfig = {
     users: {
       type: 'array',
       description: 'List of matched P2 team members',
-      items: { type: 'json' },
     },
     total: { type: 'number', description: 'Total number of team members returned' },
   },

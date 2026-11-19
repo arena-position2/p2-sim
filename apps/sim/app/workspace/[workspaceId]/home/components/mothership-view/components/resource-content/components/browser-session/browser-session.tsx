@@ -10,11 +10,7 @@ import type {
   BrowserSitePermissionRequest,
 } from '@sim/browser-protocol'
 import { isBrowserTheme } from '@sim/browser-protocol'
-import type {
-  BrowserAddToChatPayload,
-  BrowserCredentialMetadata,
-  DesktopAppearanceTheme,
-} from '@sim/desktop-bridge'
+import type { BrowserAddToChatPayload, DesktopAppearanceTheme } from '@sim/desktop-bridge'
 import {
   Button,
   ChipConfirmModal,
@@ -33,14 +29,16 @@ import {
   PopoverContent,
   PopoverItem,
 } from '@sim/emcn'
-import { ArrowLeft, ArrowRight, Globe, Key, Link, RefreshCw, Search } from '@sim/emcn/icons'
+import { ArrowLeft, ArrowRight, Globe, Link, RefreshCw, Search } from '@sim/emcn/icons'
 import { createPortal } from 'react-dom'
 import { BrowserImportDialog } from '@/components/browser-import/browser-import-dialog'
 import { EmptyState } from '@/components/empty-state/empty-state'
+import {
+  onBrowserOmniboxFocusRequest,
+  takeBrowserOmniboxFocusRequest,
+} from '@/lib/browser-agent/omnibox-focus'
 import { onFocusVisibleBrowserOmnibox } from '@/lib/browser-agent/renderer-shortcuts'
 import {
-  fillBrowserCredential,
-  loadBrowserFillOptions,
   loadBrowserSearchSuggestions,
   loadBrowserSuggestionSources,
   onBrowserAddToChat,
@@ -71,6 +69,7 @@ import { useTheme } from '@/app/_shell/providers/theme-provider'
 import { BrowserDownloads } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-content/components/browser-session/browser-downloads'
 import { BrowserFindBar } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-content/components/browser-session/browser-find-bar'
 import { BrowserLoadingBar } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-content/components/browser-session/browser-loading-bar'
+import { BrowserPageDialogModal } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-content/components/browser-session/browser-page-dialog'
 import { BrowserPageIssueView } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-content/components/browser-session/browser-page-issue'
 import {
   type BrowserPanelOverlay,
@@ -195,15 +194,15 @@ const MAX_HANDLED_PERMISSION_REQUESTS = 256
 
 /** Claims the one renderer response allowed for a native browser permission request. */
 export function claimPermissionResponse(
-  handledRequestIds: { current: Set<string> },
+  handledRequestIds: Set<string>,
   requestId: string
 ): boolean {
-  if (handledRequestIds.current.has(requestId)) return false
-  handledRequestIds.current.add(requestId)
-  while (handledRequestIds.current.size > MAX_HANDLED_PERMISSION_REQUESTS) {
-    const oldest = handledRequestIds.current.values().next().value
+  if (handledRequestIds.has(requestId)) return false
+  handledRequestIds.add(requestId)
+  while (handledRequestIds.size > MAX_HANDLED_PERMISSION_REQUESTS) {
+    const oldest = handledRequestIds.values().next().value
     if (typeof oldest !== 'string') break
-    handledRequestIds.current.delete(oldest)
+    handledRequestIds.delete(oldest)
   }
   return true
 }
@@ -297,7 +296,7 @@ export function browserPanelSnapshotStyle(
     width: bounds.width,
     height: bounds.height,
     maxWidth: 'none',
-    zIndex: layer === 'modal' ? 'calc(var(--z-modal) - 1)' : 'calc(var(--z-popover) - 1)',
+    zIndex: layer === 'modal' ? 'calc(var(--z-modal) - 1)' : 'calc(var(--z-dropdown) - 1)',
   }
 }
 
@@ -448,11 +447,11 @@ export function BrowserSession({
   const getHostRect = useCallback(() => hostRef.current?.getBoundingClientRect() ?? null, [])
   const urlInputRef = useRef<HTMLInputElement>(null)
   const findInputRef = useRef<HTMLInputElement>(null)
-  const fillButtonRef = useRef<HTMLButtonElement>(null)
   const toolbarMenuButtonRef = useRef<HTMLButtonElement>(null)
   const omniboxFocusRafRef = useRef<number | null>(null)
   const omniboxPointerSelectionRef = useRef<OmniboxPointerSelection | null>(null)
-  const handledPermissionRequestIdsRef = useRef<Set<string>>(new Set())
+  const handledPermissionRequestIdsRef = useRef<Set<string> | null>(null)
+  const handledPermissionRequestIds = (handledPermissionRequestIdsRef.current ??= new Set())
   const [answeredPermissionRequestId, setAnsweredPermissionRequestId] = useState<string | null>(
     null
   )
@@ -471,8 +470,6 @@ export function BrowserSession({
   const [panelVisible, setPanelVisible] = useState(false)
   /** Whether the shell has a saved password for the page currently open. */
   const [fillAvailable, setFillAvailable] = useState(false)
-  /** Accounts the active page can accept, loaded only when its key menu opens. */
-  const [fillOptions, setFillOptions] = useState<BrowserCredentialMetadata[]>([])
   /** Visited hosts worth suggesting, optionally decorated by imported credentials. */
   const [suggestionCorpus, setSuggestionCorpus] = useState<UrlSuggestion[]>([])
   /** Highlighted row, or null when Enter should submit the omnibox text. */
@@ -501,6 +498,7 @@ export function BrowserSession({
     requestOverlay,
     closeOverlay,
     onSnapshotError,
+    shouldKeepNativeHidden,
   } = useBrowserPanelOcclusion(scopeId, activeTabId, panelVisible, getHostRect)
 
   const respondToPermission = useCallback(
@@ -509,7 +507,7 @@ export function BrowserSession({
       action: ReturnType<typeof browserPermissionResponseAction>,
       allowed: boolean
     ) => {
-      if (!claimPermissionResponse(handledPermissionRequestIdsRef, requestId)) {
+      if (!claimPermissionResponse(handledPermissionRequestIds, requestId)) {
         return
       }
       setAnsweredPermissionRequestId(requestId)
@@ -527,6 +525,13 @@ export function BrowserSession({
     )
   }, [permissionRequest, respondToPermission, visible])
 
+  // The shell answers page dialogs itself until this renderer declares it shows them.
+  useEffect(() => {
+    sendBrowserPanelAction('enable-page-dialogs', {}, scopeId)
+  }, [scopeId])
+  const answerPageDialog = (requestId: string, accept: boolean) =>
+    sendBrowserPanelAction('respond-dialog', { requestId, allowed: accept }, scopeId)
+
   const permissionModalOpen = shouldShowBrowserPermissionRequest(
     permissionRequest?.requestId,
     answeredPermissionRequestId,
@@ -543,11 +548,6 @@ export function BrowserSession({
   }, [closeOverlay, onOverlayControllerChange, requestOverlay])
 
   useEffect(() => onBrowserFillAvailability(setFillAvailable, scopeId), [scopeId])
-
-  useEffect(() => {
-    if (fillAvailable || activeOverlay !== 'credentials') return
-    void closeOverlay('credentials')
-  }, [activeOverlay, closeOverlay, fillAvailable])
 
   useEffect(() => {
     let active = true
@@ -568,7 +568,10 @@ export function BrowserSession({
           setImportOpen(true)
           return
         }
-        navigateToSettings({ section: 'browser' })
+        navigateToSettings({
+          section: 'browser',
+          ...(command === 'passwords' ? { browserView: 'passwords' } : {}),
+        })
       }, scopeId),
     [navigateToSettings, scopeId]
   )
@@ -653,16 +656,17 @@ export function BrowserSession({
 
   useEffect(() => onBrowserOmniboxFocus(focusOmnibox, scopeId), [focusOmnibox, scopeId])
 
-  // A fresh blank tab coming on screen — opened from the resource strip or by
-  // Cmd+T — gets the omnibox, the way Chrome's new-tab page does. A tab with a
-  // page keeps its content.
-  const focusedBlankTabIdRef = useRef<string | null>(null)
+  // A blank tab the user opened from the resource strip gets the omnibox once
+  // it is on screen, the way Chrome's new-tab page does. Cmd+T arrives from the
+  // shell above. A blank tab the agent opened must never take the caret.
   useEffect(() => {
-    if (!visible || !activeTabId || !showEmptyState) return
-    if (focusedBlankTabIdRef.current === activeTabId) return
-    focusedBlankTabIdRef.current = activeTabId
-    focusOmnibox('clear')
-  }, [activeTabId, focusOmnibox, showEmptyState, visible])
+    if (!visible || !activeTabId) return
+    const claimFocusRequest = () => {
+      if (takeBrowserOmniboxFocusRequest(activeTabId, scopeId)) focusOmnibox('clear')
+    }
+    claimFocusRequest()
+    return onBrowserOmniboxFocusRequest(claimFocusRequest)
+  }, [activeTabId, focusOmnibox, scopeId, visible])
 
   // Sim owns keyboard events while its renderer has focus. Claim Cmd+L here
   // before the workspace's global "Go to Logs" command can navigate away.
@@ -777,14 +781,18 @@ export function BrowserSession({
     let disposed = false
     let occlusionRequest = 0
     const atomicPanelOcclusion = supportsAtomicBrowserPanelOcclusion()
-    let occlusionPresent = atomicPanelOcclusion && hasNativeSurfaceOcclusion()
+    const hasRequestedOcclusion = () =>
+      atomicPanelOcclusion && (hasNativeSurfaceOcclusion() || shouldKeepNativeHidden())
+    let occlusionPresent = hasRequestedOcclusion()
     // A full-screen marker can exist before this Browser reports its first
     // rect. In that path this bounds effect acquires a serialized hidden lease
     // before attaching geometry, including rollback if the marker disappears
     // while Electron is still processing the hide.
-    const geometryOcclusionLease = createBrowserPanelGeometryOcclusionLease((occluded) =>
-      setBrowserPanelOccluded(occluded, scopeId, occluded).catch(() => false)
-    )
+    const geometryOcclusionLease = createBrowserPanelGeometryOcclusionLease((occluded) => {
+      /** The snapshot controller retains ownership if a tooltip or menu outlives the modal. */
+      if (!occluded && shouldKeepNativeHidden()) return Promise.resolve(true)
+      return setBrowserPanelOccluded(occluded, scopeId, occluded).catch(() => false)
+    })
 
     const commitGeometry = (
       bounds: BrowserPanelBounds,
@@ -825,7 +833,7 @@ export function BrowserSession({
       }
 
       const anchor = describeAnchor(panel)
-      const nativeSurfaceOcclusionPresent = atomicPanelOcclusion && hasNativeSurfaceOcclusion()
+      const nativeSurfaceOcclusionPresent = hasRequestedOcclusion()
       const request = ++occlusionRequest
 
       if (
@@ -844,14 +852,13 @@ export function BrowserSession({
         // resets panelOccluded — while this side still remembers `applied:
         // true`. Without dropping that belief, setDesired(true) is a no-op,
         // the next bounds commit lays out an unoccluded native view, and the
-        // browser punches above the still-open modal with nothing left to
-        // ever re-hide it. Forgetting `applied` costs one idempotent hide IPC
-        // per heartbeat while a modal is up, and makes any main-side lease
-        // loss self-heal within a second.
+        // browser punches above the still-open overlay. Forgetting `applied`
+        // reasserts the lease for modals and painted transient overlays on each
+        // heartbeat, recovering main-side lease loss within a second.
         if (nativeSurfaceOcclusionPresent) geometryOcclusionLease.assumeRevealed()
         void geometryOcclusionLease.setDesired(nativeSurfaceOcclusionPresent).then((settled) => {
           if (disposed) return
-          const latestOcclusionPresent = atomicPanelOcclusion && hasNativeSurfaceOcclusion()
+          const latestOcclusionPresent = hasRequestedOcclusion()
           if (
             request !== occlusionRequest ||
             latestOcclusionPresent !== nativeSurfaceOcclusionPresent
@@ -887,7 +894,7 @@ export function BrowserSession({
     const resizeObserver = new ResizeObserver(() => reportGeometry(false))
     const occlusionObserver = new MutationObserver((records) => {
       if (!mutationsTouchNativeSurfaceOcclusion(records)) return
-      const next = hasNativeSurfaceOcclusion()
+      const next = hasRequestedOcclusion()
       if (next === occlusionPresent) return
       occlusionPresent = next
       scheduleGeometryReport(true)
@@ -928,7 +935,7 @@ export function BrowserSession({
       void geometryOcclusionLease.setDesired(false)
       reportBrowserPanelBounds(null, null, scopeId)
     }
-  }, [hasRendererPage, visible, suspended, scopeId])
+  }, [hasRendererPage, visible, suspended, scopeId, shouldKeepNativeHidden])
 
   /**
    * Programmatic focus on a new tab keeps the omnibox ready for typing without
@@ -1002,27 +1009,10 @@ export function BrowserSession({
     urlInputRef.current?.blur()
   }
 
-  /**
-   * Opens the shell's native account chooser under the key icon. Called
-   * directly from the click so the page still has an active user gesture,
-   * which the shell requires before it will read anything from the vault.
-   */
-  const handleShowCredentials = useCallback(() => {
-    const rect = fillButtonRef.current?.getBoundingClientRect()
-    if (!rect) return
-    showBrowserCredentialChooser({ x: rect.left, y: rect.bottom }, scopeId)
-  }, [scopeId])
-
-  /** Swaps the native page for its captured frame before opening the emcn menu. */
-  const handleOpenCredentialMenu = useCallback(async () => {
-    const options = await loadBrowserFillOptions(scopeId)
-    if (options.length === 0) {
-      handleShowCredentials()
-      return
-    }
-    setFillOptions(options)
-    await requestOverlay('credentials', handleShowCredentials)
-  }, [handleShowCredentials, requestOverlay, scopeId])
+  const handleShowCredentials = () => {
+    const rect = toolbarMenuButtonRef.current?.getBoundingClientRect()
+    if (rect) showBrowserCredentialChooser({ x: rect.left, y: rect.bottom }, scopeId)
+  }
 
   const handleShowNativeToolbarMenu = useCallback(() => {
     const rect = toolbarMenuButtonRef.current?.getBoundingClientRect()
@@ -1175,6 +1165,8 @@ export function BrowserSession({
                   }}
                   onKeyDown={(event) => {
                     event.stopPropagation()
+                    // Keys during an IME composition edit the composed text, not the URL.
+                    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
                     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                       // Never move a highlight through a list that is not on screen.
                       if (!suggestionsOpen) return
@@ -1191,10 +1183,17 @@ export function BrowserSession({
                     }
                     if (event.key === 'Enter') submitUrl()
                     if (event.key === 'Escape') {
-                      // Dismiss the list first; leave the omnibox only once
-                      // there is no highlight left to back out of.
-                      if (activeSuggestion !== null) setActiveSuggestion(null)
-                      else urlInputRef.current?.blur()
+                      // Back out one step at a time, as Chrome does: the
+                      // highlight, then the edited text, then the omnibox.
+                      if (activeSuggestion !== null) {
+                        setActiveSuggestion(null)
+                      } else if ((urlDraft ?? '') !== (pageState?.url ?? '')) {
+                        setUrlDraft(pageState?.url ?? '')
+                        setSuggestionsVisible(false)
+                        selectFocusedOmniboxOnNextFrame(event.currentTarget)
+                      } else {
+                        urlInputRef.current?.blur()
+                      }
                     }
                   }}
                 />
@@ -1256,42 +1255,6 @@ export function BrowserSession({
           {findOpen && (
             <BrowserFindBar inputRef={findInputRef} onClose={closeFind} scopeId={scopeId} />
           )}
-          {fillAvailable && (
-            <DropdownMenu
-              open={activeOverlay === 'credentials'}
-              modal={false}
-              onOpenChange={(open) => {
-                if (open) void handleOpenCredentialMenu()
-                else void closeOverlay('credentials')
-              }}
-            >
-              <DropdownMenuTrigger asChild>
-                <Button
-                  ref={fillButtonRef}
-                  type='button'
-                  variant='ghost-secondary'
-                  size='sm'
-                  aria-label='Fill a saved password'
-                  title='Fill a saved password'
-                  className='size-[30px] shrink-0 p-0'
-                >
-                  <Key className='size-[14px]' />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='end' sideOffset={5} className='w-[240px]'>
-                {fillOptions.map((credential) => (
-                  <DropdownMenuItem
-                    key={credential.id}
-                    onSelect={() => void fillBrowserCredential(credential.id, scopeId)}
-                  >
-                    <span className='min-w-0 flex-1 truncate'>
-                      {credential.username || '(no username)'}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
           <BrowserDownloads
             scopeId={scopeId}
             open={activeOverlay === 'downloads'}
@@ -1339,6 +1302,19 @@ export function BrowserSession({
               />
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                onSelect={afterToolbarClose(handleShowCredentials)}
+                disabled={!fillAvailable}
+              >
+                Fill Saved Password
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={afterToolbarClose(() =>
+                  navigateToSettings({ section: 'browser', browserView: 'passwords' })
+                )}
+              >
+                Passwords
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 onSelect={afterToolbarClose(() => setImportOpen(true))}
                 disabled={!canImport}
               >
@@ -1372,7 +1348,7 @@ export function BrowserSession({
           <div className='absolute inset-0 flex flex-col items-center justify-center gap-2'>
             <Globe className='size-[18px] text-[var(--text-tertiary)]' />
             <p className='text-[var(--text-muted)] text-small'>
-              Waiting for the browser session to start…
+              Waiting for the browser session to start
             </p>
           </div>
         )}
@@ -1405,6 +1381,11 @@ export function BrowserSession({
         request={permissionRequest}
         open={permissionModalOpen}
         onDecision={respondToPermission}
+      />
+      <BrowserPageDialogModal
+        dialog={pageState?.dialog}
+        open={visible && !permissionModalOpen}
+        onAnswer={answerPageDialog}
       />
     </div>
   )

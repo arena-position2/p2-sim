@@ -309,7 +309,6 @@ export function DocumentTagEntry({
     )
     const tagSelectHandler = inputController.fieldHelpers.createTagSelectHandler(
       cellKey,
-      fieldValue,
       (newValue) => handleTagDropdownSelection(tag.id, newValue)
     )
 

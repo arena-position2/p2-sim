@@ -1,10 +1,9 @@
 'use client'
 
 import * as React from 'react'
-import { cn, comboboxVariants } from '@sim/emcn'
+import { Button, cn, comboboxVariants } from '@sim/emcn'
 import axios from 'axios'
 import { Check, ChevronsUpDown } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
   Command,
   CommandEmpty,
@@ -36,7 +35,6 @@ interface SlackChannelSelectorProps {
 export function SlackChannelSelector({
   blockId,
   subBlockId,
-  title,
   layout,
   isPreview = false,
   subBlockValues,
@@ -44,9 +42,7 @@ export function SlackChannelSelector({
   dependsOn,
 }: SlackChannelSelectorProps) {
   const [storeValue, setStoreValue] = useSubBlockValue(blockId, subBlockId)
-  const [clientValue, setClientValue] = useSubBlockValue(blockId, 'clientId')
-
-  console.log('ChannelSelector - clientValue:', clientValue, 'clientId:', clientValue?.clientId)
+  const [clientValue] = useSubBlockValue(blockId, 'clientId')
 
   const previewValue = isPreview && subBlockValues ? subBlockValues[subBlockId]?.value : undefined
 
@@ -66,15 +62,6 @@ export function SlackChannelSelector({
     }
   )
 
-  console.log(
-    'ChannelSelector - finalDisabled:',
-    finalDisabled,
-    'disabled:',
-    disabled,
-    'hasClient:',
-    !!clientValue?.clientId
-  )
-
   React.useEffect(() => {
     const fetchChannels = async () => {
       // Only fetch if we have a selected client
@@ -92,15 +79,10 @@ export function SlackChannelSelector({
           `/api/client-channel-mapping/${clientValue.clientId}/channels`
         )
 
-        console.log('Channel API response:', response.data)
-        console.log('Channels array:', response.data.channels)
-
         const channelsData = response.data.channels || []
-        console.log('Setting channels from API:', channelsData)
 
         setChannels(channelsData)
-      } catch (error) {
-        console.error('Error fetching channels:', error)
+      } catch {
         setChannels([])
       } finally {
         setLoading(false)
@@ -110,14 +92,11 @@ export function SlackChannelSelector({
     fetchChannels()
   }, [clientValue?.clientId])
 
-  console.log('ChannelSelector render - channels:', channels, 'length:', channels?.length)
-
   const selectedLabel =
     channels?.find((channel) => channel.channel_id === selectedValue?.channel_id)?.channel_name ||
     'Select channel...'
 
   const handleSelect = (channel: Channel) => {
-    console.log('Selected channel:', channel)
     if (!isPreview && !finalDisabled) {
       setStoreValue({ ...channel, customDisplayValue: channel.channel_name })
       setOpen(false)

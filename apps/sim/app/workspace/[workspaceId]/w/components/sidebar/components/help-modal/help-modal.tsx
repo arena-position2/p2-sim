@@ -62,7 +62,7 @@ interface SubmitHelpVariables {
   data: FormValues
   images: ImageWithPreview[]
   workflowId?: string
-  workspaceId: string
+  workspaceId?: string
   onOpenChange?: (open: boolean) => void
 }
 
@@ -362,6 +362,7 @@ export function HelpModal({ open, onOpenChange, workflowId, workspaceId }: HelpM
                         className='object-contain'
                       />
                       <button
+                        aria-label='Remove image'
                         type='button'
                         className='absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100'
                         onClick={() => removeImage(index)}

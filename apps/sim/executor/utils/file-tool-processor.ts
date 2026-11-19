@@ -1,7 +1,7 @@
 import { createLogger } from '@sim/logger'
 import { getErrorMessage, toError } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
-import { omit } from '@sim/utils/object'
+import { isRecordLike, omit } from '@sim/utils/object'
 import { isCanonicalBase64 } from '@/lib/api/contracts/primitives'
 import { isUserFile, type UserFileLike } from '@/lib/core/utils/user-file'
 import {
@@ -21,10 +21,6 @@ import type { UserFile } from '@/executor/types'
 import type { ToolDefinition } from '@/tools/types'
 
 const logger = createLogger('FileToolProcessor')
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function isAccessDeniedError(error: unknown): boolean {
   return getErrorMessage(error).toLowerCase().includes('access denied')
@@ -173,7 +169,7 @@ export class FileToolProcessor {
         }
         for (const file of files) {
           signal?.throwIfAborted()
-          if (!isRecord(file)) throw new Error('File output must be a file object')
+          if (!isRecordLike(file)) throw new Error('File output must be a file object')
           if (isUserFile(file)) {
             if (file.base64 !== undefined) replacements.set(file, omit(file, ['base64']))
             continue
@@ -216,7 +212,7 @@ export class FileToolProcessor {
       })
       if (replacements.size === 0) return toolOutput
       const output = replaceFileReferences(toolOutput, replacements)
-      if (!isRecord(output)) throw new Error('Tool file output must be an object')
+      if (!isRecordLike(output)) throw new Error('Tool file output must be an object')
       return output
     }
     if (pendingFiles.size === 0) return present([])
@@ -224,7 +220,7 @@ export class FileToolProcessor {
       createInternalToolFilesResult([...pendingFiles.values()], present),
       context,
       (output) => {
-        if (!isRecord(output)) throw new Error('Tool file output must be an object')
+        if (!isRecordLike(output)) throw new Error('Tool file output must be an object')
         return output
       },
       signal
@@ -257,7 +253,7 @@ export class FileToolProcessor {
         data instanceof ArrayBuffer
           ? Buffer.from(data)
           : Buffer.from(data.buffer, data.byteOffset, data.byteLength)
-    } else if (Array.isArray(data) || (isRecord(data) && data.type === 'Buffer')) {
+    } else if (Array.isArray(data) || (isRecordLike(data) && data.type === 'Buffer')) {
       const bytes = Array.isArray(data) ? data : data.data
       if (!Array.isArray(bytes)) throw new Error(`Invalid serialized buffer format for ${name}`)
       assertFileSize(bytes.length, name, remainingBytes)

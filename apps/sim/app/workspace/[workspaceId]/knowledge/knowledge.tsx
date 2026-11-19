@@ -2,39 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChipDropdownOption } from '@sim/emcn'
-import { Button, ChipConfirmModal, ChipDropdown, Tooltip, toast } from '@sim/emcn'
+import { Avatar, Button, ChipConfirmModal, ChipDropdown, Tooltip, toast } from '@sim/emcn'
 import { Database, FolderPlus, Pencil, Plus, Trash } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { useParams, useRouter } from 'next/navigation'
 import { useQueryStates } from 'nuqs'
-import { PermissionAccessBoundary } from '@/components/access-requests/permission-access-boundary'
 import { MAX_KNOWLEDGE_BATCH_ITEMS } from '@/lib/knowledge/constants'
 import type { KnowledgeBaseData } from '@/lib/knowledge/types'
 import { SEARCH_DEBOUNCE_MS } from '@/lib/url-state'
 import { clickKnowledgeBaseEvent } from '@/app/arenaMixpanelEvents/mixpanelEvents'
-import type {
-  BreadcrumbItem,
-  FilterTag,
-  ResourceAction,
-  ResourceCell,
-  ResourceColumn,
-  ResourceRow,
-  SearchConfig,
-  SortConfig,
-} from '@/app/workspace/[workspaceId]/components'
-import {
-  EMPTY_CELL_PLACEHOLDER,
-  FILTER_SECTION_LABEL_CLASS,
-  OwnerAvatar,
-  ownerCell,
-  Resource,
-  reportBulkOutcome,
-  resourceListState,
-  selectionLabel,
-  timeCell,
-  useResourceRowSelection,
-} from '@/app/workspace/[workspaceId]/components'
 import type {
   MoveOptionNode,
   SortableResource,
@@ -61,12 +38,37 @@ import {
   useFolderNavigation,
   useFolderRowDragDrop,
 } from '@/app/workspace/[workspaceId]/components/folders'
+import { reportBulkOutcome } from '@/app/workspace/[workspaceId]/components/resource/bulk-outcome'
 import { ResourceActionBar } from '@/app/workspace/[workspaceId]/components/resource/components/action-bar'
+import { ownerCell } from '@/app/workspace/[workspaceId]/components/resource/components/owner-cell'
 import {
   KnowledgeEmptyState,
   ResourceListLoading,
   ResourceNoResults,
 } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state'
+import type {
+  BreadcrumbItem,
+  ResourceAction,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-header'
+import type {
+  FilterTag,
+  SearchConfig,
+  SortConfig,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import { FILTER_SECTION_LABEL_CLASS } from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import { timeCell } from '@/app/workspace/[workspaceId]/components/resource/components/time-cell'
+import { resourceListState } from '@/app/workspace/[workspaceId]/components/resource/is-resource-list-empty'
+import type {
+  ResourceCell,
+  ResourceColumn,
+  ResourceRow,
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
+import {
+  EMPTY_CELL_PLACEHOLDER,
+  Resource,
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
+import { selectionLabel } from '@/app/workspace/[workspaceId]/components/resource/selection-label'
+import { useResourceRowSelection } from '@/app/workspace/[workspaceId]/components/resource/use-resource-row-selection'
 import { BaseTagsModal } from '@/app/workspace/[workspaceId]/knowledge/[id]/components/base-tags-modal'
 import {
   CopyKnowledgeBaseModal,
@@ -88,6 +90,7 @@ import { useRegisterGlobalCommands } from '@/app/workspace/[workspaceId]/provide
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import { BrandIcon } from '@/blocks/brand-icon'
 import { CONNECTOR_META_REGISTRY } from '@/connectors/registry'
+import { PermissionAccessBoundary } from '@/ee/access-requests/components/permission-access-boundary'
 import { useKnowledgeBasesList } from '@/hooks/kb/use-knowledge'
 import { useCreateFolder, useDeleteFolderMutation, useUpdateFolder } from '@/hooks/queries/folders'
 import {
@@ -217,7 +220,10 @@ function KnowledgeContent() {
     }
   }, [permissionConfig.hideKnowledgeBaseTab, router, workspaceId])
 
-  const { knowledgeBases, isLoading, isPlaceholderData, error } = useKnowledgeBasesList(workspaceId)
+  const { knowledgeBases, isLoading, isPlaceholderData, error } = useKnowledgeBasesList(
+    workspaceId,
+    { includeCounts: true }
+  )
   const { data: members } = useWorkspaceMembersQuery(workspaceId)
   /**
    * Indexed once: `ownerCell` resolves a member per row, so passing the raw array makes the
@@ -523,7 +529,7 @@ function KnowledgeContent() {
       await deleteKnowledgeBase.mutateAsync({ knowledgeBaseId: id })
       logger.info(`Knowledge base deleted: ${id}`)
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are unstable; mutateAsync is stable in v5
+    // mutation objects are unstable; mutateAsync is stable in v5
     [knowledgeBases, userPermissions.canEdit, userPermissions.canAdmin]
   )
 
@@ -936,7 +942,6 @@ function KnowledgeContent() {
       logger.error('Failed to create folder', createError)
       toast.error(getErrorMessage(createError, 'Failed to create folder'))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])
 
   useRegisterGlobalCommands(() => [
@@ -990,7 +995,6 @@ function KnowledgeContent() {
       logger.error('Failed to delete folder', deleteError)
       toast.error(getErrorMessage(deleteError, 'Failed to delete folder'))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, openFolder, canDeleteFolder])
 
   const descendantsByFolderId = useMemo(() => buildDescendantIndex(folders), [folders])
@@ -1001,7 +1005,7 @@ function KnowledgeContent() {
     const mutation = pinnedBaseIds.has(kb.id) ? unpinItem : pinItem
     mutation.mutate({ workspaceId, resourceType: 'knowledge_base', resourceId: kb.id })
     closeRowContextMenu()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are unstable; mutate is stable in v5
+    // mutation objects are unstable; mutate is stable in v5
   }, [workspaceId, pinnedBaseIds, closeRowContextMenu])
 
   const handleToggleFolderPin = useCallback(() => {
@@ -1010,7 +1014,7 @@ function KnowledgeContent() {
     const mutation = pinnedFolderIds.has(folder.id) ? unpinItem : pinItem
     mutation.mutate({ workspaceId, resourceType: 'folder', resourceId: folder.id })
     closeFolderContextMenu()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are unstable; mutate is stable in v5
+    // mutation objects are unstable; mutate is stable in v5
   }, [workspaceId, pinnedFolderIds, closeFolderContextMenu])
 
   /** Move targets for the folder under the cursor: itself and its subtree are unreachable. */
@@ -1048,7 +1052,7 @@ function KnowledgeContent() {
         toast.error(getErrorMessage(moveError, 'Failed to move folder'))
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are unstable; mutateAsync is stable in v5
+    // mutation objects are unstable; mutateAsync is stable in v5
     [workspaceId]
   )
 
@@ -1114,7 +1118,7 @@ function KnowledgeContent() {
         }
       )
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are unstable; mutate is stable in v5
+    // mutation objects are unstable; mutate is stable in v5
     [clearSelection]
   )
 
@@ -1160,7 +1164,7 @@ function KnowledgeContent() {
       // The mutation toasts the request failure itself; the modal stays open to allow a retry.
       logger.error('Failed to delete selected items', deleteError)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation objects are unstable; mutateAsync is stable in v5
+    // mutation objects are unstable; mutateAsync is stable in v5
   }, [selectedKnowledgeBaseIds, selectedFolderIds, clearSelection, canDeleteSelection])
 
   /**
@@ -1334,7 +1338,7 @@ function KnowledgeContent() {
       (members ?? []).map((m) => ({
         value: m.userId,
         label: m.name,
-        iconElement: <OwnerAvatar name={m.name} image={m.image} />,
+        iconElement: <Avatar size='xs' name={m.name} src={m.image} aria-hidden />,
       })),
     [members]
   )

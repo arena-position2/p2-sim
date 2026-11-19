@@ -3,15 +3,15 @@
 import { type ReactNode, useEffect, useRef } from 'react'
 import { SettingsHeaderProvider, SettingsHeaderShell } from '@/components/settings/settings-header'
 import { SettingsSectionProvider } from '@/components/settings/settings-panel'
-import { useSettingsBeforeUnload } from '@/components/settings/use-settings-before-unload'
+import { useSettingsBrowserNavigation } from '@/components/settings/use-settings-browser-navigation'
 import { useTheme } from '@/app/_shell/providers/theme-provider'
 import { ArenaThemeSync } from '@/app/workspace/[workspaceId]/providers/arena-theme-sync'
 
-interface ArenaGeneralSettingsShellProps {
-  children: ReactNode
-}
+const ARENA_EMBED_THEMES = ['light', 'dark', 'system'] as const
 
-const ARENA_EMBED_THEMES = new Set(['light', 'dark', 'system'])
+function isArenaEmbedTheme(value: string): value is (typeof ARENA_EMBED_THEMES)[number] {
+  return ARENA_EMBED_THEMES.some((theme) => theme === value)
+}
 
 /**
  * Applies `?theme=` once on embed load. Later changes come from the Arena
@@ -26,7 +26,7 @@ function useArenaEmbedTheme() {
     appliedRef.current = true
 
     const theme = new URLSearchParams(window.location.search).get('theme')
-    if (theme && ARENA_EMBED_THEMES.has(theme)) {
+    if (theme && isArenaEmbedTheme(theme)) {
       setTheme(theme)
     }
   }, [setTheme])
@@ -45,7 +45,7 @@ interface ArenaGeneralSettingsShellProps {
  * PATCH never updates the embedded document.
  */
 export function ArenaGeneralSettingsShell({ children }: ArenaGeneralSettingsShellProps) {
-  useSettingsBeforeUnload()
+  useSettingsBrowserNavigation()
   useArenaEmbedTheme()
 
   return (

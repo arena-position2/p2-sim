@@ -1,9 +1,69 @@
 import { HubspotIcon } from '@/components/icons'
 import { getScopesForService } from '@/lib/oauth/utils'
+import {
+  isAdminWorkspace,
+  resolveWorkspaceIdForAdminCheck,
+} from '@/lib/workspaces/is-admin-workspace'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
-import type { HubSpotResponse } from '@/tools/hubspot/types'
 import { getTrigger } from '@/triggers'
+
+const HUBSPOT_COND_NEVER = '__hubspot_cond_never__'
+
+/** In-flight promise cache keyed by workspaceId — deduplicates concurrent accounts fetchOptions calls */
+let _inflightAccountsFetch: {
+  workspaceId: string
+  promise: Promise<Array<{ id: string; label: string }>>
+} | null = null
+
+async function fetchHubSpotAccountOptions(
+  workspaceId: string
+): Promise<Array<{ id: string; label: string }>> {
+  if (_inflightAccountsFetch?.workspaceId === workspaceId) {
+    return _inflightAccountsFetch.promise
+  }
+
+  const promise = fetch(`/api/hubspot/accounts?workspaceId=${encodeURIComponent(workspaceId)}`)
+    .then((r) => r.json())
+    .then((data) => {
+      _inflightAccountsFetch = null
+      if (!data?.success || !Array.isArray(data.items)) return []
+      return (data.items as Array<{ id?: string; label?: string }>)
+        .filter((item) => typeof item.id === 'string' && item.id.trim() !== '')
+        .map((item) => ({
+          id: item.id!.trim(),
+          label:
+            typeof item.label === 'string' && item.label.trim() !== ''
+              ? item.label.trim()
+              : item.id!.trim(),
+        }))
+    })
+    .catch(() => {
+      _inflightAccountsFetch = null
+      return []
+    })
+
+  _inflightAccountsFetch = { workspaceId, promise }
+  return promise
+}
+
+/** Show Accounts dropdown (admin workspaces only). */
+function hubspotAdminOnlyCondition(values?: Record<string, unknown>) {
+  const isAdmin = isAdminWorkspace(resolveWorkspaceIdForAdminCheck(values))
+  if (isAdmin) {
+    return { field: 'operation', value: HUBSPOT_COND_NEVER, not: true as const }
+  }
+  return { field: 'operation', value: HUBSPOT_COND_NEVER }
+}
+
+/** Show OAuth / manual credential fields (non-admin workspaces only). */
+function hubspotNonAdminOnlyCondition(values?: Record<string, unknown>) {
+  const isAdmin = isAdminWorkspace(resolveWorkspaceIdForAdminCheck(values))
+  if (isAdmin) {
+    return { field: 'operation', value: HUBSPOT_COND_NEVER }
+  }
+  return { field: 'operation', value: HUBSPOT_COND_NEVER, not: true as const }
+}
 
 // Cache to prevent multiple API calls for the same credential
 const campaignCache = new Map<
@@ -29,8 +89,8 @@ const fetchCampaignOptions = async (
     const workflowValues = useSubBlockStore.getState().workflowValues[activeWorkflowId]
     const blockValues = workflowValues?.[blockId]
 
-    const credentialId = (blockValues?.credential ??
-      blockValues?.accounts ??
+    const credentialId = (blockValues?.accounts ??
+      blockValues?.credential ??
       blockValues?.oauthCredential) as string
 
     if (!credentialId) {
@@ -76,7 +136,7 @@ const fetchCampaignOptions = async (
         campaignCache.set(credentialId, { data: options, timestamp: now })
 
         return options
-      } catch (error) {
+      } catch {
         // Try to return cached data on error
         if (cached) {
           return cached.data
@@ -92,7 +152,7 @@ const fetchCampaignOptions = async (
     campaignInFlightRequests.set(credentialId, requestPromise)
 
     return requestPromise
-  } catch (error) {
+  } catch {
     // Try to return cached data on error
     try {
       const { useSubBlockStore } = await import('@/stores/workflows/subblock/store')
@@ -120,12 +180,11 @@ const fetchCampaignOptions = async (
   }
 }
 
-const validateCampaignValue = (params: Record<string, any>, isMulti: boolean): string => {
-  // No validation logic - just return undefined to let the system handle the value
+const validateCampaignValue = (_params: Record<string, unknown>, _isMulti: boolean): string => {
   return undefined as unknown as string
 }
 
-export const HubSpotBlock: BlockConfig<HubSpotResponse> = {
+export const HubSpotBlock: BlockConfig = {
   type: 'hubspot',
   name: 'HubSpot',
   description: 'Interact with HubSpot CRM or trigger workflows from HubSpot events',
@@ -459,6 +518,46 @@ export const HubSpotBlock: BlockConfig<HubSpotResponse> = {
       value: () => 'get_contacts',
     },
     {
+      id: 'accounts',
+      title: 'Accounts',
+      type: 'dropdown',
+      options: [],
+      fetchOptions: async () => {
+        try {
+          const { useWorkflowRegistry } = await import('@/stores/workflows/registry/store')
+          const workspaceId = useWorkflowRegistry.getState().hydration.workspaceId
+          if (!workspaceId) return []
+          return await fetchHubSpotAccountOptions(workspaceId)
+        } catch {
+          return []
+        }
+      },
+      fetchOptionById: async (_blockId: string, optionId: string) => {
+        try {
+          const { useWorkflowRegistry } = await import('@/stores/workflows/registry/store')
+          const workspaceId = useWorkflowRegistry.getState().hydration.workspaceId
+          if (!workspaceId) return null
+          const options = await fetchHubSpotAccountOptions(workspaceId)
+          return options.find((option) => option.id === optionId) ?? null
+        } catch {
+          return null
+        }
+      },
+      placeholder: 'Select HubSpot account',
+      required: true,
+      mode: 'basic',
+      condition: hubspotAdminOnlyCondition,
+    },
+    {
+      id: 'accounts',
+      title: 'Accounts',
+      type: 'short-input',
+      mode: 'advanced',
+      placeholder: 'Shared portal alias or credential ID',
+      required: true,
+      condition: hubspotAdminOnlyCondition,
+    },
+    {
       id: 'credential',
       title: 'HubSpot Account',
       type: 'oauth-input',
@@ -468,8 +567,7 @@ export const HubSpotBlock: BlockConfig<HubSpotResponse> = {
       requiredScopes: getScopesForService('hubspot'),
       placeholder: 'Connect or select HubSpot account',
       required: true,
-      description:
-        'Shared workspaces include public HubSpot portals plus your personal connections (`GET /api/hubspot/accounts`). Connect through OAuth for personal accounts.',
+      condition: hubspotNonAdminOnlyCondition,
     },
     {
       id: 'manualCredential',
@@ -477,8 +575,9 @@ export const HubSpotBlock: BlockConfig<HubSpotResponse> = {
       type: 'short-input',
       canonicalParamId: 'oauthCredential',
       mode: 'advanced',
-      placeholder: 'Credential ID or shared portal alias',
+      placeholder: 'Enter credential ID',
       required: true,
+      condition: hubspotNonAdminOnlyCondition,
     },
     {
       id: 'contactId',
@@ -524,7 +623,7 @@ export const HubSpotBlock: BlockConfig<HubSpotResponse> = {
       type: 'dropdown',
       placeholder: 'Select a campaign...',
       options: [], // Fallback empty array to prevent undefined errors
-      dependsOn: { any: ['credential'] },
+      dependsOn: { any: ['credential', 'accounts'] },
       multiSelect: false,
       condition: {
         field: 'operation',
@@ -545,7 +644,7 @@ export const HubSpotBlock: BlockConfig<HubSpotResponse> = {
       type: 'dropdown',
       placeholder: 'Select campaigns...',
       options: [], // Fallback empty array to prevent undefined errors
-      dependsOn: { any: ['credential'] },
+      dependsOn: { any: ['credential', 'accounts'] },
       multiSelect: true,
       selectAllOption: true,
       condition: {
@@ -2249,10 +2348,10 @@ Return ONLY the JSON array of property names - no explanations, no markdown, no 
           ...rest
         } = params
 
-        const oauthCredential = (params.credential ??
+        const oauthCredential = (accounts ??
+          params.credential ??
           params.oauthCredential ??
-          params.manualCredential ??
-          accounts) as string
+          params.manualCredential) as string
 
         const cleanParams: Record<string, any> = {
           oauthCredential,

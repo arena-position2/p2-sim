@@ -1,6 +1,14 @@
 import { createLogger } from '@sim/logger'
+import { findCause } from '@sim/utils/errors'
 import { queue, task } from '@trigger.dev/sdk'
 import { env, envNumber } from '@/lib/core/config/env'
+import {
+  type BackgroundRetryDecision,
+  type BackgroundRetryPolicy,
+  backgroundRetryAttemptCeiling,
+  getBackgroundRetryDecision,
+  getDatabaseRetryAt,
+} from '@/lib/core/errors/background-retry'
 import {
   BYOK_EMBEDDING_CREDENTIAL_REJECTION_MESSAGE,
   EMBEDDING_QUOTA_EXHAUSTED_MESSAGE,
@@ -39,6 +47,46 @@ import { processDocumentAsync } from '@/lib/knowledge/documents/service'
 const logger = createLogger('TriggerKnowledgeProcessing')
 export { resolveQuotaContinuationDelayMs }
 
+/**
+ * Ordinary failures keep the configured short retries. A transient database failure backs off for
+ * minutes, about an hour in total, so a slow database window does not exhaust every attempt inside
+ * it and leave an uploaded document failed for good.
+ */
+export const DOCUMENT_PROCESSING_RETRY_POLICY: BackgroundRetryPolicy = {
+  maxAttempts: envNumber(env.KB_CONFIG_MAX_ATTEMPTS, 3),
+  database: { maxAttempts: 6, baseDelayMs: 2 * 60 * 1000, maxDelayMs: 30 * 60 * 1000 },
+}
+
+/**
+ * A database failure whose next attempt is already scheduled, and recorded on the document as
+ * `pending` until {@link retryAt}. The message names only the database code; the driver error
+ * stays in `cause`, which the task runner does not record.
+ */
+export class DocumentProcessingDatabaseRetryError extends Error {
+  constructor(
+    message: string,
+    readonly retryAt: Date,
+    options: { cause: unknown }
+  ) {
+    super(message, options)
+    this.name = 'DocumentProcessingDatabaseRetryError'
+  }
+}
+
+/** The `catchError` decision for `knowledge-process-document` after `attempt` (1-based) failed. */
+export function getDocumentProcessingRetry(
+  error: unknown,
+  attempt: number
+): BackgroundRetryDecision {
+  const scheduled = findCause(
+    error,
+    (value): value is DocumentProcessingDatabaseRetryError =>
+      value instanceof DocumentProcessingDatabaseRetryError
+  )
+  if (scheduled) return { retryAt: scheduled.retryAt }
+  return getBackgroundRetryDecision(error, attempt, DOCUMENT_PROCESSING_RETRY_POLICY)
+}
+
 export async function runDocumentProcessing(
   rawPayload: DocumentProcessingPayload,
   attemptNumber = 1
@@ -56,9 +104,11 @@ export async function runDocumentProcessing(
     payload.processingSliceCount === undefined
 
   logger.info(`[${requestId}] Starting Trigger.dev processing for document: ${docData.filename}`)
+  /** Set from the service's callback, so control-flow narrowing cannot see it change. */
+  let databaseRetryAt = null as Date | null
 
   try {
-    await processDocumentAsync(
+    const result = await processDocumentAsync(
       knowledgeBaseId,
       documentId,
       docData,
@@ -87,18 +137,41 @@ export async function runDocumentProcessing(
           : { quotaContinuationExhausted: true }),
         scheduleProviderContinuation: (error) =>
           scheduleDocumentProcessingProviderContinuation(payload, error, true, chargedAtDispatch),
+        scheduleDatabaseRetry: (error) => {
+          databaseRetryAt = getDatabaseRetryAt(
+            error,
+            attemptNumber,
+            DOCUMENT_PROCESSING_RETRY_POLICY
+          )
+          return databaseRetryAt
+        },
       }
     )
 
-    logger.info(`[${requestId}] Successfully processed document: ${docData.filename}`)
+    logger.info(`[${requestId}] Document processing finished`, { documentId, ...result })
 
     return {
-      success: true,
+      success: result.outcome === 'indexed',
+      ...result,
       documentId,
       filename: docData.filename,
       processingTime: Date.now() - startedAt,
     }
   } catch (error) {
+    if (databaseRetryAt) {
+      const diagnostic = getConnectorFailureDiagnostic(error)
+      logger.warn(`[${requestId}] Document processing will retry after a database failure`, {
+        documentId,
+        diagnostic,
+        attempt: attemptNumber,
+        retryAt: databaseRetryAt.toISOString(),
+      })
+      throw new DocumentProcessingDatabaseRetryError(
+        diagnostic?.message ?? 'Database request failed.',
+        databaseRetryAt,
+        { cause: error }
+      )
+    }
     const providerDeferral = getProviderCapacityDeferral(error)
     if (providerDeferral || error instanceof ProviderCapacityContinuationExhaustedError) {
       const outcome =
@@ -204,7 +277,8 @@ export async function runDocumentProcessing(
       `[${requestId}] Failed to process document: ${docData.filename}`,
       diagnostic ?? error
     )
-    if (diagnostic?.category === 'database') throw new Error(diagnostic.message)
+    /** Trigger records the thrown message and stack, never `cause`; Drizzle's message carries SQL. */
+    if (diagnostic?.category === 'database') throw new Error(diagnostic.message, { cause: error })
     throw error
   }
 }
@@ -245,14 +319,21 @@ export const processDocument = task({
   id: 'knowledge-process-document',
   maxDuration: envNumber(env.KB_CONFIG_MAX_DURATION, 600),
   /**
-   * Sized from production telemetry: peak sampled RSS 902 MB and peak 1.2 vCPU
-   * across a corpus where no document exceeded 2 GB, so `medium-2x` holds ~4x
-   * memory and ~1.7x CPU headroom over the observed worst case. The prior
-   * `large-1x` reserved 8 GB against a worst case using an eighth of it.
+   * Sized from production telemetry: p99.9 sampled RSS ~740 MB and peak just
+   * under 2 GB, so `medium-1x` (2 GB) holds the overwhelming majority and the
+   * rare document past it escalates through `outOfMemory` below. Processing waits on embedding and storage calls far
+   * more than it computes, so the single vCPU stretches a CPU-bound parse
+   * slightly but halves the wall-clock rate every run is billed at.
    */
-  machine: 'medium-2x',
+  machine: 'medium-1x',
   retry: {
-    maxAttempts: envNumber(env.KB_CONFIG_MAX_ATTEMPTS, 3),
+    /**
+     * The ceiling for thrown errors: database retries use all of it, and
+     * `catchError` stops every other thrown error at `KB_CONFIG_MAX_ATTEMPTS`.
+     * A crashed or timed-out run is not retried; an out-of-memory kill is
+     * retried once, on the `outOfMemory` machine below.
+     */
+    maxAttempts: backgroundRetryAttemptCeiling(DOCUMENT_PROCESSING_RETRY_POLICY),
     factor: envNumber(env.KB_CONFIG_RETRY_FACTOR, 2),
     minTimeoutInMs: envNumber(env.KB_CONFIG_MIN_TIMEOUT, 1000),
     maxTimeoutInMs: envNumber(env.KB_CONFIG_MAX_TIMEOUT, 10000),
@@ -271,4 +352,5 @@ export const processDocument = task({
   queue: interactiveProcessingQueue,
   run: (payload: DocumentProcessingPayload, { ctx }) =>
     runDocumentProcessing(payload, ctx.attempt.number),
+  catchError: async ({ error, ctx }) => getDocumentProcessingRetry(error, ctx.attempt.number),
 })

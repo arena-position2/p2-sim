@@ -27,17 +27,6 @@ export function classifyConnectorSyncResult(result: SyncResult): ConnectorSyncTa
   return 'completed'
 }
 
-function formatConnectorSyncFailure(
-  connectorId: string,
-  result: SyncResult,
-  outcome: Extract<ConnectorSyncTaskOutcome, 'partial' | 'failed'>
-): string {
-  if (outcome === 'failed') {
-    return `Connector sync failed for ${connectorId}: ${result.error}`
-  }
-  return `Connector sync partially failed for ${connectorId}: ${result.docsFailed} source failures, ${result.processingDispatch.failed} dispatch failures`
-}
-
 export async function executeConnectorSyncJob(payload: unknown) {
   const {
     connectorId,
@@ -60,9 +49,10 @@ export async function executeConnectorSyncJob(payload: unknown) {
       dispatchToken,
     })
 
+    const outcome = classifyConnectorSyncResult(result)
     logger.info(`[${requestId}] Connector sync completed`, {
       connectorId,
-      outcome: classifyConnectorSyncResult(result),
+      outcome,
       deferred: result.deferred,
       added: result.docsAdded,
       updated: result.docsUpdated,
@@ -75,17 +65,20 @@ export async function executeConnectorSyncJob(payload: unknown) {
       processingDispatchFailed: result.processingDispatch.failed,
     })
 
-    const outcome = classifyConnectorSyncResult(result)
-    if (outcome === 'failed' || result.docsFailed > 0 || result.processingDispatch.failed > 0) {
+    if (outcome === 'failed') {
       /**
-       * `executeSync` has already persisted its terminal state. Source failures
-       * preserve the previous incremental watermark so the next connector pass
-       * replays them; dispatch failures remain eligible for the stuck-document
-       * sweep. Retrying this whole task immediately would duplicate a large
-       * fan-out, so fail visibly without retrying the completed transaction.
+       * `executeSync` has already persisted its terminal state, and retrying this
+       * whole task would duplicate a large fan-out, so fail visibly without
+       * retrying the completed transaction. A partial sync is not a failed run:
+       * its source failures keep the previous incremental watermark so the next
+       * connector pass replays them, its dispatch failures stay eligible for the
+       * stuck-document sweep, and the outcome rides on the return value.
        */
-      throw new AbortTaskRunError(
-        formatConnectorSyncFailure(connectorId, result, outcome === 'failed' ? 'failed' : 'partial')
+      throw new AbortTaskRunError(`Connector sync failed for ${connectorId}: ${result.error}`)
+    }
+    if (outcome === 'partial' && (result.docsFailed > 0 || result.processingDispatch.failed > 0)) {
+      logger.warn(
+        `[${requestId}] Connector sync partially failed for ${connectorId}: ${result.docsFailed} source failures, ${result.processingDispatch.failed} dispatch failures`
       )
     }
 
@@ -105,13 +98,17 @@ export const knowledgeConnectorSync = task({
   id: 'knowledge-connector-sync',
   maxDuration: CONNECTOR_SYNC_MAX_DURATION_SECONDS,
   /**
-   * Sized from production telemetry: peak sampled RSS 2.6 GB and peak 1.4 vCPU,
-   * so `large-1x` holds ~3x memory and ~2.8x CPU headroom. No `outOfMemory`
-   * escalation: an OOM is a SIGKILL, so the run never reaches the terminal
-   * write that clears `syncLockToken`, and the escalated attempt would find the
-   * row still `syncing` and skip. The stale-lock reaper owns that recovery.
+   * Sized from production telemetry: p99.9 sampled RSS ~650 MB, peak 2.6 GB, and
+   * peak 1.4 vCPU, so `medium-2x` (4 GB, 2 vCPU) still clears the worst case.
+   * The run is I/O-bound — it mostly waits on source APIs and their rate-limit
+   * backoff — and Trigger.dev bills wall-clock per preset, so `large-1x` paid
+   * double for headroom no run used. Not `medium-1x`: 2 GB sits below the peak,
+   * and there is no `outOfMemory` escalation to absorb it. An OOM is a SIGKILL,
+   * so the run never reaches the terminal write that clears `syncLockToken`,
+   * and the escalated attempt would find the row still `syncing` and skip. The
+   * stale-lock reaper owns that recovery.
    */
-  machine: 'large-1x',
+  machine: 'medium-2x',
   retry: {
     maxAttempts: 3,
     factor: 2,

@@ -1,10 +1,23 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { useLayoutEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useState } from 'react'
 import { cn } from '@sim/emcn'
+import { useQueryClient } from '@tanstack/react-query'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { useSettingsBeforeUnload } from '@/components/settings/use-settings-before-unload'
+import { useSettingsIntentHandler } from '@/components/settings/settings-navigation-provider'
+import { SettingsPendingSection } from '@/components/settings/settings-pending-section'
+import { useSettingsBrowserNavigation } from '@/components/settings/use-settings-browser-navigation'
+import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
+import {
+  resolveSettingsSection,
+  type SettingsSection,
+} from '@/app/workspace/[workspaceId]/settings/navigation'
+import { warmSettingsSection } from '@/app/workspace/[workspaceId]/settings/section-warmers'
+
+function pendingSectionMeta(section: string) {
+  return resolveSettingsSection(section)?.meta ?? null
+}
 
 interface SettingsLayoutShellProps {
   children: ReactNode
@@ -14,11 +27,28 @@ interface SettingsLayoutShellProps {
  * Settings chrome that can adjust surface styling when embedded (Arena iframe)
  * or loaded in a generic iframe, without reading `window` in a Server Component.
  *
- * Also owns the settings-wide unload guard: the route layout is a Server
- * Component, so this is the closest client boundary that wraps every section.
+ * Also owns the settings-wide unload guard and the sidebar navigation-intent
+ * warmer: the route layout is a Server Component, so this is the closest
+ * client boundary that wraps every section.
  */
 export function SettingsLayoutShell({ children }: SettingsLayoutShellProps) {
-  useSettingsBeforeUnload()
+  useSettingsBrowserNavigation()
+  const queryClient = useQueryClient()
+  const hostContext = useWorkspaceHostContext()
+  const workspaceId = hostContext.workspace.id
+  const billingOrganizationId = hostContext.hostOrganizationId
+
+  useSettingsIntentHandler(
+    useCallback(
+      (section: string) =>
+        warmSettingsSection(
+          queryClient,
+          { workspaceId, billingOrganizationId },
+          section as SettingsSection
+        ),
+      [queryClient, workspaceId, billingOrganizationId]
+    )
+  )
 
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -40,7 +70,7 @@ export function SettingsLayoutShell({ children }: SettingsLayoutShellProps) {
       )}
     >
       <div className='mx-auto flex min-h-full max-w-[940px] flex-col px-[26px] pt-9 pb-[52px]'>
-        {children}
+        <SettingsPendingSection resolveMeta={pendingSectionMeta}>{children}</SettingsPendingSection>
       </div>
     </div>
   )

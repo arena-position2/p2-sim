@@ -1,8 +1,7 @@
 import { FigmaIcon } from '@/components/icons'
 import type { BlockConfig, SubBlockType } from '@/blocks/types'
-import type { FigmaResponse } from '@/tools/figma/types'
 
-export const FigmaBlock: BlockConfig<FigmaResponse> = {
+export const FigmaBlock: BlockConfig = {
   type: 'figma',
   name: 'Figma',
   description: 'Interact with Figma files, create designs, and convert to code',

@@ -6,7 +6,8 @@ import { Plus } from '@sim/emcn/icons'
 import { getErrorMessage } from '@sim/utils/errors'
 import { useParams, useRouter } from 'next/navigation'
 import { useQueryState } from 'nuqs'
-import { IntegrationTabsHeader, SkillTile } from '@/app/workspace/[workspaceId]/components'
+import { IntegrationTabsHeader } from '@/app/workspace/[workspaceId]/components/integration-tabs-header'
+import { SkillTile } from '@/app/workspace/[workspaceId]/components/skill-tile'
 import { ShowcaseWithExplore } from '@/app/workspace/[workspaceId]/integrations/components/showcase-with-explore'
 import { SettingsEmptyState } from '@/app/workspace/[workspaceId]/settings/components/settings-empty-state'
 import {
@@ -101,7 +102,7 @@ export function Skills() {
 
           <div className='flex flex-col gap-7'>
             {error ? (
-              <SettingsEmptyState variant='inline' tone='error'>
+              <SettingsEmptyState variant='inline'>
                 {getErrorMessage(error, 'Failed to load skills')}
               </SettingsEmptyState>
             ) : filteredSkills.length > 0 ? (

@@ -13,7 +13,7 @@ import type {
   SpanProcessor,
 } from '@opentelemetry/sdk-trace-base'
 import { createLogger } from '@sim/logger'
-import { TraceAttr } from '@/lib/copilot/generated/trace-attributes-v1'
+import { TraceAttr } from '@/lib/mothership/generated/trace-attributes-v1'
 import { env } from './lib/core/config/env'
 import { parseOtlpHeaders } from './lib/monitoring/otlp'
 
@@ -259,8 +259,7 @@ async function initializeOpenTelemetry() {
     exporter.export = (spans, resultCallback) => {
       origExport(spans, (result) => {
         if (result?.code !== 0) {
-          // eslint-disable-next-line no-console
-          console.error('[OTEL] exporter export failed', {
+          logger.error('Exporter export failed', {
             endpoint: telemetryConfig.endpoint,
             resultCode: result?.code,
             error: result?.error?.message,
@@ -502,4 +501,10 @@ export async function register() {
   // but boot never waits on Redis to serve requests that do not touch it.
   const { warmRedisConnection } = await import('@/lib/core/config/redis')
   void warmRedisConnection()
+
+  const { startSimReceivers } = await import('./lib/mothership/transport/receiver')
+  await startSimReceivers()
+
+  const { startServiceUsageReplay } = await import('./lib/mothership/billing/service-delivery')
+  startServiceUsageReplay()
 }

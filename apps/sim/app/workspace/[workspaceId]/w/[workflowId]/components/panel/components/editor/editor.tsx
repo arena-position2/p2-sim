@@ -11,15 +11,17 @@ import {
   SquareArrowUpRight,
   Unlock,
 } from '@sim/emcn/icons'
-import type { BlockRetryConfig } from '@sim/workflow-types/workflow'
+import {
+  type BlockRetryConfig,
+  isWorkflowBlockAncestorLocked,
+  isWorkflowBlockProtected,
+} from '@sim/workflow-types/workflow'
 import { isEqual } from 'es-toolkit'
 import { useParams } from 'next/navigation'
-import { usePostHog } from 'posthog-js/react'
 import { useShallow } from 'zustand/react/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { isMcpRuntimeReference } from '@/lib/mcp/operation-policy'
 import { resolveMcpBlockConfig } from '@/lib/mcp/workflow-config'
-import { captureEvent } from '@/lib/posthog/client'
 import { isRetryEligibleBlock } from '@/lib/workflows/blocks/retry-eligibility'
 import {
   buildCanonicalIndex,
@@ -45,14 +47,8 @@ import {
   useEditorSubblockLayout,
 } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/hooks'
 import { ActiveSearchTargetProvider } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/providers/active-search-target-provider'
-import { LoopTool } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/subflows/loop/loop-config'
-import { ParallelTool } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/subflows/parallel/parallel-config'
 import { getSubBlockStableKey } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/utils'
 import { useCurrentWorkflow } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
-import {
-  isAncestorProtected,
-  isBlockProtected,
-} from '@/app/workspace/[workspaceId]/w/[workflowId]/utils/block-protection-utils'
 import { PreviewWorkflow } from '@/app/workspace/[workspaceId]/w/components/preview'
 import { BlockTile } from '@/blocks/block-tile'
 import { getBlock } from '@/blocks/registry'
@@ -110,8 +106,6 @@ export function Editor() {
   const isSubflow =
     currentBlock && (currentBlock.type === 'loop' || currentBlock.type === 'parallel')
 
-  const subflowConfig = isSubflow ? (currentBlock.type === 'loop' ? LoopTool : ParallelTool) : null
-
   const isWorkflowBlock =
     currentBlock && (currentBlock.type === 'workflow' || currentBlock.type === 'workflow_input')
   const isNoteBlock = currentBlock?.type === 'note'
@@ -122,8 +116,6 @@ export function Editor() {
 
   const params = useParams()
   const workspaceId = params.workspaceId as string
-  const posthog = usePostHog()
-
   const subBlocksRef = useRef<HTMLDivElement>(null)
 
   const userPermissions = useUserPermissionsContext()
@@ -137,8 +129,10 @@ export function Editor() {
   // Check if block is locked (or inside a locked ancestor) and compute edit permission
   // Locked blocks cannot be edited by anyone (admins can only lock/unlock)
   const blocks = useWorkflowStore((state) => state.blocks)
-  const isLocked = currentBlockId ? isBlockProtected(currentBlockId, blocks) : false
-  const isAncestorLocked = currentBlockId ? isAncestorProtected(currentBlockId, blocks) : false
+  const isLocked = currentBlockId ? isWorkflowBlockProtected(currentBlockId, blocks) : false
+  const isAncestorLocked = currentBlockId
+    ? isWorkflowBlockAncestorLocked(currentBlockId, blocks)
+    : false
   const canEditBlock = userPermissions.canEdit && !workflowLocked && !isLocked
 
   const { advancedMode, triggerMode } = useEditorBlockProperties(
@@ -354,7 +348,8 @@ export function Editor() {
     const block = blocks[blockId]
     if (!block) return
 
-    if (!userPermissions.canEdit || workflowLocked || isBlockProtected(blockId, blocks)) return
+    if (!userPermissions.canEdit || workflowLocked || isWorkflowBlockProtected(blockId, blocks))
+      return
 
     renamingBlockIdRef.current = blockId
     setEditedName(block.name || '')
@@ -419,18 +414,6 @@ export function Editor() {
     setIsRenaming(false)
     setEditedName('')
   }, [currentBlockId])
-
-  /**
-   * Handles opening documentation link in a new secure tab.
-   */
-  const handleOpenDocs = useCallback(() => {
-    const docsLink = isSubflow ? subflowConfig?.docsLink : blockConfig?.docsLink
-    window.open(docsLink || 'https://docs.sim.ai/quick-reference', '_blank', 'noopener,noreferrer')
-    captureEvent(posthog, 'docs_opened', {
-      source: 'editor_button',
-      block_type: currentBlock?.type,
-    })
-  }, [isSubflow, subflowConfig?.docsLink, blockConfig?.docsLink, posthog, currentBlock?.type])
 
   // Get child workflow ID for workflow blocks
   const childWorkflowId = isWorkflowBlock ? blockSubBlockValues?.workflowId : null
@@ -623,7 +606,7 @@ export function Editor() {
                           </div>
                         ) : childWorkflowState ? (
                           <>
-                            <div className='[&_.react-flow__handle]:hidden! h-full w-full [&_*:active]:cursor-grabbing! [&_*]:cursor-grab!'>
+                            <div className='[&_.react-flow__handle]:hidden! size-full [&_*:active]:cursor-grabbing! [&_*]:cursor-grab!'>
                               <PreviewWorkflow
                                 workflowState={childWorkflowState}
                                 height={160}
@@ -638,6 +621,7 @@ export function Editor() {
                             <Tooltip.Root>
                               <Tooltip.Trigger asChild>
                                 <Button
+                                  aria-label='Open workflow'
                                   type='button'
                                   variant='ghost'
                                   onClick={handleOpenChildWorkflow}
@@ -889,10 +873,7 @@ export function Editor() {
 
                 {/* Connections Content - Always visible */}
                 <div className='flex-1 overflow-y-auto overflow-x-hidden px-1.5 pb-2'>
-                  <ConnectionBlocks
-                    connections={incomingConnections}
-                    currentBlockId={currentBlock.id}
-                  />
+                  <ConnectionBlocks connections={incomingConnections} />
                 </div>
               </div>
             )}

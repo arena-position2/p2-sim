@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { INTEGRATION_METADATA } from '@sim/deployment-config/integration-metadata'
-import { ArrowRight, ChevronDown, cn, Expandable, ExpandableContent, OverflowText } from '@sim/emcn'
+import { ArrowRight, cn, OverflowText } from '@sim/emcn'
 import { Table } from '@sim/emcn/icons'
 import { stripVersionSuffix } from '@sim/utils/string'
 import { useParams } from 'next/navigation'
 import { usePostHog } from 'posthog-js/react'
+import { HomeSection } from '@/components/home/home-section'
 import { GmailIcon, SlackIcon } from '@/components/icons'
 import {
   resolveOAuthServiceForIntegration,
@@ -25,7 +26,7 @@ import { getAllBlockMeta } from '@/blocks/registry'
 import type { ModuleTag } from '@/blocks/types'
 import { useWorkspaceCredentials } from '@/hooks/queries/credentials'
 import { useKnowledgeBasesQuery } from '@/hooks/queries/kb/knowledge'
-import { useOAuthConnections } from '@/hooks/queries/oauth/oauth-connections'
+import { useOAuthConnections } from '@/hooks/queries/oauth/connections'
 import { useTablesList } from '@/hooks/queries/tables'
 
 /** Lookup integration slug by OAuth service display name (case-insensitive). */
@@ -232,11 +233,13 @@ const INITIAL_ACTIONS: Action[] = [
 ]
 
 interface SuggestedActionsProps {
+  organizationId?: string
   onSelectPrompt: (prompt: string) => void
 }
 
-export function SuggestedActions({ onSelectPrompt }: SuggestedActionsProps) {
-  const { workspaceId } = useParams<{ workspaceId: string }>()
+export function SuggestedActions({ onSelectPrompt, organizationId }: SuggestedActionsProps) {
+  const params = useParams<{ workspaceId?: string }>()
+  const workspaceId = organizationId ? undefined : params.workspaceId
   const posthog = usePostHog()
 
   const { data: credentials = EMPTY_CREDENTIALS } = useWorkspaceCredentials({
@@ -291,16 +294,21 @@ export function SuggestedActions({ onSelectPrompt }: SuggestedActionsProps) {
   }, [connectedProviders, services, signals])
 
   const handleSelect = (action: Action, position: number) => {
-    captureEvent(posthog, 'suggested_action_clicked', {
-      workspace_id: workspaceId,
-      kind: action.kind,
-      action_id: action.id,
-      label: action.label,
-      position,
-      connected_provider_count: connectedProviders.size,
-    })
+    if (workspaceId)
+      captureEvent(posthog, 'suggested_action_clicked', {
+        workspace_id: workspaceId,
+        kind: action.kind,
+        action_id: action.id,
+        label: action.label,
+        position,
+        connected_provider_count: connectedProviders.size,
+      })
     if (action.kind === 'prompt') {
       onSelectPrompt(action.prompt)
+      return
+    }
+    if (!workspaceId) {
+      onSelectPrompt(`${action.label}.`)
       return
     }
     const target = resolveOAuthServiceForSlug(action.slug)
@@ -308,74 +316,46 @@ export function SuggestedActions({ onSelectPrompt }: SuggestedActionsProps) {
   }
 
   const handleToggleExpanded = () => {
-    captureEvent(posthog, 'suggested_actions_toggled', {
-      workspace_id: workspaceId,
-      expanded: !expanded,
-    })
+    if (workspaceId)
+      captureEvent(posthog, 'suggested_actions_toggled', {
+        workspace_id: workspaceId,
+        expanded: !expanded,
+      })
     setAnimationsEnabled(true)
     setExpanded((prev) => !prev)
   }
 
   return (
-    <div className='group/suggested mx-auto mt-7 w-full max-w-chat'>
-      {/* Full width so the whole line toggles, not just the label and chevron. */}
-      <button
-        type='button'
-        onClick={handleToggleExpanded}
-        aria-expanded={expanded}
-        className='group/toggle flex w-full cursor-pointer items-center gap-2'
+    <>
+      <HomeSection
+        title='Suggested actions'
+        expanded={expanded}
+        animationsEnabled={animationsEnabled}
+        onToggle={handleToggleExpanded}
       >
-        <span className='text-[var(--text-muted)] text-caption'>Suggested actions</span>
-        {/*
-         * Revealed by hovering anywhere in the section — the group sits on the
-         * section wrapper rather than this row, so the action rows below arm it just
-         * as the header does. Focus is keyed off the toggle instead, the only element
-         * here that can hold it, and matters because globals clear focus outlines.
-         * One transition covers the fade and the rotation so the two cannot drift
-         * apart. Mirrors the sidebar's section headers.
-         */}
-        <ChevronDown
-          className={cn(
-            'size-[14px] shrink-0 text-[var(--text-icon)] opacity-0 transition-[opacity,transform] duration-150',
-            'group-hover/suggested:opacity-100 group-focus-visible/toggle:opacity-100',
-            !expanded && '-rotate-90'
-          )}
-        />
-      </button>
-      <Expandable expanded={expanded}>
-        <ExpandableContent className={cn(!animationsEnabled && 'animate-none!')}>
-          {/* 6px, matching a sidebar section header to its first item — both headers
-              are an 18px box around 12px text, so equal padding reads as equal
-              distance. Padding an inner wrapper rather than the animated element:
-              `collapsible-up`/`-down` interpolate height alone, so a margin here
-              would hold its full value through the close and then vanish on unmount,
-              snapping the content below up. */}
-          <div className='flex flex-col pt-1.5'>
-            {actions.map((action, i) => {
-              const Icon = action.icon
-              return (
-                <button
-                  key={action.id}
-                  type='button'
-                  onClick={() => handleSelect(action, i)}
-                  className={cn(
-                    'flex items-center gap-2 border-[var(--border)] px-2 py-2 text-left transition-colors hover-hover:bg-[var(--surface-5)]',
-                    i > 0 && 'border-t'
-                  )}
-                >
-                  <BrandIcon icon={Icon} className='size-[16px] shrink-0' />
-                  <OverflowText
-                    label={action.label}
-                    className='flex-1 text-[var(--text-body)] text-sm'
-                    focusTarget='nearest-interactive'
-                  />
-                  <ArrowRight className='size-[16px] shrink-0 text-[var(--text-icon)]' />
-                </button>
-              )
-            })}
-          </div>
-        </ExpandableContent>
-      </Expandable>
+        {actions.map((action, i) => {
+          const Icon = action.icon
+          return (
+            <button
+              key={action.id}
+              type='button'
+              onClick={() => handleSelect(action, i)}
+              className={cn(
+                'flex min-h-11 items-center gap-2 border-[var(--border)] px-2 py-2 text-left transition-colors hover-hover:bg-[var(--surface-5)] md:min-h-0',
+                i > 0 && 'border-t'
+              )}
+            >
+              <BrandIcon icon={Icon} className='size-[16px] shrink-0' />
+              <OverflowText
+                label={action.label}
+                className='flex-1 text-[var(--text-body)] text-sm'
+                focusTarget='nearest-interactive'
+              />
+              <ArrowRight className='size-[16px] shrink-0 text-[var(--text-icon)]' />
+            </button>
+          )
+        })}
+      </HomeSection>
       {oauthTarget && workspaceId && (
         <ConnectOAuthModal
           mode='connect'
@@ -391,6 +371,6 @@ export function SuggestedActions({ onSelectPrompt }: SuggestedActionsProps) {
           serviceIcon={oauthTarget.serviceIcon}
         />
       )}
-    </div>
+    </>
   )
 }

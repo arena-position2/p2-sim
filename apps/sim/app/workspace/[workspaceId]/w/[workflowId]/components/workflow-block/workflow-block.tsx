@@ -70,6 +70,7 @@ import {
   getDisplayValue,
   hasDisplayableRowValue,
   resolveDropdownLabel,
+  resolveFallbackModelsLabel,
   resolveFilterFieldLabel,
   resolveFolderPathLabel,
   resolveSandboxLabel,
@@ -120,7 +121,7 @@ import { useDeployWorkflow } from '@/hooks/queries/deployments'
 import { useDynamicSubBlockOptionDisplayName } from '@/hooks/queries/dynamic-subblock-options'
 import { useHubSpotAccountDisplayName } from '@/hooks/queries/hubspot-accounts'
 import { useMcpToolServers, useMcpToolsQuery } from '@/hooks/queries/mcp'
-import { useCredentialName } from '@/hooks/queries/oauth/oauth-credentials'
+import { useCredentialName } from '@/hooks/queries/oauth/credentials'
 import { useSandboxes } from '@/hooks/queries/sandboxes'
 import { useReactivateSchedule, useScheduleInfo } from '@/hooks/queries/schedules'
 import { useSkills } from '@/hooks/queries/skills'
@@ -169,6 +170,7 @@ const SUBBLOCK_META_ICONS_BY_TYPE: Record<string, MetaIcon> = {
   'messages-input': MessageSquareText,
   'tool-input': Wrench,
   'skill-input': Sparkles,
+  'model-fallback-list': ArrowLeftRight,
   'oauth-input': Key,
   switch: ToggleLeft,
   'file-upload': Paperclip,
@@ -647,6 +649,11 @@ const SubBlockRow = memo(function SubBlockRow({
     [subBlock, rawValue, workspaceSkills]
   )
 
+  const fallbackModelsDisplayValue = useMemo(
+    () => resolveFallbackModelsLabel(subBlock, rawValue),
+    [subBlock, rawValue]
+  )
+
   /**
    * Hydrates the Function block's sandbox id to its name. Deliberately scoped to
    * the sandbox row: this row is memoized per subblock, and the shared list query
@@ -681,6 +688,7 @@ const SubBlockRow = memo(function SubBlockRow({
     filterDisplayValue ||
     toolsDisplayValue ||
     skillsDisplayValue ||
+    fallbackModelsDisplayValue ||
     sandboxDisplayValue ||
     knowledgeBaseDisplayName ||
     workflowSelectionName ||
@@ -902,9 +910,12 @@ export const WorkflowBlock = memo(function WorkflowBlock({
       workflow_id: currentWorkflowId,
       kind: sunset.kind,
     })
-    sendMothershipMessage(sunset.prompt, [
-      { kind: 'workflow_block', workflowId: currentWorkflowId, blockId: id, label: name },
-    ])
+    sendMothershipMessage({
+      content: sunset.prompt,
+      contexts: [
+        { kind: 'workflow_block', workflowId: currentWorkflowId, blockId: id, label: name },
+      ],
+    })
   }
 
   const canonicalIndex = useMemo(

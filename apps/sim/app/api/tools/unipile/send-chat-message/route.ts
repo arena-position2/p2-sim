@@ -3,9 +3,10 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
+import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { RawFileInputArraySchema } from '@/lib/uploads/utils/file-schemas'
 import { processFilesToUserFiles } from '@/lib/uploads/utils/file-utils'
-import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
+import { downloadServableFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
 import { UNIPILE_BASE_URL } from '@/tools/unipile/types'
 
 const logger = createLogger('UnipileSendChatMessageAPI')
@@ -74,9 +75,14 @@ export async function POST(request: NextRequest) {
     if (Array.isArray(data.attachments) && data.attachments.length > 0) {
       const userFiles = processFilesToUserFiles(data.attachments, data.chat_id, logger)
       for (const userFile of userFiles) {
-        const buffer = await downloadFileFromStorage(userFile, data.chat_id, logger)
+        const { buffer, contentType } = await downloadServableFileFromStorage(
+          userFile,
+          data.chat_id,
+          logger,
+          { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+        )
         const blob = new Blob([new Uint8Array(buffer)], {
-          type: userFile.type || 'application/octet-stream',
+          type: contentType || userFile.type || 'application/octet-stream',
         })
         form.append('attachments', blob, userFile.name)
       }

@@ -2,10 +2,10 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { v1KnowledgeSearchContract } from '@/lib/api/contracts/v1/knowledge'
 import { parseRequest } from '@/lib/api/server'
 import {
-  checkAttributedUsageLimits,
   resolveBillingAttribution,
   resolveSystemBillingAttribution,
 } from '@/lib/billing/core/billing-attribution'
+import { checkSearchUsageLimits } from '@/lib/billing/core/usage-gate-cache'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { ALL_TAG_SLOTS } from '@/lib/knowledge/constants'
 import { toKbEmbeddingDimensions } from '@/lib/knowledge/embedding-models'
@@ -14,11 +14,12 @@ import {
   type KbEmbeddingTarget,
   recordSearchEmbeddingUsage,
 } from '@/lib/knowledge/embeddings'
+import { SearchDeadlineError } from '@/lib/knowledge/search/budget'
+import type { SearchResult } from '@/lib/knowledge/search/candidates'
 import { resolveKnowledgeSearchDefaults } from '@/lib/knowledge/search/defaults'
 import {
-  executeKnowledgeSearch,
-  getDocumentMetadataByIds,
-  type SearchResult,
+  type KnowledgeRetrievalResult,
+  retrieveKnowledgeSearch,
 } from '@/lib/knowledge/search/queries'
 import { getDocumentTagDefinitions } from '@/lib/knowledge/tags/service'
 import { buildUndefinedTagsError, validateTagValue } from '@/lib/knowledge/tags/utils'
@@ -81,7 +82,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
      * keys resolve their system actor and immutable payer from one workspace read.
      */
     if (billingAttribution) {
-      const usage = await checkAttributedUsageLimits(billingAttribution)
+      const usage = await checkSearchUsageLimits(billingAttribution)
       if (usage.isExceeded) {
         return NextResponse.json(
           { error: usage.message || 'Usage limit exceeded. Please upgrade your plan to continue.' },
@@ -224,7 +225,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
         }
       : undefined
 
-    let results: SearchResult[]
+    let retrieved: KnowledgeRetrievalResult
     let queryEmbeddingIsBYOK: boolean | null = null
     const [readAccess, { searchMode, boostRecency }] = await Promise.all([
       resolveV1KnowledgeReadAccess(userId, rateLimit, workspaceId),
@@ -240,7 +241,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
     const access = 'get' in readAccess ? await readAccess.get() : readAccess
 
     if (!hasQuery && hasFilters) {
-      results = await executeKnowledgeSearch({
+      retrieved = await retrieveKnowledgeSearch({
         knowledgeBaseIds: accessibleKbIds,
         topK,
         access,
@@ -256,7 +257,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
         workspaceId
       )
       queryEmbeddingIsBYOK = queryEmbeddingResult.isBYOK
-      results = await executeKnowledgeSearch({
+      retrieved = await retrieveKnowledgeSearch({
         knowledgeBaseIds: accessibleKbIds,
         topK,
         access,
@@ -309,14 +310,14 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
       tagDefinitionsMap[kbId] = map
     })
 
-    const documentIds = results.map((r) => r.documentId)
-    const documentMetadataMap = await getDocumentMetadataByIds(documentIds, access, accessProvider)
-    const readableResults = results.filter((result) => documentMetadataMap[result.documentId])
+    /** v1 cannot express an incomplete search, so a leg that ran out of time fails the request. */
+    if (retrieved.retrieval.status === 'partial') throw new SearchDeadlineError()
+    const results = retrieved.rows
 
     return NextResponse.json({
       success: true,
       data: {
-        results: readableResults.map((result) => {
+        results: results.map((result, index) => {
           const kbTagMap = tagDefinitionsMap[result.knowledgeBaseId] || {}
           const tags: Record<string, string | number | boolean | Date | null> = {}
 
@@ -328,21 +329,23 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
             }
           })
 
-          const docMeta = documentMetadataMap[result.documentId]
+          const similarity = hasQuery ? 1 - result.distance : 1
           return {
             documentId: result.documentId,
-            documentName: docMeta?.filename || undefined,
-            sourceUrl: docMeta?.sourceUrl ?? null,
+            documentName: result.filename || undefined,
+            sourceUrl: result.sourceUrl,
             content: result.content,
             chunkIndex: result.chunkIndex,
             metadata: tags,
-            similarity: hasQuery ? 1 - result.distance : 1,
+            similarity,
+            rankScore: result.rankScore ?? similarity,
+            rank: index + 1,
           }
         }),
         query: searchQuery,
         knowledgeBaseIds: accessibleKbIds,
         topK,
-        totalResults: readableResults.length,
+        totalResults: results.length,
       },
     })
   } catch (error) {

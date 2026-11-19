@@ -1,7 +1,21 @@
 'use client'
 
 import { useMemo } from 'react'
-import { LineChart, type LineChartMultiSeries, type LineChartPoint } from '@sim/emcn'
+import { LineChart } from '@sim/emcn'
+
+interface UsageChartPoint {
+  timestamp: string
+  value: number
+}
+
+interface UsageChartSeries {
+  id: string
+  label: string
+  color: string
+  data: UsageChartPoint[]
+  dashed?: boolean
+}
+
 import { dollarsToCredits } from '@/lib/billing/credits/conversion'
 
 interface UsageTimeSeriesPoint {
@@ -41,14 +55,14 @@ export function UsageTimeSeriesChart({
   showExecutionsOverlay = true,
   costChartTitle,
 }: UsageTimeSeriesChartProps) {
-  const billableData = useMemo((): LineChartPoint[] => {
+  const billableData = useMemo((): UsageChartPoint[] => {
     return timeSeries.map((bucket) => ({
       timestamp: bucket.bucketStart,
       value: dollarsToCredits(bucket.billableCost),
     }))
   }, [timeSeries])
 
-  const series = useMemo((): LineChartMultiSeries[] => {
+  const series = useMemo((): UsageChartSeries[] => {
     if (!showExecutionsOverlay || timeSeries.length === 0) return []
 
     return [
@@ -65,7 +79,7 @@ export function UsageTimeSeriesChart({
     ]
   }, [showExecutionsOverlay, timeSeries])
 
-  const activeUserData = useMemo((): LineChartPoint[] => {
+  const activeUserData = useMemo((): UsageChartPoint[] => {
     if (!showActiveUsers) return []
     return timeSeries.map((bucket) => ({
       timestamp: bucket.bucketStart,

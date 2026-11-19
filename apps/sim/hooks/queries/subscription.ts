@@ -44,12 +44,7 @@ interface UseSubscriptionDataOptions {
  * @param options - Optional configuration
  */
 export function useSubscriptionData(options: UseSubscriptionDataOptions = {}) {
-  const {
-    includeOrg = false,
-    workspaceId,
-    enabled = true,
-    staleTime = SUBSCRIPTION_DATA_STALE_TIME,
-  } = options
+  const { includeOrg = false, enabled = true, staleTime = SUBSCRIPTION_DATA_STALE_TIME } = options
 
   return useQuery({ ...subscriptionDataQueryOptions(includeOrg, staleTime), enabled })
 }
@@ -83,27 +78,6 @@ async function fetchUsageLimitData(signal?: AbortSignal) {
   return requestJson(getUserUsageLimitContract, {
     query: { context: 'user' },
     signal,
-  })
-}
-
-interface UseUsageLimitDataOptions {
-  /** Whether to enable the query (defaults to true) */
-  enabled?: boolean
-}
-
-/**
- * Hook to fetch usage limit metadata
- * Returns: currentLimit, minimumLimit, canEdit, plan, updatedAt
- * Use this for editing usage limits, not for displaying current usage
- */
-export function useUsageLimitData(options: UseUsageLimitDataOptions = {}) {
-  const { enabled = true } = options
-
-  return useQuery({
-    queryKey: subscriptionKeys.usage(),
-    queryFn: ({ signal }) => fetchUsageLimitData(signal),
-    staleTime: USAGE_LIMIT_STALE_TIME,
-    enabled,
   })
 }
 

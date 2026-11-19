@@ -16,6 +16,7 @@ import {
   type BillingAttributionSnapshot,
 } from '@/lib/billing/core/billing-attribution'
 import type { AsyncExecutionCorrelation } from '@/lib/core/async-jobs/types'
+import { logFailureOnce } from '@/lib/core/errors/failure-log'
 import {
   capExecutionTimeoutMs,
   createTimeoutAbortController,
@@ -26,6 +27,7 @@ import {
   RESERVATION_TTL_BUFFER_MS,
 } from '@/lib/core/execution-limits'
 import type { RequestAttribution } from '@/lib/core/utils/request-attribution'
+import type { ExecutionActor } from '@/lib/execution/actor-resolution'
 import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
@@ -68,6 +70,12 @@ export type WorkflowExecutionPayload = {
   principal: SerializedPrincipalV1
   userId: string
   billingAttribution: BillingAttributionSnapshot
+  /**
+   * Actor identity the enqueuing surface resolved alongside the billing
+   * snapshot. The worker cannot re-derive a caller-named payer actor, so it
+   * rides the payload with the attribution it belongs to.
+   */
+  executionActor?: ExecutionActor
   workspaceId: string
   input?: any
   triggerType?: CoreTriggerType
@@ -238,6 +246,7 @@ export async function executeWorkflowJob(
           userId: actorUserId,
           principal,
           billingAttribution: preprocessResult.billingAttribution,
+          executionActor: payload.executionActor,
           sessionUserId: undefined,
           workflowUserId: workflow.userId,
           triggerType: payload.triggerType || 'api',
@@ -277,7 +286,7 @@ export async function executeWorkflowJob(
           timeoutController.isTimedOut() &&
           timeoutController.timeoutMs
         ) {
-          const timeoutErrorMessage = getTimeoutErrorMessage(null, timeoutController.timeoutMs)
+          const timeoutErrorMessage = getTimeoutErrorMessage(timeoutController.timeoutMs)
           logger.info(`[${requestId}] Workflow execution timed out`, {
             timeoutMs: timeoutController.timeoutMs,
           })
@@ -306,10 +315,10 @@ export async function executeWorkflowJob(
           metadata: payload.metadata,
         }
       } catch (error: unknown) {
-        logger.error(
-          `[${requestId}] Workflow execution failed: ${workflowId}`,
-          loggingSession.projectDiagnosticError(error, { executionId })
-        )
+        logFailureOnce(logger, `[${requestId}] Workflow execution failed: ${workflowId}`, error, {
+          metadata: () => loggingSession.projectDiagnosticError(error),
+          executionId,
+        })
 
         if (error instanceof ExecutionTimeoutError) throw error
 

@@ -1,57 +1,59 @@
-import { isBrowserToolName, isCurrentBrowserToolName } from '@sim/browser-protocol'
+import type { Span } from '@opentelemetry/api'
 import { createLogger } from '@sim/logger'
-import { isTerminalToolName } from '@sim/terminal-protocol'
 import { getErrorMessage, toError } from '@sim/utils/errors'
-import { isPlainRecord } from '@sim/utils/object'
+import { isPlainRecord, toRecord } from '@sim/utils/object'
 import { type NextRequest, NextResponse } from 'next/server'
 import { copilotConfirmContract } from '@/lib/api/contracts/copilot'
 import { parseRequest, validationErrorResponse } from '@/lib/api/server'
+import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import {
   ASYNC_TOOL_CONFIRMATION_STATUS,
   ASYNC_TOOL_STATUS,
   type AsyncCompletionData,
   type AsyncConfirmationStatus,
-  DESKTOP_TOOL_CLAIM_OWNER,
+  type AsyncTerminalStatus,
+  getTerminalConfirmationStatus,
   isDeliveredAsyncStatus,
   isTerminalAsyncStatus,
   isWorkflowToolExecutionClaimable,
-} from '@/lib/copilot/async-runs/lifecycle'
+} from '@/lib/mothership/async-runs/lifecycle'
 import {
-  completeAsyncToolCall,
-  completeClaimedAsyncToolCall,
-  completePendingAsyncToolCall,
-  detachAsyncToolCall,
   getAsyncToolCall,
   getClaimedWorkflowExecutionId,
   getRunSegment,
-} from '@/lib/copilot/async-runs/repository'
-import { CopilotConfirmOutcome } from '@/lib/copilot/generated/trace-attribute-values-v1'
-import { TraceAttr } from '@/lib/copilot/generated/trace-attributes-v1'
-import { TraceSpan } from '@/lib/copilot/generated/trace-spans-v1'
-import { publishToolConfirmation } from '@/lib/copilot/persistence/tool-confirm'
+} from '@/lib/mothership/async-runs/repository'
+import { CopilotConfirmOutcome } from '@/lib/mothership/generated/trace-attribute-values-v1'
+import { TraceAttr } from '@/lib/mothership/generated/trace-attributes-v1'
+import { TraceSpan } from '@/lib/mothership/generated/trace-spans-v1'
 import {
   authenticateCopilotRequestSessionOnly,
   createInternalServerErrorResponse,
   createNotFoundResponse,
   createRequestTracker,
   createUnauthorizedResponse,
-} from '@/lib/copilot/request/http'
-import { withIncomingGoSpan } from '@/lib/copilot/request/otel'
+} from '@/lib/mothership/request/http'
+import { withIncomingGoSpan } from '@/lib/mothership/request/otel'
+import { sealClientToolSettlement } from '@/lib/mothership/request/tools/client-completion-seal.server'
 import {
-  retainSealedClientToolContext,
-  sealClientToolCompletion,
-} from '@/lib/copilot/request/tools/client-completion-seal.server'
+  type ClientToolSettlementGuard,
+  clientToolCompletionMessage,
+  settleClientToolCall,
+} from '@/lib/mothership/request/tools/client-settlement.server'
+import { isWorkflowToolName } from '@/lib/mothership/tools/client-executed-tools'
 import {
-  type AsyncWorkflowDeploymentError,
+  getDesktopToolClaimOwner,
+  isDesktopToolCall,
+  isNativeDesktopTool,
+} from '@/lib/mothership/tools/desktop-tools'
+import {
   createStructuralWorkflowToolCompletionData,
-  getAsyncWorkflowDeploymentError,
   getWorkflowToolCompletionExecutionId,
   getWorkflowToolCompletionMessage,
-  getWorkflowToolConfirmationStatus,
-  isWorkflowToolName,
+  getWorkflowToolLaunchError,
   resolveWorkflowToolTargetId,
-} from '@/lib/copilot/tools/workflow-tools'
-import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
+  WORKFLOW_EXECUTION_BUSY,
+  type WorkflowToolLaunchError,
+} from '@/lib/mothership/tools/workflow-tools'
 import { getTrustedWorkflowToolExecution } from '@/lib/workflows/executor/execution-state'
 
 const logger = createLogger('CopilotConfirmAPI')
@@ -59,20 +61,6 @@ const NATIVE_HANDOFF_INTERRUPTED_MESSAGE =
   'The desktop action was interrupted during handoff. Its outcome is unknown; do not retry it automatically.'
 
 type ToolCallStatusUpdateOutcome = 'updated' | 'conflict' | 'failed'
-
-interface UpdateToolCallStatusOptions {
-  executionId?: string
-  completionGuard?:
-    | { status: typeof ASYNC_TOOL_STATUS.pending }
-    | { status: typeof ASYNC_TOOL_STATUS.running; claimedBy: string }
-}
-
-function getClientToolCompletionMessage(status: AsyncConfirmationStatus): string {
-  if (status === ASYNC_TOOL_CONFIRMATION_STATUS.success) return 'Tool completed'
-  if (status === ASYNC_TOOL_CONFIRMATION_STATUS.background) return 'Tool is running in background'
-  if (status === ASYNC_TOOL_CONFIRMATION_STATUS.cancelled) return 'Tool cancelled'
-  return 'Tool failed'
-}
 
 function createConfirmationResponse(
   toolCallId: string,
@@ -82,59 +70,54 @@ function createConfirmationResponse(
   return NextResponse.json({ success: true, message, toolCallId, status })
 }
 
+/**
+ * A result for a call that is already settled — a retried delivery, or one that lost to the server
+ * settling the call first (Stop, a fast "not started" failure) — answers with the stored outcome.
+ * Nothing is written or published again, and the reporter stops retrying.
+ */
+function acknowledgeSettledToolCall(
+  span: Span,
+  toolCallId: string,
+  storedStatus: AsyncTerminalStatus
+): NextResponse {
+  const settledStatus = getTerminalConfirmationStatus(storedStatus)
+  span.setAttributes({
+    [TraceAttr.ToolConfirmationStatus]: settledStatus,
+    [TraceAttr.CopilotConfirmOutcome]: CopilotConfirmOutcome.Delivered,
+  })
+  return createConfirmationResponse(toolCallId, settledStatus, 'Tool call was already settled')
+}
+
+/**
+ * A desktop call this report may not settle: the desktop app holds it under its claim (or a
+ * report raced that claim and lost), so only the claim's own result settles it. Final, not
+ * retryable: the reporter stops.
+ */
+function heldByAnotherReporterResponse(): NextResponse {
+  return NextResponse.json(
+    { error: 'The desktop app holds this tool call; only its own result settles it' },
+    { status: 409 }
+  )
+}
+
 /** Atomically finalize or detach a client tool before publishing its wakeup event. */
 async function updateToolCallStatus(
   existing: NonNullable<Awaited<ReturnType<typeof getAsyncToolCall>>>,
   status: AsyncConfirmationStatus,
   message?: string,
   data?: AsyncCompletionData,
-  options: UpdateToolCallStatusOptions = {}
+  options: { executionId?: string; guard?: ClientToolSettlementGuard } = {}
 ): Promise<ToolCallStatusUpdateOutcome> {
   const toolCallId = existing.toolCallId
   try {
-    if (status === ASYNC_TOOL_CONFIRMATION_STATUS.background) {
-      const detached = options.executionId
-        ? await detachAsyncToolCall(toolCallId, { preserveClaim: true })
-        : await detachAsyncToolCall(toolCallId)
-      if (!detached) return 'conflict'
-      publishToolConfirmation({
-        toolCallId,
-        status,
-        message: message || undefined,
-        timestamp: new Date().toISOString(),
-        data,
-        ...(options.executionId ? { executionId: options.executionId } : {}),
-      })
-      return 'updated'
-    }
-    const durableStatus =
-      status === ASYNC_TOOL_CONFIRMATION_STATUS.success
-        ? ASYNC_TOOL_STATUS.completed
-        : status === ASYNC_TOOL_CONFIRMATION_STATUS.cancelled
-          ? ASYNC_TOOL_STATUS.cancelled
-          : ASYNC_TOOL_STATUS.failed
-    const completionInput = {
-      toolCallId,
-      status: durableStatus,
-      result: data ?? null,
-      error: status === 'success' ? null : message || status,
-    }
-    const completed =
-      options.completionGuard?.status === ASYNC_TOOL_STATUS.pending
-        ? await completePendingAsyncToolCall(completionInput)
-        : options.completionGuard?.status === ASYNC_TOOL_STATUS.running
-          ? await completeClaimedAsyncToolCall(completionInput, options.completionGuard.claimedBy)
-          : await completeAsyncToolCall(completionInput)
-    if (!completed) return 'conflict'
-    publishToolConfirmation({
+    return await settleClientToolCall({
       toolCallId,
       status,
-      message: message || undefined,
-      timestamp: new Date().toISOString(),
+      message: message ?? '',
       data,
-      ...(options.executionId ? { executionId: options.executionId } : {}),
+      executionId: options.executionId,
+      guard: options.guard ?? { kind: 'open' },
     })
-    return 'updated'
   } catch (error) {
     logger.error('Failed to update tool call status', {
       toolCallId,
@@ -227,6 +210,17 @@ export const POST = withRouteHandler((req: NextRequest) => {
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
+        if (run.desktopDeviceId && isDesktopToolCall(existing.toolName, toRecord(existing.args))) {
+          span.setAttribute(TraceAttr.CopilotConfirmOutcome, CopilotConfirmOutcome.Forbidden)
+          return NextResponse.json(
+            {
+              error:
+                "This chat's desktop actions report through the desktop app's background executor",
+            },
+            { status: 409 }
+          )
+        }
+
         const isWorkflowTool = isWorkflowToolName(existing.toolName || '')
         const workflowId = isWorkflowTool
           ? resolveWorkflowToolTargetId(existing.args, run.workflowId)
@@ -246,7 +240,7 @@ export const POST = withRouteHandler((req: NextRequest) => {
             return createNotFoundResponse('Completed workflow execution not found')
           }
 
-          const terminalStatus = getWorkflowToolConfirmationStatus(existing.status)
+          const terminalStatus = getTerminalConfirmationStatus(existing.status)
           span.setAttributes({
             [TraceAttr.ToolConfirmationStatus]: terminalStatus,
             [TraceAttr.CopilotConfirmOutcome]: CopilotConfirmOutcome.Delivered,
@@ -283,20 +277,19 @@ export const POST = withRouteHandler((req: NextRequest) => {
           )
         }
 
+        if (!isWorkflowTool && isTerminalAsyncStatus(existing.status)) {
+          return acknowledgeSettledToolCall(span, toolCallId, existing.status)
+        }
+
         const isErrorOrCancelledOutcome =
           status === ASYNC_TOOL_CONFIRMATION_STATUS.error ||
           status === ASYNC_TOOL_CONFIRMATION_STATUS.cancelled
-        const isNativeClientTool =
-          isBrowserToolName(existing.toolName) || isTerminalToolName(existing.toolName)
+        const isNativeClientTool = isNativeDesktopTool(existing.toolName)
+        const nativeClaimOwner = getDesktopToolClaimOwner(existing.toolName)
         const isPreclaimNativeTerminalOutcome =
-          (isCurrentBrowserToolName(existing.toolName) || isTerminalToolName(existing.toolName)) &&
+          nativeClaimOwner !== undefined &&
           existing.status === ASYNC_TOOL_STATUS.pending &&
           isErrorOrCancelledOutcome
-        const nativeClaimOwner = isCurrentBrowserToolName(existing.toolName)
-          ? DESKTOP_TOOL_CLAIM_OWNER.browser
-          : isTerminalToolName(existing.toolName)
-            ? DESKTOP_TOOL_CLAIM_OWNER.terminal
-            : undefined
         const isIndeterminateNativeExit =
           isPreclaimNativeTerminalOutcome &&
           status === ASYNC_TOOL_CONFIRMATION_STATUS.error &&
@@ -306,14 +299,29 @@ export const POST = withRouteHandler((req: NextRequest) => {
         const isMutableClientToolCall = isWorkflowTool
           ? isWorkflowToolExecutionClaimable(existing.status, existing.permissionDecision)
           : existing.status === ASYNC_TOOL_STATUS.running || isPreclaimNativeTerminalOutcome
-        if ((isNativeClientTool || isWorkflowTool) && !isMutableClientToolCall) {
+        if (isNativeClientTool && !isMutableClientToolCall) {
+          span.setAttribute(TraceAttr.CopilotConfirmOutcome, CopilotConfirmOutcome.ToolCallNotFound)
+          return heldByAnotherReporterResponse()
+        }
+        if (isWorkflowTool && !isMutableClientToolCall) {
           span.setAttribute(TraceAttr.CopilotConfirmOutcome, CopilotConfirmOutcome.ToolCallNotFound)
           return createNotFoundResponse('Running client tool call not found')
+        }
+        // A reporter that says the call never started (a stale replay, a closed view) cannot speak
+        // for a call the desktop claimed: only the claim's own result may settle it.
+        if (
+          isNativeClientTool &&
+          isPlainRecord(data) &&
+          data.notStarted === true &&
+          existing.status !== ASYNC_TOOL_STATUS.pending
+        ) {
+          span.setAttribute(TraceAttr.CopilotConfirmOutcome, CopilotConfirmOutcome.ToolCallNotFound)
+          return heldByAnotherReporterResponse()
         }
 
         let effectiveStatus = status
         let executionId = submittedExecutionId
-        let deploymentError: AsyncWorkflowDeploymentError | undefined
+        let launchError: WorkflowToolLaunchError | undefined
 
         if (isWorkflowTool) {
           const claimedExecutionId = getClaimedWorkflowExecutionId(existing.claimedBy)
@@ -345,7 +353,7 @@ export const POST = withRouteHandler((req: NextRequest) => {
             executionId = claimedExecutionId
             if (status !== ASYNC_TOOL_CONFIRMATION_STATUS.background) {
               if (trustedExecution) {
-                effectiveStatus = getWorkflowToolConfirmationStatus(trustedExecution.status)
+                effectiveStatus = getTerminalConfirmationStatus(trustedExecution.status)
               } else if (!isErrorOrCancelledOutcome) {
                 span.setAttribute(
                   TraceAttr.CopilotConfirmOutcome,
@@ -358,7 +366,7 @@ export const POST = withRouteHandler((req: NextRequest) => {
             executionId = submittedExecutionId
           } else if (trustedExecution) {
             executionId = trustedExecution.executionId
-            effectiveStatus = getWorkflowToolConfirmationStatus(trustedExecution.status)
+            effectiveStatus = getTerminalConfirmationStatus(trustedExecution.status)
           } else if (!isErrorOrCancelledOutcome) {
             effectiveStatus = ASYNC_TOOL_CONFIRMATION_STATUS.error
             executionId = undefined
@@ -368,50 +376,50 @@ export const POST = withRouteHandler((req: NextRequest) => {
 
           if (
             effectiveStatus === ASYNC_TOOL_CONFIRMATION_STATUS.error &&
-            executionId === undefined &&
-            existing.toolName === 'run_workflow' &&
-            isPlainRecord(existing.args) &&
-            existing.args.async === true
+            executionId === undefined
           ) {
-            deploymentError = getAsyncWorkflowDeploymentError(data)
+            const submittedError = getWorkflowToolLaunchError(data)
+            if (
+              submittedError?.code === WORKFLOW_EXECUTION_BUSY.code ||
+              (existing.toolName === 'run_workflow' &&
+                isPlainRecord(existing.args) &&
+                existing.args.async === true)
+            )
+              launchError = submittedError
           }
         }
 
         span.setAttribute(TraceAttr.ToolConfirmationStatus, effectiveStatus)
         const projected = isWorkflowTool
           ? {
-              message:
-                deploymentError?.message ?? getWorkflowToolCompletionMessage(effectiveStatus),
+              message: launchError?.message ?? getWorkflowToolCompletionMessage(effectiveStatus),
               data: createStructuralWorkflowToolCompletionData(
                 effectiveStatus,
                 workflowId,
                 executionId,
-                deploymentError
+                launchError
               ),
             }
           : {
-              message: getClientToolCompletionMessage(status),
-              data: {
-                ...retainSealedClientToolContext(existing.result),
-                ...(await sealClientToolCompletion({
-                  toolCallId,
-                  runId: existing.runId,
-                  userId: authenticatedUserId,
-                  ...(isIndeterminateNativeExit
-                    ? {
-                        message: NATIVE_HANDOFF_INTERRUPTED_MESSAGE,
-                        data: {
-                          error: NATIVE_HANDOFF_INTERRUPTED_MESSAGE,
-                          outcomeUnknown: true,
-                          doNotRetry: true,
-                        },
-                      }
-                    : {
-                        ...(message !== undefined ? { message } : {}),
-                        ...(data !== undefined ? { data } : {}),
-                      }),
-                })),
-              },
+              message: clientToolCompletionMessage(status),
+              data: await sealClientToolSettlement(existing.result, {
+                toolCallId,
+                runId: existing.runId,
+                userId: authenticatedUserId,
+                ...(isIndeterminateNativeExit
+                  ? {
+                      message: NATIVE_HANDOFF_INTERRUPTED_MESSAGE,
+                      data: {
+                        error: NATIVE_HANDOFF_INTERRUPTED_MESSAGE,
+                        outcomeUnknown: true,
+                        doNotRetry: true,
+                      },
+                    }
+                  : {
+                      ...(message !== undefined ? { message } : {}),
+                      ...(data !== undefined ? { data } : {}),
+                    }),
+              }),
             }
 
         const updateOutcome = await updateToolCallStatus(
@@ -421,9 +429,7 @@ export const POST = withRouteHandler((req: NextRequest) => {
           projected.data,
           {
             ...(isWorkflowTool && executionId ? { executionId } : {}),
-            ...(isPreclaimNativeTerminalOutcome
-              ? { completionGuard: { status: ASYNC_TOOL_STATUS.pending } as const }
-              : {}),
+            ...(isPreclaimNativeTerminalOutcome ? { guard: { kind: 'pending' } as const } : {}),
           }
         )
 
@@ -434,18 +440,20 @@ export const POST = withRouteHandler((req: NextRequest) => {
                 ASYNC_TOOL_CONFIRMATION_STATUS.error,
                 projected.message,
                 projected.data,
-                {
-                  completionGuard: {
-                    status: ASYNC_TOOL_STATUS.running,
-                    claimedBy: nativeClaimOwner,
-                  },
-                }
+                { guard: { kind: 'claimed', claimedBy: nativeClaimOwner } }
               )
             : updateOutcome
 
+        if (reconciledOutcome === 'conflict' && !isWorkflowTool) {
+          const settled = await getAsyncToolCall(toolCallId).catch(() => null)
+          if (settled && isTerminalAsyncStatus(settled.status)) {
+            return acknowledgeSettledToolCall(span, toolCallId, settled.status)
+          }
+        }
+
         if (reconciledOutcome === 'conflict' && isPreclaimNativeTerminalOutcome) {
           span.setAttribute(TraceAttr.CopilotConfirmOutcome, CopilotConfirmOutcome.ToolCallNotFound)
-          return createNotFoundResponse('Pending client tool call not found')
+          return heldByAnotherReporterResponse()
         }
 
         if (reconciledOutcome !== 'updated') {

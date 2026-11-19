@@ -85,6 +85,8 @@ export interface ChatMessage {
   type: 'user' | 'assistant'
   timestamp: Date
   isInitialMessage?: boolean
+  /** User bubble summarizing Start Block form values (not a typed chat query) */
+  isStartBlockInputsSummary?: boolean
   isStreaming?: boolean
   /** Model thinking text (agent-events-v1). Chrome only when non-empty. */
   thinking?: string
@@ -176,7 +178,7 @@ export const ClientChatMessage = memo(function ClientChatMessage({
 
   const content =
     message.type === 'user' ? (
-      <div className='px-4 py-5' data-message-id={message.id}>
+      <div className='py-5 md:px-4' data-message-id={message.id}>
         <div className='mx-auto max-w-3xl'>
           {message.attachments && message.attachments.length > 0 && (
             <div className='mb-2 flex justify-end'>
@@ -268,10 +270,12 @@ export const ClientChatMessage = memo(function ClientChatMessage({
           {/* `Sent N file(s)` is a placeholder for attachment-only sends, not user text. */}
           {message.content && !String(message.content).startsWith('Sent') && (
             <div className='flex justify-end'>
-              <div className='max-w-[80%] rounded-3xl bg-[var(--surface-3)] px-4 py-3'>
-                <div className='whitespace-pre-wrap break-words text-[var(--text-primary)] text-base leading-relaxed'>
+              <div className='min-w-0 max-w-[90%] rounded-3xl bg-[var(--surface-3)] px-4 py-3 md:max-w-[80%]'>
+                <div className='whitespace-pre-wrap text-[var(--text-primary)] text-base leading-relaxed [overflow-wrap:anywhere]'>
                   {isJsonObject ? (
-                    <pre>{JSON.stringify(message.content, null, 2)}</pre>
+                    <pre className='overflow-x-auto'>
+                      {JSON.stringify(message.content, null, 2)}
+                    </pre>
                   ) : (
                     <span>{message.content as string}</span>
                   )}
@@ -282,7 +286,7 @@ export const ClientChatMessage = memo(function ClientChatMessage({
         </div>
       </div>
     ) : (
-      <div className='px-4 pt-5 pb-2' data-message-id={message.id}>
+      <div className='pt-5 pb-2 md:px-4' data-message-id={message.id}>
         <div className='mx-auto max-w-3xl'>
           <div className='flex flex-col space-y-3'>
             <div>
@@ -299,9 +303,9 @@ export const ClientChatMessage = memo(function ClientChatMessage({
                 />
               )}
               {hasContent && (
-                <div className='break-words text-base'>
+                <div className='min-w-0 text-base [overflow-wrap:anywhere]'>
                   {isJsonObject ? (
-                    <pre className='text-[var(--text-primary)]'>
+                    <pre className='overflow-x-auto text-[var(--text-primary)]'>
                       {JSON.stringify(cleanTextContent, null, 2)}
                     </pre>
                   ) : (
@@ -323,6 +327,7 @@ export const ClientChatMessage = memo(function ClientChatMessage({
                   <Tooltip.Root>
                     <Tooltip.Trigger asChild>
                       <Button
+                        aria-label={isCopied ? 'Copied!' : 'Copy to clipboard'}
                         variant='ghost-secondary'
                         className='p-0'
                         onClick={() => {

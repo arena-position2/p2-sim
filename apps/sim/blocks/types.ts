@@ -358,6 +358,8 @@ export interface SubBlockConfig {
         icon?: React.ComponentType<{ className?: string }>
         group?: string
         hidden?: boolean
+        /** Credential-type gate for this dropdown option. */
+        reactiveCondition?: SubBlockConfig['reactiveCondition']
         defaultChecked?: boolean
         description?: string
       }[]
@@ -375,6 +377,8 @@ export interface SubBlockConfig {
         icon?: React.ComponentType<{ className?: string }>
         group?: string
         hidden?: boolean
+        /** Credential-type gate for this dropdown option. */
+        reactiveCondition?: SubBlockConfig['reactiveCondition']
         defaultChecked?: boolean
         description?: string
       }[])
@@ -642,7 +646,7 @@ export type CanvasSentenceClause =
 /** An ordered set of clauses forming one card summary sentence. */
 export type CanvasSentence = readonly CanvasSentenceClause[]
 
-export interface BlockConfig<T extends ToolResponse = ToolResponse> {
+export interface BlockConfig {
   type: string
   name: string
   description: string
@@ -675,10 +679,10 @@ export interface BlockConfig<T extends ToolResponse = ToolResponse> {
     /**
      * Natural-language summary shown on the card in place of its field rows.
      *
-     * Third-person present with the block as the implicit subject — the header
-     * already names it, so write `Posts a message to ⟨#eng⟩`, never `Sends a
-     * Slack message`. A block with no summary keeps the field-row layout, which
-     * is what makes adoption incremental.
+     * Imperative, with the card naming its own action — the header already names
+     * the service, so write `Post a message to ⟨#eng⟩`, never `Posts a message`
+     * or `Post a Slack message`. A block with no summary keeps the field-row
+     * layout, which is what makes adoption incremental.
      */
     sentences?: {
       /** Used when the block has no operation dropdown. */
@@ -766,8 +770,4 @@ export interface BlockConfig<T extends ToolResponse = ToolResponse> {
     enabled: boolean
     available: string[] // List of trigger IDs this block supports
   }
-}
-
-interface OutputConfig {
-  type: BlockOutput
 }

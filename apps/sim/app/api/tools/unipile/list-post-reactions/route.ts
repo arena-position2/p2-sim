@@ -15,10 +15,12 @@ const RequestSchema = z.object({
   account_id: z.string().min(1, 'account_id is required'),
   comment_id: optionalString,
   limit: z.coerce.number().int().min(1).max(100).optional().nullable(),
+  max_items: z.coerce.number().int().min(1).max(50_000).optional().nullable(),
 })
 
 /**
  * Proxies GET `/api/v1/posts/{post_id}/reactions` to Unipile, following pagination until all reactions are loaded.
+ * Optional `max_items` stops after that many reactions.
  */
 export async function POST(request: NextRequest) {
   const authResult = await checkInternalAuth(request, { requireWorkflowId: false })
@@ -44,6 +46,7 @@ export async function POST(request: NextRequest) {
       accountId: data.account_id.trim(),
       commentId: data.comment_id,
       limit: data.limit ?? undefined,
+      maxItems: data.max_items ?? undefined,
     })
 
     return NextResponse.json({

@@ -13,6 +13,7 @@ import { DEFAULT_PRIVACY_URL, DEFAULT_TERMS_URL } from '@/lib/branding/defaults'
 import { getEnv, isFalsy } from '@/lib/core/config/env'
 import { validateCallbackUrl } from '@/lib/core/security/input-validation'
 import { quickValidateEmail } from '@/lib/messaging/email/validation'
+import { captureClientEvent } from '@/lib/posthog/client'
 import { DEFAULT_POST_AUTH_ROUTE } from '@/app/(auth)/auth-redirect'
 import { AuthFormMessage, AuthSubmitButton } from '@/app/(auth)/components'
 import { useBrandConfig } from '@/ee/whitelabeling'
@@ -165,6 +166,7 @@ function SSOFormContent({
         return
       }
 
+      captureClientEvent('external_sign_in_started', { provider: 'sso', surface: 'sso_page' })
       const result = await client.signIn.sso({
         email: emailValue,
         providerId: resolved.providerId,

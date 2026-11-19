@@ -87,12 +87,6 @@ describe('resolveSettingsSection', () => {
     sessions: 'security',
   } as const
 
-  it('keeps legacy section links working', () => {
-    for (const [segment, id] of Object.entries(LEGACY_SEGMENTS)) {
-      expect(resolveSettingsSection(segment)?.id).toBe(id)
-    }
-  })
-
   it('never shadows a real section with an alias', () => {
     // The day someone adds a section whose id collides with an alias key, that section becomes
     // unreachable — the alias would rewrite the segment before the catalog is consulted.

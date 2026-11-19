@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Badge, cn, Label } from '@sim/emcn'
+import { Badge, Button, cn, Label } from '@sim/emcn'
 import { Check, ChevronDown, User, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
   Command,
   CommandEmpty,
@@ -41,7 +40,6 @@ export function SlackUserSelector({
   label = 'Select Slack user',
   disabled = false,
   workflowId,
-  isForeignCredential = false,
   multiple = false,
   useUserToken = false,
 }: SlackUserSelectorProps) {
@@ -81,7 +79,6 @@ export function SlackUserSelector({
       const data = await response.json()
       setUsers(data.users || [])
     } catch (err) {
-      console.error('Error fetching Slack users:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch users')
     } finally {
       setLoading(false)

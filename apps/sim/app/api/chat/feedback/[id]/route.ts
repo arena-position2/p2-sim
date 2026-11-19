@@ -7,7 +7,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
-import { createErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
+import { createCodedErrorResponse, createSuccessResponse } from '@/app/api/workflows/utils'
 
 const logger = createLogger('ChatFeedbackAPI')
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const executionId = (await params).id
 
     if (!session) {
-      return createErrorResponse('Unauthorized', 401)
+      return createCodedErrorResponse('Unauthorized', 401)
     }
 
     if (!session?.user?.id) {
@@ -47,12 +47,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         .limit(1)
 
       if (workflowExectution.length === 0) {
-        return createErrorResponse('Invalid execution Id', 400)
+        return createCodedErrorResponse('Invalid execution Id', 400)
       }
 
       const executionLog = workflowExectution[0]
       if (!executionLog.workflowId) {
-        return createErrorResponse('Invalid execution: missing workflow', 400)
+        return createCodedErrorResponse('Invalid execution: missing workflow', 400)
       }
 
       // If liked is null, delete existing feedback records for this executionId+userId (unlike action)
@@ -97,13 +97,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       })
     } catch (validationError) {
       if (validationError instanceof z.ZodError) {
-        const errorMessage = validationError.errors[0]?.message || 'Invalid request data'
-        return createErrorResponse(errorMessage, 400, 'VALIDATION_ERROR')
+        const errorMessage = validationError.issues[0]?.message || 'Invalid request data'
+        return createCodedErrorResponse(errorMessage, 400, 'VALIDATION_ERROR')
       }
       throw validationError
     }
   } catch (error: any) {
     logger.error('Error creating chat deployment:', error)
-    return createErrorResponse(error.message || 'Failed to create chat deployment', 500)
+    return createCodedErrorResponse(error.message || 'Failed to create chat deployment', 500)
   }
 }

@@ -1,15 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { ANONYMOUS_USER_ID } from '@sim/auth/principal'
 import {
   Button,
-  // ChipCombobox,
+  Chip,
+  ChipCombobox,
   ChipModal,
   ChipModalBody,
   ChipModalError,
   ChipModalFooter,
   ChipModalHeader,
   ChipSelect,
+  cn,
   Input,
   Label,
   Switch,
@@ -17,15 +20,25 @@ import {
 } from '@sim/emcn'
 import { Camera, Check, CircleInfo, Pencil } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
+import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { requestJson } from '@/lib/api/client/request'
-import { telemetryContract } from '@/lib/api/contracts/telemetry'
-import { signOut, useSession } from '@/lib/auth/auth-client'
-import { ANONYMOUS_USER_ID } from '@/lib/auth/constants'
-import { isHosted } from '@/lib/core/config/env-flags'
-// import { getBrowserTimezone, getTimezoneOptions } from '@/lib/core/utils/timezone'
+import { useQueryState } from 'nuqs'
+import { useSession } from '@/lib/auth/auth-client'
+import { signOutAndRedirect } from '@/lib/auth/sign-out'
+import { useDeploymentShape } from '@/lib/core/config/deployment-shape'
+import { getBrowserTimezone, getTimezoneOptions } from '@/lib/core/utils/timezone'
 import { getBaseUrl } from '@/lib/core/utils/urls'
+import { DeleteAccountModal } from '@/app/workspace/[workspaceId]/settings/components/general/components/delete-account-modal'
+import { PrivacyView } from '@/app/workspace/[workspaceId]/settings/components/general/components/privacy-view'
+import {
+  generalViewParam,
+  generalViewUrlKeys,
+} from '@/app/workspace/[workspaceId]/settings/components/general/search-params'
+import {
+  getTimezonePickerPresentation,
+  timezonePreferenceFromPickerValue,
+} from '@/app/workspace/[workspaceId]/settings/components/general/timezone-picker'
 import type { SettingsAction } from '@/app/workspace/[workspaceId]/settings/components/settings-header/settings-header'
 import { SettingsPanel } from '@/app/workspace/[workspaceId]/settings/components/settings-panel'
 import { SettingsSection } from '@/app/workspace/[workspaceId]/settings/components/settings-section/settings-section'
@@ -37,19 +50,27 @@ import {
   useUpdateUserProfile,
   useUserProfile,
 } from '@/hooks/queries/user-profile'
-import { clearUserData } from '@/stores'
+
+/** `loading` gives the view its own boundary; the section page has none to suspend into. */
+const AuthorizedApps = dynamic(
+  () =>
+    import(
+      '@/app/workspace/[workspaceId]/settings/components/authorized-apps/authorized-apps'
+    ).then((module) => module.AuthorizedApps),
+  { loading: () => null }
+)
 
 const logger = createLogger('General')
 
 /** Human-friendly timezone options for the picker, common zones first. */
-// const TIMEZONE_OPTIONS = getTimezoneOptions()
+const TIMEZONE_OPTIONS = getTimezoneOptions()
 
 /**
- * Shared trigger width for the appearance dropdowns (Theme, Timezone, Snap
- * to grid) so they line up as one column instead of differently-sized
+ * Shared trigger width for the three appearance dropdowns (Theme, Timezone, Snap
+ * to grid) so they line up as one column instead of three differently-sized
  * pills. Wide enough for the longest common timezone label.
  */
-const DROPDOWN_TRIGGER_CLASS = 'w-[240px] flex-shrink-0'
+const DROPDOWN_TRIGGER_CLASS = 'w-full shrink-0 md:w-[240px]'
 
 /**
  * Extracts initials from a user's name.
@@ -73,6 +94,7 @@ export function General({ hideProfile = false }: GeneralProps) {
   const router = useRouter()
   const brandConfig = useOrgBrandConfig()
   const { data: session } = useSession()
+  const { hosted } = useDeploymentShape()
 
   const { data: profile, isLoading: isProfileLoading } = useUserProfile()
   const updateProfile = useUpdateUserProfile()
@@ -94,8 +116,14 @@ export function General({ hideProfile = false }: GeneralProps) {
     setName(profile.name)
   }
 
+  const [view, setView] = useQueryState(generalViewParam.key, {
+    ...generalViewParam.parser,
+    ...generalViewUrlKeys,
+  })
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false)
   const resetPassword = useResetPassword()
+
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
 
   const [uploadError, setUploadError] = useState<string | null>(null)
 
@@ -174,16 +202,6 @@ export function General({ hideProfile = false }: GeneralProps) {
     handleUpdateName()
   }
 
-  const handleSignOut = async () => {
-    try {
-      await Promise.all([signOut(), clearUserData()])
-      router.push('/login?fromLogout=true')
-    } catch (error) {
-      logger.error('Error signing out:', { error })
-      router.push('/login?fromLogout=true')
-    }
-  }
-
   const handleResetPasswordConfirm = async () => {
     if (!profile?.email) return
 
@@ -207,13 +225,18 @@ export function General({ hideProfile = false }: GeneralProps) {
     )
   }
 
-  // const handleThemeChange = async (value: string) => {
-  //   await updateSetting.mutateAsync({ key: 'theme', value: value as 'light' | 'dark' })
-  // }
+  const handleThemeChange = async (value: string) => {
+    await updateSetting.mutateAsync({ key: 'theme', value: value as 'system' | 'light' | 'dark' })
+  }
 
-  // const handleTimezoneChange = async (value: string) => {
-  //   await updateSetting.mutateAsync({ key: 'timezone', value })
-  // }
+  const handleTimezoneChange = async (value: string) => {
+    const timezone = timezonePreferenceFromPickerValue(value)
+    if (timezone === undefined) return
+    await updateSetting.mutateAsync({
+      key: 'timezone',
+      value: timezone,
+    })
+  }
 
   const handleAutoConnectChange = async (checked: boolean) => {
     if (checked !== settings?.autoConnect && !updateSetting.isPending) {
@@ -246,53 +269,55 @@ export function General({ hideProfile = false }: GeneralProps) {
     }
   }
 
-  const handleTelemetryToggle = async (checked: boolean) => {
-    if (checked !== settings?.telemetryEnabled && !updateSetting.isPending) {
-      await updateSetting.mutateAsync({ key: 'telemetryEnabled', value: checked })
-
-      if (checked) {
-        if (typeof window !== 'undefined') {
-          requestJson(telemetryContract, {
-            body: {
-              category: 'consent',
-              action: 'enable_from_settings',
-              timestamp: new Date().toISOString(),
-            },
-          }).catch(() => {})
-        }
-      }
-    }
-  }
-
   const imageUrl =
     profilePictureUrl || profile?.image || brandConfig.logoUrl || brandConfig.logoUrlBlacktext
 
-  if (isLoading) {
-    return null
+  if (view === 'privacy') {
+    return <PrivacyView onBack={() => setView(null, { history: 'replace' })} />
+  }
+
+  if (view === 'authorized-apps' && !isAuthDisabled) {
+    return <AuthorizedApps onBack={() => setView(null, { history: 'replace' })} />
   }
 
   const actions: SettingsAction[] = [
-    ...(isHosted
+    ...(hosted
       ? [
           {
+            id: 'home-page',
             text: 'Home page',
             onSelect: () => window.open('/?home', '_blank', 'noopener,noreferrer'),
           },
         ]
       : []),
-    ...(!isAuthDisabled
+    ...(session?.user?.id && !isAuthDisabled
       ? [
-          { text: 'Sign out', onSelect: handleSignOut },
-          { text: 'Reset password', onSelect: () => setShowResetPasswordModal(true) },
+          { id: 'sign-out', text: 'Sign out', onSelect: () => signOutAndRedirect(router.push) },
+          {
+            id: 'reset-password',
+            text: 'Reset password',
+            onSelect: () => setShowResetPasswordModal(true),
+            disabled: !profile?.email,
+          },
         ]
       : []),
   ]
 
+  if (isLoading) {
+    return <SettingsPanel actions={actions} />
+  }
+
+  const browserTimezone = getBrowserTimezone()
+  const savedTimezone = settings?.timezone ?? null
+  const timezonePicker = getTimezonePickerPresentation(
+    savedTimezone,
+    browserTimezone,
+    TIMEZONE_OPTIONS
+  )
+
   return (
     <>
-      <SettingsPanel
-      // actions={actions}
-      >
+      <SettingsPanel actions={actions}>
         {!hideProfile && (
           <SettingsSection label='Profile'>
             <div className='flex flex-col gap-3'>
@@ -301,7 +326,10 @@ export function General({ hideProfile = false }: GeneralProps) {
                   <button
                     type='button'
                     aria-label='Change profile picture'
-                    className={`group relative flex size-9 flex-shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full transition-all hover-hover:bg-[var(--bg)] ${!imageUrl ? 'border border-[var(--border)]' : ''}`}
+                    className={cn(
+                      'group relative flex size-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full transition-colors hover-hover:bg-[var(--bg)]',
+                      !imageUrl && 'border border-[var(--border)]'
+                    )}
                     onClick={handleProfilePictureClick}
                   >
                     {(() => {
@@ -313,7 +341,7 @@ export function General({ hideProfile = false }: GeneralProps) {
                             width={36}
                             height={36}
                             unoptimized
-                            className={`h-full w-full object-cover transition-opacity duration-300 ${
+                            className={`size-full object-cover transition-opacity duration-300 ${
                               isUploadingProfilePicture ? 'opacity-50' : 'opacity-100'
                             }`}
                           />
@@ -363,7 +391,7 @@ export function General({ hideProfile = false }: GeneralProps) {
                             onChange={(e) => setName(e.target.value)}
                             onKeyDown={handleKeyDown}
                             onBlur={handleInputBlur}
-                            className='absolute top-0 left-0 h-full w-full border-0 bg-transparent p-0 text-base outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0'
+                            className='absolute top-0 left-0 size-full border-0 bg-transparent p-0 text-base outline-hidden focus:outline-hidden focus:ring-0 focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0'
                             maxLength={100}
                             disabled={updateProfile.isPending}
                             autoComplete='off'
@@ -374,7 +402,7 @@ export function General({ hideProfile = false }: GeneralProps) {
                         </div>
                         <Button
                           variant='ghost'
-                          className='size-[12px] flex-shrink-0 p-0'
+                          className='size-[12px] shrink-0 p-0'
                           onClick={handleUpdateName}
                           disabled={updateProfile.isPending}
                           aria-label='Save name'
@@ -387,7 +415,7 @@ export function General({ hideProfile = false }: GeneralProps) {
                         <h3 className='text-base'>{profile?.name || ''}</h3>
                         <Button
                           variant='ghost'
-                          className='size-[10.5px] flex-shrink-0 p-0'
+                          className='size-[10.5px] shrink-0 p-0'
                           onClick={() => setIsEditingName(true)}
                           aria-label='Edit name'
                         >
@@ -406,7 +434,7 @@ export function General({ hideProfile = false }: GeneralProps) {
 
         <SettingsSection label='Preferences'>
           <div className='flex flex-col gap-4'>
-            {/* <div className='flex items-center justify-between'>
+            <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
               <Label>Theme</Label>
               <div className={DROPDOWN_TRIGGER_CLASS}>
                 <ChipSelect
@@ -426,7 +454,7 @@ export function General({ hideProfile = false }: GeneralProps) {
               </div>
             </div>
 
-            <div className='flex items-center justify-between gap-4'>
+            <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4'>
               <Label>Timezone</Label>
               <div className={DROPDOWN_TRIGGER_CLASS}>
                 <ChipCombobox
@@ -434,13 +462,13 @@ export function General({ hideProfile = false }: GeneralProps) {
                   dropdownWidth={240}
                   searchable
                   searchPlaceholder='Search timezones'
-                  value={settings?.timezone ?? getBrowserTimezone()}
+                  value={timezonePicker.value}
                   onChange={handleTimezoneChange}
                   placeholder='Select timezone'
-                  options={TIMEZONE_OPTIONS}
+                  options={timezonePicker.options}
                 />
               </div>
-            </div> */}
+            </div>
 
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-1.5'>
@@ -531,7 +559,7 @@ export function General({ hideProfile = false }: GeneralProps) {
               />
             </div>
 
-            <div className='flex items-center justify-between'>
+            <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
               <Label>Snap to grid</Label>
               <div className={DROPDOWN_TRIGGER_CLASS}>
                 <ChipSelect
@@ -566,21 +594,26 @@ export function General({ hideProfile = false }: GeneralProps) {
         </SettingsSection>
 
         <SettingsSection label='Privacy'>
-          <div className='flex flex-col gap-3'>
-            <div className='flex items-center justify-between'>
-              <Label htmlFor='telemetry'>Allow anonymous telemetry</Label>
-              <Switch
-                id='telemetry'
-                checked={settings?.telemetryEnabled ?? true}
-                onCheckedChange={handleTelemetryToggle}
-              />
-            </div>
-            <p className='text-[var(--text-muted)] text-small'>
-              We use OpenTelemetry to collect anonymous usage data to improve Arena. You can opt-out
-              at any time.
-            </p>
+          <div className='flex items-center justify-between'>
+            <Label>Privacy settings</Label>
+            <Chip onClick={() => setView('privacy')}>Manage</Chip>
           </div>
         </SettingsSection>
+
+        {!isAuthDisabled && (
+          <SettingsSection label='Account'>
+            <div className='flex flex-col gap-4'>
+              <div className='flex items-center justify-between'>
+                <Label>Authorized apps</Label>
+                <Chip onClick={() => setView('authorized-apps')}>Manage</Chip>
+              </div>
+              <div className='flex items-center justify-between'>
+                <Label>Delete account</Label>
+                <Chip onClick={() => setShowDeleteAccountModal(true)}>Delete</Chip>
+              </div>
+            </div>
+          </SettingsSection>
+        )}
       </SettingsPanel>
 
       <ChipModal
@@ -613,6 +646,12 @@ export function General({ hideProfile = false }: GeneralProps) {
           }}
         />
       </ChipModal>
+
+      <DeleteAccountModal
+        open={showDeleteAccountModal}
+        onOpenChange={setShowDeleteAccountModal}
+        email={profile?.email || ''}
+      />
     </>
   )
 }

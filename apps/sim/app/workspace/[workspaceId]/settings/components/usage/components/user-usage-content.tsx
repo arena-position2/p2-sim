@@ -55,7 +55,7 @@ interface UserUsageContentProps {
 }
 
 function workspaceUsageHref(workspaceId: string): string {
-  return `/workspace/${workspaceId}/settings/usage?scope=user`
+  return `/workspace/${workspaceId}/settings/arena-usage?scope=user`
 }
 
 function workflowLogsHref(workspaceId: string, workflowId: string): string {

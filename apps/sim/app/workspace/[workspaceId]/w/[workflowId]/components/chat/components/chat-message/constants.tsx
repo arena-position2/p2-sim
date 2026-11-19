@@ -2,11 +2,16 @@
 
 import { type SyntheticEvent, useCallback, useEffect, useState } from 'react'
 import { Button, Modal, ModalBody, ModalContent, ModalHeader } from '@sim/emcn'
+import { createLogger } from '@sim/logger'
 import { AlertTriangle, Check, Download, Expand, X } from 'lucide-react'
-import { normalizeImageUrlForCompare } from '@/lib/chat/assistant-assets'
-import { isUserFileWithMetadata } from '@/lib/core/utils/user-file'
+import {
+  chatDisplayUrlForImageFile,
+  normalizeImageUrlForCompare,
+} from '@/lib/chat/assistant-assets'
 
 export { normalizeImageUrlForCompare } from '@/lib/chat/assistant-assets'
+
+const logger = createLogger('ChatMessageImages')
 
 /**
  * Common base64-encoded image headers
@@ -236,7 +241,7 @@ function Base64ImageWithBlobUrl({
         className='h-full max-w-full rounded-lg border bg-cover'
         style={{ maxHeight: '500px', objectFit: 'contain' }}
         onError={(e) => {
-          console.error('Image failed to load (blob URL)', { error: e })
+          logger.error('Image failed to load (blob URL)', { error: e })
         }}
       />
     </ImageWithViewFullOverlay>
@@ -493,7 +498,7 @@ export const renderBs64Img = ({
             className='h-full max-w-full rounded-lg bg-cover object-contain'
             referrerPolicy='no-referrer'
             onError={(e) => {
-              console.error('Image failed to load:', {
+              logger.error('Image failed to load:', {
                 error: e,
                 imageUrl: singleImageUrl,
               })
@@ -520,7 +525,7 @@ export const renderBs64Img = ({
               className='h-full max-w-full rounded-lg bg-cover object-contain'
               referrerPolicy='no-referrer'
               onError={(e) => {
-                console.error('Image failed to load:', {
+                logger.error('Image failed to load:', {
                   error: e,
                   imageUrl: singleImageUrl,
                 })
@@ -570,7 +575,7 @@ export const renderBs64Img = ({
           className='h-full max-w-full rounded-lg bg-cover object-contain'
           referrerPolicy='no-referrer'
           onError={(e) => {
-            console.error('Image failed to load:', {
+            logger.error('Image failed to load:', {
               error: e,
               imageSrcLength: imageSrc.length,
               preview: imageSrc.substring(0, 100),
@@ -580,7 +585,7 @@ export const renderBs64Img = ({
       </ImageWithViewFullOverlay>
     )
   } catch (error) {
-    console.error('Error rendering image:', error, {
+    logger.error('Error rendering image:', error, {
       imageDataLength: imageData?.length,
       isBase64,
       imageUrl,
@@ -745,7 +750,7 @@ export const downloadImage = async (isBase64?: boolean, imageData?: string, imag
 
     // Clean up the URL
     setTimeout(() => URL.revokeObjectURL(url), 100)
-  } catch (error) {
+  } catch {
     alert('Failed to download image. Please try again later.')
   }
 }
@@ -803,23 +808,9 @@ export function extractBase64Image(content: string): {
         const headerIndex = cleanText.indexOf(header)
 
         if (headerIndex !== -1) {
-          // Found a potential base64 string starting with this header
-          // Extract everything from the header onwards that looks like base64
-          let base64Start = headerIndex
-
-          // Look backwards to see if there's "image:" or similar prefix to remove
-          const beforeHeader = cleanText.substring(0, base64Start)
-          const imagePrefixMatch = beforeHeader.match(/(?:^|\s)(image\s*:?\s*)$/i)
-          if (imagePrefixMatch) {
-            base64Start = base64Start - imagePrefixMatch[1].length
-          }
-
-          // Extract the base64 string (everything from base64Start that's base64-like)
-          let base64End = base64Start
-          const textFromStart = cleanText.substring(base64Start)
-
-          // Match base64 characters (including spaces/newlines that might be in the string)
-          const base64Match = textFromStart.match(/^[^A-Za-z0-9+/=\s]*([A-Za-z0-9+/=\s]{50,})/)
+          // Match from the image header. A data URL prefix is stripped only after the payload matches.
+          const textFromHeader = cleanText.substring(headerIndex)
+          const base64Match = textFromHeader.match(/^[^A-Za-z0-9+/=\s]*([A-Za-z0-9+/=\s]{50,})/)
 
           if (base64Match) {
             const base64WithSpaces = base64Match[1]
@@ -831,8 +822,16 @@ export function extractBase64Image(content: string): {
               /^[A-Za-z0-9+/=]+$/.test(base64String) &&
               base64String.length >= 50
             ) {
-              // Calculate the end position
-              base64End = base64Start + base64Match[0].length
+              const beforeHeader = cleanText.substring(0, headerIndex)
+              const dataUrlPrefixMatch = beforeHeader.match(/data:image\/[a-z0-9.+-]+;base64,$/i)
+              const imagePrefixMatch = beforeHeader.match(/(?:^|\s)(image\s*:?\s*)$/i)
+              let base64Start = headerIndex
+              if (dataUrlPrefixMatch) {
+                base64Start = headerIndex - dataUrlPrefixMatch[0].length
+              } else if (imagePrefixMatch) {
+                base64Start = headerIndex - imagePrefixMatch[1].length
+              }
+              const base64End = headerIndex + base64Match[0].length
 
               // Remove the base64 string from the text
               const beforeBase64 = cleanText.substring(0, base64Start).trim()
@@ -1155,6 +1154,284 @@ function isOrphanLabelLine(text: string): boolean {
   return /^[\w#.-]+(?:\s+[\w#.-]+){0,3}\s*:?\s*$/.test(trimmed)
 }
 
+const IMAGE_PAYLOAD_JSON_KEYS = [
+  '"base64"',
+  '"dataUrl"',
+  '"b64_json"',
+  '"data"',
+  '"bytes"',
+] as const
+
+function isImageBase64Payload(value: string): boolean {
+  const compact = value.replace(/\s+/g, '')
+  if (!compact) return false
+  const payload = /^data:image\//i.test(compact) ? (compact.split(',')[1] ?? '') : compact
+  return payload.length >= 50 && COMMON_IMAGE_HEADERS.some((header) => payload.startsWith(header))
+}
+
+function consumeBase64Run(text: string, start: number): number {
+  let end = start
+  while (end < text.length) {
+    const code = text.charCodeAt(end)
+    const isBase64Char =
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      code === 43 ||
+      code === 47 ||
+      code === 61 ||
+      code === 45 ||
+      code === 95
+    if (!isBase64Char) break
+    end += 1
+  }
+  return end
+}
+
+function dataImagePrefixLength(text: string, index: number): number {
+  const head = text[index]
+  if (head !== 'd' && head !== 'D') return 0
+  const match = /^data:image\/[a-z0-9.+-]+;base64,/i.exec(text.slice(index, index + 64))
+  return match?.[0].length ?? 0
+}
+
+function imageHeaderLengthAt(text: string, index: number): number {
+  for (const header of COMMON_IMAGE_HEADERS) {
+    if (text.startsWith(header, index)) return header.length
+  }
+  return 0
+}
+
+function stripJsonImagePayloadFields(text: string): string {
+  let result = text
+  for (const key of IMAGE_PAYLOAD_JSON_KEYS) {
+    let searchFrom = 0
+    while (searchFrom < result.length) {
+      const keyIndex = result.indexOf(key, searchFrom)
+      if (keyIndex === -1) break
+
+      let cursor = keyIndex + key.length
+      while (cursor < result.length && /\s/.test(result[cursor] ?? '')) cursor += 1
+      if (result[cursor] !== ':') {
+        searchFrom = keyIndex + key.length
+        continue
+      }
+      cursor += 1
+      while (cursor < result.length && /\s/.test(result[cursor] ?? '')) cursor += 1
+      if (result[cursor] !== '"') {
+        searchFrom = keyIndex + key.length
+        continue
+      }
+
+      const valueStart = cursor + 1
+      let valueEnd = valueStart
+      while (valueEnd < result.length && result[valueEnd] !== '"') valueEnd += 1
+      const value = result.slice(valueStart, valueEnd)
+      if (!isImageBase64Payload(value)) {
+        searchFrom = keyIndex + key.length
+        continue
+      }
+
+      let removeStart = keyIndex
+      let removeEnd = valueEnd + 1
+      let after = removeEnd
+      while (after < result.length && /\s/.test(result[after] ?? '')) after += 1
+      if (result[after] === ',') {
+        removeEnd = after + 1
+      } else {
+        let before = removeStart - 1
+        while (before >= 0 && /\s/.test(result[before] ?? '')) before -= 1
+        if (result[before] === ',') removeStart = before
+      }
+
+      result = `${result.slice(0, removeStart)}${result.slice(removeEnd)}`
+      searchFrom = removeStart
+    }
+  }
+  return result
+}
+
+/**
+ * Removes inline image bytes from assistant prose once a real image is already shown.
+ * Edit replies often echo the selected file as a data URL or `base64` field beside the stored URL.
+ */
+function stripInlineImagePayloads(text: string): string {
+  const source = stripJsonImagePayloadFields(text)
+  const chunks: string[] = []
+  let cursor = 0
+  let index = 0
+
+  while (index < source.length) {
+    const dataPrefix = dataImagePrefixLength(source, index)
+    if (dataPrefix > 0) {
+      const payloadEnd = consumeBase64Run(source, index + dataPrefix)
+      if (payloadEnd - (index + dataPrefix) >= 50) {
+        if (index > cursor) chunks.push(source.slice(cursor, index))
+        index = payloadEnd
+        cursor = index
+        continue
+      }
+    }
+
+    const headerLength = imageHeaderLengthAt(source, index)
+    if (headerLength > 0) {
+      const payloadEnd = consumeBase64Run(source, index)
+      if (payloadEnd - index >= 50) {
+        if (index > cursor) chunks.push(source.slice(cursor, index))
+        index = payloadEnd
+        cursor = index
+        continue
+      }
+    }
+
+    index += 1
+  }
+
+  if (cursor < source.length) chunks.push(source.slice(cursor))
+
+  return chunks
+    .join('')
+    .replace(/!?\[[^\]]*\]\(\s*\)/g, '')
+    .replace(/\{\s*\}/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function fenceLanguage(openLine: string): string {
+  const info = /^(\s*)([`~]{3,})(.*)$/.exec(openLine)?.[3] ?? ''
+  return info.trim().toLowerCase().split(/\s/)[0] ?? ''
+}
+
+function isSampleCodeFence(openLine: string): boolean {
+  const language = fenceLanguage(openLine)
+  return (
+    language === 'html' ||
+    language === 'css' ||
+    language === 'svg' ||
+    language === 'xml' ||
+    language === 'tsx' ||
+    language === 'jsx' ||
+    language === 'ts' ||
+    language === 'python' ||
+    language === 'py' ||
+    language === 'bash' ||
+    language === 'sh' ||
+    language === 'md'
+  )
+}
+
+function sanitizeImagePayloadFence(lines: string[]): string | null {
+  if (lines.length < 2 || isSampleCodeFence(lines[0] ?? '')) {
+    return lines.join('\n')
+  }
+
+  const body = lines.slice(1, -1).join('\n').trim()
+  if (!body) return lines.join('\n')
+
+  try {
+    const parsed = JSON.parse(body) as unknown
+    if (chatImageFileUrls(parsed)) return null
+    const stripped = stripJsonImagePayloadFields(JSON.stringify(parsed))
+    const reparsed = JSON.parse(stripped) as unknown
+    if (JSON.stringify(reparsed) === JSON.stringify(parsed)) return lines.join('\n')
+    if (
+      reparsed == null ||
+      (typeof reparsed === 'object' && Object.keys(reparsed as object).length === 0)
+    ) {
+      return null
+    }
+    const open = lines[0] ?? '```'
+    const close = lines[lines.length - 1] ?? '```'
+    return `${open}\n${JSON.stringify(reparsed, null, 2)}\n${close}`
+  } catch {
+    return lines.join('\n')
+  }
+}
+
+function partitionImageFileFences(raw: string): { text: string; urls: string[] } {
+  const urls: string[] = []
+  const parts: string[] = []
+  let outsideLines: string[] = []
+  let fenceLines: string[] = []
+
+  const flushOutside = () => {
+    if (outsideLines.length === 0) return
+    parts.push(outsideLines.join('\n'))
+    outsideLines = []
+  }
+
+  const flushFence = () => {
+    if (fenceLines.length === 0) return
+    const body = fenceLines.slice(1, -1).join('\n').trim()
+    try {
+      const fileUrls = chatImageFileUrls(JSON.parse(body) as unknown)
+      if (fileUrls) {
+        urls.push(...fileUrls)
+        fenceLines = []
+        return
+      }
+    } catch {
+      // Not an image-file dump; keep the fence in the prose.
+    }
+    parts.push(fenceLines.join('\n'))
+    fenceLines = []
+  }
+
+  forEachMarkdownFenceLine(raw, (line, insideFence) => {
+    if (insideFence) {
+      flushOutside()
+      fenceLines.push(line)
+      return
+    }
+    flushFence()
+    outsideLines.push(line)
+  })
+  flushOutside()
+  flushFence()
+
+  return { text: parts.join('\n').trim(), urls }
+}
+
+function stripRenderedImagePayloads(raw: string): string {
+  const parts: string[] = []
+  let outsideLines: string[] = []
+  let fenceLines: string[] = []
+
+  const flushOutside = () => {
+    if (outsideLines.length === 0) return
+    const cleaned = stripInlineImagePayloads(outsideLines.join('\n'))
+    outsideLines = []
+    if (cleaned) parts.push(cleaned)
+  }
+
+  const flushFence = () => {
+    if (fenceLines.length === 0) return
+    const kept = sanitizeImagePayloadFence(fenceLines)
+    fenceLines = []
+    if (kept?.trim()) parts.push(kept)
+  }
+
+  forEachMarkdownFenceLine(raw, (line, insideFence) => {
+    if (insideFence) {
+      flushOutside()
+      fenceLines.push(line)
+      return
+    }
+    flushFence()
+    outsideLines.push(line)
+  })
+  flushOutside()
+  flushFence()
+
+  return parts
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 /**
  * Drops hoisted image URLs from prose lines. Fenced code is copied through
  * unchanged, including its backticks, so a sample page stays one code block.
@@ -1256,15 +1533,125 @@ export function isImageUrlLine(s: string): boolean {
   return extractImageUrlFromLine(s) !== null
 }
 
+function chatImageFileUrl(value: unknown): string | null {
+  return chatDisplayUrlForImageFile(value)
+}
+
+/** A selected `image` file, or an `images` array of them, is shown as pictures only. */
+function chatImageFileUrls(value: unknown): string[] | null {
+  const single = chatImageFileUrl(value)
+  if (single) {
+    return [single]
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    return null
+  }
+  const urls: string[] = []
+  for (const item of value) {
+    const url = chatImageFileUrl(item)
+    if (!url) {
+      return null
+    }
+    urls.push(url)
+  }
+  return urls
+}
+
 /**
  * Resolves assistant message text into deduped image URLs and remaining markdown prose.
  * Handles: (1) multiple outputs joined with \\n\\n (same URL twice from content+image picks),
  * (2) JSON payloads `{ content, image, metadata }`, (3) single URL lines.
  * Image URLs inside fenced code stay in the prose so sample HTML is not previewed as a chat image.
  */
+function balancedJsonObjectEnd(text: string, start: number): number {
+  if (text[start] !== '{') return -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      continue
+    }
+    if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+  return -1
+}
+
+/** Drops image file records that were stringified into the answer. */
+function stripImageFileRecordObjects(text: string): { text: string; urls: string[] } {
+  const urls: string[] = []
+  let result = ''
+  let index = 0
+  while (index < text.length) {
+    const start = text.indexOf('{', index)
+    if (start === -1) {
+      result += text.slice(index)
+      break
+    }
+    const end = balancedJsonObjectEnd(text, start)
+    if (end === -1) {
+      result += text.slice(start)
+      break
+    }
+    const slice = text.slice(start, end)
+    let displayUrl: string | null = null
+    let hasStoredUrl = false
+    try {
+      const parsed = JSON.parse(slice) as { url?: unknown }
+      hasStoredUrl = typeof parsed.url === 'string' && parsed.url.trim().length > 0
+      displayUrl = hasStoredUrl ? null : chatDisplayUrlForImageFile(parsed)
+    } catch {
+      displayUrl = null
+    }
+    if (!displayUrl) {
+      result += text.slice(index, end)
+      index = end
+      continue
+    }
+    result += text.slice(index, start)
+    urls.push(displayUrl)
+    index = end
+  }
+  return {
+    text: result
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/^\n+|\n+$/g, '')
+      .trim(),
+    urls,
+  }
+}
+
 export function resolveMessageImagesAndProse(raw: string): { urls: string[]; prose: string } {
   if (!raw || typeof raw !== 'string') {
     return { urls: [], prose: '' }
+  }
+
+  const strippedRecords = stripImageFileRecordObjects(raw)
+  if (strippedRecords.urls.length > 0) {
+    const resolved = resolveMessageImagesAndProse(strippedRecords.text)
+    const urls: string[] = []
+    const seen = new Set<string>()
+    for (const url of strippedRecords.urls) addUniqueImageUrl(url, seen, urls)
+    for (const url of resolved.urls) addUniqueImageUrl(url, seen, urls)
+    return { urls, prose: resolved.prose }
   }
 
   const t = raw.trim()
@@ -1272,6 +1659,10 @@ export function resolveMessageImagesAndProse(raw: string): { urls: string[]; pro
     try {
       const o = JSON.parse(t) as Record<string, unknown>
       if (o && typeof o === 'object' && !Array.isArray(o)) {
+        const fileUrls = chatImageFileUrls(o)
+        if (fileUrls) {
+          return { urls: fileUrls, prose: '' }
+        }
         const jsonUrls: string[] = []
         const jSeen = new Set<string>()
         if (typeof o.image === 'string') addUniqueImageUrl(o.image, jSeen, jsonUrls)
@@ -1288,7 +1679,7 @@ export function resolveMessageImagesAndProse(raw: string): { urls: string[]; pro
         if (jsonUrls.length > 0) {
           const prose =
             typeof o.content === 'string' ? removeImageUrlsFromProse(o.content, jsonUrls) : ''
-          return { urls: jsonUrls, prose }
+          return { urls: jsonUrls, prose: stripRenderedImagePayloads(prose) }
         }
       }
     } catch {
@@ -1309,6 +1700,10 @@ export function resolveMessageImagesAndProse(raw: string): { urls: string[]; pro
   if (t.startsWith('[')) {
     try {
       const parsed = JSON.parse(t) as unknown
+      const fileUrls = chatImageFileUrls(parsed)
+      if (fileUrls) {
+        return { urls: fileUrls, prose: '' }
+      }
       const urls = parseImageUrlArray(parsed)
       if (urls.length > 0) {
         return { urls, prose: '' }
@@ -1323,6 +1718,10 @@ export function resolveMessageImagesAndProse(raw: string): { urls: string[]; pro
     if (fencedMatch?.[1]) {
       try {
         const parsed = JSON.parse(fencedMatch[1]) as unknown
+        const fileUrls = chatImageFileUrls(parsed)
+        if (fileUrls) {
+          return { urls: fileUrls, prose: '' }
+        }
         const urls = parseImageUrlArray(parsed)
         if (urls.length > 0) {
           return { urls, prose: '' }
@@ -1333,9 +1732,18 @@ export function resolveMessageImagesAndProse(raw: string): { urls: string[]; pro
     }
   }
 
-  const urls = extractAllImageUrlsFromText(raw)
+  const partitioned = partitionImageFileFences(raw)
+  const urls: string[] = []
+  const seen = new Set<string>()
+  for (const url of partitioned.urls) addUniqueImageUrl(url, seen, urls)
+  for (const url of extractAllImageUrlsFromText(partitioned.text)) {
+    addUniqueImageUrl(url, seen, urls)
+  }
   if (urls.length > 0) {
-    return { urls, prose: removeImageUrlsFromProse(raw, urls) }
+    return {
+      urls,
+      prose: stripRenderedImagePayloads(removeImageUrlsFromProse(partitioned.text, urls)),
+    }
   }
 
   return { urls: [], prose: raw }
@@ -1672,13 +2080,18 @@ export function mergeToolOutputImageUrls(
         continue
       }
 
-      if (isUserFileWithMetadata(value) && value.type.startsWith('image/') && value.url) {
-        add(value.url)
+      const fileUrl = chatDisplayUrlForImageFile(value)
+      if (fileUrl) {
+        add(fileUrl)
       }
     }
   }
   for (const u of urlsFromProse) add(u)
-  return { uniqueUrls, prose }
+  return {
+    uniqueUrls,
+    prose:
+      uniqueUrls.length > 0 || isBase64(imageField) ? stripRenderedImagePayloads(prose) : prose,
+  }
 }
 
 /**

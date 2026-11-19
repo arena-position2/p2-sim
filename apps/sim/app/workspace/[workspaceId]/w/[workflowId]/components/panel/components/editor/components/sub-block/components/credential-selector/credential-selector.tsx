@@ -8,17 +8,11 @@ import { consumeOAuthReturnContext, writeOAuthReturnContext } from '@/lib/creden
 import {
   getCanonicalScopesForProvider,
   getProviderIdFromServiceId,
-  getServiceConfigByProviderId,
   OAUTH_PROVIDERS,
   type OAuthProvider,
   parseProvider,
 } from '@/lib/oauth'
-import {
-  getMissingRequiredScopes,
-  getRequiredScopesForCredential,
-  getServiceConfigByServiceId,
-} from '@/lib/oauth/utils'
-import { isAdminWorkspace } from '@/lib/workspaces/is-admin-workspace'
+import { getMissingRequiredScopes, getServiceConfigByServiceId } from '@/lib/oauth/utils'
 import { ConnectOAuthModal } from '@/app/workspace/[workspaceId]/components/connect-oauth-modal'
 import {
   ConnectServiceAccountModal,
@@ -34,16 +28,9 @@ import { useActiveSearchTarget } from '@/app/workspace/[workspaceId]/w/[workflow
 import { BrandIcon } from '@/blocks/brand-icon'
 import type { SubBlockConfig } from '@/blocks/types'
 import { useWorkspaceCredential, useWorkspaceCredentials } from '@/hooks/queries/credentials'
-import { useHubSpotAccountOptions } from '@/hooks/queries/hubspot-accounts'
-import { useConnectOAuthService } from '@/hooks/queries/oauth/oauth-connections'
-import { useOAuthCredentials } from '@/hooks/queries/oauth/oauth-credentials'
-import { useUnipileAccountOptions } from '@/hooks/queries/unipile'
-import { useCanUseZoomAdmin } from '@/hooks/queries/workspace'
+import { useOAuthCredentials } from '@/hooks/queries/oauth/credentials'
 import { useCredentialRefreshTriggers } from '@/hooks/use-credential-refresh-triggers'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
-
-const UNIPILE_LINKEDIN_PROVIDER_ID = 'unipile_linkedin' as const
-const UNIPILE_RECONNECT_PREFIX = '__reconnect__:' as const
 
 interface CredentialSelectorProps {
   blockId: string
@@ -75,13 +62,6 @@ export function CredentialSelector({
 
   const label = subBlock.placeholder || 'Select credential'
   const serviceId = subBlock.serviceId || ''
-  const { canUseZoomAdmin } = useCanUseZoomAdmin(workspaceId)
-  const additionalConnectOptions = useMemo(() => {
-    const options = subBlock.additionalConnectOptions || []
-    if (options.length === 0) return options
-    // Zoom Admin connect: org allowlist or env ADMIN_WORKSPACE_IDS (same as authorize).
-    return canUseZoomAdmin ? options : []
-  }, [subBlock.additionalConnectOptions, canUseZoomAdmin])
   const isAllCredentials = !serviceId
   const effectiveProviderId = getProviderIdFromServiceId(serviceId) as OAuthProvider
 
@@ -98,12 +78,8 @@ export function CredentialSelector({
   const selectedId = typeof effectiveValue === 'string' ? effectiveValue : ''
 
   const provider = effectiveProviderId
-  const isSharedUnipileWorkspace =
-    effectiveProviderId === UNIPILE_LINKEDIN_PROVIDER_ID && isAdminWorkspace(workspaceId)
 
   const isTriggerMode = subBlock.mode === 'trigger' || subBlock.mode === 'trigger-advanced'
-  const isSharedHubspotWorkspace =
-    isAdminWorkspace(workspaceId) && effectiveProviderId === 'hubspot'
 
   const {
     data: rawCredentials = [],
@@ -116,36 +92,12 @@ export function CredentialSelector({
   })
 
   const {
-    data: unipileAccountOptions = [],
-    isFetching: unipileAccountOptionsLoading,
-    refetch: refetchUnipileAccountOptions,
-  } = useUnipileAccountOptions(isSharedUnipileWorkspace ? workspaceId : undefined)
-
-  const connectOAuthService = useConnectOAuthService()
-
-  const {
     data: allWorkspaceCredentials = [],
     isFetching: allCredentialsLoading,
     refetch: refetchAllCredentials,
   } = useWorkspaceCredentials({ workspaceId, enabled: isAllCredentials })
 
-  const { data: additionalWorkspaceCredentials = [] } = useWorkspaceCredentials({
-    workspaceId,
-    type: 'oauth',
-    enabled: additionalConnectOptions.length > 0,
-  })
-
-  const {
-    data: hubspotAccountOptions = [],
-    isFetching: hubspotAccountOptionsLoading,
-    refetch: refetchHubspotAccounts,
-  } = useHubSpotAccountOptions(isSharedHubspotWorkspace ? workspaceId : undefined)
-
-  const credentialsLoading = isAllCredentials
-    ? allCredentialsLoading
-    : oauthCredentialsLoading ||
-      (isSharedHubspotWorkspace && hubspotAccountOptionsLoading) ||
-      (isSharedUnipileWorkspace && unipileAccountOptionsLoading)
+  const credentialsLoading = isAllCredentials ? allCredentialsLoading : oauthCredentialsLoading
 
   const credentialKind = subBlock.credentialKind
   const isMergedKinds = credentialKind === 'any'
@@ -205,42 +157,21 @@ export function CredentialSelector({
     selectedCredential?.type === 'service_account' ||
     selectedAllCredential?.type === 'service_account'
 
-  const matchedHubspotOption = useMemo(
-    () => hubspotAccountOptions.find((option) => option.id === selectedId) ?? null,
-    [hubspotAccountOptions, selectedId]
-  )
-
-  const selectedUnipileAccountOption = useMemo(
-    () => unipileAccountOptions.find((option) => option.id === selectedId) ?? null,
-    [unipileAccountOptions, selectedId]
-  )
-
   const { data: inaccessibleCredential } = useWorkspaceCredential(
     selectedId || undefined,
     Boolean(selectedId) &&
       !selectedCredential &&
       !selectedAllCredential &&
-      !matchedHubspotOption &&
-      !selectedUnipileAccountOption &&
       !credentialsLoading &&
       Boolean(workspaceId)
   )
   const inaccessibleCredentialName = inaccessibleCredential?.displayName ?? null
 
-  const resolvedLabel = useMemo(() => {
-    if (selectedAllCredential) return selectedAllCredential.displayName
-    if (selectedCredential) return selectedCredential.name
-    if (matchedHubspotOption) return matchedHubspotOption.label
-    if (selectedUnipileAccountOption) return selectedUnipileAccountOption.label
-    if (inaccessibleCredentialName) return inaccessibleCredentialName
-    return ''
-  }, [
-    selectedAllCredential,
-    selectedCredential,
-    matchedHubspotOption,
-    selectedUnipileAccountOption,
-    inaccessibleCredentialName,
-  ])
+  const resolvedLabel = selectedAllCredential
+    ? selectedAllCredential.displayName
+    : selectedCredential
+      ? selectedCredential.name
+      : inaccessibleCredentialName || ''
 
   const displayValue = isEditing ? editingValue : resolvedLabel
 
@@ -255,41 +186,23 @@ export function CredentialSelector({
     ? dataversePolicy.requiredScopes
     : (subBlock.requiredScopes ?? [])
 
-  const refetch = useCallback(async () => {
-    if (isAllCredentials) {
-      await refetchAllCredentials()
-    } else {
-      await refetchCredentials()
-    }
-    if (isSharedUnipileWorkspace) {
-      await refetchUnipileAccountOptions()
-    }
-  }, [
-    isAllCredentials,
-    isSharedUnipileWorkspace,
-    refetchAllCredentials,
-    refetchCredentials,
-    refetchUnipileAccountOptions,
-  ])
+  const refetch = useCallback(
+    () => (isAllCredentials ? refetchAllCredentials() : refetchCredentials()),
+    [isAllCredentials, refetchAllCredentials, refetchCredentials]
+  )
 
   useCredentialRefreshTriggers(refetch, effectiveProviderId, workspaceId)
 
   const handleOpenChange = useCallback(
     (isOpen: boolean) => {
-      if (!isOpen) return
-      void refetch()
-      if (isSharedHubspotWorkspace) void refetchHubspotAccounts()
+      if (isOpen) void refetch()
     },
-    [refetch, isSharedHubspotWorkspace, refetchHubspotAccounts]
+    [refetch]
   )
 
   const hasOAuthSelection = Boolean(selectedCredential)
-  const scopesForValidation = useMemo(
-    () => getRequiredScopesForCredential(selectedCredential, requiredScopes),
-    [selectedCredential, requiredScopes]
-  )
   const missingRequiredScopes = hasOAuthSelection
-    ? getMissingRequiredScopes(selectedCredential!, scopesForValidation)
+    ? getMissingRequiredScopes(selectedCredential!, requiredScopes || [])
     : []
   const needsUpdate =
     !isServiceAccount &&
@@ -324,42 +237,6 @@ export function CredentialSelector({
     setShowConnectModal(true)
   }, [credentialKind])
 
-  const handleUnipileReconnect = useCallback(
-    async (credentialId: string) => {
-      if (isPreview) return
-
-      const matchedUnipileOption = unipileAccountOptions.find(
-        (option) => option.credentialId === credentialId
-      )
-      const matchedCredential = credentials.find((cred) => cred.id === credentialId)
-
-      writeOAuthReturnContext({
-        origin: 'workflow',
-        workflowId: activeWorkflowId || '',
-        displayName: matchedUnipileOption?.label ?? matchedCredential?.name ?? 'LinkedIn account',
-        providerId: UNIPILE_LINKEDIN_PROVIDER_ID,
-        preCount: credentials.length,
-        workspaceId,
-        reconnect: true,
-        credentialId,
-        requestedAt: Date.now(),
-      })
-
-      await connectOAuthService.mutateAsync({
-        providerId: UNIPILE_LINKEDIN_PROVIDER_ID,
-        callbackURL: window.location.href,
-      })
-    },
-    [
-      activeWorkflowId,
-      connectOAuthService,
-      credentials,
-      isPreview,
-      unipileAccountOptions,
-      workspaceId,
-    ]
-  )
-
   const getProviderIcon = useCallback((providerName: OAuthProvider) => {
     const { baseProvider } = parseProvider(providerName)
     const baseProviderConfig = OAUTH_PROVIDERS[baseProvider]
@@ -371,11 +248,6 @@ export function CredentialSelector({
   }, [])
 
   const getProviderName = useCallback((providerName: OAuthProvider) => {
-    const serviceConfig = getServiceConfigByProviderId(providerName)
-    if (serviceConfig) {
-      return serviceConfig.name
-    }
-
     const { baseProvider } = parseProvider(providerName)
     const baseProviderConfig = OAUTH_PROVIDERS[baseProvider]
 
@@ -389,26 +261,6 @@ export function CredentialSelector({
       .join(' ')
   }, [])
 
-  const additionalConnectItems = useMemo(
-    () =>
-      additionalConnectOptions.map((option) => {
-        const optionProvider = getProviderIdFromServiceId(option.serviceId) as OAuthProvider
-        const credentialCount = additionalWorkspaceCredentials.filter(
-          (cred) => cred.providerId === optionProvider
-        ).length
-
-        return {
-          label: option.label,
-          value: `__connect_account__:${option.serviceId}`,
-          iconElement: <SquareArrowUpRight className='size-3' />,
-          serviceId: option.serviceId,
-          provider: optionProvider,
-          credentialCount,
-        }
-      }),
-    [additionalConnectOptions, additionalWorkspaceCredentials]
-  )
-
   const comboboxOptions = useMemo(() => {
     if (isAllCredentials) {
       const oauthCredentials = allWorkspaceCredentials.filter(
@@ -417,62 +269,6 @@ export function CredentialSelector({
       return oauthCredentials.map((cred) => ({ label: cred.displayName, value: cred.id }))
     }
     if (isMergedKinds) return []
-
-    if (isSharedHubspotWorkspace) {
-      const personalAccountCount = hubspotAccountOptions.filter(
-        (option) => option.source === 'personal'
-      ).length
-
-      const options = hubspotAccountOptions.map((option) => ({
-        label: option.label,
-        value: option.id,
-        iconElement: getProviderIcon(provider),
-      }))
-
-      options.push({
-        label:
-          personalAccountCount > 0 ? 'Connect another HubSpot account' : 'Connect HubSpot account',
-        value: '__connect_account__',
-        iconElement: <SquareArrowUpRight className='size-3' />,
-      })
-      options.push(...additionalConnectItems)
-
-      return options
-    }
-
-    if (isSharedUnipileWorkspace) {
-      const personalAccountCount = unipileAccountOptions.filter(
-        (option) => option.source === 'personal'
-      ).length
-
-      const options = unipileAccountOptions.map((option) => ({
-        label: option.label,
-        value: option.id,
-        iconElement: getProviderIcon(provider),
-      }))
-
-      options.push({
-        label:
-          personalAccountCount > 0
-            ? 'Connect another LinkedIn account'
-            : 'Connect LinkedIn account',
-        value: '__connect_account__',
-        iconElement: <SquareArrowUpRight className='size-3' />,
-      })
-
-      for (const option of unipileAccountOptions) {
-        if (!option.credentialId || !option.canReconnect) continue
-        options.push({
-          label: `Reconnect ${option.label}`,
-          value: `${UNIPILE_RECONNECT_PREFIX}${option.credentialId}`,
-          iconElement: <SquareArrowUpRight className='size-3' />,
-        })
-      }
-
-      options.push(...additionalConnectItems)
-
-      return options
-    }
 
     const options = credentials.map((cred) => ({
       label: cred.name,
@@ -497,17 +293,12 @@ export function CredentialSelector({
         iconElement: <SquareArrowUpRight className='size-3' />,
       })
     }
-    options.push(...additionalConnectItems)
 
     return options
   }, [
     isAllCredentials,
     isMergedKinds,
-    isSharedUnipileWorkspace,
-    unipileAccountOptions,
     allWorkspaceCredentials,
-    isSharedHubspotWorkspace,
-    hubspotAccountOptions,
     credentials,
     credentialKind,
     subBlock.credentialLabels,
@@ -516,7 +307,6 @@ export function CredentialSelector({
     provider,
     getProviderIcon,
     getProviderName,
-    additionalConnectItems,
   ])
 
   const comboboxGroups = useMemo<ComboboxOptionGroup[] | undefined>(() => {
@@ -570,14 +360,9 @@ export function CredentialSelector({
     provider,
     getProviderIcon,
     getProviderName,
-    additionalConnectItems,
   ])
 
   const selectedCredentialProvider = selectedCredential?.provider ?? provider
-  const reauthorizeProvider = selectedCredentialProvider
-  const reauthorizeServiceId = selectedCredential?.provider ?? serviceId
-  const reauthorizeRequiredScopes = getCanonicalScopesForProvider(reauthorizeProvider)
-
   const workflowSearchHighlight = getWorkflowSearchLabelHighlight({
     activeSearchTarget,
     subBlockId: subBlock.id,
@@ -620,34 +405,9 @@ export function CredentialSelector({
     workflowSearchHighlight,
   ])
 
-  const [connectModalConfig, setConnectModalConfig] = useState<{
-    provider: OAuthProvider
-    serviceId: string
-    credentialCount: number
-  } | null>(null)
-
-  const connectServiceId = connectModalConfig?.serviceId ?? serviceId
-  const connectProviderId = useMemo(
-    () => getProviderIdFromServiceId(connectServiceId),
-    [connectServiceId]
-  )
-  const connectRequiredScopes = useMemo(
-    () => getCanonicalScopesForProvider(connectProviderId),
-    [connectProviderId]
-  )
-
   const handleComboboxChange = useCallback(
     (value: string) => {
-      if (value.startsWith(UNIPILE_RECONNECT_PREFIX)) {
-        const credentialId = value.slice(UNIPILE_RECONNECT_PREFIX.length)
-        if (credentialId) {
-          void handleUnipileReconnect(credentialId)
-        }
-        return
-      }
-
       if (value === '__connect_account__') {
-        setConnectModalConfig(null)
         if (isMergedKinds) {
           setShowConnectModal(true)
           return
@@ -657,29 +417,6 @@ export function CredentialSelector({
       }
       if (value === '__connect_service_account__') {
         setShowSetupModal(true)
-        return
-      }
-
-      if (value.startsWith('__connect_account__:')) {
-        const targetServiceId = value.replace('__connect_account__:', '')
-        const targetOption = additionalConnectItems.find(
-          (option) => option.serviceId === targetServiceId
-        )
-
-        if (targetOption) {
-          setConnectModalConfig({
-            provider: targetOption.provider,
-            serviceId: targetOption.serviceId,
-            credentialCount: targetOption.credentialCount,
-          })
-          setShowConnectModal(true)
-          return
-        }
-      }
-
-      const matchedUnipileOption = unipileAccountOptions.find((option) => option.id === value)
-      if (matchedUnipileOption) {
-        handleSelect(value)
         return
       }
 
@@ -693,12 +430,6 @@ export function CredentialSelector({
         return
       }
 
-      const matchedHubspotOption = hubspotAccountOptions.find((option) => option.id === value)
-      if (matchedHubspotOption) {
-        handleSelect(value)
-        return
-      }
-
       setIsEditing(true)
       setEditingValue(value)
     },
@@ -707,12 +438,8 @@ export function CredentialSelector({
       isMergedKinds,
       allWorkspaceCredentials,
       credentials,
-      hubspotAccountOptions,
-      unipileAccountOptions,
       handleAddCredential,
       handleSelect,
-      handleUnipileReconnect,
-      additionalConnectItems,
     ]
   )
 
@@ -756,8 +483,8 @@ export function CredentialSelector({
                 writeOAuthReturnContext({
                   origin: 'workflow',
                   workflowId: activeWorkflowId || '',
-                  displayName: selectedCredential?.name ?? getProviderName(reauthorizeProvider),
-                  providerId: reauthorizeProvider,
+                  displayName: selectedCredential?.name ?? getProviderName(provider),
+                  providerId: effectiveProviderId,
                   preCount: credentials.filter((c) => c.type !== 'service_account').length,
                   workspaceId,
                   reconnect: true,
@@ -777,16 +504,15 @@ export function CredentialSelector({
           mode='connect'
           origin='workflow'
           open={showConnectModal}
-          onOpenChange={(open) => {
-            if (!open) {
-              setShowConnectModal(false)
-              setConnectModalConfig(null)
-            }
-          }}
-          provider={connectModalConfig?.provider ?? provider}
-          serviceId={connectServiceId}
-          providerId={connectProviderId}
-          requiredScopes={dataversePolicy.applies ? requiredScopes : connectRequiredScopes}
+          onOpenChange={(open) => !open && setShowConnectModal(false)}
+          provider={provider}
+          serviceId={serviceId}
+          providerId={effectiveProviderId}
+          requiredScopes={
+            dataversePolicy.applies
+              ? requiredScopes
+              : getCanonicalScopesForProvider(effectiveProviderId)
+          }
           workspaceId={workspaceId}
           workflowId={activeWorkflowId || ''}
           requireDataverseEnvironment={dataversePolicy.applies}
@@ -804,11 +530,15 @@ export function CredentialSelector({
               setShowOAuthModal(false)
             }
           }}
-          provider={reauthorizeProvider}
-          toolName={getProviderName(reauthorizeProvider)}
-          requiredScopes={dataversePolicy.applies ? requiredScopes : reauthorizeRequiredScopes}
+          provider={provider}
+          toolName={getProviderName(provider)}
+          requiredScopes={
+            dataversePolicy.applies
+              ? requiredScopes
+              : getCanonicalScopesForProvider(effectiveProviderId)
+          }
           newScopes={missingRequiredScopes}
-          serviceId={reauthorizeServiceId}
+          serviceId={serviceId}
           // A reauthorize must return to the authorization server that issued
           // the credential — deriving it from the service id would send a
           // sandbox user to production, where they cannot sign in at all.

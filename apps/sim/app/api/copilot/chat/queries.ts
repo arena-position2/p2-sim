@@ -5,20 +5,21 @@ import { authorizeWorkflowByWorkspacePermission } from '@sim/platform-authz/work
 import { toError } from '@sim/utils/errors'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
-import { getLatestRunForStream } from '@/lib/copilot/async-runs/repository'
-import { buildEffectiveChatTranscript } from '@/lib/copilot/chat/effective-transcript'
-import { getAccessibleCopilotChat } from '@/lib/copilot/chat/lifecycle'
-import { normalizeMessage } from '@/lib/copilot/chat/persisted-message'
+import { buildEffectiveChatTranscript } from '@/lib/mothership/chat/effective-transcript'
+import { getAccessibleCopilotChat } from '@/lib/mothership/chat/lifecycle'
+import {
+  type LiveTurnSnapshot,
+  readLiveTurnSnapshot,
+} from '@/lib/mothership/chat/live-turn-snapshot'
+import { compactToolCallParams, normalizeMessage } from '@/lib/mothership/chat/persisted-message'
+import type { MothershipEffort } from '@/lib/mothership/model-options'
 import {
   authenticateCopilotRequestSessionOnly,
   createBadRequestResponse,
   createForbiddenResponse,
   createInternalServerErrorResponse,
   createUnauthorizedResponse,
-} from '@/lib/copilot/request/http'
-import { readFilePreviewSessions } from '@/lib/copilot/request/session'
-import { readEvents } from '@/lib/copilot/request/session/buffer'
-import { toStreamBatchEvent } from '@/lib/copilot/request/session/types'
+} from '@/lib/mothership/request/http'
 import {
   assertActiveWorkspaceAccess,
   isWorkspaceAccessDeniedError,
@@ -30,8 +31,10 @@ function transformChat(chat: {
   id: string
   title: string | null
   model: string | null
+  mode?: 'agent' | 'assistant' | 'plan'
   messages: unknown
   config?: unknown
+  effort?: MothershipEffort | null
   conversationId?: string | null
   resources?: unknown
   createdAt: Date | null
@@ -41,9 +44,13 @@ function transformChat(chat: {
     id: chat.id,
     title: chat.title,
     model: chat.model,
+    // Required by `parseChatHistory` on the workflow-panel fallback path
+    // (`GET /api/mothership/chats/:id` 404s for `type: 'copilot'`, then loads here).
+    mode: chat.mode ?? 'agent',
     messages: Array.isArray(chat.messages) ? chat.messages : [],
     messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
     config: chat.config || null,
+    effort: chat.effort ?? null,
     ...('conversationId' in chat ? { activeStreamId: chat.conversationId || null } : {}),
     ...('resources' in chat
       ? { resources: Array.isArray(chat.resources) ? chat.resources : [] }
@@ -87,43 +94,10 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Chat not found' }, { status: 404 })
       }
 
-      let streamSnapshot: {
-        events: ReturnType<typeof toStreamBatchEvent>[]
-        previewSessions: Awaited<ReturnType<typeof readFilePreviewSessions>>
-        status: string
-      } | null = null
+      let streamSnapshot: LiveTurnSnapshot | null = null
       if (chat.conversationId) {
         try {
-          const [events, previewSessions, run] = await Promise.all([
-            readEvents(chat.conversationId, '0'),
-            readFilePreviewSessions(chat.conversationId).catch((error) => {
-              logger.warn('Failed to read preview sessions for copilot chat', {
-                chatId,
-                conversationId: chat.conversationId,
-                error: toError(error).message,
-              })
-              return []
-            }),
-            getLatestRunForStream(chat.conversationId, authenticatedUserId).catch((error) => {
-              logger.warn('Failed to fetch latest run for copilot chat snapshot', {
-                chatId,
-                conversationId: chat.conversationId,
-                error: toError(error).message,
-              })
-              return null
-            }),
-          ])
-
-          streamSnapshot = {
-            events: events.map(toStreamBatchEvent),
-            previewSessions,
-            status:
-              typeof run?.status === 'string'
-                ? run.status
-                : events.length > 0
-                  ? 'active'
-                  : 'unknown',
-          }
+          streamSnapshot = await readLiveTurnSnapshot(chat.conversationId, authenticatedUserId)
         } catch (error) {
           logger.warn('Failed to load copilot chat stream snapshot', {
             chatId,
@@ -142,7 +116,7 @@ export async function GET(req: NextRequest) {
         messages: normalizedMessages,
         activeStreamId: chat.conversationId || null,
         ...(streamSnapshot ? { streamSnapshot } : {}),
-      })
+      }).map(compactToolCallParams)
 
       logger.info(`Retrieved chat ${chatId}`)
       return NextResponse.json({

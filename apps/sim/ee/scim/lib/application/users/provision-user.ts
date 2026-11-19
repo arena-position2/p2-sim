@@ -125,7 +125,13 @@ export const provisionScimUser = defineAuthorizedScimUseCase({
     if (resolution.action === 'create') {
       await assertEmailAvailable(db, email)
       try {
-        const created = await auth.api.createUser({
+        const created = await (
+          auth.api as unknown as {
+            createUser: (input: {
+              body: { email: string; name: string; data: { emailVerified: boolean } }
+            }) => Promise<{ user: { id: string } }>
+          }
+        ).createUser({
           body: {
             email,
             name: accountName(attributes),

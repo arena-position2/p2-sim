@@ -9,8 +9,8 @@
  * `DATA_RETENTION_ENABLED` (or `ENTERPRISE_ENABLED`) when billing is off.
  *
  * Body: any subset of `logRetentionHours`, `softDeleteRetentionHours`,
- * `taskCleanupHours`, `piiRedaction`, `retentionOverrides`. Omitted keys keep
- * their current value; `null` means "forever" for an hours field.
+ * `taskCleanupHours`, `fileVersionRetentionHours`, `piiRedaction`, `retentionOverrides`.
+ * Omitted keys keep their current value; `null` means "forever" for an hours field.
  *
  * Response: AdminSingleResponse<{ success, organizationId }>
  */
@@ -27,11 +27,11 @@ import { getForeignWorkspaceTargetsReason } from '@/lib/billing/retention'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { withAdminAuthParams } from '@/app/api/v1/admin/middleware'
 import {
+  adminBadRequestResponse,
+  adminInternalErrorResponse,
   adminInvalidJsonResponse,
+  adminNotFoundResponse,
   adminValidationErrorResponse,
-  badRequestResponse,
-  internalErrorResponse,
-  notFoundResponse,
   singleResponse,
 } from '@/app/api/v1/admin/responses'
 
@@ -68,7 +68,7 @@ export const PATCH = withRouteHandler(
         .limit(1)
 
       if (!existing) {
-        return notFoundResponse('Organization')
+        return adminNotFoundResponse('Organization')
       }
 
       const merged: DataRetentionSettings = { ...(existing.dataRetentionSettings ?? {}) }
@@ -77,6 +77,9 @@ export const PATCH = withRouteHandler(
         merged.softDeleteRetentionHours = body.softDeleteRetentionHours
       }
       if (body.taskCleanupHours !== undefined) merged.taskCleanupHours = body.taskCleanupHours
+      if (body.fileVersionRetentionHours !== undefined) {
+        merged.fileVersionRetentionHours = body.fileVersionRetentionHours
+      }
 
       if (body.piiRedaction !== undefined) {
         merged.piiRedaction = body.piiRedaction
@@ -97,7 +100,7 @@ export const PATCH = withRouteHandler(
         piiRedaction: body.piiRedaction,
       })
       if (foreignTargetsReason) {
-        return badRequestResponse(foreignTargetsReason)
+        return adminBadRequestResponse(foreignTargetsReason)
       }
 
       await db
@@ -124,7 +127,7 @@ export const PATCH = withRouteHandler(
       return singleResponse({ success: true as const, organizationId })
     } catch (error) {
       logger.error('Admin API: Failed to update data retention', { error, organizationId })
-      return internalErrorResponse('Failed to update data retention')
+      return adminInternalErrorResponse('Failed to update data retention')
     }
   })
 )

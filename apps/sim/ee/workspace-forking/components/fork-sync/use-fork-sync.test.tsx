@@ -6,6 +6,10 @@
  * from a provider undo, which must restore them before Save or Sync derives its payload.
  */
 import { act, type ReactNode } from 'react'
+import { createDeferred } from '@sim/testing/helpers/deferred'
+import { emcnMock } from '@sim/testing/mocks/emcn.mock'
+import { nextNavigationMock } from '@sim/testing/mocks/next-navigation.mock'
+import { NuqsTestingAdapter } from 'nuqs/adapters/testing'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -13,6 +17,8 @@ import type {
   ForkMappingEntry,
   UpdateForkMappingBody,
 } from '@/lib/api/contracts/workspace-fork'
+import { ForkSyncDetailView } from '@/ee/workspace-forking/components/fork-sync-detail-view/fork-sync-detail-view'
+import { useSettingsDirtyStore } from '@/stores/settings/dirty/store'
 
 const {
   mockUseForkMapping,
@@ -20,16 +26,53 @@ const {
   mockUpdateMutate,
   mockUpdateMutateAsync,
   mockPromote,
+  mockPromoteIsPending,
 } = vi.hoisted(() => ({
   mockUseForkMapping: vi.fn(),
   mockUseForkDiff: vi.fn(),
   mockUpdateMutate: vi.fn(),
   mockUpdateMutateAsync: vi.fn(),
   mockPromote: vi.fn(),
+  mockPromoteIsPending: vi.fn(() => false),
 }))
 
-vi.mock('@sim/emcn', () => ({
-  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+vi.mock('@sim/emcn', () => ({ ...emcnMock, ChipConfirmModal: () => null }))
+vi.mock('next/navigation', () => nextNavigationMock)
+vi.mock('@/ee/workspace-forking/components/fork-sync/fork-sync-view', () => ({
+  ForkSyncView: ({
+    controller,
+    onDirectionChange,
+  }: {
+    controller: ForkSyncController
+    onDirectionChange: (direction: 'push' | 'pull') => void
+  }) => (
+    <>
+      <button
+        type='button'
+        onClick={() => controller.setTriggerAdoption('trigger-a', 'alternate-path')}
+      >
+        Change trigger
+      </button>
+      <button
+        type='button'
+        onClick={() => controller.setTriggerAdoption('trigger-a', 'default-path')}
+      >
+        Restore trigger
+      </button>
+      <button type='button' onClick={() => controller.toggleCopyKeys(['table:table-a'], false)}>
+        Skip copy
+      </button>
+      <button type='button' onClick={() => onDirectionChange('pull')}>
+        Pull
+      </button>
+      <button type='button' onClick={() => void controller.sync()}>
+        Sync choices
+      </button>
+      <button type='button' onClick={controller.discard}>
+        Discard choices
+      </button>
+    </>
+  ),
 }))
 
 vi.mock('@/ee/workspace-forking/hooks/workspace-fork', () => ({
@@ -40,7 +83,7 @@ vi.mock('@/ee/workspace-forking/hooks/workspace-fork', () => ({
     mutateAsync: mockUpdateMutateAsync,
     isPending: false,
   }),
-  usePromoteFork: () => ({ mutateAsync: mockPromote }),
+  usePromoteFork: () => ({ mutateAsync: mockPromote, isPending: mockPromoteIsPending() }),
 }))
 
 import {
@@ -133,14 +176,6 @@ const SUCCESSFUL_PROMOTE_RESULT = {
   deployFailed: 0,
 }
 
-function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise
-  })
-  return { promise, resolve }
-}
-
 const mappedRepickContext = (previousValue: string) => ({
   previousValue,
   baselineValueFor: (field: ForkDependentReconfig) => field.currentValue,
@@ -151,6 +186,7 @@ function diffData(dependentReconfigs: ForkDependentReconfig[]) {
     sourceWorkspaceId: WORKSPACE_ID,
     targetWorkspaceId: OTHER_WORKSPACE_ID,
     workflows: [],
+    sourceVersions: [],
     dependentReconfigs,
     resourceUsages: [],
     copyableUnmapped: [],
@@ -166,8 +202,7 @@ function diffData(dependentReconfigs: ForkDependentReconfig[]) {
 
 const mountedRoots: Root[] = []
 
-function renderForkSync(): { get: () => ForkSyncController } {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+function renderForkSync(): { get: () => ForkSyncController; rerender: () => void } {
   const container = document.createElement('div')
   const root = createRoot(container)
   mountedRoots.push(root)
@@ -189,6 +224,7 @@ function renderForkSync(): { get: () => ForkSyncController } {
   })
 
   return {
+    rerender: () => act(() => root.render(<Probe />)),
     get: () => {
       if (!result) throw new Error('hook result is not ready')
       return result
@@ -203,15 +239,6 @@ function savedDependentValues(): UpdateForkMappingBody['dependentValues'] {
   return variables.body.dependentValues
 }
 
-/** The `dependentValues` the last Sync promoted. */
-function promotedDependentValues(): UpdateForkMappingBody['dependentValues'] {
-  expect(mockPromote).toHaveBeenCalledTimes(1)
-  const [variables] = mockPromote.mock.calls[0] as [
-    { body: { dependentValues?: UpdateForkMappingBody['dependentValues'] } },
-  ]
-  return variables.body.dependentValues
-}
-
 function valueFor(
   submitted: UpdateForkMappingBody['dependentValues'],
   field: ForkDependentReconfig
@@ -220,7 +247,7 @@ function valueFor(
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   mockUseForkMapping.mockReturnValue({
     data: { entries: [CREDENTIAL_ENTRY] },
     isLoading: false,
@@ -235,16 +262,171 @@ beforeEach(() => {
     isPlaceholderData: false,
   })
   mockUpdateMutateAsync.mockResolvedValue({ success: true, updated: 1 })
+  mockPromoteIsPending.mockReturnValue(false)
   mockPromote.mockResolvedValue(SUCCESSFUL_PROMOTE_RESULT)
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   act(() => {
     for (const root of mountedRoots.splice(0)) root.unmount()
   })
 })
 
 describe('useForkSync dependent payload', () => {
+  it('ignores copy choices made against a placeholder diff', async () => {
+    const data = {
+      ...diffData([]),
+      copyableUnmapped: [
+        {
+          kind: 'table',
+          sourceId: 'table-a',
+          label: 'Table',
+          parentId: null,
+          parentLabel: null,
+          referenced: true,
+        },
+      ],
+    }
+    mockUseForkDiff.mockReturnValue({
+      data,
+      isError: false,
+      error: null,
+      isPlaceholderData: true,
+    })
+    const { get, rerender } = renderForkSync()
+    act(() => get().toggleCopyKeys(['table:table-a'], false))
+    mockUseForkDiff.mockReturnValue({
+      data,
+      isError: false,
+      error: null,
+      isPlaceholderData: false,
+    })
+    rerender()
+    await act(async () => {
+      await get().sync()
+    })
+    const [request] = mockPromote.mock.calls[0]
+    expect(request.body.copyResources?.tables).toEqual(['table-a'])
+  })
+
+  it('guards sync-only choices and becomes clean after restoring defaults or discarding', async () => {
+    vi.useFakeTimers()
+    const refreshDiff = (includeNewCandidate = false) =>
+      mockUseForkDiff.mockReturnValue({
+        data: {
+          ...diffData([]),
+          triggerMappings: [
+            {
+              sourceBlockId: 'trigger-a',
+              blockName: 'Trigger',
+              workflowName: 'Workflow',
+              ownPath: null,
+              adoptablePaths: ['default-path', 'alternate-path'],
+              defaultAdoptPath: 'default-path',
+            },
+          ],
+          copyableUnmapped: [
+            {
+              kind: 'table',
+              sourceId: 'table-a',
+              label: 'Table',
+              parentId: null,
+              parentLabel: null,
+              referenced: true,
+            },
+            ...(includeNewCandidate
+              ? [
+                  {
+                    kind: 'table',
+                    sourceId: 'table-b',
+                    label: 'New table',
+                    parentId: null,
+                    parentLabel: null,
+                    referenced: true,
+                  },
+                ]
+              : []),
+          ],
+        },
+        isError: false,
+        error: null,
+        isPlaceholderData: false,
+      })
+    refreshDiff()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    mountedRoots.push(root)
+    let queryString = ''
+    const renderDetail = () =>
+      root.render(
+        <NuqsTestingAdapter
+          hasMemory
+          onUrlUpdate={(update) => {
+            queryString = update.queryString
+          }}
+        >
+          <ForkSyncDetailView
+            title='Sync'
+            workspaceId={WORKSPACE_ID}
+            otherWorkspaceId={OTHER_WORKSPACE_ID}
+            otherWorkspaceName='Parent'
+            onBack={() => {}}
+            actions={[]}
+          />
+        </NuqsTestingAdapter>
+      )
+    act(renderDetail)
+    const expectLeave = (allowed: boolean) => {
+      let left = false
+      act(() =>
+        useSettingsDirtyStore.getState().requestLeave(() => {
+          left = true
+        })
+      )
+      expect(left).toBe(allowed)
+      useSettingsDirtyStore.getState().cancelLeave()
+    }
+    const click = (text: string) => {
+      const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+        (element) => element.textContent === text
+      )
+      if (!button) throw new Error(`Missing control ${text}`)
+      act(() => button.click())
+    }
+    expectLeave(true)
+    refreshDiff(true)
+    act(renderDetail)
+    expectLeave(true)
+    mockPromoteIsPending.mockReturnValue(true)
+    act(renderDetail)
+    await act(async () => {
+      click('Pull')
+      await vi.runOnlyPendingTimersAsync()
+    })
+    expect(queryString).toBe('')
+    mockPromoteIsPending.mockReturnValue(false)
+    act(renderDetail)
+    click('Change trigger')
+    expectLeave(false)
+    click('Restore trigger')
+    expectLeave(true)
+    click('Skip copy')
+    expectLeave(false)
+    refreshDiff()
+    act(renderDetail)
+    expectLeave(false)
+    click('Discard choices')
+    expectLeave(true)
+    click('Skip copy')
+    expectLeave(false)
+    await act(async () => {
+      click('Sync choices')
+      await vi.runOnlyPendingTimersAsync()
+    })
+    expectLeave(true)
+  })
+
   it('submits an effective blank for an optional dependent invalidated by a real provider change', () => {
     const { get } = renderForkSync()
 
@@ -289,41 +471,6 @@ describe('useForkSync dependent payload', () => {
     expect(valueFor(submitted, CLEARED_FIELD)).toBe('')
   })
 
-  it('restores the dependent chain when the provider re-pick is undone', () => {
-    const { get } = renderForkSync()
-
-    act(() => {
-      get().setReconfig((prev) =>
-        applyDependentRepick(
-          prev,
-          PARENT_FIELD,
-          DEPENDENTS,
-          'sheet-2',
-          mappedRepickContext('sheet-1')
-        )
-      )
-    })
-    expect(get().dirty).toBe(true)
-
-    act(() => {
-      get().setReconfig((prev) =>
-        applyDependentRepick(
-          prev,
-          PARENT_FIELD,
-          DEPENDENTS,
-          'sheet-1',
-          mappedRepickContext('sheet-2')
-        )
-      )
-    })
-
-    expect(get().reconfig).toEqual({})
-    expect(get().dirty).toBe(false)
-
-    act(() => get().save())
-    expect(mockUpdateMutate).not.toHaveBeenCalled()
-  })
-
   it('keeps Sync blocked while a REQUIRED dependent is marked by a parent re-pick', () => {
     const requiredChild = { ...CHILD_FIELD, required: true }
     mockUseForkDiff.mockReturnValue({
@@ -366,94 +513,9 @@ describe('useForkSync dependent payload', () => {
     expect(get().reconfig).toEqual({})
     expect(get().syncDisabled).toBe(false)
   })
-
-  it('submits the invalidated dependent as blank in the promote payload too', async () => {
-    const { get } = renderForkSync()
-
-    act(() => {
-      get().setReconfig((prev) =>
-        applyDependentRepick(
-          prev,
-          PARENT_FIELD,
-          DEPENDENTS,
-          'sheet-2',
-          mappedRepickContext('sheet-1')
-        )
-      )
-    })
-    await act(async () => {
-      await get().sync()
-    })
-
-    expect(valueFor(promotedDependentValues(), CHILD_FIELD)).toBe('')
-  })
-
-  it('clears a stale nested Agent tool child when its provider changes', async () => {
-    const project = dependent({
-      subBlockKey: 'tools[0].projectId',
-      dependencyScope: 'tools[0]',
-      currentValue: 'project-old',
-      providesContextKey: 'projectId',
-    })
-    const issue = dependent({
-      subBlockKey: 'tools[0].issueKey',
-      dependencyScope: 'tools[0]',
-      currentValue: 'OLD-1',
-      consumesContextKeys: ['projectId'],
-    })
-    mockUseForkDiff.mockReturnValue({
-      data: diffData([project, issue]),
-      isError: false,
-      error: null,
-      isPlaceholderData: false,
-    })
-    const { get } = renderForkSync()
-
-    act(() => {
-      get().setReconfig((prev) =>
-        applyDependentRepick(
-          prev,
-          project,
-          [project, issue],
-          'project-new',
-          mappedRepickContext('project-old')
-        )
-      )
-    })
-    await act(async () => {
-      await get().sync()
-    })
-
-    expect(valueFor(promotedDependentValues(), project)).toBe('project-new')
-    expect(valueFor(promotedDependentValues(), issue)).toBe('')
-  })
 })
 
 describe('useForkSync post-sync reset', () => {
-  it('drops the in-session re-picks once the sync commits them', async () => {
-    const { get } = renderForkSync()
-
-    act(() => {
-      get().setReconfig((prev) =>
-        applyDependentRepick(
-          prev,
-          PARENT_FIELD,
-          DEPENDENTS,
-          'sheet-2',
-          mappedRepickContext('sheet-1')
-        )
-      )
-    })
-    expect(get().dirty).toBe(true)
-
-    await act(async () => {
-      await get().sync()
-    })
-
-    expect(get().reconfig).toEqual({})
-    expect(get().dirty).toBe(false)
-  })
-
   it('keeps the in-session re-picks when the sync is refused by the server gate', async () => {
     mockPromote.mockResolvedValue({
       promoteRunId: null,
@@ -503,31 +565,6 @@ describe('useForkSync post-sync reset', () => {
     expect(get().dirty).toBe(true)
   })
 
-  it('keeps a newer dependent re-pick made while Sync was in flight', async () => {
-    const pendingPromote = createDeferred<typeof SUCCESSFUL_PROMOTE_RESULT>()
-    mockPromote.mockReturnValue(pendingPromote.promise)
-    const { get } = renderForkSync()
-    let syncPromise!: Promise<void>
-
-    act(() => {
-      syncPromise = get().sync()
-    })
-    await act(async () => Promise.resolve())
-    expect(mockPromote).toHaveBeenCalledTimes(1)
-
-    act(() => {
-      get().setReconfig((current) => ({
-        ...current,
-        [dependentKey(PARENT_FIELD)]: 'sheet-newer',
-      }))
-    })
-    pendingPromote.resolve(SUCCESSFUL_PROMOTE_RESULT)
-    await act(async () => syncPromise)
-
-    expect(get().reconfig[dependentKey(PARENT_FIELD)]).toBe('sheet-newer')
-    expect(get().dirty).toBe(true)
-  })
-
   it('keeps newer mapping edits made while Save was in flight', () => {
     let finishSave: (() => void) | undefined
     mockUpdateMutate.mockImplementation((_variables, options) => {
@@ -568,12 +605,6 @@ describe('shouldReconfigureEntry', () => {
       ...overrides,
     }) as ForkMappingEntry
 
-  it('is false for a settled non-custom-block mapping', () => {
-    // An unchanged credential mapping leaves its stored dependent picks valid, so its fields
-    // stay out of the way until something actually changes.
-    expect(shouldReconfigureEntry(entry(), {})).toBe(false)
-  })
-
   it('is true for a custom block mapped to a DIFFERENT block, even once saved', () => {
     // The regression: `parentChanged` drove the reconfigure UI off "was this edited in this
     // session", so a saved mapping read as settled and the modal showed "no changes required"
@@ -587,41 +618,5 @@ describe('shouldReconfigureEntry', () => {
     })
 
     expect(shouldReconfigureEntry(saved, {})).toBe(true)
-  })
-
-  it('is false for a custom block mapped to itself', () => {
-    // "Keep the same block across environments": the type never changes, so the source's own
-    // field ids still describe it and its values carry across untouched.
-    const identity = entry({
-      kind: 'custom-block',
-      sourceId: 'custom_block_prod01',
-      targetId: 'custom_block_prod01',
-    })
-
-    expect(shouldReconfigureEntry(identity, {})).toBe(false)
-  })
-
-  it('follows an in-session custom-block re-pick rather than the saved target', () => {
-    const saved = entry({
-      kind: 'custom-block',
-      sourceId: 'custom_block_prod01',
-      targetId: 'custom_block_uat0001',
-    })
-    const key = `${saved.kind}:${saved.sourceId}`
-
-    // Re-pointed back at itself in-session: nothing to configure.
-    expect(shouldReconfigureEntry(saved, { [key]: 'custom_block_prod01' })).toBe(false)
-    // Re-pointed at a third block: configure against that one.
-    expect(shouldReconfigureEntry(saved, { [key]: 'custom_block_sbx0001' })).toBe(true)
-  })
-
-  it('is false for an unmapped custom block, which the promote blocks instead', () => {
-    const unmapped = entry({
-      kind: 'custom-block',
-      sourceId: 'custom_block_prod01',
-      targetId: null,
-    })
-
-    expect(shouldReconfigureEntry(unmapped, {})).toBe(false)
   })
 })

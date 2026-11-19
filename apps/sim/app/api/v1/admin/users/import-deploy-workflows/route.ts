@@ -30,9 +30,9 @@ import { getRandomWorkspaceColor } from '@/lib/workspaces/colors'
 import { getOrganizationOwnerId, WORKSPACE_MODE } from '@/lib/workspaces/policy'
 import { authenticateCronSecretRequest } from '@/app/api/v1/admin/cron-secret-auth'
 import {
-  badRequestResponse,
-  internalErrorResponse,
-  notFoundResponse,
+  adminBadRequestResponse,
+  adminInternalErrorResponse,
+  adminNotFoundResponse,
   singleResponse,
 } from '@/app/api/v1/admin/responses'
 
@@ -324,22 +324,22 @@ export const POST = withRouteHandler(async (request) => {
 
     const body: unknown = await request.json()
     if (!isRecord(body)) {
-      return badRequestResponse('Request body must be a JSON object.')
+      return adminBadRequestResponse('Request body must be a JSON object.')
     }
 
     const emailId = typeof body.emailId === 'string' ? body.emailId.trim().toLowerCase() : ''
     if (!emailId) {
-      return badRequestResponse('emailId is required.')
+      return adminBadRequestResponse('emailId is required.')
     }
 
     const { inputs, error } = getSourceWorkflowInputs(body)
     if (error || !inputs) {
-      return badRequestResponse(error || 'Invalid workflow input.')
+      return adminBadRequestResponse(error || 'Invalid workflow input.')
     }
 
     const postgresParsed = parsePostgresConnectionFromBody(body)
     if (postgresParsed && 'error' in postgresParsed) {
-      return badRequestResponse(postgresParsed.error)
+      return adminBadRequestResponse(postgresParsed.error)
     }
     const postgresConnection = postgresParsed
 
@@ -355,7 +355,7 @@ export const POST = withRouteHandler(async (request) => {
       .limit(1)
 
     if (!targetUser) {
-      return notFoundResponse('User')
+      return adminNotFoundResponse('User')
     }
 
     const personalWorkspace = await getOrCreatePersonalWorkspace({
@@ -465,7 +465,8 @@ export const POST = withRouteHandler(async (request) => {
           allowedEmails: [targetUser.email],
           outputConfigs,
           workspaceId: personalWorkspace.workspaceId,
-          deployOptions,
+          requestId,
+          actorId: 'admin-api',
         })
 
         if (!chatDeployResult.success) {
@@ -543,6 +544,6 @@ export const POST = withRouteHandler(async (request) => {
     return singleResponse(response)
   } catch (error) {
     logger.error(`[${requestId}] Admin API: Failed to import and deploy workflows`, { error })
-    return internalErrorResponse('Failed to import and deploy workflows')
+    return adminInternalErrorResponse('Failed to import and deploy workflows')
   }
 })

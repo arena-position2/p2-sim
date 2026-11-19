@@ -1,17 +1,22 @@
 import type { Metadata } from 'next'
 import { getBaseUrl, isSearchIndexableAppUrl } from '@/lib/core/utils/urls'
+import { INTEGRATION_COUNT_LABEL } from '@/lib/landing/constants'
 import { getBrandConfig } from '@/ee/whitelabeling/branding'
 
 /**
- * Generate dynamic metadata based on brand configuration
+ * Generate dynamic metadata based on brand configuration.
+ *
+ * Deliberately sets no `alternates.canonical` or `openGraph.url`: every route
+ * inherits this, so a fixed value would make each page claim the home page as
+ * its canonical. Landing pages emit their own canonical URLs.
  */
 export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metadata {
   const brand = getBrandConfig()
   const allowIndexing = isSearchIndexableAppUrl(getBaseUrl())
 
   const defaultTitle = brand.name
-  const summaryFull = `Arena's AI agent workflow builder automates production tasks with powerful, open-source solutions, enabling seamless workflows for businesses of all sizes.`
-  const summaryShort = `Arena's AI agent workflow builder automates production tasks with powerful, open-source solutions, enabling seamless workflows for businesses of all sizes.`
+  const summaryFull = `Arena is the open-source AI workspace where teams build, deploy, and manage AI agents. Connect ${INTEGRATION_COUNT_LABEL} integrations and every major LLM to create agents that automate real work — visually, conversationally, or with code. Trusted by over 100,000 builders — from startups to Fortune 500 companies. SOC2 compliant.`
+  const summaryShort = `Arena is the open-source AI workspace where teams build, deploy, and manage AI agents. Connect ${INTEGRATION_COUNT_LABEL} integrations and every major LLM to create agents that automate real work.`
 
   return {
     title: {
@@ -47,12 +52,6 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
     creator: brand.name,
     publisher: brand.name,
     metadataBase: new URL(getBaseUrl()),
-    alternates: {
-      canonical: '/',
-      languages: {
-        'en-US': '/',
-      },
-    },
     robots: allowIndexing
       ? {
           index: true,
@@ -76,7 +75,6 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
     openGraph: {
       type: 'website',
       locale: 'en_US',
-      url: getBaseUrl(),
       title: defaultTitle,
       description: summaryFull,
       siteName: 'Arena AI',
@@ -134,42 +132,5 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
       'msapplication-config': 'none',
     },
     ...override,
-  }
-}
-
-/**
- * Generate static structured data for SEO
- */
-export function generateStructuredData() {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'SoftwareApplication',
-    name: 'Arena',
-    description: `Arena\'s AI agent workflow builder automates production tasks with powerful, open-source solutions, enabling seamless workflows for businesses of all sizes.`,
-    url: getBaseUrl(),
-    applicationCategory: 'BusinessApplication',
-    operatingSystem: 'Web',
-    applicationSubCategory: 'AIWorkspace',
-    areaServed: 'Worldwide',
-    availableLanguage: ['en'],
-    offers: {
-      '@type': 'Offer',
-      category: 'SaaS',
-    },
-    creator: {
-      '@type': 'Organization',
-      name: 'Position2',
-      url: 'https://position2.com',
-    },
-    featureList: [
-      'AI Workspace for Teams',
-      'Chat — Natural Language Agent Creation',
-      'Visual Workflow Builder',
-      '1,000+ Integrations',
-      'LLM Orchestration',
-      'Knowledge Base Creation',
-      'Table Creation',
-      'Document Creation',
-    ],
   }
 }

@@ -21,9 +21,13 @@ const PAGES: Record<string, string> = {
   '/login': '<!doctype html><html><body><h1 id="login">fixture-login</h1></body></html>',
 }
 
+/** `User-Agent` of every request the fixture origin has served, in arrival order. */
+const requestUserAgents: string[] = []
+
 function startFixtureServer(): Promise<{ server: Server; origin: string }> {
   return new Promise((resolvePromise) => {
     const server = createServer((request, response) => {
+      requestUserAgents.push(request.headers['user-agent'] ?? '')
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
       const sessionCookie = request.headers.cookie
         ?.split(';')
@@ -85,6 +89,21 @@ test.describe('desktop shell smoke', () => {
     expect(window.url()).toBe(`${origin}/home`)
   })
 
+  test('presents one stock Chrome user agent on every request from the first load', async () => {
+    requestUserAgents.length = 0
+    app = await launchApp(origin)
+    const window = await app.firstWindow()
+    await expect(window.locator('#app')).toHaveText('fixture-app')
+    await window.evaluate(() => fetch('/home').then((response) => response.text()))
+
+    const pageUserAgent = await window.evaluate(() => navigator.userAgent)
+    expect(pageUserAgent).toMatch(
+      /^Mozilla\/5\.0 \(.+\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/\d+\.0\.0\.0 Safari\/537\.36$/
+    )
+    expect(requestUserAgents.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(requestUserAgents)).toEqual(new Set([pageUserAgent]))
+  })
+
   test('internal window.open creates an independent full Sim window', async () => {
     app = await launchApp(origin)
     const window = await app.firstWindow()
@@ -119,6 +138,7 @@ test.describe('desktop shell smoke', () => {
   test('OAuth popups share the session without inheriting the privileged preload', async () => {
     app = await launchApp(origin)
     const window = await app.firstWindow()
+    await window.waitForURL(`${origin}/home`, { waitUntil: 'load' })
     await window.evaluate(() => {
       document.cookie = 'sim-e2e-session=shared; Path=/; SameSite=Lax'
     })
@@ -300,7 +320,7 @@ test.describe('desktop shell smoke', () => {
     await window.locator('#server').click()
     const picker = await pickerPromise
 
-    expect(picker.url()).toBe('sim-shell://pages/server.html')
+    await expect(picker).toHaveURL('sim-shell://pages/server.html')
     await expect(picker.getByRole('dialog', { name: 'Sim server', exact: true })).toBeVisible()
     await expect(picker.getByLabel('Server URL')).toHaveValue('http://127.0.0.1:1')
     await expect(picker.getByLabel('Server URL')).toBeFocused()

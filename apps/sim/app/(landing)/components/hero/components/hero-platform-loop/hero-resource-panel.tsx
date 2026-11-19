@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   TabStrip,
+  TabStripAction,
   type TabStripItem,
   Tooltip,
 } from '@sim/emcn'
@@ -25,9 +26,7 @@ import type { LeadRecord } from '@/app/(landing)/tables/components/tables-record
 import { TablesRecordsTable } from '@/app/(landing)/tables/components/tables-records-preview/tables-records-table'
 import {
   RESOURCE_HEADER_CLASSES,
-  RESOURCE_TAB_ICON_BUTTON_CLASS,
   RESOURCE_TAB_ICON_CLASS,
-  resourceTabWidthClass,
 } from '@/app/workspace/[workspaceId]/home/components/mothership-view/components/resource-tabs/resource-tab-controls'
 
 export type HeroResourceId = 'workflow' | 'table' | 'brief'
@@ -133,15 +132,14 @@ export function HeroResourcePanel({
     activeId === 'workflow' ? (
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
-          <Button
+          <TabStripAction
             type='button'
             variant='subtle'
             onClick={onRunWorkflow}
-            className={RESOURCE_TAB_ICON_BUTTON_CLASS}
             aria-label='Run workflow'
           >
             <PlayOutline className={RESOURCE_TAB_ICON_CLASS} />
-          </Button>
+          </TabStripAction>
         </Tooltip.Trigger>
         <Tooltip.Content side='bottom'>Run workflow</Tooltip.Content>
       </Tooltip.Root>
@@ -156,20 +154,15 @@ export function HeroResourcePanel({
         onSelect={(id) => onActiveChange(id as HeroResourceId)}
         onClose={(id) => onCloseResource(id as HeroResourceId)}
         variant='floating'
-        className={cn(RESOURCE_HEADER_CLASSES.stripGeometry, resourceTabWidthClass(tabs.length))}
+        className={RESOURCE_HEADER_CLASSES.stripGeometry}
         newTabControl={
           <DropdownMenu>
             <Tooltip.Root>
               <Tooltip.Trigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    type='button'
-                    variant='subtle'
-                    className={RESOURCE_TAB_ICON_BUTTON_CLASS}
-                    aria-label='Add resource'
-                  >
+                  <TabStripAction type='button' variant='subtle' aria-label='Add resource'>
                     <Plus className={RESOURCE_TAB_ICON_CLASS} />
-                  </Button>
+                  </TabStripAction>
                 </DropdownMenuTrigger>
               </Tooltip.Trigger>
               <Tooltip.Content side='bottom'>Add resource</Tooltip.Content>

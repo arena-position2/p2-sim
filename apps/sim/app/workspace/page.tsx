@@ -21,7 +21,7 @@ import {
   UPGRADE_REASON_PARAM,
 } from '@/lib/billing/upgrade-reasons'
 import { isLocalLoginEnabled } from '@/lib/core/config/env-flags'
-import { WorkspaceRecencyStorage } from '@/lib/core/utils/browser-storage'
+import { ApplicationLoading } from '@/app/_shell/application-loading'
 import { DesktopTitleBarLane } from '@/app/_shell/desktop-title-bar'
 import { useWorkspacesWithMetadata } from '@/hooks/queries/workspace'
 import { fetchUserProfileSetPeopleMP } from '@/utilities/mixPanelTrigger'
@@ -142,12 +142,7 @@ export default function WorkspacePage() {
 
     hasRedirectedRef.current = true
 
-    const localRecentId = WorkspaceRecencyStorage.getMostRecent()
-    const findWorkspace = (id: string | null) =>
-      id ? workspaces.find((w) => w.id === id) : undefined
-
-    const targetWorkspace =
-      findWorkspace(localRecentId) ?? findWorkspace(lastActiveWorkspaceId) ?? workspaces[0]
+    const targetWorkspace = workspaces.find((w) => w.id === lastActiveWorkspaceId) ?? workspaces[0]
 
     if (redirectWorkflowId) {
       handleWorkflowRedirect(redirectWorkflowId, targetWorkspace.id, router)
@@ -202,21 +197,7 @@ export default function WorkspacePage() {
     )
   }
 
-  return (
-    <div className='desktop-title-bar-page flex w-full items-center justify-center'>
-      <DesktopTitleBarLane />
-      <div
-        className='size-[18px] animate-spin rounded-full'
-        style={{
-          background:
-            'conic-gradient(from 0deg, hsl(var(--muted-foreground)) 0deg 120deg, transparent 120deg 180deg, hsl(var(--muted-foreground)) 180deg 300deg, transparent 300deg 360deg)',
-          mask: 'radial-gradient(farthest-side, transparent calc(100% - 1.5px), black calc(100% - 1.5px))',
-          WebkitMask:
-            'radial-gradient(farthest-side, transparent calc(100% - 1.5px), black calc(100% - 1.5px))',
-        }}
-      />
-    </div>
-  )
+  return <ApplicationLoading />
 }
 
 async function handleWorkflowRedirect(

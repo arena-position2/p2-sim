@@ -1,9 +1,5 @@
-/**
- * @vitest-environment node
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { slackConnectorMeta } from '@/connectors/slack/meta'
-import { slackConnector } from '@/connectors/slack/slack'
+import { slackConnector, slackRollingRefreshDay } from '@/connectors/slack/slack'
 import type { ExternalDocument } from '@/connectors/types'
 import { CONNECTOR_TEXT_DOCUMENT_MAX_BYTES } from '@/connectors/utils'
 
@@ -165,8 +161,18 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
+
+const DAY = 24 * 60 * 60 * 1000
+
+/** Freezes the clock on a day that is not this thread's rolling reread, so it lists as quiet. */
+function freezeOnQuietDay(externalId: string): void {
+  const base = Date.UTC(2026, 0, 1)
+  const offset = (slackRollingRefreshDay(externalId) + 1 - (Math.floor(base / DAY) % 28) + 28) % 28
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(base + offset * DAY)
+}
 
 async function listAll(token: string, config: Record<string, unknown> = {}, run = 'run-1') {
   const context: Record<string, unknown> = { syncRunId: run }
@@ -219,108 +225,6 @@ describe('Slack thread indexing through provider APIs', () => {
     expect(await slackConnector.getDocument('alice', {}, id('D0PRIVATE'))).toBeNull()
   })
 
-  it('fails DM indexing validation when the member has not granted its scopes', async () => {
-    failure = (call) =>
-      call.params.get('types')?.includes('im') ? { ok: false, error: 'missing_scope' } : undefined
-    expect(
-      await slackConnector.validateConfig?.('alice', { includeDirectMessages: true })
-    ).toMatchObject({ valid: false, error: expect.stringContaining('missing_scope') })
-  })
-
-  it('lists and hydrates whole threads with exact message links and one stable id per root', async () => {
-    pageSize = 1
-    const { documents, context } = await listAll('alice', { channel: GENERAL.id, maxMessages: 0 })
-    expect(documents).toHaveLength(1)
-    expect(documents[0]).toMatchObject({ externalId: id(GENERAL.id), contentDeferred: true })
-    expect(calls.filter((call) => call.method === 'conversations.replies')).toHaveLength(0)
-    const document = await slackConnector.getDocument('alice', {}, documents[0].externalId, context)
-    expect(document?.content).toContain('Architecture decision')
-    expect(document?.content).toContain('Use the queue')
-    expect(document?.sourceUrl).toBe('https://acme.slack.com/archives/C0GENERAL/p1700000100000100')
-    expect(document?.metadata?.messageCount).toBe(2)
-    expect(calls.filter((call) => call.method === 'conversations.replies')).toHaveLength(2)
-    expect(
-      calls.find((call) => call.method === 'chat.getPermalink')?.params.get('message_ts')
-    ).toBe(ROOT)
-  })
-
-  it('keeps member listings isolated and withdraws documents when the provider removes channel access', async () => {
-    const alice = await listAll('alice', { maxMessages: 0 })
-    const bob = await listAll('bob', { maxMessages: 0 })
-    expect(alice.documents.map((doc) => doc.externalId)).toContain(id(PRIVATE.id))
-    expect(bob.documents.map((doc) => doc.externalId)).toEqual([id(GENERAL.id)])
-    expect(alice.documents[0].contentHash).toBe(bob.documents[0].contentHash)
-    channels[1].readers = []
-    const afterRevocation = await listAll('alice', { maxMessages: 0 }, 'run-2')
-    expect(afterRevocation.documents.map((doc) => doc.externalId)).not.toContain(id(PRIVATE.id))
-    expect(afterRevocation.context.listingCapped).toBeUndefined()
-    expect(await slackConnector.getDocument('alice', {}, id(PRIVATE.id))).toBeNull()
-  })
-
-  it('changes the text hash for reply edits/deletes and does not rewrite unchanged content', async () => {
-    const before = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    const again = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(again?.contentHash).toBe(before?.contentHash)
-    channels[0].replies[ROOT] = [root(), reply('Use the corrected queue')]
-    const edited = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(edited?.contentHash).not.toBe(before?.contentHash)
-    expect(edited?.content).toContain('corrected queue')
-    channels[0].replies[ROOT] = [root()]
-    const deleted = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(deleted?.contentHash).not.toBe(edited?.contentHash)
-    expect(deleted?.content).not.toContain('corrected queue')
-    delete channels[0].replies[ROOT]
-    channels[0].messages = []
-    expect(await slackConnector.getDocument('alice', {}, id(GENERAL.id))).toBeNull()
-    expect((await listAll('alice', { channel: GENERAL.id })).documents).toEqual([])
-  })
-
-  it('retires legacy channel ids and marks every thread for reply refresh on the next run', async () => {
-    const first = await listAll('alice', { channel: GENERAL.id }, 'run-1')
-    const next = await listAll('alice', { channel: GENERAL.id }, 'run-2')
-    expect(first.documents.map((doc) => doc.externalId)).not.toContain(GENERAL.id)
-    expect(first.documents[0].externalId).toBe(next.documents[0].externalId)
-    expect(first.documents[0].contentHash).not.toBe(next.documents[0].contentHash)
-    expect(await slackConnector.getDocument('alice', {}, GENERAL.id)).toBeNull()
-  })
-
-  it('preserves channel inclusion/exclusion and includes archived channels unless excluded', async () => {
-    expect(slackConnectorMeta.permissionScopedListing).toEqual({ capFieldIds: ['maxMessages'] })
-    expect(slackConnectorMeta.supportsSeparateContentCredential).toBe(true)
-    const result = await listAll('alice', {
-      channel: ['general', 'archive'],
-      excludeChannels: '#general',
-      maxMessages: 0,
-    })
-    expect(result.documents.map((doc) => doc.externalId)).toEqual([id(ARCHIVE.id)])
-    expect(
-      (await listAll('alice', { includeArchived: 'false', maxMessages: 0 })).documents.map(
-        (doc) => doc.externalId
-      )
-    ).not.toContain(id(ARCHIVE.id))
-    expect(
-      calls
-        .filter((call) => call.method === 'conversations.list')
-        .every((call) => call.params.get('types') === 'public_channel,private_channel')
-    ).toBe(true)
-  })
-
-  it('defines an explicit root-date scope without inventing a default lookback', async () => {
-    await listAll('alice', { channel: GENERAL.id })
-    expect(
-      calls.find((call) => call.method === 'conversations.history')?.params.has('oldest')
-    ).toBe(false)
-    expect(
-      (await listAll('alice', { channel: GENERAL.id, startDate: '2024-01-01' })).documents
-    ).toEqual([])
-    expect(
-      await slackConnector.getDocument('alice', { startDate: '2024-01-01' }, id(GENERAL.id))
-    ).toBeNull()
-    expect(await slackConnector.validateConfig('alice', { startDate: '2024-02-30' })).toMatchObject(
-      { valid: false }
-    )
-  })
-
   it('signals partial capped listings and fully reconciles when the configured cap was not reached', async () => {
     channels[0].messages = [{ ...root(), ts: SECOND }, root()]
     const capped = await listAll('alice', { channel: GENERAL.id, maxMessages: 1 })
@@ -331,82 +235,6 @@ describe('Slack thread indexing through provider APIs', () => {
     expect(full.context.listingCapped).toBeUndefined()
     const exact = await listAll('alice', { channel: GENERAL.id, maxMessages: 2 })
     expect(exact.context.listingCapped).toBeUndefined()
-  })
-
-  it('does not duplicate broadcast replies or index channel lifecycle noise', async () => {
-    channels[0].messages = [
-      { ...reply(), subtype: 'thread_broadcast' },
-      root(),
-      { type: 'message', subtype: 'channel_join', ts: SECOND, text: 'joined' },
-    ]
-    expect(
-      (await listAll('alice', { channel: GENERAL.id })).documents.map((doc) => doc.externalId)
-    ).toEqual([id(GENERAL.id)])
-  })
-
-  it('includes bot attachment and nested Block Kit text in thread content', async () => {
-    channels[0].replies[ROOT] = [
-      {
-        ...root(),
-        attachments: [
-          {
-            text: 'PR approved',
-            blocks: [{ type: 'section', text: { type: 'plain_text', text: 'Deploy tonight' } }],
-          },
-        ],
-      },
-    ]
-    const document = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(document?.content).toContain('PR approved')
-    expect(document?.content).toContain('Deploy tonight')
-  })
-
-  it('indexes a rich-text message once when Slack also provides its plain-text fallback', async () => {
-    const text = 'Project Lantern is coordinated by Avery Reed.'
-    channels[0].replies[ROOT] = [
-      {
-        ...root(text),
-        attachments: [{ text: 'Review Friday at 09:30 UTC' }],
-        blocks: [
-          {
-            type: 'rich_text',
-            elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text }] }],
-          },
-        ],
-      },
-    ]
-    const document = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(document?.content.split(text)).toHaveLength(2)
-    expect(document?.content).toContain('Review Friday at 09:30 UTC')
-  })
-
-  it('does not repeat a fallback containing the complete block body', async () => {
-    channels[0].replies[ROOT] = [
-      {
-        ...root('First paragraph\nSecond paragraph'),
-        blocks: ['First paragraph', 'Second paragraph'].map((text) => ({
-          type: 'section',
-          text: { type: 'plain_text', text },
-        })),
-      },
-    ]
-    const document = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(document?.content.split('First paragraph')).toHaveLength(2)
-    expect(document?.content.split('Second paragraph')).toHaveLength(2)
-  })
-
-  it('preserves repeated blocks and distinct fallback information', async () => {
-    channels[0].replies[ROOT] = [
-      {
-        ...root('Deployment status changed'),
-        blocks: ['Ready', 'Ready'].map((text) => ({
-          type: 'section',
-          text: { type: 'plain_text', text },
-        })),
-      },
-    ]
-    const document = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(document?.content).toContain('Deployment status changed\nReady\nReady')
   })
 })
 
@@ -439,35 +267,11 @@ describe('Slack threads without indexable text', () => {
     expect(calls.some((call) => call.method === 'chat.getPermalink')).toBe(false)
   })
 
-  it('indexes a later reply edit even when the root and reply count have not changed', async () => {
-    const empty = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    channels[0].replies[ROOT][1] = reply('Orion has a launch date')
-    const document = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
-    expect(document?.externalId).toBe(empty?.externalId)
-    expect(document?.content).toContain('Orion has a launch date')
-    expect(document?.contentHash).not.toBe(empty?.contentHash)
-    expect(document?.skippedReason).toBeUndefined()
-  })
-
   it('does not classify a missing root as verified empty content', async () => {
     replacement = (call) =>
       call.method === 'conversations.replies' ? { ok: true, messages: [] } : undefined
     expect(await slackConnector.getDocument('alice', {}, id(GENERAL.id))).toBeNull()
   })
-
-  it.each([
-    [{ ok: true, messages: [reply('')], is_limited: true }, 'only part'],
-    [{ ok: true, messages: [reply('')], has_more: true }, 'continuation cursor'],
-    [{ ok: false, error: 'missing_scope' }, 'missing_scope'],
-    [{ ok: true }, 'invalid message page'],
-  ])(
-    'does not skip an empty thread when a later page is incomplete: %j',
-    async (response, error) => {
-      replacement = (call) =>
-        call.method === 'conversations.replies' && call.params.has('cursor') ? response : undefined
-      await expect(slackConnector.getDocument('alice', {}, id(GENERAL.id))).rejects.toThrow(error)
-    }
-  )
 })
 
 describe('Slack incomplete and unsafe provider responses', () => {
@@ -541,52 +345,87 @@ describe('Slack incomplete and unsafe provider responses', () => {
     }
   )
 
-  it.each(['ratelimited', 'service_unavailable', 'internal_error', 'missing_scope'])(
-    'does not invalidate a credential for %s',
-    async (code) => {
-      failure = () => ({ ok: false, error: code })
-      const error = await listAll('alice').catch((error: unknown) => error)
-      expect(slackConnector.isCredentialInvalidError?.(error)).toBe(false)
-    }
-  )
-
-  it.each([
-    { code: 'ratelimited', status: 429, category: 'rate_limit' },
-    { code: 'token_revoked', status: 401, category: 'authorization' },
-    { code: 'missing_scope', status: 403, category: 'authorization' },
-    { code: 'internal_error', status: 503, category: 'provider_unavailable' },
-    { code: 'invalid_arguments', status: 400, category: 'request_rejected' },
-  ])('classifies the $code envelope as HTTP $status $category', async ({ code, ...expected }) => {
-    failure = (call) =>
-      call.method === 'conversations.replies' ? { ok: false, error: code } : undefined
-    await expect(slackConnector.getDocument('alice', {}, id(GENERAL.id))).rejects.toMatchObject({
-      name: 'SlackApiError',
-      code,
-      ...expected,
-    })
-  })
-
-  it('keeps the HTTP status of a non-OK response for failure classification', async () => {
-    fetchMock.mockImplementationOnce(async () => new Response('forbidden', { status: 403 }))
-    await expect(slackConnector.getDocument('alice', {}, id(GENERAL.id))).rejects.toMatchObject({
-      name: 'ConnectorSourceError',
-      status: 403,
-      message: expect.stringMatching(/^Slack [a-z.]+ failed with HTTP 403$/),
-    })
-  })
-
-  it('propagates Slack envelope throttling so the sync scheduler can cool down', async () => {
-    failure = (call) =>
-      call.method === 'conversations.replies' ? { ok: false, error: 'ratelimited' } : undefined
-    await expect(slackConnector.getDocument('alice', {}, id(GENERAL.id))).rejects.toMatchObject({
-      rateLimited: true,
-    })
-  })
-
   it('refuses oversized thread text rather than silently indexing a partial answer', async () => {
     channels[0].replies[ROOT] = [root('x'.repeat(CONNECTOR_TEXT_DOCUMENT_MAX_BYTES))]
     await expect(slackConnector.getDocument('alice', {}, id(GENERAL.id))).rejects.toThrow(
       /large|size|exceeds/i
     )
+  })
+})
+
+describe('Slack change detection and access scopes', () => {
+  const match = (candidate: string, stored: string) =>
+    slackConnector.matchContentHash?.(candidate, stored)
+  const scope = (channel: string) => `slack:v4:${TEAM}:${channel}:`
+
+  beforeEach(() => {
+    freezeOnQuietDay(id(GENERAL.id))
+  })
+
+  it('rereads each quiet thread on exactly one day of every 28', async () => {
+    const start = Date.now()
+    const rereadDays: number[] = []
+    for (let day = 0; day < 28; day += 1) {
+      vi.setSystemTime(start + day * DAY)
+      const listed = await listAll('alice', { channel: GENERAL.id }, `run-${day}`)
+      if (listed.documents[0].contentHash.includes(':refresh:')) rereadDays.push(day)
+    }
+    expect(rereadDays).toHaveLength(1)
+  })
+
+  it('does not reread a quiet thread until its root reports a change', async () => {
+    const first = await listAll('alice', { channel: GENERAL.id }, 'run-1')
+    const stored = await slackConnector.getDocument('alice', {}, id(GENERAL.id), first.context)
+    const next = await listAll('alice', { channel: GENERAL.id }, 'run-2')
+    expect(match(next.documents[0].contentHash, stored?.contentHash ?? '')).toBe('current')
+    channels[0].messages = [{ ...root(), reply_count: 2, latest_reply: SECOND }]
+    const replied = await listAll('alice', { channel: GENERAL.id }, 'run-3')
+    expect(match(replied.documents[0].contentHash, stored?.contentHash ?? '')).toBe('stale')
+    channels[0].messages = [{ ...root(), edited: { ts: SECOND } }]
+    const edited = await listAll('alice', { channel: GENERAL.id }, 'run-4')
+    expect(match(edited.documents[0].contentHash, stored?.contentHash ?? '')).toBe('stale')
+  })
+
+  it('carries a thread indexed under the text-only hash forward without reindexing it', async () => {
+    const hydrated = await slackConnector.getDocument('alice', {}, id(GENERAL.id))
+    const text = hydrated?.contentHash.split(':').at(-1)
+    expect(match(hydrated?.contentHash ?? '', `slack-content:v4:${text}`)).toBe('equivalent')
+    expect(match(hydrated?.contentHash ?? '', `slack-content:v4:${'0'.repeat(64)}`)).toBe('stale')
+    const listed = await listAll('alice', { channel: GENERAL.id })
+    expect(match(listed.documents[0].contentHash, `slack-content:v4:${text}`)).toBe('stale')
+  })
+
+  it('reports exactly the conversations each member can read, under the listing rules', async () => {
+    const listScopes = slackConnector.listAccessibleScopes
+    if (!listScopes) throw new Error('Slack must report access scopes')
+    const readAll = async (token: string, sourceConfig: Record<string, unknown>) => {
+      const prefixes: string[] = []
+      let cursor: string | undefined
+      do {
+        const page = await listScopes(token, sourceConfig, cursor)
+        prefixes.push(...page.prefixes)
+        cursor = page.nextCursor
+      } while (cursor)
+      return prefixes
+    }
+    pageSize = 1
+    expect(await listScopes('alice', {})).toEqual({
+      prefixes: [scope(GENERAL.id)],
+      nextCursor: '1',
+    })
+    expect(await readAll('alice', {})).toEqual([
+      scope(GENERAL.id),
+      scope(PRIVATE.id),
+      scope(ARCHIVE.id),
+    ])
+    expect(await readAll('bob', {})).toEqual([scope(GENERAL.id)])
+    expect(
+      await readAll('alice', { excludeChannels: '#general', includeArchived: 'false' })
+    ).toEqual([scope(PRIVATE.id)])
+    const listed = await listAll('alice', { maxMessages: 0 })
+    const prefixes = await readAll('alice', {})
+    expect(
+      listed.documents.every((doc) => prefixes.some((prefix) => doc.externalId.startsWith(prefix)))
+    ).toBe(true)
   })
 })

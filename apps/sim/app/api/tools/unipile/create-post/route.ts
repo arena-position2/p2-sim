@@ -3,9 +3,10 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkInternalAuth } from '@/lib/auth/hybrid'
 import { env } from '@/lib/core/config/env'
+import { MAX_BUFFERED_TRANSFER_BYTES } from '@/lib/uploads/shared/types'
 import { RawFileInputArraySchema, RawFileInputSchema } from '@/lib/uploads/utils/file-schemas'
 import { processFilesToUserFiles } from '@/lib/uploads/utils/file-utils'
-import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
+import { downloadServableFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
 import {
   appendUnipileLinkedinMentionsMultipartPart,
   mentionsToUnipileApiJson,
@@ -131,9 +132,14 @@ export async function POST(request: NextRequest) {
       if (hasBinaryAttachments && Array.isArray(data.attachments)) {
         const attachmentFiles = processFilesToUserFiles(data.attachments, data.account_id, logger)
         for (const file of attachmentFiles) {
-          const buffer = await downloadFileFromStorage(file, data.account_id, logger)
+          const { buffer, contentType } = await downloadServableFileFromStorage(
+            file,
+            data.account_id,
+            logger,
+            { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+          )
           const blob = new Blob([new Uint8Array(buffer)], {
-            type: file.type || 'application/octet-stream',
+            type: contentType || file.type || 'application/octet-stream',
           })
           form.append('attachments', blob, file.name)
         }
@@ -151,9 +157,14 @@ export async function POST(request: NextRequest) {
           logger
         )
         if (thumbnailFile) {
-          const buffer = await downloadFileFromStorage(thumbnailFile, data.account_id, logger)
+          const { buffer, contentType } = await downloadServableFileFromStorage(
+            thumbnailFile,
+            data.account_id,
+            logger,
+            { maxBytes: MAX_BUFFERED_TRANSFER_BYTES }
+          )
           const blob = new Blob([new Uint8Array(buffer)], {
-            type: thumbnailFile.type || 'application/octet-stream',
+            type: contentType || thumbnailFile.type || 'application/octet-stream',
           })
           form.append('video_thumbnail', blob, thumbnailFile.name)
         }

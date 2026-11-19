@@ -1,13 +1,18 @@
+import type { SessionPrincipal } from '@sim/auth/principal'
 import type { QueryClient } from '@tanstack/react-query'
 import type { WorkspaceHostContext } from '@/lib/api/contracts/workspaces'
-import { listMothershipChats } from '@/lib/copilot/chat/list-mothership-chats'
 import { isChatEnabled } from '@/lib/core/config/env-flags'
+import { listMothershipChats } from '@/lib/mothership/chat/list-mothership-chats'
 import { prefetchUserProfile } from '@/lib/users/prefetch-user-profile'
 import { listWorkflowsForUser } from '@/lib/workflows/queries'
 import { getWorkspaceHostContextForViewer } from '@/lib/workspaces/host-context'
 import { getWorkspacePermissionsForAuthorizedViewer } from '@/lib/workspaces/permissions/utils'
 import { seedWorkspaceList } from '@/lib/workspaces/seed-workspace-list'
 import { prefetchResourceFolders } from '@/app/workspace/[workspaceId]/lib/prefetch-resource-folders'
+import {
+  FORK_AVAILABILITY_STALE_TIME,
+  forkAvailabilityKeys,
+} from '@/ee/workspace-forking/hooks/use-forking-available'
 import {
   MOTHERSHIP_CHAT_LIST_STALE_TIME,
   mapChat,
@@ -113,4 +118,29 @@ export async function prefetchWorkspaceSidebar(
     prefetchUserProfile(queryClient, userId),
     seedWorkspaceList(queryClient, userId, activeOrganizationId),
   ])
+}
+
+/**
+ * Seeds fork availability, which decides whether the settings sidebar lists Workspace Forks, so
+ * the row renders with the rest of the sidebar. Only admins can read it
+ * (`forkOperations.discover`), so it is skipped for everyone else. It runs the availability
+ * route's own use case; a failed read stays out of hydration and the client refetches it.
+ */
+export async function prefetchWorkspaceForkAvailability(
+  queryClient: QueryClient,
+  workspaceId: string,
+  principal: SessionPrincipal,
+  hostContext: WorkspaceHostContext
+): Promise<void> {
+  if (hostContext.viewer.permission !== 'admin') return
+  await queryClient.prefetchQuery({
+    queryKey: forkAvailabilityKeys.detail(workspaceId),
+    queryFn: async () => {
+      const { getWorkspaceForkAvailability } = await import(
+        '@/ee/workspace-forking/application/discovery'
+      )
+      return getWorkspaceForkAvailability.execute({ principal, input: { workspaceId } })
+    },
+    staleTime: FORK_AVAILABILITY_STALE_TIME,
+  })
 }

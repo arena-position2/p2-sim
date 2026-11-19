@@ -345,7 +345,6 @@ export function OAuthAppsSettings() {
                     searchable
                     searchPlaceholder='Search workspaces...'
                     fullWidth
-                    flush
                     disabled={
                       appsLoading || upsertApp.isPending || orgWorkspaceOptions.length === 0
                     }

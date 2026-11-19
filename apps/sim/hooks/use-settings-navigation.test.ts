@@ -1,6 +1,7 @@
 /**
  * @vitest-environment node
  */
+import { authClientMock } from '@sim/testing/mocks/auth-client.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceHostContext } from '@/lib/api/contracts/workspaces'
 
@@ -12,18 +13,15 @@ const { mockIsArenaBilling } = vi.hoisted(() => ({
  * `@/lib/auth/auth-client` builds a Better Auth client at module scope, which
  * throws when NEXT_PUBLIC_APP_URL is absent from the environment (and under
  * `isolate: false` an earlier file may have imported the graph in a polluted
- * env). This test exercises the pure `resolveSettingsHref` and
- * `resolveSettingsReturnUrl` helpers, so stub the client module out entirely.
+ * env). This test exercises the pure `resolveSettingsHref` helper, so stub the
+ * client module out entirely.
  */
-vi.mock('@/lib/auth/auth-client', () => ({
-  useSession: vi.fn(() => ({ data: null, isPending: false })),
-}))
-
+vi.mock('@/lib/auth/auth-client', () => authClientMock)
 vi.mock('@/lib/billing/arena/env', () => ({
   isArenaBilling: mockIsArenaBilling,
 }))
 
-import { resolveSettingsHref, resolveSettingsReturnUrl } from '@/hooks/use-settings-navigation'
+import { resolveSettingsHref } from '@/hooks/use-settings-navigation'
 
 const HOST_CONTEXT: WorkspaceHostContext = {
   workspace: {
@@ -84,7 +82,7 @@ describe('resolveSettingsHref unified settings navigation', () => {
         hostContext: HOST_CONTEXT,
         viewerUserId: 'external-a',
       })
-    ).toBe('/workspace/workspace-b/settings/usage')
+    ).toBe('/workspace/workspace-b/settings/arena-usage')
   })
 
   it('sends non-admin org members away from arena billing to usage', () => {
@@ -95,7 +93,7 @@ describe('resolveSettingsHref unified settings navigation', () => {
         hostContext: HOST_CONTEXT,
         viewerUserId: 'external-a',
       })
-    ).toBe('/workspace/workspace-b/settings/usage')
+    ).toBe('/workspace/workspace-b/settings/arena-usage')
   })
 
   it('maps billing to arena-billing for Arena admins who can manage the payer', () => {
@@ -161,45 +159,5 @@ describe('resolveSettingsHref unified settings navigation', () => {
         viewerUserId: 'admin-b',
       })
     ).toBe('/workspace/workspace-b/settings/billing')
-  })
-})
-
-describe('resolveSettingsReturnUrl', () => {
-  const fallback = '/workspace/workspace-b'
-
-  it('returns the stored url when it belongs to the current workspace', () => {
-    expect(
-      resolveSettingsReturnUrl({
-        storedUrl: '/workspace/workspace-b/w/workflow-a',
-        workspaceId: 'workspace-b',
-        fallback,
-      })
-    ).toBe('/workspace/workspace-b/w/workflow-a')
-  })
-
-  it('discards a stored url captured in a workspace the user has since left', () => {
-    expect(
-      resolveSettingsReturnUrl({
-        storedUrl: '/workspace/workspace-a/w/workflow-a',
-        workspaceId: 'workspace-b',
-        fallback,
-      })
-    ).toBe(fallback)
-  })
-
-  it('keeps workspace-agnostic stored urls', () => {
-    expect(
-      resolveSettingsReturnUrl({
-        storedUrl: '/account/settings/billing',
-        workspaceId: 'workspace-b',
-        fallback,
-      })
-    ).toBe('/account/settings/billing')
-  })
-
-  it('falls back when nothing was stored', () => {
-    expect(
-      resolveSettingsReturnUrl({ storedUrl: null, workspaceId: 'workspace-b', fallback })
-    ).toBe(fallback)
   })
 })

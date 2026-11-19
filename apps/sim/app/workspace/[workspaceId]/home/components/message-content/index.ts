@@ -2,7 +2,7 @@ export {
   assistantMessageHasRenderableContent,
   collectMainThinkingText,
   getOrchestratorMessageText,
-  hasOpenMainThinking,
+  getOrchestratorMessageTextSegments,
   MessageContent,
 } from './message-content'
 export type { MessagePhase } from './utils'

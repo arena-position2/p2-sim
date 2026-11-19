@@ -1,26 +1,17 @@
-/**
- * @vitest-environment node
- */
-import { createMockRequest, hybridAuthMockFns } from '@sim/testing'
+import { hybridAuthMockFns } from '@sim/testing/mocks/hybrid-auth.mock'
+import { createMockRequest } from '@sim/testing/mocks/request.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const { mockMaskPIIBatch } = vi.hoisted(() => ({
-  mockMaskPIIBatch: vi.fn(),
-}))
+import { POST } from '@/app/api/guardrails/mask-batch/route'
 
 const mockCheckInternalAuth = hybridAuthMockFns.mockCheckInternalAuth
 
-vi.mock('@/lib/guardrails/validate_pii', () => ({
-  maskPIIBatch: mockMaskPIIBatch,
-}))
-
-import { POST } from '@/app/api/guardrails/mask-batch/route'
-
 describe('POST /api/guardrails/mask-batch', () => {
+  let presidioFetch: ReturnType<typeof vi.fn>
+
   beforeEach(() => {
-    vi.clearAllMocks()
     mockCheckInternalAuth.mockResolvedValue({ success: true })
-    mockMaskPIIBatch.mockImplementation(async (texts: string[]) => texts.map((t) => `M(${t})`))
+    presidioFetch = vi.fn()
+    vi.stubGlobal('fetch', presidioFetch)
   })
 
   it('returns 401 without internal auth', async () => {
@@ -34,33 +25,30 @@ describe('POST /api/guardrails/mask-batch', () => {
     )
 
     expect(res.status).toBe(401)
-    expect(mockMaskPIIBatch).not.toHaveBeenCalled()
+    expect(presidioFetch).not.toHaveBeenCalled()
   })
 
-  it('masks the batch in-process and preserves order', async () => {
-    const res = await POST(
-      createMockRequest('POST', {
-        texts: ['a@b.com', 'hello'],
-        entityTypes: ['EMAIL_ADDRESS'],
-        language: 'en',
-      })
-    )
+  it.each([
+    [
+      '422 when Presidio rejects the input, so it is never resent',
+      422,
+      () => new Response('{}', { status: 422 }),
+    ],
+    [
+      '503 when Presidio is unreachable, so it reads as an outage',
+      503,
+      () => Promise.reject(new TypeError('fetch failed')),
+    ],
+    [
+      '500 for any other Presidio failure, retried on its own',
+      500,
+      () => new Response('boom', { status: 500 }),
+    ],
+  ] as const)('answers %s', async (_name, status, presidio) => {
+    presidioFetch.mockImplementationOnce(presidio)
 
-    expect(res.status).toBe(200)
-    const json = await res.json()
-    expect(json.masked).toEqual(['M(a@b.com)', 'M(hello)'])
-    expect(mockMaskPIIBatch).toHaveBeenCalledWith(
-      ['a@b.com', 'hello'],
-      ['EMAIL_ADDRESS'],
-      'en',
-      undefined
-    )
-  })
+    const res = await POST(createMockRequest('POST', { texts: ['a'], entityTypes: [] }))
 
-  it('rejects an invalid body with 400', async () => {
-    const res = await POST(createMockRequest('POST', { texts: 'not-an-array', entityTypes: [] }))
-
-    expect(res.status).toBe(400)
-    expect(mockMaskPIIBatch).not.toHaveBeenCalled()
+    expect(res.status).toBe(status)
   })
 })

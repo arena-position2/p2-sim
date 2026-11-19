@@ -2,7 +2,11 @@ import { useCallback } from 'react'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { isRecordLike } from '@sim/utils/object'
-import type { WorkflowStateContractInput } from '@/lib/api/contracts/workflows'
+import { ApiClientError, requestJson } from '@/lib/api/client'
+import {
+  getWorkflowExecutionContract,
+  type WorkflowStateContractInput,
+} from '@/lib/api/contracts/workflows'
 import { readSSEEvents } from '@/lib/core/utils/sse'
 import type {
   BlockChildWorkflowStartedData,
@@ -281,6 +285,11 @@ function reconnectStreamKey(workflowId: string, executionId: string): string {
   return `${workflowId}:reconnect:${executionId}`
 }
 
+/** Whether a reconnect stream for this execution is currently open in this tab. */
+export function isReconnectStreamOpen(workflowId: string, executionId: string): boolean {
+  return sharedAbortControllers.has(reconnectStreamKey(workflowId, executionId))
+}
+
 function abortStream(key: string): void {
   const controller = sharedAbortControllers.get(key)
   if (!controller) return
@@ -499,6 +508,13 @@ export function useExecutionStream() {
     const streamKey = reconnectStreamKey(workflowId, executionId)
     abortStream(streamKey)
     sharedAbortControllers.set(streamKey, abortController)
+    let receivedTerminal = false
+    const receiveTerminal =
+      <T>(handler: ((data: T) => void | Promise<void>) | undefined) =>
+      async (data: T) => {
+        await handler?.(data)
+        receivedTerminal = true
+      }
     try {
       // boundary-raw-fetch: execution reconnect endpoint returns an SSE stream consumed via response.body.getReader() and processSSEStream
       const response = await fetch(
@@ -510,11 +526,88 @@ export function useExecutionStream() {
       }
       if (!response.body) throw new Error('No response body')
 
-      await processSSEStream(response.body.getReader(), callbacks, 'Reconnect')
-    } catch (error: any) {
-      if (isClientDisconnectError(error)) return
-      logger.error('Reconnection stream error:', error)
-      throw error
+      try {
+        await processSSEStream(
+          response.body.getReader(),
+          {
+            ...callbacks,
+            onExecutionCompleted: receiveTerminal(callbacks.onExecutionCompleted),
+            onExecutionPaused: receiveTerminal(callbacks.onExecutionPaused),
+            onExecutionError: receiveTerminal(callbacks.onExecutionError),
+            onExecutionCancelled: receiveTerminal(callbacks.onExecutionCancelled),
+          },
+          'Reconnect'
+        )
+      } catch (error) {
+        if (receivedTerminal && !(error instanceof SSEEventHandlerError)) return
+        throw error
+      }
+      if (!receivedTerminal) {
+        throw new SSEStreamInterruptedError(
+          'Reconnect ended without a terminal event',
+          executionId,
+          undefined
+        )
+      }
+    } catch (error) {
+      if (abortController.signal.aborted) return
+      if (
+        error instanceof SSEEventHandlerError ||
+        (isExecutionStreamHttpError(error) && [401, 403].includes(error.httpStatus))
+      )
+        throw error
+
+      /** Stream retention and network delivery cannot determine an execution's outcome. */
+      let recorded
+      try {
+        recorded = await requestJson(getWorkflowExecutionContract, {
+          params: { id: workflowId, executionId },
+          query: { includeOutput: 'true' },
+          signal: abortController.signal,
+        })
+      } catch (lookupError) {
+        if (abortController.signal.aborted) return
+        if (lookupError instanceof ApiClientError) {
+          throw new ExecutionStreamHttpError(lookupError.message, lookupError.status)
+        }
+        throw lookupError
+      }
+      if (abortController.signal.aborted) return
+      const duration = recorded.totalDurationMs ?? 0
+      switch (recorded.status) {
+        case 'completed':
+          await callbacks.onExecutionCompleted?.({
+            success: true,
+            output: recorded.finalOutput,
+            duration,
+            startTime: recorded.startedAt,
+            endTime: recorded.endedAt ?? recorded.startedAt,
+          })
+          return
+        case 'failed':
+          await callbacks.onExecutionError?.({
+            error: recorded.error ?? 'Execution failed',
+            duration,
+          })
+          return
+        case 'cancelled':
+          await callbacks.onExecutionCancelled?.({ duration })
+          return
+        case 'paused':
+          await callbacks.onExecutionPaused?.({
+            output: recorded.finalOutput,
+            duration,
+            startTime: recorded.startedAt,
+            endTime: recorded.paused?.pausedAt ?? recorded.endedAt ?? recorded.startedAt,
+          })
+          return
+        default:
+          throw new SSEStreamInterruptedError(
+            'Execution is still active; live updates need reconnect',
+            executionId,
+            error
+          )
+      }
     } finally {
       if (sharedAbortControllers.get(streamKey) === abortController) {
         sharedAbortControllers.delete(streamKey)

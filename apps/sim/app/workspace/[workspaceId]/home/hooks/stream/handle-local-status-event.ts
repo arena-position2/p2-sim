@@ -1,7 +1,7 @@
 import {
   LOCAL_STATUS_PHASE,
   type PersistedStreamEventEnvelope,
-} from '@/lib/copilot/request/session/contract'
+} from '@/lib/mothership/request/session/contract'
 import type { StreamLoopContext } from '@/app/workspace/[workspaceId]/home/hooks/stream/stream-context'
 import { setLocalLiveStatus } from '@/local-copilot/lib/client/local-live-status'
 

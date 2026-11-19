@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Badge,
   Button,
+  Chip,
   ChipCopyInput,
   ChipInput,
   ChipModalTabs,
@@ -12,12 +13,9 @@ import {
   Skeleton,
 } from '@sim/emcn'
 import { formatDateTime } from '@sim/utils/formatting'
+import Link from 'next/link'
 import { useQueryStates } from 'nuqs'
-import { AnthropicIcon, OpenAIIcon } from '@/components/icons'
-import {
-  BYOKKeyManager,
-  type BYOKManagerProvider,
-} from '@/app/workspace/[workspaceId]/settings/components/byok/byok-key-manager'
+import { useSettingsUnsavedGuard } from '@/components/settings/use-settings-unsaved-guard'
 import {
   type MothershipTab,
   mothershipParsers,
@@ -26,33 +24,13 @@ import {
 import { SettingsEmptyState } from '@/app/workspace/[workspaceId]/settings/components/settings-empty-state'
 import { SettingsPanel } from '@/app/workspace/[workspaceId]/settings/components/settings-panel'
 import {
-  type MothershipByokKey,
   type MothershipEnv,
-  useDeleteMothershipByok,
   useGenerateLicense,
-  useMothershipByokKeys,
   useMothershipLicenses,
   useMothershipRequests,
   useMothershipUserBreakdown,
-  useUpsertMothershipByok,
 } from '@/hooks/queries/mothership-admin'
-
-const ENTERPRISE_BYOK_PROVIDERS: BYOKManagerProvider[] = [
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    icon: OpenAIIcon,
-    description: 'Enterprise mothership LLM calls',
-    placeholder: 'sk-...',
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    icon: AnthropicIcon,
-    description: 'Enterprise mothership LLM calls',
-    placeholder: 'sk-ant-...',
-  },
-]
+import { useSettingsDirtyStore } from '@/stores/settings/dirty/store'
 
 const TABS: { id: MothershipTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -108,6 +86,7 @@ export function Mothership() {
   const defaults = useMemo(() => defaultTimeRange(), [])
   const [start, setStart] = useState(defaults.start)
   const [end, setEnd] = useState(defaults.end)
+  const requestLeave = useSettingsDirtyStore((state) => state.requestLeave)
 
   return (
     <SettingsPanel>
@@ -118,7 +97,12 @@ export function Mothership() {
             align='start'
             dropdownWidth={160}
             value={environment}
-            onChange={(value) => setMothershipParams({ env: value as MothershipEnv })}
+            onChange={(value) => {
+              if (value !== environment)
+                requestLeave(() => {
+                  void setMothershipParams({ env: value as MothershipEnv })
+                })
+            }}
             placeholder='Select environment'
             options={ENV_OPTIONS}
           />
@@ -127,7 +111,12 @@ export function Mothership() {
         <ChipModalTabs
           tabs={TABS.map((tab) => ({ value: tab.id, label: tab.label }))}
           value={activeTab}
-          onChange={(value) => setMothershipParams({ tab: value as MothershipTab })}
+          onChange={(value) => {
+            if (value !== activeTab)
+              requestLeave(() => {
+                void setMothershipParams({ tab: value as MothershipTab })
+              })
+          }}
         />
 
         <div className='flex items-center gap-3'>
@@ -160,18 +149,12 @@ export function Mothership() {
 function ByokTab() {
   const [targetWorkspaceId, setTargetWorkspaceId] = useState('')
   const workspaceId = targetWorkspaceId.trim()
-
-  const { data, isLoading } = useMothershipByokKeys(workspaceId)
-  const upsert = useUpsertMothershipByok()
-  const del = useDeleteMothershipByok()
-
-  const configuredProviderIds = useMemo(
-    () => new Set(((data?.keys as MothershipByokKey[]) ?? []).map((k) => k.provider)),
-    [data]
-  )
-
   return (
     <div className='flex flex-col gap-4'>
+      <p className='text-[var(--text-secondary)] text-sm'>
+        Mothership uses the enterprise workspace's Anthropic key from Sim BYOK settings, including
+        keys inherited from its organization.
+      </p>
       <div className='flex items-center gap-2'>
         <Label className='text-[var(--text-secondary)] text-sm'>Target workspace</Label>
         <ChipInput
@@ -181,26 +164,13 @@ function ByokTab() {
           className='w-[280px]'
         />
       </div>
-      {workspaceId ? (
-        <BYOKKeyManager
-          providers={ENTERPRISE_BYOK_PROVIDERS}
-          configuredProviderIds={configuredProviderIds}
-          isLoading={isLoading}
-          isSaving={upsert.isPending}
-          isDeleting={del.isPending}
-          showSearch={false}
-          description="Store a customer-provided Anthropic or OpenAI key for this workspace. It is encrypted at rest in the mothership and used only for this workspace's enterprise requests."
-          onSave={async (provider, apiKey) => {
-            await upsert.mutateAsync({ workspaceId, provider, apiKey })
-          }}
-          onDelete={async (provider) => {
-            await del.mutateAsync({ workspaceId, provider })
-          }}
-        />
-      ) : (
-        <SettingsEmptyState variant='inline'>
-          Enter a workspace ID to manage its Mothership BYOK keys.
-        </SettingsEmptyState>
+      {workspaceId && (
+        <Link
+          href={`/workspace/${encodeURIComponent(workspaceId)}/settings/byok`}
+          className='text-sm underline'
+        >
+          Manage workspace BYOK keys
+        </Link>
       )}
     </div>
   )
@@ -390,24 +360,39 @@ function LicensesTab({ environment }: { environment: MothershipEnv }) {
   const generateLicense = useGenerateLicense(environment)
   const [newName, setNewName] = useState('')
   const [newExpiry, setNewExpiry] = useState('')
+  const [approvalReference, setApprovalReference] = useState('')
   const [generatedKey, setGeneratedKey] = useState<string | null>(null)
+  const resetForm = () => {
+    setNewName('')
+    setNewExpiry('')
+    setApprovalReference('')
+  }
+  useSettingsUnsavedGuard({
+    isDirty: Boolean(newName.trim() || newExpiry || approvalReference.trim() || generatedKey),
+    navigationBlocked: generateLicense.isPending,
+    onDiscard: () => {
+      resetForm()
+      setGeneratedKey(null)
+    },
+  })
 
-  const handleGenerate = useCallback(() => {
-    if (!newName.trim()) return
+  const handleGenerate = () => {
+    if (!newName.trim() || !approvalReference.trim() || generateLicense.isPending || generatedKey)
+      return
     generateLicense.mutate(
       {
         name: newName.trim(),
+        approvalReference: approvalReference.trim(),
         ...(newExpiry ? { expirationDate: newExpiry } : {}),
       },
       {
         onSuccess: (result) => {
           setGeneratedKey(result.license_key)
-          setNewName('')
-          setNewExpiry('')
+          resetForm()
         },
       }
     )
-  }, [newName, newExpiry, generateLicense.mutate])
+  }
 
   return (
     <div className='flex flex-col gap-5'>
@@ -416,18 +401,27 @@ function LicensesTab({ environment }: { environment: MothershipEnv }) {
         <div className='flex flex-col gap-1'>
           <Label className='text-[var(--text-secondary)] text-caption'>Enterprise Name</Label>
           <ChipInput
+            disabled={generateLicense.isPending}
             value={newName}
-            onChange={(e) => {
-              setNewName(e.target.value)
-              setGeneratedKey(null)
-            }}
+            onChange={(e) => setNewName(e.target.value)}
             placeholder='e.g. Acme Corp'
             className='w-[200px]'
           />
         </div>
         <div className='flex flex-col gap-1'>
+          <Label className='text-[var(--text-secondary)] text-caption'>Approval reference</Label>
+          <ChipInput
+            disabled={generateLicense.isPending}
+            value={approvalReference}
+            onChange={(event) => setApprovalReference(event.target.value)}
+            placeholder='Signed order form or written approval'
+            className='w-[240px]'
+          />
+        </div>
+        <div className='flex flex-col gap-1'>
           <Label className='text-[var(--text-secondary)] text-caption'>Expiration (optional)</Label>
           <ChipInput
+            disabled={generateLicense.isPending}
             type='date'
             value={newExpiry}
             onChange={(e) => setNewExpiry(e.target.value)}
@@ -438,7 +432,12 @@ function LicensesTab({ environment }: { environment: MothershipEnv }) {
           variant='primary'
           className='h-[32px]'
           onClick={handleGenerate}
-          disabled={generateLicense.isPending || !newName.trim()}
+          disabled={
+            generateLicense.isPending ||
+            Boolean(generatedKey) ||
+            !newName.trim() ||
+            !approvalReference.trim()
+          }
         >
           {generateLicense.isPending ? 'Generating...' : 'Generate'}
         </Button>
@@ -449,7 +448,10 @@ function LicensesTab({ environment }: { environment: MothershipEnv }) {
           <p className='text-[var(--text-secondary)] text-caption'>
             License key (only shown once):
           </p>
-          <ChipCopyInput value={generatedKey} copyLabel='Copy license key' />
+          <div className='flex items-center gap-2'>
+            <ChipCopyInput value={generatedKey} copyLabel='Copy license key' className='flex-1' />
+            <Chip onClick={() => setGeneratedKey(null)}>Done</Chip>
+          </div>
         </div>
       )}
 

@@ -12,7 +12,10 @@ import type {
 } from '@/lib/api/contracts/agent-access-requests'
 import { useSession } from '@/lib/auth/auth-client'
 import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
-import { SettingsEmptyState } from '@/app/workspace/[workspaceId]/settings/components/settings-empty-state'
+import {
+  SettingsEmptyState,
+  SettingsQueryErrorState,
+} from '@/app/workspace/[workspaceId]/settings/components/settings-empty-state'
 import { SettingsPanel } from '@/app/workspace/[workspaceId]/settings/components/settings-panel'
 import { useBrandConfig } from '@/ee/whitelabeling/branding'
 import {
@@ -126,7 +129,7 @@ export function AgentAccessRequest({ standalone = false }: AgentAccessRequestPro
     refetch,
     isFetching,
   } = useAgentAccessRequests(workspaceId)
-  const approveMutation = useApproveAgentAccessRequests(workspaceId)
+  const approveMutation = useApproveAgentAccessRequests()
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
@@ -200,9 +203,12 @@ export function AgentAccessRequest({ standalone = false }: AgentAccessRequestPro
   const body = isPending ? (
     <SettingsEmptyState>Loading agent access requests...</SettingsEmptyState>
   ) : isError ? (
-    <SettingsEmptyState tone='error'>
-      {error.message || 'Unable to load agent access requests'}
-    </SettingsEmptyState>
+    <SettingsQueryErrorState
+      error={error}
+      fallback='Unable to load agent access requests'
+      isRetrying={isFetching}
+      onRetry={() => void refetch()}
+    />
   ) : !rows || rows.length === 0 ? (
     <SettingsEmptyState>No agent access requests.</SettingsEmptyState>
   ) : (

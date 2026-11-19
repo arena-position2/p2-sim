@@ -8,6 +8,7 @@ interface KnowledgeBaseData {
   userId: string
   workspaceId?: string | null
   name: string
+  isSearchIndex: boolean
   description?: string | null
   tokenCount: number
   embeddingModel: string
@@ -22,7 +23,13 @@ export interface KnowledgeBaseAccessResult {
   hasAccess: true
   knowledgeBase: Pick<
     KnowledgeBaseData,
-    'id' | 'userId' | 'workspaceId' | 'name' | 'embeddingModel' | 'embeddingDimension'
+    | 'id'
+    | 'userId'
+    | 'workspaceId'
+    | 'name'
+    | 'isSearchIndex'
+    | 'embeddingModel'
+    | 'embeddingDimension'
   >
 }
 
@@ -52,6 +59,7 @@ async function resolveKnowledgeBaseAccess(
       userId: knowledgeBase.userId,
       workspaceId: knowledgeBase.workspaceId,
       name: knowledgeBase.name,
+      isSearchIndex: knowledgeBase.isSearchIndex,
       embeddingModel: knowledgeBase.embeddingModel,
       embeddingDimension: knowledgeBase.embeddingDimension,
     })
@@ -104,13 +112,7 @@ export async function checkKnowledgeBaseAccess(
   return resolveKnowledgeBaseAccess(knowledgeBaseId, userId, false)
 }
 
-/**
- * Check if a user has write access to a knowledge base.
- *
- * Write access is granted if:
- * 1. KB has a workspace: user has write or admin permissions on that workspace
- * 2. KB has no workspace (legacy): user owns the KB directly
- */
+/** Write access: workspace write/admin, or ownership of a legacy knowledge base with no workspace. */
 export async function checkKnowledgeBaseWriteAccess(
   knowledgeBaseId: string,
   userId: string

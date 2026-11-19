@@ -1,20 +1,7 @@
-import { generateId } from '@sim/utils/id'
 import { SkyvernIcon } from '@/components/icons'
 import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
 import { parseSkyvernRunParameterRows } from '@/tools/skyvern/parameter-rows'
-import type {
-  SkyvernCreateWorkflowResponse,
-  SkyvernGetRunResponse,
-  SkyvernListWorkflowsResponse,
-  SkyvernRunWorkflowResponse,
-} from '@/tools/skyvern/types'
-
-export type SkyvernResponse =
-  | SkyvernCreateWorkflowResponse
-  | SkyvernListWorkflowsResponse
-  | SkyvernRunWorkflowResponse
-  | SkyvernGetRunResponse
 
 const SKYVERN_WORKFLOW_CACHE_TTL_MS = 60_000
 
@@ -130,7 +117,7 @@ const fetchSkyvernWorkflowOptionById = async (
   }
 }
 
-export const SkyvernBlock: BlockConfig<SkyvernResponse> = {
+export const SkyvernBlock: BlockConfig = {
   type: 'skyvern',
   name: 'Skyvern',
   description: 'Create and run Skyvern browser automation workflows',
@@ -209,9 +196,9 @@ export const SkyvernBlock: BlockConfig<SkyvernResponse> = {
         fieldValuePlaceholder: 'Default value (optional)',
       },
       condition: { field: 'operation', value: 'skyvern_create_workflow' },
-      defaultValue: () => [
+      defaultValue: [
         {
-          id: generateId(),
+          id: 'starting_url',
           name: 'starting_url',
           type: 'string',
           description: 'Starting URL',
@@ -219,7 +206,7 @@ export const SkyvernBlock: BlockConfig<SkyvernResponse> = {
           collapsed: false,
         },
         {
-          id: generateId(),
+          id: 'appointment_type',
           name: 'appointment_type',
           type: 'string',
           description: 'Appointment type',
@@ -227,7 +214,7 @@ export const SkyvernBlock: BlockConfig<SkyvernResponse> = {
           collapsed: false,
         },
         {
-          id: generateId(),
+          id: 'days_to_search',
           name: 'days_to_search',
           type: 'integer',
           description: 'Number of days to search',
@@ -321,9 +308,9 @@ export const SkyvernBlock: BlockConfig<SkyvernResponse> = {
       },
       mode: 'basic',
       condition: { field: 'operation', value: 'skyvern_run_workflow' },
-      defaultValue: () => [
+      defaultValue: [
         {
-          id: generateId(),
+          id: 'starting_url',
           name: 'starting_url',
           type: 'string',
           value: '',

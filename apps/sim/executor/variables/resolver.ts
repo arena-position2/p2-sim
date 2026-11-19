@@ -177,6 +177,36 @@ type CodeScanMode =
   | { type: 'regex'; inCharacterClass: boolean }
 
 /**
+ * Lexer progress through one code template, shared by every reference spliced into it.
+ * References are formatted in ascending offset order, so each quote lookup resumes where the
+ * previous one stopped: rescanning from offset 0 per reference is quadratic in template size.
+ */
+interface CodeTemplateScan {
+  readonly template: string
+  quoteCursor?: CodeQuoteCursor
+  shellQuoteCursor?: ShellQuoteCursor
+  hasModuleDependencySyntax?: boolean
+}
+
+interface CodeQuoteCursor {
+  language: string | undefined
+  queriedIndex: number
+  position: number
+  modes: CodeScanMode[]
+  lastSignificantIndex: number
+  openParenIsControlHead: boolean[]
+  identifierFollowsPropertyAccess: boolean
+  controlHeadParenCloses: Set<number>
+  regexCloseIndices: Set<number>
+}
+
+interface ShellQuoteCursor {
+  queriedIndex: number
+  position: number
+  quoteContext: ShellQuoteContext
+}
+
+/**
  * Characters after which a `/` opens a regular expression rather than dividing.
  *
  * The scanner has to tell the two apart, because a regex body is the one place a lone quote
@@ -523,6 +553,7 @@ export class VariableResolver {
     let replacementError: Error | null = null
     let displayResult = ''
     let displayCursor = 0
+    const scan: CodeTemplateScan = { template }
 
     const result = await replaceValidReferencesAsync(template, async (match, index) => {
       if (replacementError) return match
@@ -534,7 +565,7 @@ export class VariableResolver {
           match,
           resolutionContext,
           language,
-          template,
+          scan,
           index,
           contextVarAccumulator
         )
@@ -547,7 +578,7 @@ export class VariableResolver {
           match,
           resolutionContext,
           language,
-          template,
+          scan,
           index,
           contextVarAccumulator
         )
@@ -578,7 +609,7 @@ export class VariableResolver {
             const lazyReplacement = this.formatLazyLargeValueReference(
               varName,
               language,
-              template,
+              scan,
               index
             )
             if (!lazyReplacement) {
@@ -589,7 +620,7 @@ export class VariableResolver {
             const lazyReplacement = this.formatLazyLargeArrayManifestReference(
               varName,
               language,
-              template,
+              scan,
               index
             )
             if (!lazyReplacement) {
@@ -603,7 +634,7 @@ export class VariableResolver {
               ctx,
               effectiveValue,
               language,
-              template,
+              scan,
               offloadState
             )
             if (offloadedRef) {
@@ -612,19 +643,13 @@ export class VariableResolver {
               // maybeOffload only returns a ref when the JS runtime helpers are usable —
               // the same guard formatLazyLargeValueReference needs — so it is non-null here.
               replacement =
-                this.formatLazyLargeValueReference(varName, language, template, index) ??
-                this.formatContextVariableReference(
-                  varName,
-                  language,
-                  template,
-                  index,
-                  effectiveValue
-                )
+                this.formatLazyLargeValueReference(varName, language, scan, index) ??
+                this.formatContextVariableReference(varName, language, scan, index, effectiveValue)
             } else {
               replacement = this.formatContextVariableReference(
                 varName,
                 language,
-                template,
+                scan,
                 index,
                 effectiveValue
               )
@@ -634,7 +659,7 @@ export class VariableResolver {
           displayResult += this.formatDisplayValueForCodeContext(
             displayValue,
             language,
-            template,
+            scan,
             index
           )
           return replacement
@@ -651,17 +676,12 @@ export class VariableResolver {
         if (isLargeValueRef(effectiveValue)) {
           const varName = `__blockRef_${Object.keys(contextVarAccumulator).length}`
           contextVarAccumulator[varName] = effectiveValue
-          const lazyReplacement = this.formatLazyLargeValueReference(
-            varName,
-            language,
-            template,
-            index
-          )
+          const lazyReplacement = this.formatLazyLargeValueReference(varName, language, scan, index)
           if (lazyReplacement) {
             displayResult += this.formatDisplayValueForCodeContext(
               effectiveValue,
               language,
-              template,
+              scan,
               index
             )
             return lazyReplacement
@@ -675,14 +695,14 @@ export class VariableResolver {
           const lazyReplacement = this.formatLazyLargeArrayManifestReference(
             varName,
             language,
-            template,
+            scan,
             index
           )
           if (lazyReplacement) {
             displayResult += this.formatDisplayValueForCodeContext(
               effectiveValue,
               language,
-              template,
+              scan,
               index
             )
             return lazyReplacement
@@ -709,19 +729,19 @@ export class VariableResolver {
         const replacement = this.formatContextVariableReference(
           varName,
           language,
-          template,
+          scan,
           index,
           effectiveValue
         )
         displayResult += this.formatDisplayValueForCodeContext(
           effectiveValue,
           language,
-          template,
+          scan,
           index
         )
         return replacement
       } catch (error) {
-        replacementError = error instanceof Error ? error : new Error(String(error))
+        replacementError = toError(error)
         displayResult += match
         return match
       }
@@ -749,7 +769,7 @@ export class VariableResolver {
     reference: string,
     context: ResolutionContext,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number,
     contextVarAccumulator: Record<string, unknown>
   ): Promise<{ replacement: string; display: string } | null> {
@@ -780,7 +800,7 @@ export class VariableResolver {
     }
 
     return {
-      replacement: this.formatContextVariablePathReference(varName, language, template, matchIndex),
+      replacement: this.formatContextVariablePathReference(varName, language, scan, matchIndex),
       display: reference,
     }
   }
@@ -807,14 +827,14 @@ export class VariableResolver {
   private formatContextVariablePathReference(
     varName: string,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number
   ): string {
     if (language === 'shell') {
-      return this.formatShellContextVariableReference(varName, template, matchIndex, '')
+      return this.formatShellContextVariableReference(varName, scan, matchIndex, '')
     }
 
-    const quoteContext = this.getCodeStringQuoteContext(template, matchIndex, language)
+    const quoteContext = this.getCodeStringQuoteContext(scan, matchIndex, language)
 
     if (language === 'python') {
       const expression = `globals()[${JSON.stringify(varName)}]`
@@ -840,11 +860,11 @@ export class VariableResolver {
     reference: string,
     context: ResolutionContext,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number,
     contextVarAccumulator: Record<string, unknown>
   ): Promise<{ replacement: string; display: string } | null> {
-    if (!this.canUseJavaScriptRuntimeHelpers(language, template)) {
+    if (!this.canUseJavaScriptRuntimeHelpers(language, scan)) {
       return null
     }
 
@@ -869,7 +889,7 @@ export class VariableResolver {
     const lazyExpression = `(await sim.files.readBase64(${fileExpression}))`
 
     return {
-      replacement: this.formatJavaScriptAsyncExpression(lazyExpression, template, matchIndex),
+      replacement: this.formatJavaScriptAsyncExpression(lazyExpression, scan, matchIndex),
       display: reference,
     }
   }
@@ -890,12 +910,12 @@ export class VariableResolver {
     ctx: ExecutionContext,
     value: unknown,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     offloadState: FunctionContextOffloadState
   ): Promise<LargeValueRef | null> {
     // Lazy re-reading is only available in the JavaScript isolated-vm runtime; other
     // runtimes have no broker to materialize a ref, so the value must stay inline.
-    if (!this.canUseJavaScriptRuntimeHelpers(language, template)) {
+    if (!this.canUseJavaScriptRuntimeHelpers(language, scan)) {
       return null
     }
     if (!ctx.workspaceId || !ctx.workflowId || !ctx.executionId) {
@@ -939,15 +959,15 @@ export class VariableResolver {
   private formatLazyLargeValueReference(
     varName: string,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number
   ): string | null {
-    if (!this.canUseJavaScriptRuntimeHelpers(language, template)) {
+    if (!this.canUseJavaScriptRuntimeHelpers(language, scan)) {
       return null
     }
 
     const expression = `(await sim.values.read(globalThis[${JSON.stringify(varName)}]))`
-    return this.formatJavaScriptAsyncExpression(expression, template, matchIndex, {
+    return this.formatJavaScriptAsyncExpression(expression, scan, matchIndex, {
       stringifyInStringContext: true,
     })
   }
@@ -955,15 +975,15 @@ export class VariableResolver {
   private formatLazyLargeArrayManifestReference(
     varName: string,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number
   ): string | null {
-    if (!this.canUseJavaScriptRuntimeHelpers(language, template)) {
+    if (!this.canUseJavaScriptRuntimeHelpers(language, scan)) {
       return null
     }
 
     const expression = `(await sim.values.readArray(globalThis[${JSON.stringify(varName)}]))`
-    return this.formatJavaScriptAsyncExpression(expression, template, matchIndex, {
+    return this.formatJavaScriptAsyncExpression(expression, scan, matchIndex, {
       stringifyInStringContext: true,
     })
   }
@@ -1003,11 +1023,11 @@ export class VariableResolver {
 
   private formatJavaScriptAsyncExpression(
     expression: string,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number,
     options: { stringifyInStringContext?: boolean } = {}
   ): string {
-    const quoteContext = this.getCodeStringQuoteContext(template, matchIndex, 'javascript')
+    const quoteContext = this.getCodeStringQuoteContext(scan, matchIndex, 'javascript')
     const stringExpression = options.stringifyInStringContext
       ? `JSON.stringify(${expression})`
       : expression
@@ -1022,11 +1042,15 @@ export class VariableResolver {
     return expression
   }
 
-  private canUseJavaScriptRuntimeHelpers(language: string | undefined, template: string): boolean {
+  private canUseJavaScriptRuntimeHelpers(
+    language: string | undefined,
+    scan: CodeTemplateScan
+  ): boolean {
     if (language !== 'javascript') {
       return false
     }
-    return !this.hasJavaScriptModuleDependencySyntax(template)
+    scan.hasModuleDependencySyntax ??= this.hasJavaScriptModuleDependencySyntax(scan.template)
+    return !scan.hasModuleDependencySyntax
   }
 
   private hasJavaScriptModuleDependencySyntax(template: string): boolean {
@@ -1206,10 +1230,11 @@ export class VariableResolver {
    * author did not write, silently, while admitting one too many only costs the narrowing.
    */
   private readsEnvironmentMap(expression: string): boolean {
+    const scan: CodeTemplateScan = { template: expression }
     ENVIRONMENT_MAP_IDENTIFIER.lastIndex = 0
     let match = ENVIRONMENT_MAP_IDENTIFIER.exec(expression)
     while (match !== null) {
-      if (this.getCodeStringQuoteContext(expression, match.index, 'javascript') === null) {
+      if (this.getCodeStringQuoteContext(scan, match.index, 'javascript') === null) {
         return true
       }
       match = ENVIRONMENT_MAP_IDENTIFIER.exec(expression)
@@ -1272,13 +1297,13 @@ export class VariableResolver {
   private formatContextVariableReference(
     varName: string,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number,
     value: unknown
   ): string {
     if (language === 'python') {
       const expression = `globals()[${JSON.stringify(varName)}]`
-      const quoteContext = this.getCodeStringQuoteContext(template, matchIndex, language)
+      const quoteContext = this.getCodeStringQuoteContext(scan, matchIndex, language)
       if (this.isPythonStringQuoteContext(quoteContext)) {
         const quote = this.getCodeStringQuoteToken(quoteContext)
         return `${quote} + json.dumps(${expression}) + ${quote}`
@@ -1287,11 +1312,11 @@ export class VariableResolver {
     }
 
     if (language === 'shell') {
-      return this.formatShellContextVariableReference(varName, template, matchIndex, value)
+      return this.formatShellContextVariableReference(varName, scan, matchIndex, value)
     }
 
     const expression = `globalThis[${JSON.stringify(varName)}]`
-    const quoteContext = this.getCodeStringQuoteContext(template, matchIndex, language)
+    const quoteContext = this.getCodeStringQuoteContext(scan, matchIndex, language)
     if (quoteContext === 'template') {
       return `\${JSON.stringify(${expression})}`
     }
@@ -1325,7 +1350,7 @@ export class VariableResolver {
   private formatDisplayValueForCodeContext(
     value: unknown,
     language: string | undefined,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number
   ): string {
     // Offloaded large values carry only a storage ref (or array manifest), never the
@@ -1339,15 +1364,19 @@ export class VariableResolver {
     }
 
     if (language === 'shell') {
-      return this.formatShellDisplayValue(value, template, matchIndex)
+      return this.formatShellDisplayValue(value, scan, matchIndex)
     }
 
     return this.blockResolver.formatValueForBlock(value, BlockType.FUNCTION, language)
   }
 
-  private formatShellDisplayValue(value: unknown, template: string, matchIndex: number): string {
+  private formatShellDisplayValue(
+    value: unknown,
+    scan: CodeTemplateScan,
+    matchIndex: number
+  ): string {
     const text = this.stringifyShellDisplayValue(value)
-    const quoteContext = this.getShellQuoteContext(template, matchIndex)
+    const quoteContext = this.getShellQuoteContext(scan, matchIndex)
     if (quoteContext === 'double') {
       return text.replace(/["\\$`]/g, '\\$&')
     }
@@ -1369,19 +1398,33 @@ export class VariableResolver {
   }
 
   private getCodeStringQuoteContext(
-    template: string,
+    scan: CodeTemplateScan,
     index: number,
     language: string | undefined
   ): CodeStringQuoteContext {
+    const template = scan.template
     const isPython = language === 'python'
-    const modes: CodeScanMode[] = [{ type: 'normal' }]
-    let lastSignificantIndex = -1
-    const openParenIsControlHead: boolean[] = []
-    let identifierFollowsPropertyAccess = false
-    const controlHeadParenCloses = new Set<number>()
-    const regexCloseIndices = new Set<number>()
+    let cursor = scan.quoteCursor
+    if (!cursor || cursor.language !== language || index < cursor.queriedIndex) {
+      cursor = {
+        language,
+        queriedIndex: 0,
+        position: 0,
+        modes: [{ type: 'normal' }],
+        lastSignificantIndex: -1,
+        openParenIsControlHead: [],
+        identifierFollowsPropertyAccess: false,
+        controlHeadParenCloses: new Set(),
+        regexCloseIndices: new Set(),
+      }
+      scan.quoteCursor = cursor
+    }
+    cursor.queriedIndex = index
+    const { modes, openParenIsControlHead, controlHeadParenCloses, regexCloseIndices } = cursor
+    let { lastSignificantIndex, identifierFollowsPropertyAccess } = cursor
 
-    for (let i = 0; i < index; i++) {
+    let i = cursor.position
+    for (; i < index; i++) {
       const char = template[i]
       const next = template[i + 1]
       const mode = modes[modes.length - 1]
@@ -1610,6 +1653,9 @@ export class VariableResolver {
         modes.push({ type: 'template' })
       }
     }
+    cursor.position = i
+    cursor.lastSignificantIndex = lastSignificantIndex
+    cursor.identifierFollowsPropertyAccess = identifierFollowsPropertyAccess
 
     const mode = modes[modes.length - 1]
     if (mode.type === 'regex') {
@@ -1629,12 +1675,12 @@ export class VariableResolver {
 
   private formatShellContextVariableReference(
     varName: string,
-    template: string,
+    scan: CodeTemplateScan,
     matchIndex: number,
     value: unknown
   ): string {
     const expansion = `\${${varName}}`
-    const quoteContext = this.getShellQuoteContext(template, matchIndex)
+    const quoteContext = this.getShellQuoteContext(scan, matchIndex)
     if (quoteContext === 'double') {
       return expansion
     }
@@ -1657,34 +1703,39 @@ export class VariableResolver {
     return quotedExpansion
   }
 
-  private getShellQuoteContext(template: string, index: number): ShellQuoteContext {
-    let quoteContext: ShellQuoteContext = null
+  private getShellQuoteContext(scan: CodeTemplateScan, index: number): ShellQuoteContext {
+    const template = scan.template
+    let cursor = scan.shellQuoteCursor
+    if (!cursor || index < cursor.queriedIndex) {
+      cursor = { queriedIndex: 0, position: 0, quoteContext: null }
+      scan.shellQuoteCursor = cursor
+    }
+    cursor.queriedIndex = index
 
-    for (let i = 0; i < index; i++) {
+    let i = cursor.position
+    for (; i < index; i++) {
       const char = template[i]
 
-      if (quoteContext === null && this.isShellCommentStart(template, i)) {
+      if (cursor.quoteContext === null && this.isShellCommentStart(template, i)) {
         const nextNewline = template.indexOf('\n', i + 1)
-        if (nextNewline === -1 || nextNewline >= index) {
-          break
-        }
-        i = nextNewline
+        i = nextNewline === -1 ? template.length : nextNewline
         continue
       }
 
-      if (char === '\\' && quoteContext !== 'single') {
+      if (char === '\\' && cursor.quoteContext !== 'single') {
         i++
         continue
       }
 
-      if (char === "'" && quoteContext !== 'double') {
-        quoteContext = quoteContext === 'single' ? null : 'single'
-      } else if (char === '"' && quoteContext !== 'single') {
-        quoteContext = quoteContext === 'double' ? null : 'double'
+      if (char === "'" && cursor.quoteContext !== 'double') {
+        cursor.quoteContext = cursor.quoteContext === 'single' ? null : 'single'
+      } else if (char === '"' && cursor.quoteContext !== 'single') {
+        cursor.quoteContext = cursor.quoteContext === 'double' ? null : 'double'
       }
     }
+    cursor.position = i
 
-    return quoteContext
+    return cursor.quoteContext
   }
 
   private isShellCommentStart(template: string, index: number): boolean {
@@ -1798,6 +1849,7 @@ export class VariableResolver {
     }
 
     let replacementError: Error | null = null
+    const scan: CodeTemplateScan = { template }
 
     let projectedReferenceResult = ''
     let projectedReferenceCursor = 0
@@ -1832,7 +1884,7 @@ export class VariableResolver {
           return formatted
         }
         if (typeof resolved === 'object' && resolved !== null) {
-          const formatted = this.formatConditionJson(resolved, template, index)
+          const formatted = this.formatConditionJson(resolved, scan, index)
           projectedReferenceResult += containsResolvedSecret ? match : formatted
           return formatted
         }
@@ -1879,9 +1931,9 @@ export class VariableResolver {
    * surrounding context wrongly, and a quote inside a regex literal is enough to do that.
    * Splicing raw JSON would make that heuristic load-bearing for injection.
    */
-  private formatConditionJson(value: object, template: string, matchIndex: number): string {
+  private formatConditionJson(value: object, scan: CodeTemplateScan, matchIndex: number): string {
     const escaped = escapeInertStringContent(JSON.stringify(value))
-    const quoteContext = this.getCodeStringQuoteContext(template, matchIndex, 'javascript')
+    const quoteContext = this.getCodeStringQuoteContext(scan, matchIndex, 'javascript')
     return quoteContext === null ? `JSON.parse('${escaped}')` : escaped
   }
 

@@ -219,7 +219,7 @@ export const KnowledgeBlock: BlockConfig = {
     //   condition: getCohereRerankerApiKeyCondition(),
     // },
 
-    // --- List Documents ---
+    // List Documents
     {
       id: 'search',
       title: 'Search',
@@ -300,7 +300,7 @@ export const KnowledgeBlock: BlockConfig = {
       },
     },
 
-    // --- Upload Chunk ---
+    // Upload Chunk
     {
       id: 'content',
       title: 'Chunk Content',
@@ -311,7 +311,7 @@ export const KnowledgeBlock: BlockConfig = {
       condition: { field: 'operation', value: 'upload_chunk' },
     },
 
-    // --- Create Document / Upsert Document ---
+    // Create Document / Upsert Document
     {
       id: 'name',
       title: 'Document Name',
@@ -344,7 +344,7 @@ export const KnowledgeBlock: BlockConfig = {
       condition: { field: 'operation', value: ['create_document', 'upsert_document'] },
     },
 
-    // --- Update Chunk / Delete Chunk ---
+    // Update Chunk / Delete Chunk
     {
       id: 'chunkId',
       title: 'Chunk ID',
@@ -372,7 +372,7 @@ export const KnowledgeBlock: BlockConfig = {
       condition: { field: 'operation', value: 'update_chunk' },
     },
 
-    // --- Connector operations ---
+    // Connector operations
     {
       id: 'connectorId',
       title: 'Connector ID',
@@ -382,7 +382,7 @@ export const KnowledgeBlock: BlockConfig = {
       condition: { field: 'operation', value: ['get_connector', 'trigger_sync'] },
     },
 
-    // --- List Chunks ---
+    // List Chunks
     {
       id: 'chunkSearch',
       title: 'Search',
@@ -587,5 +587,19 @@ export const KnowledgeBlock: BlockConfig = {
     results: { type: 'json', description: 'Search results' },
     query: { type: 'string', description: 'Query used' },
     totalResults: { type: 'number', description: 'Total results count' },
+    cost: {
+      type: 'json',
+      description:
+        'Search cost breakdown: input, output, and total USD for the query embedding, plus rerankerCost, rerankerModel, and rerankerSearchUnits when a reranker ran. Absent when the search was not billed (e.g. tag-only search or BYOK).',
+    },
+    tokens: {
+      type: 'json',
+      description:
+        'Token usage of the query embedding: prompt, completion, and total. Present with cost.',
+    },
+    model: {
+      type: 'string',
+      description: 'Embedding model that scored the query. Present with cost.',
+    },
   },
 }

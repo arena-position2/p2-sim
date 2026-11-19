@@ -380,7 +380,7 @@ export function ShareSkillsPanel() {
               placeholder='Search workspace name or paste ID'
             />
             {sourceWorkspaces.error && (
-              <SettingsEmptyState variant='inline' tone='error'>
+              <SettingsEmptyState variant='inline'>
                 {sourceWorkspaces.error.message}
               </SettingsEmptyState>
             )}
@@ -415,9 +415,7 @@ export function ShareSkillsPanel() {
               </Chip>
             </div>
             {sourceSkills.error && (
-              <SettingsEmptyState variant='inline' tone='error'>
-                {sourceSkills.error.message}
-              </SettingsEmptyState>
+              <SettingsEmptyState variant='inline'>{sourceSkills.error.message}</SettingsEmptyState>
             )}
             <ChipDropdown
               multiple
@@ -497,7 +495,7 @@ export function ShareSkillsPanel() {
             <SettingsEmptyState variant='inline'>Loading catalog…</SettingsEmptyState>
           )}
           {catalogError && (
-            <SettingsEmptyState variant='inline' tone='error'>
+            <SettingsEmptyState variant='inline'>
               {getErrorMessage(catalogError, 'Failed to load catalog')}
             </SettingsEmptyState>
           )}
@@ -591,7 +589,7 @@ export function ShareSkillsPanel() {
             }
           />
           {targetWorkspaces.error && (
-            <SettingsEmptyState variant='inline' tone='error'>
+            <SettingsEmptyState variant='inline'>
               {targetWorkspaces.error.message}
             </SettingsEmptyState>
           )}

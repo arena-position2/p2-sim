@@ -1,7 +1,7 @@
 'use client'
 
 import { ChipModalField, ChipModalSeparator, ChipSelect } from '@sim/emcn'
-import type { SecretMountPolicy } from '@/lib/copilot/secret-mount-policy'
+import type { SecretMountPolicy } from '@/lib/mothership/secret-mount-policy'
 import { useRawMountableSecretOptions } from '@/hooks/queries/secret-mount-options'
 
 const SECRET_SCOPE_OPTIONS = [

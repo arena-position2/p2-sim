@@ -2,6 +2,7 @@ import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { V2_WORKFLOW_BILLING_EMAIL_HEADER } from '@/lib/api/contracts/v2/workflows'
 import { getSession } from '@/lib/auth'
 import { generateInternalToken } from '@/lib/auth/internal'
 import { getBaseUrl, getInternalApiBaseUrl } from '@/lib/core/utils/urls'
@@ -91,9 +92,13 @@ function responseForLog<T>(data: AgentExecuteResponse<T>): AgentExecuteResponse<
   return data
 }
 
-async function buildUpstreamHeaders(auth: UpstreamAuth): Promise<Record<string, string>> {
+async function buildUpstreamHeaders(
+  auth: UpstreamAuth,
+  userEmail: string
+): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    [V2_WORKFLOW_BILLING_EMAIL_HEADER]: userEmail,
   }
 
   if (auth.type === 'apiKey') {
@@ -110,6 +115,7 @@ async function executeAgentWorkflow<T>(params: {
   agentBaseUrl: string
   workflowId: string
   auth: UpstreamAuth
+  userEmail: string
   body: Record<string, unknown>
   logLabel: string
 }): Promise<
@@ -126,7 +132,7 @@ async function executeAgentWorkflow<T>(params: {
 
   const upstream = await fetch(url, {
     method: 'POST',
-    headers: await buildUpstreamHeaders(params.auth),
+    headers: await buildUpstreamHeaders(params.auth, params.userEmail),
     body: JSON.stringify(params.body),
     cache: 'no-store',
   })
@@ -165,6 +171,10 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
     })
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const userEmail = session.user.email?.trim()
+  if (!userEmail) {
+    return NextResponse.json({ error: 'Logged-in user email is required' }, { status: 400 })
+  }
 
   const resolveWorkflowId = process.env.SIM_AGENT_EMBED_WORKFLOW_ID
   const resolveApiKey = process.env.SIM_AGENT_EMBED_KEY
@@ -196,6 +206,7 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
       agentBaseUrl: executeBaseUrl,
       workflowId: resolveWorkflowId,
       auth: { type: 'apiKey', apiKey: resolveApiKey },
+      userEmail,
       body: { userId: session.user.id, email: session.user.email },
       logLabel: 'resolve-credentials',
     })
@@ -235,6 +246,7 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
       agentBaseUrl: executeBaseUrl,
       workflowId: htmlWorkflowId,
       auth: { type: 'internalJwt', userId: session.user.id },
+      userEmail,
       body: {
         persona,
         userId: session.user.id,

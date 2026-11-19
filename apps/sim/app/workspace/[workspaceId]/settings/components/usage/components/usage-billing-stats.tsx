@@ -56,9 +56,13 @@ export function UsageBillingStats({ view }: UsageBillingStatsProps) {
 }
 
 /**
- * User-tab remaining credits:
- * - allocation when a personal cap is set
- * - otherwise the shared organization pool
+ * User-tab remaining credits.
+ * With no personal cap, this person shares the organization pool, so remaining
+ * is the pool limit minus every member's usage. Subtracting only their own
+ * runs would show credits the organization has already spent.
+ * With a cap, remaining is the smaller of the unused cap and that same pool
+ * remainder. Used credits come from the cap reader, the same total that blocks
+ * the next run.
  */
 function UserRemainingCredits({
   data,
@@ -80,10 +84,7 @@ function UserRemainingCredits({
     return <OrgPoolRemainingCredits data={data} />
   }
 
-  const memberUsedCredits =
-    memberCredits?.usedDollars != null
-      ? dollarsToCredits(memberCredits.usedDollars)
-      : data.summary.totalCredits
+  const memberUsedCredits = dollarsToCredits(memberCredits?.usedDollars ?? 0)
 
   const display = resolveOrgMemberCreditDisplay({
     orgPool,
@@ -108,6 +109,10 @@ function UserRemainingCredits({
   )
 }
 
+/**
+ * Remaining credits in the shared pool: the pool limit minus every member's
+ * usage this period. An uncapped member spends from that shared balance.
+ */
 function OrgPoolRemainingCredits({ data }: { data: CreditUsageSummary }) {
   const orgPool = data.orgPool
   const isUnlimited = orgPool?.isUnlimited ?? false

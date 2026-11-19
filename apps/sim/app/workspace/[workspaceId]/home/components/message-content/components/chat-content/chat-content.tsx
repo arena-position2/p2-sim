@@ -10,27 +10,60 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Streamdown } from 'streamdown'
+import type { Nodes } from 'hast'
+import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from 'streamdown'
 import 'streamdown/styles.css'
-// prismjs core must load before its language components — they register on the
-// global `Prism` it installs (on `window`/`global`); fixes SSR + client order.
-import 'prismjs'
+import 'prismjs/components/prism-core'
+import 'prismjs/components/prism-markup'
+import 'prismjs/components/prism-css'
+import 'prismjs/components/prism-clike'
+import 'prismjs/components/prism-javascript'
 import 'prismjs/components/prism-typescript'
 import 'prismjs/components/prism-bash'
-import 'prismjs/components/prism-css'
-import 'prismjs/components/prism-markup'
 import '@sim/emcn/components/code/code.css'
-import { Checkbox, CopyCodeButton, cn, languages, highlight as prismHighlight } from '@sim/emcn'
-import { decodeVfsSegmentSafe } from '@/lib/copilot/vfs/path-utils'
+import {
+  Checkbox,
+  CopyCodeButton,
+  chipFilledFillTokens,
+  cn,
+  Lightbox,
+  languages,
+  overflowFadeSizeClass,
+  highlight as prismHighlight,
+  scrollFadeAttributes,
+  scrollFadeXClass,
+  useScrollEdges,
+} from '@sim/emcn'
 import { extractTextContent } from '@/lib/core/utils/react-node-text'
+import {
+  inlineChatImageUrl,
+  isInlineFileReference,
+} from '@/lib/mothership/chat/inline-image-reference'
+import { decodeVfsSegmentSafe } from '@/lib/vfs/path'
+import { inter } from '@/app/_styles/fonts/inter/inter'
+import { useChatSurface } from '@/app/workspace/[workspaceId]/home/components/chat-surface-context'
 import { ContextMentionIcon } from '@/app/workspace/[workspaceId]/home/components/context-mention-icon'
+import { sanitizeChatDisplayContent } from '@/app/workspace/[workspaceId]/home/components/message-content/components/chat-content/chat-sanitize'
+import {
+  ExternalLink,
+  LinkSourcesContext,
+} from '@/app/workspace/[workspaceId]/home/components/message-content/components/chat-content/external-link'
+import { HighlightedLines } from '@/app/workspace/[workspaceId]/home/components/message-content/components/chat-content/highlighted-lines'
+import { remarkPlainText } from '@/app/workspace/[workspaceId]/home/components/message-content/components/chat-content/remark-plain-text'
 import { SourceChip } from '@/app/workspace/[workspaceId]/home/components/message-content/components/source-chip'
+import {
+  externalLinkHostname,
+  PROSE_LINK_CLASS,
+} from '@/app/workspace/[workspaceId]/home/components/message-content/components/source-link'
 import {
   type CredentialSubmissionPayload,
   parseSpecialTags,
   type SourceTagData,
   SpecialTags,
+  WorkspaceResourceDisplay,
+  type WorkspaceResourceTagData,
 } from '@/app/workspace/[workspaceId]/home/components/message-content/components/special-tags'
+import { indexSourcesByUrl } from '@/app/workspace/[workspaceId]/home/components/message-content/sources-by-url'
 import type {
   ChatContextKind,
   WorkspaceResourceRef,
@@ -41,8 +74,6 @@ import {
   lastInlineGroupIndex,
   SOURCE_LINK_PREFIX,
 } from './chat-content-groups'
-import { sanitizeChatDisplayContent } from './chat-sanitize'
-import { ExternalLink, externalLinkHostname } from './external-link'
 
 const LANG_ALIASES: Record<string, string> = {
   js: 'javascript',
@@ -57,17 +88,22 @@ const LANG_ALIASES: Record<string, string> = {
   py: 'python',
 }
 
+const MARKDOWN_REMARK_PLUGINS = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkPlainText,
+] as const satisfies NonNullable<ComponentPropsWithoutRef<typeof Streamdown>['remarkPlugins']>
+
 const PROSE_CLASSES = cn(
   'prose prose-base dark:prose-invert max-w-none',
-  'font-[family-name:var(--font-inter)] antialiased break-words tracking-[0]',
+  'antialiased break-words tracking-[0]',
   'prose-headings:font-semibold prose-headings:tracking-[0] prose-headings:text-[var(--text-primary)]',
   'prose-headings:mb-3 prose-headings:mt-6 first:prose-headings:mt-0',
   'prose-p:text-base prose-p:leading-[25px] prose-p:text-[var(--text-primary)]',
   'prose-li:text-base prose-li:leading-[25px] prose-li:text-[var(--text-primary)]',
   'prose-li:my-1',
-  'prose-ul:my-4 prose-ol:my-4',
+  'prose-ul:my-4 prose-ol:my-4 [&_li>ul]:my-1 [&_li>ol]:my-1',
   'prose-strong:font-semibold prose-strong:text-[var(--text-primary)]',
-  'prose-a:text-[var(--text-primary)] prose-a:underline prose-a:decoration-dashed prose-a:underline-offset-4',
+  'prose-a:text-[var(--text-primary)] prose-a:no-underline',
   'prose-hr:border-[var(--border)] prose-hr:my-6',
   'prose-table:my-0'
 )
@@ -128,11 +164,31 @@ interface SourceReferenceProps {
 function SourceReference({ index, children }: SourceReferenceProps) {
   const source = useContext(SourceRefsContext)[index]
   if (!source) return <>{children}</>
-  return <SourceChip source={source} />
+  return (
+    <span data-chat-find-boundary>
+      <SourceChip source={source} />
+    </span>
+  )
 }
 
-type TdProps = ComponentPropsWithoutRef<'td'>
-type ThProps = ComponentPropsWithoutRef<'th'>
+const WORKSPACE_LINK_PREFIX = '#sim-workspace-ref-'
+const WorkspaceRefsContext = createContext<{
+  resources: WorkspaceResourceTagData[]
+  onSelect?: (resource: WorkspaceResourceRef) => void
+}>({ resources: [] })
+
+/** Keeps complete resource addresses local to each rendered message, including interleaved turns. */
+function WorkspaceReference({ index, children }: SourceReferenceProps) {
+  const { resources, onSelect } = useContext(WorkspaceRefsContext)
+  const resource = resources[index]
+  return resource ? (
+    <span data-chat-find-boundary>
+      <WorkspaceResourceDisplay data={resource} onSelect={onSelect} />
+    </span>
+  ) : (
+    <>{children}</>
+  )
+}
 
 /**
  * Maps a `#wsres-{type}-{ref}` link's resource type to the chat-context kind
@@ -153,11 +209,16 @@ const WSRES_LINK_KINDS: Record<string, ChatContextKind | undefined> = {
 function fileIconLabel(ref: string, fallback: string): string {
   const segments = ref.split('/').filter(Boolean)
   for (let i = segments.length - 1; i >= 0; i--) {
-    const decoded = decodeVfsSegmentSafe(segments[i])
+    const segment = segments[i]
+    if (!segment) continue
+    const decoded = decodeVfsSegmentSafe(segment)
     if (decoded.includes('.')) return decoded
   }
   return fallback
 }
+
+type TdProps = ComponentPropsWithoutRef<'td'>
+type ThProps = ComponentPropsWithoutRef<'th'>
 
 /**
  * Bounded LRU cache for Prism highlight output. Chat rows are virtualized, so a
@@ -191,23 +252,44 @@ function highlight(code: string, language: string): string {
   return html
 }
 
+interface MarkdownTableProps {
+  children?: React.ReactNode
+}
+
+function MarkdownTable({ children }: MarkdownTableProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const edges = useScrollEdges(scrollRef, { axis: 'x' })
+  const isOverflowing = edges.left || edges.right
+
+  return (
+    <div
+      ref={scrollRef}
+      role={isOverflowing ? 'region' : undefined}
+      aria-label={isOverflowing ? 'Scrollable table' : undefined}
+      tabIndex={isOverflowing ? 0 : undefined}
+      className={cn(
+        'not-prose my-4 w-full overflow-x-auto [&_strong]:font-semibold',
+        scrollFadeXClass,
+        overflowFadeSizeClass
+      )}
+      {...scrollFadeAttributes(edges)}
+    >
+      <table className='min-w-full border-collapse [&_tbody_tr:last-child_td]:border-b-0'>
+        {children}
+      </table>
+    </div>
+  )
+}
+
 const MARKDOWN_COMPONENTS = {
-  table({ children }: { children?: React.ReactNode }) {
-    return (
-      <div className='not-prose my-4 w-full overflow-x-auto [&_strong]:font-semibold'>
-        <table className='min-w-full border-collapse [&_tbody_tr:last-child_td]:border-b-0'>
-          {children}
-        </table>
-      </div>
-    )
-  },
+  table: MarkdownTable,
   thead({ children }: { children?: React.ReactNode }) {
     return <thead>{children}</thead>
   },
   th({ children, style }: ThProps) {
     return (
       <th
-        style={style}
+        style={{ textAlign: style?.textAlign }}
         className='whitespace-nowrap border-[var(--border)] border-b px-3 py-2 text-left font-semibold text-[var(--text-primary)] text-sm leading-6'
       >
         {children}
@@ -217,7 +299,7 @@ const MARKDOWN_COMPONENTS = {
   td({ children, style }: TdProps) {
     return (
       <td
-        style={style}
+        style={{ textAlign: style?.textAlign }}
         className='whitespace-nowrap border-[var(--border)] border-b px-3 py-2 text-[var(--text-primary)] text-sm leading-6'
       >
         {children}
@@ -241,7 +323,10 @@ const MARKDOWN_COMPONENTS = {
 
     return (
       <div className='not-prose my-6 overflow-hidden rounded-lg border border-[var(--border)]'>
-        <div className='flex items-center justify-between border-[var(--border)] border-b bg-[var(--surface-4)] px-4 py-2 dark:bg-[var(--surface-4)]'>
+        <div
+          data-chat-find-ignore
+          className='flex items-center justify-between border-[var(--border)] border-b bg-[var(--surface-4)] px-4 py-2 dark:bg-[var(--surface-4)]'
+        >
           <span className='text-[var(--text-tertiary)] text-xs'>{language || 'code'}</span>
           <CopyCodeButton
             code={codeString}
@@ -249,15 +334,22 @@ const MARKDOWN_COMPONENTS = {
           />
         </div>
         <div className='code-editor-theme bg-[var(--surface-5)] dark:bg-[var(--code-bg)]'>
-          <pre
-            className='m-0 overflow-x-auto whitespace-pre p-4 font-mono text-[var(--text-primary)] text-small leading-[21px]'
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          <pre className='m-0 overflow-x-auto whitespace-pre p-4 font-mono text-[var(--text-primary)] text-small leading-[21px]'>
+            <HighlightedLines html={html} />
+          </pre>
         </div>
       </div>
     )
   },
-  a({ children, href }: { children?: React.ReactNode; href?: string }) {
+  a({
+    children,
+    href,
+    'data-footnote-ref': footnoteRef,
+  }: {
+    children?: React.ReactNode
+    href?: string
+    'data-footnote-ref'?: boolean
+  }) {
     const isQuickChartUrl = (() => {
       if (!href) return false
       try {
@@ -314,9 +406,6 @@ const MARKDOWN_COMPONENTS = {
             e.preventDefault()
             if (!type || !ref) return
             const linkText = label || ref
-            // A file link carries whichever the tag had (`path ?? id`) with no
-            // way to tell them apart here, so it is forwarded as-is and the
-            // resolver tries every interpretation against the real file list.
             window.dispatchEvent(
               new CustomEvent('wsres-click', {
                 detail:
@@ -337,17 +426,20 @@ const MARKDOWN_COMPONENTS = {
         </a>
       )
     }
+    if (href?.startsWith(WORKSPACE_LINK_PREFIX)) {
+      return (
+        <WorkspaceReference index={Number(href.slice(WORKSPACE_LINK_PREFIX.length))}>
+          {children}
+        </WorkspaceReference>
+      )
+    }
     const hostname = externalLinkHostname(href)
     if (hostname && href) {
-      return (
-        <ExternalLink href={href} hostname={hostname}>
-          {children}
-        </ExternalLink>
-      )
+      return <ExternalLink href={href}>{children}</ExternalLink>
     }
     if (href?.startsWith('mailto:')) {
       return (
-        <a href={href} className='not-prose text-[var(--text-primary)] no-underline'>
+        <a href={href} className={PROSE_LINK_CLASS}>
           {children}
         </a>
       )
@@ -355,7 +447,8 @@ const MARKDOWN_COMPONENTS = {
     return (
       <a
         href={href}
-        className='text-[var(--text-primary)] underline decoration-dashed underline-offset-4'
+        data-footnote-ref={footnoteRef}
+        className={PROSE_LINK_CLASS}
         target='_blank'
         rel='noopener noreferrer'
       >
@@ -365,7 +458,16 @@ const MARKDOWN_COMPONENTS = {
   },
   ul({ children, className }: { children?: React.ReactNode; className?: string }) {
     if (className?.includes('contains-task-list')) {
-      return <ul className='my-4 list-none space-y-2 pl-0'>{children}</ul>
+      return (
+        <ul
+          className={cn(
+            'my-4 list-none space-y-2 ps-0 [&>li:not(.task-list-item)]:ms-5 [&>li:not(.task-list-item)]:list-disc',
+            className
+          )}
+        >
+          {children}
+        </ul>
+      )
     }
     return <ul className='my-4 list-disc pl-5 marker:text-[var(--text-primary)]'>{children}</ul>
   },
@@ -379,7 +481,12 @@ const MARKDOWN_COMPONENTS = {
   li({ children, className }: { children?: React.ReactNode; className?: string }) {
     if (className?.includes('task-list-item')) {
       return (
-        <li className='flex list-none items-start gap-2 text-[var(--text-primary)] text-base leading-[25px] [&>p:only-child]:inline [&>p]:my-0'>
+        <li
+          className={cn(
+            'list-none ps-6 text-[var(--text-primary)] text-base leading-[25px] [&>p:only-child]:inline [&>p]:my-0',
+            className
+          )}
+        >
           {children}
         </li>
       )
@@ -392,7 +499,12 @@ const MARKDOWN_COMPONENTS = {
   },
   inlineCode({ children }: { children?: React.ReactNode }) {
     return (
-      <code className='whitespace-normal rounded bg-[var(--surface-5)] px-1.5 py-0.5 font-mono font-normal text-[var(--text-primary)] not-italic before:content-none after:content-none'>
+      <code
+        className={cn(
+          'whitespace-normal rounded px-1 py-[1px] font-mono font-normal text-[var(--text-primary)] not-italic before:content-none after:content-none',
+          chipFilledFillTokens
+        )}
+      >
         {children}
       </code>
     )
@@ -406,7 +518,14 @@ const MARKDOWN_COMPONENTS = {
   },
   input({ type, checked }: { type?: string; checked?: boolean }) {
     if (type === 'checkbox') {
-      return <Checkbox checked={checked || false} disabled size='sm' className='mt-1.5 shrink-0' />
+      return (
+        <Checkbox
+          checked={checked || false}
+          disabled
+          size='sm'
+          className='-ms-6 mr-2 inline-flex align-middle'
+        />
+      )
     }
     return <input type={type} checked={checked} readOnly />
   },
@@ -419,12 +538,20 @@ const MARKDOWN_COMPONENTS = {
   img({ src, alt }: ComponentPropsWithoutRef<'img'>) {
     if (typeof src !== 'string' || !src) return null
     return (
-      <img
-        src={src}
-        alt={alt ?? ''}
-        loading='lazy'
-        className='my-4 h-auto max-w-full rounded-lg border border-[var(--border)]'
-      />
+      <Lightbox src={src} alt={alt ?? ''}>
+        <button
+          type='button'
+          aria-label={alt ? `Preview ${alt}` : 'Preview image'}
+          className='my-4 block max-w-full cursor-zoom-in rounded-lg'
+        >
+          <img
+            src={src}
+            alt={alt ?? ''}
+            loading='lazy'
+            className='m-0 block h-auto max-h-[360px] w-auto max-w-full rounded-lg border border-[var(--border)] object-contain'
+          />
+        </button>
+      </Lightbox>
     )
   },
 }
@@ -432,7 +559,8 @@ const MARKDOWN_COMPONENTS = {
 interface ChatContentProps {
   content: string
   messageId?: string
-  requestMode?: 'agent' | 'assistant'
+  imageRequestId?: string
+  requestMode?: 'agent' | 'assistant' | 'plan'
   isStreaming?: boolean
   /** Transcript-derived answers for this message's question card (renders the recap). */
   questionAnswers?: string[]
@@ -451,11 +579,52 @@ interface ChatContentProps {
    * nothing (tags are suppressed until complete). A wait from the user's POV.
    */
   onPendingTagChange?: (pending: boolean) => void
+  /** The turn's retrieved sources by URL, which title the answer's plain links to them. */
+  linkSources?: ReadonlyMap<string, SourceTagData>
+  /**
+   * Stable id for this text run across virtualizer unmounts. When present, a
+   * reply that streamed keeps the streaming parser after it scrolls away, so
+   * the remount does not re-parse an unbalanced marker as bold.
+   */
+  parserSessionKey?: string
+}
+
+/**
+ * Text runs that streamed in this session, keyed by the virtualizer row plus
+ * segment id. The row unmounts when it scrolls out of the window, and a fresh
+ * mount would otherwise parse as finished markdown (`mode='static'`), which
+ * pairs a stray `*` into `<strong>`. The set is written from an effect so a
+ * discarded render cannot drop a key.
+ */
+const streamedParserSessions = new Set<string>()
+
+/** Explicit options keep Streamdown's processor cache scoped to this chat and turn. */
+function privateImageUrls({
+  chatId,
+  imageRequestId,
+}: {
+  chatId?: string | null
+  imageRequestId?: string
+}) {
+  return (tree: Nodes) => {
+    function visit(node: Nodes): void {
+      if (node.type === 'element' && node.tagName === 'img') {
+        const src = node.properties.src
+        if (typeof src === 'string' && isInlineFileReference(src)) {
+          node.properties.src =
+            chatId && imageRequestId ? inlineChatImageUrl(chatId, imageRequestId, src) : ''
+        }
+      }
+      if ('children' in node) node.children.forEach(visit)
+    }
+    visit(tree)
+  }
 }
 
 function ChatContentInner({
   content,
   messageId,
+  imageRequestId,
   requestMode,
   isStreaming = false,
   questionAnswers,
@@ -467,12 +636,20 @@ function ChatContentInner({
   onRevealStateChange,
   onStreamActivityChange,
   onPendingTagChange,
+  linkSources,
+  parserSessionKey,
 }: ChatContentProps) {
-  const onWorkspaceResourceSelectRef = useRef(onWorkspaceResourceSelect)
-  onWorkspaceResourceSelectRef.current = onWorkspaceResourceSelect
-
+  const { chatId } = useChatSurface()
+  const imageRehypePlugins = useMemo<
+    NonNullable<ComponentPropsWithoutRef<typeof Streamdown>['rehypePlugins']>
+  >(
+    () => [[privateImageUrls, { chatId, imageRequestId }], ...Object.values(defaultRehypePlugins)],
+    [chatId, imageRequestId]
+  )
   const onRevealStateChangeRef = useRef(onRevealStateChange)
   onRevealStateChangeRef.current = onRevealStateChange
+  const onWorkspaceResourceSelectRef = useRef(onWorkspaceResourceSelect)
+  onWorkspaceResourceSelectRef.current = onWorkspaceResourceSelect
 
   const displayContent = useMemo(() => sanitizeChatDisplayContent(content), [content])
   /**
@@ -527,8 +704,13 @@ function ChatContentInner({
    * mounts a fresh animate plugin with no prev-content tracking, which would
    * re-fade the entire already-visible message.
    */
-  const [streamedThisSession, setStreamedThisSession] = useState(false)
-  const [animationDrained, setAnimationDrained] = useState(false)
+  // A remount of a reply that already streamed must open on the drained
+  // streaming parser: same remend tree, no fade. Re-arming the animate plugin
+  // would fade the whole message again.
+  const resumeSettledParser =
+    parserSessionKey !== undefined && streamedParserSessions.has(parserSessionKey) && !isStreaming
+  const [streamedThisSession, setStreamedThisSession] = useState(resumeSettledParser)
+  const [animationDrained, setAnimationDrained] = useState(resumeSettledParser)
   const [fadeCutoff, setFadeCutoff] = useState(false)
 
   /**
@@ -559,22 +741,36 @@ function ChatContentInner({
   if (isStreaming && !streamedThisSession) setStreamedThisSession(true)
 
   useEffect(() => {
+    if (!parserSessionKey) return
+    if (streamedThisSession) {
+      streamedParserSessions.add(parserSessionKey)
+      return
+    }
+    // History mounts here too, and deleting an absent key is a no-op. A content
+    // replacement clears both latches; drop the session so the remount follows
+    // that reset instead of restoring the previous reply's parser.
+    if (!animationDrained) streamedParserSessions.delete(parserSessionKey)
+  }, [parserSessionKey, streamedThisSession, animationDrained])
+
+  useEffect(() => {
     if (isRevealing || animationDrained || !streamedThisSession) return
     const timeout = setTimeout(() => setAnimationDrained(true), ANIMATION_DRAIN_MS)
     return () => clearTimeout(timeout)
   }, [isRevealing, animationDrained, streamedThisSession])
 
   /**
-   * `parserTree` (drives `mode`) stays latched for the mount's life: streaming
-   * mode is the only one that applies remend/incomplete-markdown repair and
-   * block-split parsing, so a settled message must KEEP the streaming parser —
-   * swapping to `mode='static'` at drain re-parses the same source through a
-   * different pipeline (no remend, whole-doc parse) and visibly flashes on any
-   * reply with unbalanced markdown. `streamingTree` (drives the remount key
-   * and animation props) additionally drops at drain, so the settled instance
+   * `parserTree` (drives `mode`) stays latched for the reply, including after
+   * the virtualizer unmounts it: streaming mode is the only one that applies
+   * remend/incomplete-markdown repair and block-split parsing, so a settled
+   * message must KEEP the streaming parser — swapping to `mode='static'` at
+   * drain, or on the remount when the row scrolls back, re-parses the same
+   * source through a different pipeline (no remend, whole-doc parse) and turns
+   * an unbalanced `*` into bold. `streamingTree` (drives the remount key and
+   * animation props) additionally drops at drain, so the settled instance
    * re-renders through the SAME parser minus the per-word animation spans —
    * byte-identical pixels. Only never-streamed mounts (reloaded history)
-   * render static.
+   * render static. The session set above is what lets a remount tell those
+   * apart.
    */
   const parserTree = isRevealing || streamedThisSession
   const streamingTree = parserTree && !animationDrained
@@ -591,8 +787,6 @@ function ChatContentInner({
   useEffect(() => {
     const handler = (e: Event) => {
       const { type, id, path, title } = (e as CustomEvent).detail
-      // A link built from a path carries no id. Forward what the tag actually
-      // had; the select handler resolves it rather than guessing here.
       onWorkspaceResourceSelectRef.current?.({
         type,
         ...(id ? { id } : {}),
@@ -619,6 +813,11 @@ function ChatContentInner({
     () => parsed.segments.flatMap((segment) => (segment.type === 'source' ? [segment.data] : [])),
     [parsed]
   )
+  /** Retrieved sources first, then this segment's own citations, first URL wins. */
+  const linkSourcesByUrl = useMemo(
+    () => indexSourcesByUrl(linkSources?.values() ?? [], sourceRefs),
+    [linkSources, sourceRefs]
+  )
 
   /**
    * Plain text and special-tag content share ONE render structure. A message
@@ -632,43 +831,48 @@ function ChatContentInner({
    * the new special block mounts.
    */
   return (
-    <SourceRefsContext.Provider value={sourceRefs}>
-      <div className='space-y-3'>
-        {groups.map((group, i) => {
-          if (group.kind === 'inline') {
-            return (
-              <div
-                key={`inline-${i}`}
-                className={cn(PROSE_CLASSES, '[&>:first-child]:mt-0 [&>:last-child]:mb-0')}
-              >
-                <Streamdown
-                  key={streamingTree ? 'stream' : 'settled'}
-                  mode={parserTree ? undefined : 'static'}
-                  animated={fadeActive ? STREAM_ANIMATION : false}
-                  isAnimating={streamingTree}
-                  components={MARKDOWN_COMPONENTS}
+    <LinkSourcesContext.Provider value={linkSourcesByUrl}>
+      <SourceRefsContext.Provider value={sourceRefs}>
+        <div className={cn('space-y-4', inter.className)}>
+          {groups.map((group, i) => {
+            if (group.kind === 'inline') {
+              return (
+                <div
+                  key={`inline-${i}`}
+                  data-chat-find-content
+                  className={cn(PROSE_CLASSES, '[&>:first-child]:mt-0 [&>:last-child]:mb-0')}
                 >
-                  {i === lastInlineIndex ? streamedMarkdown : group.markdown}
-                </Streamdown>
-              </div>
+                  <Streamdown
+                    key={streamingTree ? 'stream' : 'settled'}
+                    mode={parserTree ? undefined : 'static'}
+                    animated={fadeActive ? STREAM_ANIMATION : false}
+                    isAnimating={streamingTree}
+                    components={MARKDOWN_COMPONENTS}
+                    rehypePlugins={imageRehypePlugins}
+                    remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                  >
+                    {i === lastInlineIndex ? streamedMarkdown : group.markdown}
+                  </Streamdown>
+                </div>
+              )
+            }
+            return (
+              <SpecialTags
+                key={`special-${group.index}`}
+                segment={group.segment}
+                interactionId={`${messageId ?? 'message'}:${group.index}`}
+                questionAnswers={questionAnswers}
+                credentialSubmission={credentialSubmission}
+                credentialAbandoned={credentialAbandoned}
+                requestMode={requestMode}
+                onOptionSelect={onOptionSelect}
+                onQuestionDismiss={onQuestionDismiss}
+              />
             )
-          }
-          return (
-            <SpecialTags
-              key={`special-${group.index}`}
-              segment={group.segment}
-              interactionId={`${messageId ?? 'message'}:${group.index}`}
-              questionAnswers={questionAnswers}
-              credentialSubmission={credentialSubmission}
-              credentialAbandoned={credentialAbandoned}
-              requestMode={requestMode}
-              onOptionSelect={onOptionSelect}
-              onQuestionDismiss={onQuestionDismiss}
-            />
-          )
-        })}
-      </div>
-    </SourceRefsContext.Provider>
+          })}
+        </div>
+      </SourceRefsContext.Provider>
+    </LinkSourcesContext.Provider>
   )
 }
 

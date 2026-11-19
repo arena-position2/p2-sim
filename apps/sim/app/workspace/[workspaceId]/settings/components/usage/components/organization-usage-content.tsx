@@ -45,7 +45,7 @@ interface OrganizationUsageContentProps {
 }
 
 function workspaceUsageHref(workspaceId: string): string {
-  return `/workspace/${workspaceId}/settings/usage`
+  return `/workspace/${workspaceId}/settings/arena-usage`
 }
 
 function workflowLogsHref(workspaceId: string, workflowId: string): string {
@@ -59,7 +59,7 @@ function lineageUsageHref(workspaceId: string, rootExecutionId: string): string 
     tab: 'workflow',
     rootExecutionId,
   })
-  return `/workspace/${workspaceId}/settings/usage?${params.toString()}`
+  return `/workspace/${workspaceId}/settings/arena-usage?${params.toString()}`
 }
 
 /**

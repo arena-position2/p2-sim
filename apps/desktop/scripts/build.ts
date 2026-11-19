@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { cpSync, readFileSync, rmSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { type BuildOptions, build } from 'esbuild'
 import postcss from 'postcss'
 import loadPostcssConfig from 'postcss-load-config'
@@ -34,52 +34,6 @@ rmSync(generatedIcon, { force: true, recursive: true })
 cpSync(appIcon, generatedIcon, { recursive: true })
 console.log(`• Selecting desktop icon: ${appIcon}`)
 
-function compileNativeHelpSearch(): void {
-  const outputDirectory = 'dist/native'
-  rmSync(outputDirectory, { force: true, recursive: true })
-  if (process.platform !== 'darwin') return
-
-  const nodeExecutable = execFileSync('node', ['-p', 'process.execPath'], {
-    encoding: 'utf8',
-  }).trim()
-  const nodeIncludeDirectory = join(dirname(nodeExecutable), '..', 'include', 'node')
-  const nodeApiHeader = join(nodeIncludeDirectory, 'node_api.h')
-  if (!existsSync(nodeApiHeader)) {
-    throw new Error(`Could not find Node-API headers at ${nodeApiHeader}`)
-  }
-
-  mkdirSync(outputDirectory, { recursive: true })
-  execFileSync(
-    'xcrun',
-    [
-      'clang++',
-      '-std=c++17',
-      '-DNAPI_VERSION=8',
-      '-fobjc-arc',
-      '-fblocks',
-      '-bundle',
-      '-undefined',
-      'dynamic_lookup',
-      '-mmacosx-version-min=12.0',
-      '-arch',
-      'arm64',
-      '-arch',
-      'x86_64',
-      '-I',
-      nodeIncludeDirectory,
-      '-framework',
-      'AppKit',
-      '-framework',
-      'Foundation',
-      '-o',
-      join(outputDirectory, 'help-search.node'),
-      'native/help-search.mm',
-    ],
-    { stdio: 'inherit' }
-  )
-  console.log('• Compiled native macOS documentation Help search')
-}
-
 const common = {
   bundle: true,
   platform: 'node' as const,
@@ -102,6 +56,7 @@ const renderer: BuildOptions = {
     server: 'src/renderer/server/index.tsx',
     offline: 'src/renderer/offline/index.tsx',
     dialog: 'src/renderer/dialog/index.tsx',
+    'credential-picker': 'src/renderer/credential-picker/index.tsx',
   },
   outdir: 'dist/renderer',
   bundle: true,
@@ -137,7 +92,7 @@ const renderer: BuildOptions = {
 }
 
 async function run(): Promise<void> {
-  compileNativeHelpSearch()
+  execFileSync(process.execPath, ['run', 'scripts/build-native.ts'], { stdio: 'inherit' })
   if (watch) {
     const { context } = await import('esbuild')
     const rendererCtx = await context(renderer)
@@ -145,6 +100,11 @@ async function run(): Promise<void> {
       ...common,
       entryPoints: ['src/preload/shell.ts'],
       outfile: 'dist/shell-preload.cjs',
+    })
+    const credentialPickerPreloadCtx = await context({
+      ...common,
+      entryPoints: ['src/preload/credential-picker.ts'],
+      outfile: 'dist/credential-picker-preload.cjs',
     })
     const mainCtx = await context({
       ...common,
@@ -169,11 +129,17 @@ async function run(): Promise<void> {
       browserPreloadCtx.watch(),
       rendererCtx.watch(),
       shellPreloadCtx.watch(),
+      credentialPickerPreloadCtx.watch(),
     ])
     return
   }
   await Promise.all([
     build(renderer),
+    build({
+      ...common,
+      entryPoints: ['src/preload/credential-picker.ts'],
+      outfile: 'dist/credential-picker-preload.cjs',
+    }),
     build({ ...common, entryPoints: ['src/preload/shell.ts'], outfile: 'dist/shell-preload.cjs' }),
     build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main.cjs' }),
     build({ ...common, entryPoints: ['src/preload/index.ts'], outfile: 'dist/preload.cjs' }),

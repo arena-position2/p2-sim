@@ -179,11 +179,10 @@ export function DeployModal({
   const createButtonDisabled =
     isApiKeysLoading || (!allowPersonalApiKeys && !canManageWorkspaceKeys)
 
-  const {
-    data: deploymentInfoData,
-    isLoading: isLoadingDeploymentInfo,
-    refetch: refetchDeploymentInfo,
-  } = useDeploymentInfo(workflowId, { enabled: open })
+  const { data: deploymentInfoData, isLoading: isLoadingDeploymentInfo } = useDeploymentInfo(
+    workflowId,
+    { enabled: open }
+  )
 
   const { data: versionsData, isLoading: versionsLoading } = useDeploymentVersions(workflowId, {
     enabled: open,
@@ -724,7 +723,6 @@ export function DeployModal({
               mode='chat'
               workflowId={workflowId || ''}
               workflowWorkspaceId={workflowWorkspaceId || ''}
-              deploymentInfo={deploymentInfo}
               existingChat={isExistingChatDeployment ? (existingChat as ExistingChat | null) : null}
               isLoadingChat={isLoadingChat}
               onRefetchChat={handleRefetchChat}
@@ -743,7 +741,6 @@ export function DeployModal({
               mode='app'
               workflowId={workflowId || ''}
               workflowWorkspaceId={workflowWorkspaceId || ''}
-              deploymentInfo={deploymentInfo}
               existingChat={isExistingAppDeployment ? (existingChat as ExistingChat | null) : null}
               isLoadingChat={isLoadingChat}
               onRefetchChat={handleRefetchChat}

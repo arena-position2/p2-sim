@@ -1,8 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
+
 import type { ReactNode } from 'react'
 import { act } from 'react'
+import { nextNavigationMock, nextNavigationMockFns } from '@sim/testing/mocks/next-navigation.mock'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,7 +12,7 @@ const { mockSettingsSidebar } = vi.hoisted(() => ({
   mockSettingsSidebar: vi.fn((_props: { items: { id: string }[] }) => null),
 }))
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/selfhost/settings/general' }))
+vi.mock('next/navigation', () => nextNavigationMock)
 vi.mock('@/components/settings/settings-sidebar', () => ({ SettingsSidebar: mockSettingsSidebar }))
 vi.mock('@/components/settings/settings-header', () => ({
   SettingsHeaderProvider: ({ children }: { children: ReactNode }) => children,
@@ -19,9 +21,6 @@ vi.mock('@/components/settings/settings-header', () => ({
 vi.mock('@/components/settings/settings-panel', () => ({
   SettingsSectionProvider: ({ children }: { children: ReactNode }) => children,
 }))
-vi.mock('@/components/settings/use-settings-before-unload', () => ({
-  useSettingsBeforeUnload: vi.fn(),
-}))
 
 import { StandaloneSettingsShell } from '@/components/settings/standalone-settings-shell'
 import {
@@ -29,14 +28,21 @@ import {
   resetDeploymentShape,
   resolveDeploymentShape,
 } from '@/lib/core/config/deployment-shape'
+import { useSidebarStore } from '@/stores/sidebar/store'
+
+nextNavigationMockFns.mockUsePathname.mockReturnValue('/selfhost/settings/general')
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let host: HTMLDivElement
 let root: Root
+const originalInnerWidth = window.innerWidth
 
 beforeEach(() => {
   resetDeploymentShape()
+  window.innerWidth = 1600
+  localStorage.clear()
+  useSidebarStore.setState({ sidebarWidth: 400, isCollapsed: false, _hasHydrated: false })
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -45,7 +51,8 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   host.remove()
-  vi.clearAllMocks()
+  window.innerWidth = originalInnerWidth
+  localStorage.clear()
 })
 
 describe('StandaloneSettingsShell', () => {

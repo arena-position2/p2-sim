@@ -10,6 +10,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { getBillingContract } from '@/lib/api/contracts/subscription'
 import { parseRequest } from '@/lib/api/server'
+import { internalBillingReadErrorPolicy } from '@/lib/api/server/routes/billing-read'
 import { getSession } from '@/lib/auth'
 import { presentOrganizationSubscription } from '@/lib/billing/arena/billing-presenter'
 import { getOrganizationSubscription, getPersonalBillingSummary } from '@/lib/billing/core/billing'
@@ -125,6 +126,7 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
       getOrganizationBillingData(organizationId, dbReplica, {
         limit: memberLimit,
         offset: memberOffset,
+        includeMemberUsageCounts: false,
       }),
       getOrganizationSubscription(organizationId, { executor: dbReplica, onError: 'throw' }),
       dbReplica
@@ -218,6 +220,13 @@ export const GET = withRouteHandler(async (request: NextRequest) => {
       userId: session?.user?.id,
       error,
     })
+
+    const recoverable = internalBillingReadErrorPolicy.project(error)
+    if (recoverable)
+      return NextResponse.json(recoverable.body, {
+        status: recoverable.status,
+        headers: recoverable.headers,
+      })
 
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }

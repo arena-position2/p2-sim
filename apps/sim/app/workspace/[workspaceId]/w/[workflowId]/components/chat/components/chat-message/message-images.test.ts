@@ -116,6 +116,119 @@ describe('resolveMessageImagesAndProse', () => {
     expect(prose).toContain(phone)
   })
 
+  it('renders a selected image file without its base64 payload', () => {
+    const raw = JSON.stringify(
+      {
+        id: 'file_1',
+        name: 'generated.png',
+        url: IMAGE_URL,
+        size: 128,
+        type: 'image/png',
+        base64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      },
+      null,
+      2
+    )
+
+    const { urls, prose } = resolveMessageImagesAndProse(raw)
+
+    expect(urls).toEqual([IMAGE_URL])
+    expect(prose).toBe('')
+  })
+
+  it('renders a selected images array without base64 payloads', () => {
+    const raw = `\`\`\`json\n${JSON.stringify([
+      {
+        id: 'file-1',
+        name: 'one.png',
+        url: IMAGE_URL,
+        key: 'agent-generated-images/wf/user/one.png',
+        size: 10,
+        type: 'image/png',
+        base64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      },
+      {
+        id: 'file-2',
+        name: 'two.png',
+        url: IMAGE_URL_2,
+        key: 'agent-generated-images/wf/user/two.png',
+        size: 10,
+        type: 'image/png',
+        base64: '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxMTEhUTExMWFRUXGBcY',
+      },
+    ])}\n\`\`\``
+
+    const { urls, prose } = resolveMessageImagesAndProse(raw)
+
+    expect(urls).toEqual([IMAGE_URL, IMAGE_URL_2])
+    expect(prose).toBe('')
+  })
+
+  it('hides inline base64 when an edited image URL is also present', () => {
+    const payload =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const raw = `Updated the background.\n\n${IMAGE_URL}\n\ndata:image/png;base64,${payload}`
+
+    const { urls, prose } = resolveMessageImagesAndProse(raw)
+
+    expect(urls).toEqual([IMAGE_URL])
+    expect(prose).toBe('Updated the background.')
+  })
+
+  it('drops a fenced image-file dump that echoes base64 beside the reply', () => {
+    const payload =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const raw = [
+      'Updated the sky.',
+      '',
+      '```json',
+      JSON.stringify(
+        {
+          id: 'file_1',
+          name: 'generated.png',
+          url: IMAGE_URL,
+          size: 128,
+          type: 'image/png',
+          base64: payload,
+        },
+        null,
+        2
+      ),
+      '```',
+    ].join('\n')
+
+    const { urls, prose } = resolveMessageImagesAndProse(raw)
+
+    expect(urls).toEqual([IMAGE_URL])
+    expect(prose).toBe('Updated the sky.')
+  })
+
+  it('renders an execution image file record as the picture, not JSON', () => {
+    const key =
+      'execution/347b4522-46e3-45ac-a850-277f1a78ff60/760767d3-9144-4ecd-90e1-6275f71950b2/5d1b54d4-d52e-413c-8af7-d3796092a3df/7510eb0c-be7c-40b4-926a-e0fe33722b60/generated-image.png'
+    const raw = JSON.stringify(
+      {
+        id: 'file_1792990794515_zrn6qoc',
+        name: 'generated-image.png',
+        size: 287761,
+        type: 'application/octet-stream',
+        url: '',
+        key,
+        context: 'execution',
+      },
+      null,
+      2
+    )
+
+    const { urls, prose } = resolveMessageImagesAndProse(`${raw}\n\nUse this image.`)
+
+    expect(prose).toBe('Use this image.')
+    expect(urls).toEqual([`/api/files/serve/${encodeURIComponent(key)}`])
+    expect(prose).not.toContain('generated-image.png')
+  })
+
   it('extracts image URLs from JSON content payloads', () => {
     const raw = JSON.stringify({
       content: `Here are options:\n- ${IMAGE_URL}\n- ${IMAGE_URL_2}`,
@@ -147,6 +260,19 @@ describe('mergeToolOutputImageUrls', () => {
     expect(prose).toContain('```html')
     expect(prose).toContain(sample)
     expect(prose).not.toContain(IMAGE_URL)
+  })
+
+  it('hides base64 echoed in content when the image field already has a URL', () => {
+    const payload =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+    const { uniqueUrls, prose } = mergeToolOutputImageUrls(
+      IMAGE_URL,
+      `Here is the edit.\n\n${payload}`
+    )
+
+    expect(uniqueUrls).toEqual([IMAGE_URL])
+    expect(prose).toBe('Here is the edit.')
   })
 
   it('merges image URLs from agent content text with list markers', () => {

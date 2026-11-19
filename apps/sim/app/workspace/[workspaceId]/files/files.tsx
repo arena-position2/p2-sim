@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Avatar,
   Button,
   ChipCombobox,
   ChipConfirmModal,
@@ -24,7 +25,6 @@ import { getErrorMessage, toError } from '@sim/utils/errors'
 import { useParams, useRouter } from 'next/navigation'
 import { useQueryStates } from 'nuqs'
 import { usePostHog } from 'posthog-js/react'
-import { PermissionAccessBoundary } from '@/components/access-requests/permission-access-boundary'
 import { getDocumentIcon } from '@/components/icons/document-icons'
 import { useLimitUpgradeToast } from '@/lib/billing/client'
 import { captureEvent } from '@/lib/posthog/client'
@@ -44,39 +44,10 @@ import {
   isVideoFileType,
   resolveEffectiveMimeType,
 } from '@/lib/uploads/utils/file-utils'
-import {
-  isSupportedExtension,
-  SUPPORTED_ARCHIVE_EXTENSIONS,
-  SUPPORTED_AUDIO_EXTENSIONS,
-  SUPPORTED_CODE_EXTENSIONS,
-  SUPPORTED_DOCUMENT_EXTENSIONS,
-  SUPPORTED_IMAGE_EXTENSIONS,
-  SUPPORTED_VIDEO_EXTENSIONS,
-} from '@/lib/uploads/utils/validation'
+import { isSupportedExtension } from '@/lib/uploads/utils/validation'
 import { SIM_PAGE_CONTENT_TYPE } from '@/lib/workspace-files/page-compile'
-import type {
-  BreadcrumbItem,
-  FilterTag,
-  ResourceAction,
-  ResourceColumn,
-  ResourceRow,
-  ResourceTableHandle,
-  SearchConfig,
-  SortConfig,
-} from '@/app/workspace/[workspaceId]/components'
-import {
-  EMPTY_CELL_PLACEHOLDER,
-  FILTER_SECTION_LABEL_CLASS,
-  FindBar,
-  OwnerAvatar,
-  ownerCell,
-  Resource,
-  resourceListState,
-  selectionLabel,
-  timeCell,
-  useFindShortcut,
-  useResourceRowSelection,
-} from '@/app/workspace/[workspaceId]/components'
+import { FindBar } from '@/app/workspace/[workspaceId]/components/find-bar/find-bar'
+import { useFindShortcut } from '@/app/workspace/[workspaceId]/components/find-bar/use-find-shortcut'
 import type {
   MoveOptionNode,
   SortableResource,
@@ -101,11 +72,38 @@ import {
   useFolderRowDragDrop,
 } from '@/app/workspace/[workspaceId]/components/folders'
 import { ResourceActionBar } from '@/app/workspace/[workspaceId]/components/resource/components/action-bar'
+import { ownerCell } from '@/app/workspace/[workspaceId]/components/resource/components/owner-cell'
 import {
   FilesEmptyState,
   ResourceListLoading,
   ResourceNoResults,
 } from '@/app/workspace/[workspaceId]/components/resource/components/resource-empty-state'
+import type {
+  BreadcrumbItem,
+  ResourceAction,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-header'
+import type {
+  FilterTag,
+  SearchConfig,
+  SortConfig,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import {
+  ResourceFilterPanel,
+  ResourceFilterSection,
+} from '@/app/workspace/[workspaceId]/components/resource/components/resource-options'
+import { timeCell } from '@/app/workspace/[workspaceId]/components/resource/components/time-cell'
+import { resourceListState } from '@/app/workspace/[workspaceId]/components/resource/is-resource-list-empty'
+import type {
+  ResourceColumn,
+  ResourceRow,
+  ResourceTableHandle,
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
+import {
+  EMPTY_CELL_PLACEHOLDER,
+  Resource,
+} from '@/app/workspace/[workspaceId]/components/resource/resource'
+import { selectionLabel } from '@/app/workspace/[workspaceId]/components/resource/selection-label'
+import { useResourceRowSelection } from '@/app/workspace/[workspaceId]/components/resource/use-resource-row-selection'
 import { DeleteConfirmModal } from '@/app/workspace/[workspaceId]/files/components/delete-confirm-modal'
 import { FileRowContextMenu } from '@/app/workspace/[workspaceId]/files/components/file-row-context-menu'
 import type { PreviewMode } from '@/app/workspace/[workspaceId]/files/components/file-viewer'
@@ -138,6 +136,7 @@ import {
 } from '@/app/workspace/[workspaceId]/files/untitled-title'
 import { useRegisterGlobalCommands } from '@/app/workspace/[workspaceId]/providers/global-commands-provider'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
+import { PermissionAccessBoundary } from '@/ee/access-requests/components/permission-access-boundary'
 import { usePinItem, usePinnedIds, useUnpinItem } from '@/hooks/queries/pinned-items'
 import { useWorkspaceMembersQuery, type WorkspaceMember } from '@/hooks/queries/workspace'
 import {
@@ -195,17 +194,6 @@ const FOLDER_TYPE_LABEL = 'Folder' as const
  * instant. Intentionally shorter than the shared `SEARCH_DEBOUNCE_MS` (300).
  */
 const FILES_SEARCH_DEBOUNCE_MS = 200 as const
-
-const SUPPORTED_EXTENSIONS = [
-  ...SUPPORTED_DOCUMENT_EXTENSIONS,
-  ...SUPPORTED_CODE_EXTENSIONS,
-  ...SUPPORTED_AUDIO_EXTENSIONS,
-  ...SUPPORTED_VIDEO_EXTENSIONS,
-  ...SUPPORTED_IMAGE_EXTENSIONS,
-  ...SUPPORTED_ARCHIVE_EXTENSIONS,
-] as const
-
-const ACCEPT_ATTR = SUPPORTED_EXTENSIONS.map((ext) => `.${ext}`).join(',')
 
 const COLUMNS: ResourceColumn[] = [
   { id: 'name', header: 'Name', widthMultiplier: 1.15 },
@@ -265,6 +253,24 @@ function formatFileType(storedType: string | null, filename: string): string {
   return storedType ?? 'File'
 }
 
+function getDroppedFiles(dataTransfer: DataTransfer): File[] {
+  if (dataTransfer.items.length === 0) return Array.from(dataTransfer.files)
+  const files: File[] = []
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== 'file') continue
+    const entry = item.webkitGetAsEntry?.()
+    if (entry?.isDirectory) {
+      toast.error(`Cannot upload the folder "${entry.name}"`, {
+        description: 'Create a folder in Files, then upload the files inside it.',
+      })
+      continue
+    }
+    const file = item.getAsFile()
+    if (file) files.push(file)
+  }
+  return files
+}
+
 export function Files() {
   return (
     <PermissionAccessBoundary configKey='hideFilesTab'>
@@ -275,6 +281,7 @@ export function Files() {
 
 function FilesContent() {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadQueueRef = useRef<Promise<void>>(Promise.resolve())
   const saveRef = useRef<(() => Promise<void>) | null>(null)
   const downloadSourceRef = useRef<FileDownloadSource | null>(null)
   const discardRef = useRef<(() => void) | null>(null)
@@ -331,7 +338,7 @@ function FilesContent() {
     for (const member of members ?? []) map.set(member.userId, member)
     return map
   }, [members])
-  const uploadFile = useUploadWorkspaceFile()
+  const { mutateAsync: uploadFile } = useUploadWorkspaceFile()
   const createWorkspaceFile = useCreateWorkspaceFile()
   const notifyLimit = useLimitUpgradeToast()
   const deleteFile = useDeleteWorkspaceFile()
@@ -937,8 +944,8 @@ function FilesContent() {
 
   const descendantFolderIdsByFolderId = useMemo(() => buildDescendantIndex(folders), [folders])
 
-  const uploadFiles = useCallback(
-    async (filesToUpload: File[], targetFolderId = currentFolderId) => {
+  const uploadFiles = (filesToUpload: File[], targetFolderId = currentFolderId) => {
+    const uploadBatch = async () => {
       if (!workspaceId || filesToUpload.length === 0 || !canEdit) return
 
       /**
@@ -950,7 +957,7 @@ function FilesContent() {
       setSearchTerm('')
 
       const oversized: string[] = []
-      const sizeFiltered = filesToUpload.filter((f) => {
+      const allowedFiles = filesToUpload.filter((f) => {
         if (f.size > MAX_WORKSPACE_FILE_SIZE) {
           oversized.push(f.name)
           return false
@@ -965,18 +972,6 @@ function FilesContent() {
         )
       }
 
-      const unsupported: string[] = []
-      const allowedFiles = sizeFiltered.filter((f) => {
-        const ext = getFileExtension(f.name)
-        const ok = SUPPORTED_EXTENSIONS.includes(ext as (typeof SUPPORTED_EXTENSIONS)[number])
-        if (!ok) unsupported.push(f.name)
-        return ok
-      })
-
-      if (unsupported.length > 0) {
-        logger.warn('Unsupported file types skipped:', unsupported)
-      }
-
       if (allowedFiles.length === 0) return
 
       try {
@@ -984,7 +979,7 @@ function FilesContent() {
 
         for (let i = 0; i < allowedFiles.length; i++) {
           try {
-            await uploadFile.mutateAsync({
+            await uploadFile({
               workspaceId,
               file: allowedFiles[i],
               folderId: targetFolderId,
@@ -992,29 +987,32 @@ function FilesContent() {
                 setUploadProgress((prev) => ({ ...prev, currentPercent: percent }))
               },
             })
-            setUploadProgress({
-              completed: i + 1,
-              total: allowedFiles.length,
-              currentPercent: 0,
-            })
           } catch (err) {
             logger.error('Error uploading file:', err)
             const message = getErrorMessage(err)
             if (/storage limit/i.test(message)) {
               notifyLimit('storage', message)
             } else {
-              toast.error(`Failed to upload "${allowedFiles[i].name}"`)
+              toast.error(`Failed to upload "${allowedFiles[i].name}"`, { description: message })
             }
+          } finally {
+            setUploadProgress({
+              completed: i + 1,
+              total: allowedFiles.length,
+              currentPercent: 0,
+            })
           }
         }
-      } catch (err) {
-        logger.error('Error uploading file:', err)
       } finally {
         setUploadProgress({ completed: 0, total: 0, currentPercent: 0 })
       }
-    },
-    [workspaceId, canEdit, currentFolderId, notifyLimit, setSearchTerm]
-  )
+    }
+    uploadQueueRef.current = uploadQueueRef.current.then(uploadBatch).catch((error) => {
+      logger.error('Error uploading files:', error)
+      toast.error(getErrorMessage(error, 'Failed to upload files'))
+    })
+    return uploadQueueRef.current
+  }
 
   const rowDragDropConfig = useFolderRowDragDrop({
     dragMime: FILE_ROW_DRAG_MIME,
@@ -1060,7 +1058,7 @@ function FilesContent() {
       matches: hasExternalFiles,
       onDropIntoFolder: (dataTransfer, targetFolderId) => {
         dismissUploadOverlay()
-        const dropped = Array.from(dataTransfer.files ?? [])
+        const dropped = getDroppedFiles(dataTransfer)
         if (dropped.length > 0) void uploadFiles(dropped, targetFolderId)
       },
     },
@@ -1102,7 +1100,7 @@ function FilesContent() {
      */
     rowDragDropConfig.externalDropHandled()
     dismissUploadOverlay()
-    const dropped = Array.from(e.dataTransfer.files)
+    const dropped = getDroppedFiles(e.dataTransfer)
     if (dropped.length > 0) await uploadFiles(dropped)
   }
 
@@ -1933,7 +1931,7 @@ function FilesContent() {
       (members ?? []).map((m) => ({
         value: m.userId,
         label: m.name,
-        iconElement: <OwnerAvatar name={m.name} image={m.image} />,
+        iconElement: <Avatar size='xs' name={m.name} src={m.image} aria-hidden />,
       })),
     [members]
   )
@@ -2001,9 +1999,8 @@ function FilesContent() {
           : `${uploadedByFilter.length} members`
 
     return (
-      <div className='flex w-[240px] flex-col gap-3 p-3'>
-        <div className='flex flex-col gap-1.5'>
-          <span className={FILTER_SECTION_LABEL_CLASS}>File Type</span>
+      <ResourceFilterPanel>
+        <ResourceFilterSection label='File Type'>
           <ChipCombobox
             options={[
               { value: 'document', label: 'Documents' },
@@ -2020,9 +2017,8 @@ function FilesContent() {
             allOptionLabel='All'
             className='w-full'
           />
-        </div>
-        <div className='flex flex-col gap-1.5'>
-          <span className={FILTER_SECTION_LABEL_CLASS}>Size</span>
+        </ResourceFilterSection>
+        <ResourceFilterSection label='Size'>
           <ChipCombobox
             options={[
               { value: 'small', label: 'Small (< 1 MB)' },
@@ -2038,10 +2034,9 @@ function FilesContent() {
             allOptionLabel='All'
             className='w-full'
           />
-        </div>
+        </ResourceFilterSection>
         {memberOptions.length > 0 && (
-          <div className='flex flex-col gap-1.5'>
-            <span className={FILTER_SECTION_LABEL_CLASS}>Uploaded By</span>
+          <ResourceFilterSection label='Uploaded By'>
             <ChipCombobox
               options={memberOptions}
               multiSelect
@@ -2055,7 +2050,7 @@ function FilesContent() {
               allOptionLabel='All'
               className='w-full'
             />
-          </div>
+          </ResourceFilterSection>
         )}
         {hasActiveFilters && (
           <Button
@@ -2066,7 +2061,7 @@ function FilesContent() {
             Clear all filters
           </Button>
         )}
-      </div>
+      </ResourceFilterPanel>
     )
   }, [
     typeFilter,
@@ -2383,7 +2378,6 @@ function FilesContent() {
         className='hidden'
         onChange={handleFileChange}
         disabled={uploading || !canEdit}
-        accept={ACCEPT_ATTR}
         multiple
       />
     </div>

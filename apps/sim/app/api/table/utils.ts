@@ -2,9 +2,8 @@ import { createLogger } from '@sim/logger'
 import { permissionSatisfies } from '@sim/platform-authz/workspace'
 import { toError } from '@sim/utils/errors'
 import { NextResponse } from 'next/server'
-import { isFeatureEnabled } from '@/lib/core/config/feature-flags'
+import { orchestrationFailureResponse } from '@/lib/api/server/orchestration-response'
 import {
-  asOrchestrationError,
   messageForOrchestrationError,
   type OrchestrationErrorCode,
   statusForOrchestrationError,
@@ -23,32 +22,7 @@ import { TableLockedError } from '@/lib/table/mutation-locks'
 import { isTablePredicate } from '@/lib/table/query-builder/converters'
 import { validateStoragePredicate } from '@/lib/table/query-builder/validate'
 import type { TableLockKind } from '@/lib/table/types'
-import { getUserEntityPermissions } from '@/lib/workspaces/permissions/utils'
-import { getWorkspaceOrganizationId } from '@/lib/workspaces/utils'
-
-/**
- * Gate for the internal predicate-grammar table query route (`tables-v2-api`
- * flag). Runs AFTER authorization, so the caller has already proven read
- * access to the table — hiding the gate behind a bare 404 at that point
- * serves nobody and reads as data loss (live incident: the table_v2 block
- * hard-"Not found"-ing on every query while the copilot gateway, which
- * bypasses HTTP, found the rows). Authorized callers get an honest 403
- * naming the gate instead.
- */
-export async function tablesV2GateError(
-  userId: string,
-  workspaceId: string
-): Promise<NextResponse | null> {
-  const orgId = await getWorkspaceOrganizationId(workspaceId)
-  if (await isFeatureEnabled('tables-v2-api', { userId, orgId })) return null
-  return NextResponse.json(
-    {
-      error: 'The v2 table query API is not enabled for this workspace',
-      code: 'tables_v2_disabled',
-    },
-    { status: 403 }
-  )
-}
+import { checkWorkspaceAccess } from '@/lib/workspaces/permissions/utils'
 
 /**
  * Maps a {@link TableLockedError} thrown by the service layer to a 423 response
@@ -134,13 +108,7 @@ export function orchestrationErrorResponse(error: unknown): NextResponse | null 
   const lockResponse = tableLockErrorResponse(error)
   if (lockResponse) return lockResponse
 
-  const classified = asOrchestrationError(error)
-  if (!classified) return null
-
-  return NextResponse.json(
-    { error: classified.message },
-    { status: statusForOrchestrationError(classified.code) }
-  )
+  return orchestrationFailureResponse(error)
 }
 
 /**
@@ -338,12 +306,14 @@ export async function checkAccess(
     return { ok: false, status: 404 }
   }
 
-  const permission = await getUserEntityPermissions(
-    roleSubjectUserId(principal),
-    'workspace',
-    table.workspaceId
-  )
-  if (!permissionSatisfies(permission, level)) {
+  /**
+   * Resolved through {@link checkWorkspaceAccess} rather than `getUserEntityPermissions`, which
+   * delegates to it and returns the permission alone. Same single resolution, but it also hands
+   * back the workspace this check just loaded — and with it the owning organization the
+   * capability gate below would otherwise look up for itself.
+   */
+  const access = await checkWorkspaceAccess(table.workspaceId, roleSubjectUserId(principal))
+  if (!permissionSatisfies(access.permission, level)) {
     return { ok: false, status: 403 }
   }
 
@@ -352,7 +322,18 @@ export async function checkAccess(
   if (
     governedUserId &&
     table.workspaceId &&
-    (await isWorkspaceCapabilityWithheld(governedUserId, table.workspaceId, 'tables.use'))
+    /**
+     * The organization is passed, not re-derived: omitting it makes the resolver load this very
+     * workspace a second time (see `getUserPermissionConfig`), which is one extra round trip on
+     * every raw table route. `access.workspace` is non-null on this line — a missing workspace
+     * resolves to a null permission, which the gate above already refused.
+     */
+    (await isWorkspaceCapabilityWithheld(
+      governedUserId,
+      table.workspaceId,
+      'tables.use',
+      access.workspace?.organizationId ?? null
+    ))
   ) {
     return { ok: false, status: 403, capability: 'tables.use' }
   }

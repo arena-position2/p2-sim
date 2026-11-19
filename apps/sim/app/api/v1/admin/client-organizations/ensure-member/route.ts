@@ -6,12 +6,12 @@ import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { ensureClientOrganizationMember } from '@/lib/organizations/client-organization'
 import { withAdminAuth } from '@/app/api/v1/admin/middleware'
 import {
+  adminBadRequestResponse,
+  adminConflictResponse,
+  adminInternalErrorResponse,
   adminInvalidJsonResponse,
+  adminNotFoundResponse,
   adminValidationErrorResponse,
-  badRequestResponse,
-  conflictResponse,
-  internalErrorResponse,
-  notFoundResponse,
   singleResponse,
 } from '@/app/api/v1/admin/responses'
 
@@ -40,20 +40,20 @@ export const POST = withRouteHandler(
 
       if (!result.success) {
         if (result.failureCode === 'user-not-found') {
-          return notFoundResponse('User')
+          return adminNotFoundResponse('User')
         }
 
         if (result.failureCode === 'already-in-other-organization') {
-          return conflictResponse(result.error, {
+          return adminConflictResponse(result.error, {
             existingOrgId: result.existingOrgId,
           })
         }
 
         if (result.failureCode === 'internal-error') {
-          return internalErrorResponse('Failed to ensure client organization membership')
+          return adminInternalErrorResponse('Failed to ensure client organization membership')
         }
 
-        return badRequestResponse(result.error)
+        return adminBadRequestResponse(result.error)
       }
 
       if (result.action === 'organization_created' || result.action === 'member_added') {
@@ -81,11 +81,11 @@ export const POST = withRouteHandler(
         })
       }
 
-      const { success: _success, userName: _userName, ...responseData } = result
+      const { success: _success, ...responseData } = result
       return singleResponse(responseData)
     } catch (error) {
       logger.error('Admin API: Failed to ensure client organization membership', { error, userId })
-      return internalErrorResponse('Failed to ensure client organization membership')
+      return adminInternalErrorResponse('Failed to ensure client organization membership')
     }
   })
 )

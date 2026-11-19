@@ -1,3 +1,5 @@
+import { getErrorMessage } from '@sim/utils/errors'
+import { toRecord } from '@sim/utils/object'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => import('@/test/electron-mock'))
@@ -12,10 +14,15 @@ import {
 import {
   captureScreenshot,
   clickAt,
+  dragPointer,
   ensureInstrumented,
   evaluateInIsolatedFrame,
   insertText,
-  setColorScheme,
+  PRIMARY_CLICK,
+  releaseFileInput,
+  resolveFileInput,
+  setFileInputFiles,
+  TabClosedOnReleaseError,
 } from '@/main/browser-agent/cdp'
 
 function createOopifFrameFixture() {
@@ -45,6 +52,7 @@ function createOopifFrameFixture() {
         {
           frame: {
             id: 'child',
+            parentId: 'top',
             name: 'account-menu',
             url: 'https://accounts.example/menu',
           },
@@ -54,11 +62,22 @@ function createOopifFrameFixture() {
   }
 }
 
+/** Callbacks for a page with no user to ask, so the shell answers every dialog. */
+const shellAnswersDialogs = {
+  claimUserDialog: () => false,
+  onDialogClosed: () => {},
+  claimUserLeave: () => false,
+}
+
 describe('browser-agent CDP instrumentation', () => {
   it('leaves file chooser dialogs native so users can upload files', async () => {
     const contents = new WebContentsView().webContents
 
-    await ensureInstrumented(contents, { onDialog: vi.fn() })
+    await ensureInstrumented(contents, {
+      onDialog: vi.fn(),
+      dialogResponse: () => null,
+      ...shellAnswersDialogs,
+    })
 
     expect(contents.debugger.sendCommand).toHaveBeenCalledWith('Page.enable', undefined)
     expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith(
@@ -78,10 +97,20 @@ describe('browser-agent CDP instrumentation', () => {
       return Promise.resolve({})
     })
 
-    await expect(ensureInstrumented(contents, { onDialog: vi.fn() })).rejects.toThrow(
-      'setup acknowledgement lost'
-    )
-    await expect(ensureInstrumented(contents, { onDialog: vi.fn() })).resolves.toBeUndefined()
+    await expect(
+      ensureInstrumented(contents, {
+        onDialog: vi.fn(),
+        dialogResponse: () => null,
+        ...shellAnswersDialogs,
+      })
+    ).rejects.toThrow('setup acknowledgement lost')
+    await expect(
+      ensureInstrumented(contents, {
+        onDialog: vi.fn(),
+        dialogResponse: () => null,
+        ...shellAnswersDialogs,
+      })
+    ).resolves.toBeUndefined()
 
     expect(autoAttachAttempts).toBe(2)
   })
@@ -89,7 +118,11 @@ describe('browser-agent CDP instrumentation', () => {
   it('dismisses an OOPIF dialog on the flattened child session', async () => {
     const contents = new WebContentsView().webContents
     const onDialog = vi.fn()
-    await ensureInstrumented(contents, { onDialog })
+    await ensureInstrumented(contents, {
+      onDialog,
+      dialogResponse: () => null,
+      ...shellAnswersDialogs,
+    })
     const listener = vi
       .mocked(contents.debugger.on)
       .mock.calls.find(([event]) => event === 'message')?.[1] as
@@ -111,103 +144,89 @@ describe('browser-agent CDP instrumentation', () => {
       { accept: false },
       'child-session'
     )
-    expect(onDialog).toHaveBeenCalledWith({ type: 'alert', message: 'Hello', handled: true })
-  })
-
-  it('accepts an OOPIF beforeunload dialog on the flattened child session', async () => {
-    const contents = new WebContentsView().webContents
-    const onDialog = vi.fn()
-    await ensureInstrumented(contents, { onDialog })
-    const listener = vi
-      .mocked(contents.debugger.on)
-      .mock.calls.find(([event]) => event === 'message')?.[1] as
-      | ((event: unknown, method: string, params: unknown, sessionId?: string) => void)
-      | undefined
-    expect(listener).toBeTypeOf('function')
-    vi.mocked(contents.debugger.sendCommand).mockClear()
-
-    listener?.(
-      {},
-      'Page.javascriptDialogOpening',
-      { type: 'beforeunload', message: 'Leave this page?' },
-      'child-session'
-    )
-    await vi.waitFor(() => expect(onDialog).toHaveBeenCalled())
-
-    expect(contents.debugger.sendCommand).toHaveBeenCalledWith(
-      'Page.handleJavaScriptDialog',
-      { accept: true },
-      'child-session'
-    )
     expect(onDialog).toHaveBeenCalledWith({
-      type: 'beforeunload',
-      message: 'Leave this page?',
+      type: 'alert',
+      message: 'Hello',
       handled: true,
+      accepted: false,
     })
   })
 
-  it('reports an OOPIF dialog as unhandled when child and root commands fail', async () => {
+  it('answers dialogs with the running action requested response', async () => {
     const contents = new WebContentsView().webContents
     const onDialog = vi.fn()
-    await ensureInstrumented(contents, { onDialog })
+    const dialogResponse = vi.fn(() => ({ accept: true }))
+    await ensureInstrumented(contents, { onDialog, dialogResponse, ...shellAnswersDialogs })
     const listener = vi
       .mocked(contents.debugger.on)
       .mock.calls.find(([event]) => event === 'message')?.[1] as
       | ((event: unknown, method: string, params: unknown, sessionId?: string) => void)
       | undefined
-    expect(listener).toBeTypeOf('function')
     vi.mocked(contents.debugger.sendCommand).mockClear()
-    vi.mocked(contents.debugger.sendCommand).mockRejectedValue(new Error('dialog target closed'))
 
-    listener?.(
-      {},
-      'Page.javascriptDialogOpening',
-      { type: 'confirm', message: 'Continue?' },
-      'child-session'
-    )
-    await vi.waitFor(() => expect(onDialog).toHaveBeenCalled())
+    listener?.({}, 'Page.javascriptDialogOpening', { type: 'alert', message: 'Saved' })
+    await vi.waitFor(() => expect(onDialog).toHaveBeenCalledTimes(1))
+    listener?.({}, 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Delete?' })
+    await vi.waitFor(() => expect(onDialog).toHaveBeenCalledTimes(2))
 
     expect(vi.mocked(contents.debugger.sendCommand).mock.calls).toEqual([
-      ['Page.handleJavaScriptDialog', { accept: false }, 'child-session'],
-      ['Page.handleJavaScriptDialog', { accept: false }],
+      ['Page.handleJavaScriptDialog', { accept: true }],
+      ['Page.handleJavaScriptDialog', { accept: true }],
     ])
-    expect(onDialog).toHaveBeenCalledWith({
+    expect(onDialog).toHaveBeenLastCalledWith({
       type: 'confirm',
-      message: 'Continue?',
-      handled: false,
+      message: 'Delete?',
+      handled: true,
+      accepted: true,
     })
   })
 
-  it('clicks through Chromium trusted mouse input', async () => {
+  it('releases the button when a timed drag is aborted mid-route', async () => {
     const contents = new WebContentsView().webContents
+    const types = () =>
+      vi
+        .mocked(contents.debugger.sendCommand)
+        .mock.calls.filter(([method]) => method === 'Input.dispatchMouseEvent')
+        .map(([, params]) => toRecord(params).type)
+    vi.useFakeTimers()
+    try {
+      const controller = new AbortController()
+      const drag = dragPointer(
+        contents,
+        { x: 0, y: 0 },
+        { x: 500, y: 0 },
+        { via: [], durationMs: 5_000 },
+        controller.signal
+      )
+      const settled = expect(drag).rejects.toMatchObject({ name: 'AbortError' })
+      await vi.advanceTimersByTimeAsync(100)
+      controller.abort()
+      await settled
+      expect(types().at(-1)).toBe('mouseReleased')
+      expect(types().filter((type) => type === 'mouseMoved').length).toBeLessThan(20)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
-    await clickAt(contents, 120, 240)
+  it('releases a held button as soon as its click is aborted', async () => {
+    const contents = new WebContentsView().webContents
+    const types = () =>
+      vi.mocked(contents.debugger.sendCommand).mock.calls.map(([, params]) => toRecord(params).type)
+    vi.useFakeTimers()
+    try {
+      const controller = new AbortController()
+      const hold = { ...PRIMARY_CLICK, holdMs: 10_000 }
+      const click = clickAt(contents, 5, 6, false, hold, controller.signal)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(types()).toEqual(['mousePressed'])
 
-    expect(vi.mocked(contents.debugger.sendCommand).mock.calls).toEqual([
-      ['Input.dispatchMouseEvent', { type: 'mouseMoved', x: 120, y: 240, button: 'none' }],
-      [
-        'Input.dispatchMouseEvent',
-        {
-          type: 'mousePressed',
-          x: 120,
-          y: 240,
-          button: 'left',
-          buttons: 1,
-          clickCount: 1,
-        },
-      ],
-      [
-        'Input.dispatchMouseEvent',
-        {
-          type: 'mouseReleased',
-          x: 120,
-          y: 240,
-          button: 'left',
-          buttons: 0,
-          clickCount: 1,
-        },
-      ],
-    ])
+      controller.abort()
+      await expect(click).rejects.toMatchObject({ name: 'AbortError' })
+      expect(types()).toEqual(['mousePressed', 'mouseReleased'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('releases the mouse after a partial click failure', async () => {
@@ -228,45 +247,82 @@ describe('browser-agent CDP instrumentation', () => {
         y: 24,
         button: 'left',
         buttons: 0,
+        modifiers: 0,
         clickCount: 1,
       },
     ])
   })
 
-  it('best-effort releases the mouse when the press response is lost', async () => {
-    const contents = new WebContentsView().webContents
-    vi.mocked(contents.debugger.sendCommand)
-      .mockResolvedValueOnce({})
-      .mockRejectedValueOnce(new Error('mouse press response lost'))
-      .mockRejectedValueOnce(new Error('cleanup unavailable'))
+  describe('a tab that closes during a click', () => {
+    /**
+     * Rejects the mouse event matching `type` and `clickCount` with `failure`, first marking the
+     * tab destroyed when `destroy` is `'at-rejection'`. `'before-release'` instead marks it
+     * destroyed as the press resolves, so the release is sent to an already-dead tab.
+     */
+    function failMouseEvent(
+      contents: WebContents,
+      fail: { type: string; clickCount: number },
+      failure: Error,
+      destroy: 'at-rejection' | 'before-release' | 'never'
+    ) {
+      let destroyed = false
+      vi.mocked(contents.isDestroyed).mockImplementation(() => destroyed)
+      vi.mocked(contents.debugger.sendCommand).mockImplementation(async (_method, params) => {
+        const { type, clickCount } = toRecord(params)
+        if (destroy === 'before-release' && type === 'mousePressed') destroyed = true
+        if (type === fail.type && clickCount === fail.clickCount) {
+          if (destroy === 'at-rejection') destroyed = true
+          throw failure
+        }
+        return {}
+      })
+    }
 
-    await expect(clickAt(contents, 36, 48)).rejects.toThrow('mouse press response lost')
+    it('reports a final release rejected because the tab closed as TabClosedOnReleaseError', async () => {
+      const contents = new WebContentsView().webContents
+      failMouseEvent(
+        contents,
+        { type: 'mouseReleased', clickCount: 1 },
+        new Error('Target closed'),
+        'at-rejection'
+      )
 
-    expect(vi.mocked(contents.debugger.sendCommand).mock.calls).toEqual([
-      ['Input.dispatchMouseEvent', { type: 'mouseMoved', x: 36, y: 48, button: 'none' }],
-      [
-        'Input.dispatchMouseEvent',
-        {
-          type: 'mousePressed',
-          x: 36,
-          y: 48,
-          button: 'left',
-          buttons: 1,
-          clickCount: 1,
-        },
-      ],
-      [
-        'Input.dispatchMouseEvent',
-        {
-          type: 'mouseReleased',
-          x: 36,
-          y: 48,
-          button: 'left',
-          buttons: 0,
-          clickCount: 1,
-        },
-      ],
-    ])
+      await expect(clickAt(contents, 12, 24)).rejects.toBeInstanceOf(TabClosedOnReleaseError)
+    })
+
+    it('keeps the original error when the release fails on a tab that is still alive', async () => {
+      const contents = new WebContentsView().webContents
+      const failure = new Error('release rejected')
+      failMouseEvent(contents, { type: 'mouseReleased', clickCount: 1 }, failure, 'never')
+
+      await expect(clickAt(contents, 12, 24)).rejects.toBe(failure)
+    })
+
+    it('keeps the original error when the tab was already gone before the release was sent', async () => {
+      const contents = new WebContentsView().webContents
+      const failure = new Error('Target closed')
+      failMouseEvent(contents, { type: 'mouseReleased', clickCount: 1 }, failure, 'before-release')
+
+      await expect(clickAt(contents, 12, 24)).rejects.toBe(failure)
+    })
+
+    it('keeps the original error when the press fails as the tab closes', async () => {
+      const contents = new WebContentsView().webContents
+      const failure = new Error('Target closed')
+      failMouseEvent(contents, { type: 'mousePressed', clickCount: 1 }, failure, 'at-rejection')
+
+      await expect(clickAt(contents, 12, 24)).rejects.toBe(failure)
+    })
+
+    it('keeps the original error when a non-final release of a multi-click fails as the tab closes', async () => {
+      const contents = new WebContentsView().webContents
+      const failure = new Error('Target closed')
+      failMouseEvent(contents, { type: 'mouseReleased', clickCount: 1 }, failure, 'at-rejection')
+
+      await expect(
+        clickAt(contents, 12, 24, true, { ...PRIMARY_CLICK, clickCount: 2 })
+      ).rejects.toBe(failure)
+    })
   })
 
   it('times out a hung press and sends cleanup before the tool watchdog can release', async () => {
@@ -310,81 +366,123 @@ describe('browser-agent CDP instrumentation', () => {
     }
   })
 
-  it('routes OOPIF isolated-world creation and evaluation through its flattened session', async () => {
-    const contents = new WebContentsView().webContents
-    const { child, frameTree } = createOopifFrameFixture()
-    await ensureInstrumented(contents, { onDialog: vi.fn() })
-    const listener = vi
-      .mocked(contents.debugger.on)
-      .mock.calls.find(([event]) => event === 'message')?.[1] as
-      | ((event: unknown, method: string, params: unknown, sessionId?: string) => void)
-      | undefined
-    expect(listener).toBeTypeOf('function')
+  it.each(['complete', 'split', 'worker', 'detached', 'ambiguous'])(
+    'routes OOPIF evaluation through its session (%s tree)',
+    async (treeKind) => {
+      const contents = new WebContentsView().webContents
+      const { child, frameTree } = createOopifFrameFixture()
+      await ensureInstrumented(contents, {
+        onDialog: vi.fn(),
+        dialogResponse: () => null,
+        ...shellAnswersDialogs,
+      })
+      const listener = vi
+        .mocked(contents.debugger.on)
+        .mock.calls.find(([event]) => event === 'message')?.[1] as
+        | ((event: unknown, method: string, params: unknown, sessionId?: string) => void)
+        | undefined
+      expect(listener).toBeTypeOf('function')
 
-    listener?.(
-      {},
-      'Target.attachedToTarget',
-      {
-        sessionId: 'child-session',
-        targetInfo: { targetId: 'child', type: 'iframe' },
-      },
-      undefined
-    )
-    expect(contents.debugger.sendCommand).toHaveBeenCalledWith(
-      'Target.setAutoAttach',
-      { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
-      'child-session'
-    )
-    vi.mocked(contents.debugger.sendCommand).mockClear()
-    vi.mocked(contents.debugger.sendCommand).mockImplementation((method) => {
-      if (method === 'Page.getFrameTree') {
-        return Promise.resolve({ frameTree })
+      listener?.(
+        {},
+        'Target.attachedToTarget',
+        {
+          sessionId: 'child-session',
+          targetInfo: { targetId: 'child', type: 'iframe' },
+        },
+        undefined
+      )
+      expect(contents.debugger.sendCommand).toHaveBeenCalledWith(
+        'Target.setAutoAttach',
+        { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+        'child-session'
+      )
+      if (treeKind === 'worker' || treeKind === 'detached') {
+        listener?.({}, 'Target.attachedToTarget', {
+          sessionId: 'unavailable-session',
+          targetInfo: {
+            targetId: 'unavailable',
+            type: treeKind === 'worker' ? 'worker' : 'iframe',
+          },
+        })
       }
-      if (method === 'Page.createIsolatedWorld') {
-        return Promise.resolve({ executionContextId: 42 })
-      }
-      if (method === 'Runtime.evaluate') {
-        return Promise.resolve({ result: { type: 'number', value: 4 } })
-      }
-      return Promise.resolve({})
-    })
+      vi.mocked(contents.debugger.sendCommand).mockClear()
+      vi.mocked(contents.debugger.sendCommand).mockImplementation((method, _params, sessionId) => {
+        if (method === 'Page.getFrameTree') {
+          if (sessionId === 'unavailable-session')
+            return Promise.reject(new Error('Target unavailable'))
+          return Promise.resolve({
+            frameTree:
+              treeKind === 'complete'
+                ? frameTree
+                : sessionId
+                  ? frameTree.childFrames[0]
+                  : { frame: frameTree.frame },
+          })
+        }
+        if (method === 'Page.createIsolatedWorld') {
+          return Promise.resolve({ executionContextId: 42 })
+        }
+        if (method === 'Runtime.evaluate') {
+          return Promise.resolve({ result: { type: 'number', value: 4 } })
+        }
+        return Promise.resolve({})
+      })
 
-    await expect(evaluateInIsolatedFrame(contents, child, '2 + 2')).resolves.toBe(4)
-
-    expect(
-      vi
-        .mocked(contents.debugger.sendCommand)
-        .mock.calls.filter(([method]) =>
-          ['Page.createIsolatedWorld', 'Runtime.evaluate'].includes(method)
+      if (treeKind === 'ambiguous') {
+        /** An omitted twin must not be mistaken for the only frame in a partial tree. */
+        child.parent?.frames.push(createOopifFrameFixture().child)
+        await expect(evaluateInIsolatedFrame(contents, child, '2 + 2')).rejects.toThrow(
+          'Could not map'
         )
-    ).toEqual([
-      [
-        'Page.createIsolatedWorld',
-        {
-          frameId: 'child',
-          worldName: 'sim-browser-agent',
-          grantUniveralAccess: false,
-        },
-        'child-session',
-      ],
-      [
-        'Runtime.evaluate',
-        {
-          expression: '2 + 2',
-          contextId: 42,
-          returnByValue: true,
-          awaitPromise: true,
-          userGesture: false,
-        },
-        'child-session',
-      ],
-    ])
-  })
+        expect(
+          vi
+            .mocked(contents.debugger.sendCommand)
+            .mock.calls.some(([method]) => method === 'Runtime.evaluate')
+        ).toBe(false)
+        return
+      }
+      await expect(evaluateInIsolatedFrame(contents, child, '2 + 2')).resolves.toBe(4)
+
+      expect(
+        vi
+          .mocked(contents.debugger.sendCommand)
+          .mock.calls.filter(([method]) =>
+            ['Page.createIsolatedWorld', 'Runtime.evaluate'].includes(method)
+          )
+      ).toEqual([
+        [
+          'Page.createIsolatedWorld',
+          {
+            frameId: 'child',
+            worldName: 'sim-browser-agent',
+            grantUniveralAccess: false,
+          },
+          'child-session',
+        ],
+        [
+          'Runtime.evaluate',
+          {
+            expression: '2 + 2',
+            contextId: 42,
+            returnByValue: true,
+            awaitPromise: true,
+            userGesture: false,
+          },
+          'child-session',
+        ],
+      ])
+    }
+  )
 
   it('falls back to the root target when OOPIF isolated-world creation fails', async () => {
     const contents = new WebContentsView().webContents
     const { child, frameTree } = createOopifFrameFixture()
-    await ensureInstrumented(contents, { onDialog: vi.fn() })
+    await ensureInstrumented(contents, {
+      onDialog: vi.fn(),
+      dialogResponse: () => null,
+      ...shellAnswersDialogs,
+    })
     const listener = vi
       .mocked(contents.debugger.on)
       .mock.calls.find(([event]) => event === 'message')?.[1] as
@@ -460,33 +558,228 @@ describe('browser-agent CDP instrumentation', () => {
   })
 })
 
-describe('browser-agent CDP theme', () => {
-  it('emulates explicit light and dark preferences', async () => {
+describe('browser-agent file input handles', () => {
+  async function fileInputFixture(childSession = false) {
     const contents = new WebContentsView().webContents
+    const { child, frameTree } = createOopifFrameFixture()
+    await ensureInstrumented(contents, {
+      onDialog: vi.fn(),
+      dialogResponse: () => null,
+      ...shellAnswersDialogs,
+    })
+    if (childSession) {
+      const onMessage = vi.mocked(contents.debugger.on).mock.calls[0]?.[1] as
+        | ((event: unknown, method: string, params: unknown, sessionId?: string) => void)
+        | undefined
+      onMessage?.({}, 'Target.attachedToTarget', {
+        sessionId: 'child-session',
+        targetInfo: { targetId: 'child', type: 'iframe' },
+      })
+    }
+    const document: { defaultView: { document: unknown } | null } = { defaultView: null }
+    document.defaultView = { document }
+    const input = {
+      tagName: 'INPUT',
+      type: 'file',
+      isConnected: true,
+      ownerDocument: document,
+      multiple: true,
+      accept: 'application/pdf',
+      matches: vi.fn(() => false),
+      files: [] as Array<{ name: string; size: number }>,
+    }
+    const wrapper = { input, document }
+    const behavior = {
+      rejectEvaluation: false,
+      rejectSet: false,
+      rejectReadback: false,
+      beforeSet: async () => {},
+      beforeReadback: async () => {},
+      afterInputValidation: () => {},
+      afterSet: () => {},
+    }
+    const send = vi.mocked(contents.debugger.sendCommand)
+    send.mockClear().mockImplementation(async (method, params) => {
+      if (method === 'Page.getFrameTree') return { frameTree }
+      if (method === 'Page.createIsolatedWorld') return { executionContextId: 42 }
+      if (method === 'Runtime.evaluate') {
+        if (behavior.rejectEvaluation) {
+          return {
+            result: { objectId: 'exception' },
+            exceptionDetails: { exception: { objectId: 'exception', description: 'Ref expired' } },
+          }
+        }
+        return { result: { objectId: 'wrapper' } }
+      }
+      if (method === 'Runtime.callFunctionOn') {
+        expect(params?.objectId).toBe('wrapper')
+        const args = params?.arguments as Array<{ value: unknown }>
+        if (args[0].value === 'files') await behavior.beforeReadback()
+        if (behavior.rejectReadback && args[0].value === 'files') {
+          throw new Error('Execution context was destroyed')
+        }
+        try {
+          const inspect = new Function(`return (${params?.functionDeclaration})`)() as (
+            ...args: unknown[]
+          ) => unknown
+          const result = inspect.apply(
+            wrapper,
+            args.map((arg) => arg.value)
+          )
+          if (result === input) {
+            behavior.afterInputValidation()
+            return { result: { objectId: 'original-input' } }
+          }
+          return { result: { value: result } }
+        } catch (error) {
+          return {
+            result: { objectId: 'exception' },
+            exceptionDetails: {
+              exception: { objectId: 'exception', description: getErrorMessage(error) },
+            },
+          }
+        }
+      }
+      if (method === 'DOM.setFileInputFiles') {
+        await behavior.beforeSet()
+        if (behavior.rejectSet) throw new Error('Input target disappeared')
+        expect(params).toEqual({ files: ['/staged/a.pdf'], objectId: 'original-input' })
+        input.files = [{ name: 'a.pdf', size: 12 }]
+        behavior.afterSet()
+      }
+      return {}
+    })
+    return {
+      contents,
+      frame: childSession ? child : child.parent!,
+      input,
+      document,
+      send,
+      behavior,
+    }
+  }
 
-    await setColorScheme(contents, 'dark')
-    await setColorScheme(contents, 'light')
+  it.each([false, true])(
+    'keeps capture, dispatch, readback and release in the original session (OOPIF: %s)',
+    async (childSession) => {
+      const { contents, frame, input, send } = await fileInputFixture(childSession)
+      const handle = await resolveFileInput(contents, frame, 'captureUploadInput(4)')
+      expect(handle).toMatchObject({ multiple: true, accept: 'application/pdf' })
+      expect(input.matches).toHaveBeenCalledWith(':disabled')
 
-    expect(vi.mocked(contents.debugger.sendCommand).mock.calls).toEqual([
-      [
-        'Emulation.setEmulatedMedia',
-        { features: [{ name: 'prefers-color-scheme', value: 'dark' }] },
-      ],
-      [
-        'Emulation.setEmulatedMedia',
-        { features: [{ name: 'prefers-color-scheme', value: 'light' }] },
-      ],
-    ])
+      try {
+        await expect(setFileInputFiles(contents, handle, ['/staged/a.pdf'])).resolves.toEqual({
+          files: [{ name: 'a.pdf', size: 12 }],
+        })
+      } finally {
+        await releaseFileInput(contents, handle)
+      }
+
+      const sessionId = childSession ? 'child-session' : undefined
+      const protocolCalls = send.mock.calls.filter(([method]) => method !== 'Page.getFrameTree')
+      expect(protocolCalls.every((call) => call[2] === sessionId)).toBe(true)
+      expect(send.mock.calls.some(([method]) => /Search|DOM.getDocument/.test(method))).toBe(false)
+      expect(send.mock.calls.find(([method]) => method === 'Runtime.evaluate')?.[1]).toEqual({
+        expression: 'captureUploadInput(4)',
+        contextId: 42,
+        returnByValue: false,
+        awaitPromise: true,
+        userGesture: false,
+      })
+      expect(
+        send.mock.calls
+          .filter(([method]) => method === 'Runtime.releaseObject')
+          .map(([, params]) => params?.objectId)
+      ).toEqual(['original-input', 'wrapper'])
+    }
+  )
+
+  it.each([
+    'detached',
+    'disabled',
+    'adopted',
+    'document-replaced',
+    'document-closed',
+    'type',
+    'multiple',
+  ])('refuses a captured input changed before dispatch (%s)', async (change) => {
+    const { contents, frame, input, document, send } = await fileInputFixture()
+    const handle = await resolveFileInput(contents, frame, 'captureUploadInput(4)')
+    if (change === 'detached') input.isConnected = false
+    if (change === 'disabled') input.matches.mockReturnValue(true)
+    if (change === 'adopted') input.ownerDocument = { defaultView: null }
+    if (change === 'document-replaced') document.defaultView = { document: {} }
+    if (change === 'document-closed') document.defaultView = null
+    if (change === 'type') input.type = 'text'
+    if (change === 'multiple') input.multiple = false
+    const onDispatch = vi.fn()
+    try {
+      await expect(
+        setFileInputFiles(
+          contents,
+          handle,
+          ['/staged/a.pdf', '/staged/b.pdf'],
+          undefined,
+          onDispatch
+        )
+      ).rejects.toThrow(/upload input|upload target/)
+      expect(onDispatch).not.toHaveBeenCalled()
+      expect(send.mock.calls.some(([method]) => method === 'DOM.setFileInputFiles')).toBe(false)
+    } finally {
+      await releaseFileInput(contents, handle)
+    }
+    expect(send).toHaveBeenCalledWith('Runtime.releaseObject', { objectId: 'wrapper' })
+    expect(
+      send.mock.calls.filter(
+        ([method, params]) => method === 'Runtime.releaseObject' && params?.objectId === 'exception'
+      )
+    ).toHaveLength(1)
   })
 
-  it('clears the override for the system preference', async () => {
-    const contents = new WebContentsView().webContents
+  it.each(['evaluation', 'metadata'] as const)('releases handles when %s fails', async (phase) => {
+    const { contents, frame, input, behavior, send } = await fileInputFixture()
+    if (phase === 'evaluation') behavior.rejectEvaluation = true
+    else input.matches.mockReturnValue(true)
 
-    await setColorScheme(contents, 'system')
+    await expect(resolveFileInput(contents, frame, 'captureUploadInput(4)')).rejects.toThrow()
+    const released = send.mock.calls
+      .filter(([method]) => method === 'Runtime.releaseObject')
+      .map(([, params]) => params?.objectId)
+    expect(released).toEqual(phase === 'evaluation' ? ['exception'] : ['exception', 'wrapper'])
+  })
 
-    expect(contents.debugger.sendCommand).toHaveBeenCalledWith('Emulation.setEmulatedMedia', {
-      features: [],
+  it('reports pending dispatch while acknowledgement is held, then acknowledges before readback', async () => {
+    const { contents, frame, behavior, send } = await fileInputFixture()
+    const handle = await resolveFileInput(contents, frame, 'captureUploadInput(4)')
+    let acknowledge: () => void = () => {}
+    let releaseReadback: () => void = () => {}
+    const acknowledgement = new Promise<void>((resolve) => {
+      acknowledge = resolve
     })
+    const readback = new Promise<void>((resolve) => {
+      releaseReadback = resolve
+    })
+    behavior.beforeSet = () => acknowledgement
+    behavior.beforeReadback = () => readback
+    const onDispatch = vi.fn()
+    const pending = setFileInputFiles(contents, handle, ['/staged/a.pdf'], undefined, onDispatch)
+    try {
+      await vi.waitFor(() =>
+        expect(send.mock.calls.some(([method]) => method === 'DOM.setFileInputFiles')).toBe(true)
+      )
+      expect(onDispatch.mock.calls).toEqual([['pending']])
+      acknowledge()
+      await vi.waitFor(() => expect(onDispatch.mock.calls).toEqual([['pending'], ['acknowledged']]))
+      expect(send.mock.calls.some(([method]) => method === 'Runtime.releaseObject')).toBe(false)
+      releaseReadback()
+      await expect(pending).resolves.toEqual({ files: [{ name: 'a.pdf', size: 12 }] })
+      expect(onDispatch.mock.calls).toEqual([['pending'], ['acknowledged']])
+    } finally {
+      acknowledge()
+      releaseReadback()
+      await pending
+      await releaseFileInput(contents, handle)
+    }
   })
 })
 
@@ -540,43 +833,6 @@ describe('browser-agent screenshot capture', () => {
     )
   })
 
-  it('crops the decoded image in memory without sending a CDP clip', async () => {
-    const { contents, cropped, image } = captureFixture({ width: 4096, height: 2048 })
-
-    const shot = await captureScreenshot(contents, { x: 100, y: 50, width: 200, height: 100 })
-
-    expect(contents.capturePage).toHaveBeenCalledWith(undefined, { stayHidden: true })
-    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith(
-      'Page.captureScreenshot',
-      expect.anything()
-    )
-    expect(image.crop).toHaveBeenCalledWith({ x: 200, y: 100, width: 400, height: 200 })
-    expect(cropped.resize).not.toHaveBeenCalled()
-    expect(shot).toEqual({
-      dataUrl: `data:image/jpeg;base64,${Buffer.from('cropped').toString('base64')}`,
-      scale: 2,
-      viewport: { width: 2048, height: 1024 },
-      imageSize: { width: 400, height: 200 },
-      clip: { x: 100, y: 50, width: 200, height: 100 },
-    })
-  })
-
-  it('reports the actual CSS crop after rounding a narrow fractional element to pixels', async () => {
-    const { contents, cropped, image } = captureFixture({ width: 4096, height: 2048 })
-    cropped.getSize.mockReturnValue({ width: 3, height: 201 })
-
-    const shot = await captureScreenshot(contents, { x: 0.1, y: 0.2, width: 1.1, height: 100 })
-
-    expect(image.crop).toHaveBeenCalledWith({ x: 0, y: 0, width: 3, height: 201 })
-    expect(shot).toMatchObject({
-      clip: { x: 0, y: 0, width: 1.5, height: 100.5 },
-      imageSize: { width: 3, height: 201 },
-      scale: 2,
-    })
-    expect(100 / shot.scale).toBe(50)
-    expect(cropped.resize).not.toHaveBeenCalled()
-  })
-
   it.each([
     {
       requested: { x: -10, y: -20, width: 30, height: 40 },
@@ -604,46 +860,6 @@ describe('browser-agent screenshot capture', () => {
       })
     }
   )
-
-  /**
-   * A 2048px CSS viewport bounded to 1024px is scale 0.5, and the capture
-   * arrives at device resolution (4096px on a 2x display). The resize is what
-   * lands the image on the CSS-relative size the coordinate contract
-   * (cssX = imageX / scale) assumes.
-   */
-  it('downscales the returned image to the CSS-relative size', async () => {
-    const { contents, resized, image } = captureFixture({ width: 4096, height: 2048 })
-
-    const shot = await captureScreenshot(contents)
-
-    expect(image.resize).toHaveBeenCalledWith({ width: 1024, height: 512, quality: 'good' })
-    expect(resized.toJPEG).toHaveBeenCalled()
-    expect(shot).toEqual({
-      dataUrl: `data:image/jpeg;base64,${Buffer.from('resized').toString('base64')}`,
-      scale: 0.5,
-      viewport: { width: 2048, height: 1024 },
-      imageSize: { width: 1024, height: 512 },
-    })
-  })
-
-  it('skips resizing when the capture already matches the target size', async () => {
-    const { contents, image } = captureFixture({ width: 1024, height: 512 })
-
-    const shot = await captureScreenshot(contents)
-
-    expect(image.resize).not.toHaveBeenCalled()
-    expect(shot).toEqual({
-      dataUrl: 'data:image/jpeg;base64,c2lt',
-      scale: 0.5,
-      viewport: { width: 2048, height: 1024 },
-      imageSize: { width: 1024, height: 512 },
-    })
-  })
-
-  it('rejects an empty native capture', async () => {
-    const { contents } = captureFixture(null)
-    await expect(captureScreenshot(contents)).rejects.toThrow('empty image')
-  })
 
   describe('stalled native capture recovery', () => {
     beforeEach(() => vi.useFakeTimers())
@@ -711,151 +927,6 @@ describe('browser-agent screenshot capture', () => {
       expect(contents.endFrameSubscription).toHaveBeenCalledTimes(2)
       expect(vi.getTimerCount()).toBe(0)
     })
-
-    it('ignores a timed-out frame callback while a later subscription is active', async () => {
-      const { contents, image } = captureFixture({ width: 1024, height: 512 }, 'fresh')
-      const stale = captureFixture({ width: 1024, height: 512 }, 'stale').image
-      vi.mocked(contents.capturePage).mockReturnValue(new Promise(() => {}))
-      const frames = observeFrames(contents)
-      const failed = expect(captureScreenshot(contents)).rejects.toThrow('frame capture timed out')
-      await vi.advanceTimersByTimeAsync(10_000)
-      await failed
-
-      const recovered = captureScreenshot(contents)
-      const settled = vi.fn()
-      void recovered.then(settled)
-      await vi.advanceTimersByTimeAsync(0)
-      frames[0](stale)
-      await vi.advanceTimersByTimeAsync(0)
-      expect(settled).not.toHaveBeenCalled()
-      expect(contents.endFrameSubscription).toHaveBeenCalledOnce()
-      frames[1](image)
-      await expect(recovered).resolves.toMatchObject({
-        dataUrl: `data:image/jpeg;base64,${Buffer.from('fresh').toString('base64')}`,
-      })
-      expect(contents.endFrameSubscription).toHaveBeenCalledTimes(2)
-    })
-
-    it.each(['resolve', 'reject'] as const)(
-      'ignores a late native %s and resumes native captures afterward',
-      async (outcome) => {
-        const { contents, image } = captureFixture({ width: 1024, height: 512 }, 'current')
-        const stale = captureFixture({ width: 1024, height: 512 }, 'stale').image
-        let settleNative: () => void = () => {}
-        vi.mocked(contents.capturePage).mockImplementationOnce(
-          () =>
-            new Promise((resolve, reject) => {
-              settleNative = () =>
-                outcome === 'resolve' ? resolve(stale) : reject(new Error('late failure'))
-            })
-        )
-        const frames = observeFrames(contents)
-        const capture = captureScreenshot(contents)
-        const settled = vi.fn()
-        void capture.then(settled)
-        await vi.advanceTimersByTimeAsync(5_000)
-        settleNative()
-        await vi.advanceTimersByTimeAsync(0)
-        expect(settled).not.toHaveBeenCalled()
-        expect(contents.endFrameSubscription).not.toHaveBeenCalled()
-        frames[0](image)
-        await expect(capture).resolves.toMatchObject({
-          dataUrl: `data:image/jpeg;base64,${Buffer.from('current').toString('base64')}`,
-        })
-        await expect(captureScreenshot(contents)).resolves.toMatchObject({
-          dataUrl: `data:image/jpeg;base64,${Buffer.from('current').toString('base64')}`,
-        })
-        expect(contents.capturePage).toHaveBeenCalledTimes(2)
-        expect(contents.beginFrameSubscription).toHaveBeenCalledOnce()
-        expect(vi.getTimerCount()).toBe(0)
-      }
-    )
-
-    it('rejects concurrent captures without replacing the active subscription or blocking another tab', async () => {
-      const { contents, image } = captureFixture({ width: 1024, height: 512 })
-      const other = captureFixture({ width: 1024, height: 512 })
-      vi.mocked(contents.capturePage).mockReturnValue(new Promise(() => {}))
-      const frames = observeFrames(contents)
-      const capture = captureScreenshot(contents)
-      await vi.advanceTimersByTimeAsync(0)
-      await expect(captureScreenshot(contents)).rejects.toThrow('already in progress')
-      expect(contents.capturePage).toHaveBeenCalledOnce()
-      await vi.advanceTimersByTimeAsync(5_000)
-      await expect(captureScreenshot(contents)).rejects.toThrow('already in progress')
-      expect(contents.beginFrameSubscription).toHaveBeenCalledOnce()
-      expect(contents.endFrameSubscription).not.toHaveBeenCalled()
-      await expect(captureScreenshot(other.contents)).resolves.toMatchObject({
-        imageSize: { width: 1024, height: 512 },
-      })
-      frames[0](image)
-      await capture
-      expect(contents.endFrameSubscription).toHaveBeenCalledOnce()
-    })
-
-    it.each(['cancel', 'destroy'] as const)(
-      'releases frame resources on %s and ignores a subsequent frame',
-      async (reason) => {
-        const { contents, image } = captureFixture({ width: 1024, height: 512 })
-        vi.mocked(contents.capturePage).mockReturnValue(new Promise(() => {}))
-        const frames = observeFrames(contents)
-        const controller = new AbortController()
-        const removeAbort = vi.spyOn(controller.signal, 'removeEventListener')
-        const failed = expect(
-          captureScreenshot(contents, undefined, controller.signal)
-        ).rejects.toThrow(reason === 'cancel' ? 'cancelled' : 'tab was closed')
-        await vi.advanceTimersByTimeAsync(5_000)
-        const destroyed = vi
-          .mocked(contents.once)
-          .mock.calls.filter(([event]) => String(event) === 'destroyed')
-          .at(-1)?.[1] as unknown as (() => void) | undefined
-        expect(destroyed).toBeDefined()
-        if (reason === 'cancel') controller.abort()
-        else {
-          vi.mocked(contents.isDestroyed).mockReturnValue(true)
-          destroyed?.()
-        }
-        await failed
-        expect(contents.removeListener).toHaveBeenCalledWith('destroyed', destroyed)
-        expect(removeAbort).toHaveBeenCalledTimes(2)
-        expect(contents.endFrameSubscription).toHaveBeenCalledTimes(reason === 'cancel' ? 1 : 0)
-        frames[0](image)
-        await vi.advanceTimersByTimeAsync(0)
-        expect(contents.endFrameSubscription).toHaveBeenCalledTimes(reason === 'cancel' ? 1 : 0)
-        expect(vi.getTimerCount()).toBe(0)
-        if (reason === 'cancel') {
-          const recovered = captureScreenshot(contents)
-          await vi.advanceTimersByTimeAsync(0)
-          frames[1](image)
-          await recovered
-          expect(contents.capturePage).toHaveBeenCalledOnce()
-          expect(contents.endFrameSubscription).toHaveBeenCalledTimes(2)
-        }
-      }
-    )
-
-    it.each(['beginFrameSubscription', 'invalidate'] as const)(
-      'cleans up a synchronous %s failure and permits another frame attempt',
-      async (method) => {
-        const { contents, image } = captureFixture({ width: 1024, height: 512 })
-        vi.mocked(contents.capturePage).mockReturnValue(new Promise(() => {}))
-        const frames = observeFrames(contents)
-        vi.mocked(contents[method]).mockImplementationOnce(() => {
-          throw new Error('frame setup failed')
-        })
-        const failed = expect(captureScreenshot(contents)).rejects.toThrow('frame setup failed')
-        await vi.advanceTimersByTimeAsync(5_000)
-        await failed
-        expect(contents.endFrameSubscription).toHaveBeenCalledOnce()
-        expect(vi.getTimerCount()).toBe(0)
-
-        const recovered = captureScreenshot(contents)
-        await vi.advanceTimersByTimeAsync(0)
-        frames.at(-1)?.(image)
-        await expect(recovered).resolves.toMatchObject({ imageSize: { width: 1024, height: 512 } })
-        expect(contents.capturePage).toHaveBeenCalledOnce()
-        expect(contents.endFrameSubscription).toHaveBeenCalledTimes(2)
-      }
-    )
   })
 
   it.each(['cancel', 'destroy'] as const)(
@@ -887,21 +958,6 @@ describe('browser-agent screenshot capture', () => {
     }
   )
 
-  it('does not start capture after cancellation or keep a synchronous failure pending', async () => {
-    const { contents } = captureFixture({ width: 1024, height: 512 })
-    const controller = new AbortController()
-    controller.abort()
-    await expect(captureScreenshot(contents, undefined, controller.signal)).rejects.toThrow()
-    expect(contents.capturePage).not.toHaveBeenCalled()
-    vi.mocked(contents.capturePage).mockImplementationOnce(() => {
-      throw new Error('native failure')
-    })
-    await expect(captureScreenshot(contents)).rejects.toThrow('native failure')
-    await expect(captureScreenshot(contents)).resolves.toMatchObject({
-      imageSize: { width: 1024, height: 512 },
-    })
-  })
-
   it('does not expose deprecated device-pixel metrics as a CSS viewport', async () => {
     const { contents } = captureFixture({ width: 1024, height: 512 })
     vi.mocked(contents.debugger.sendCommand).mockImplementation((method: string) => {
@@ -915,46 +971,6 @@ describe('browser-agent screenshot capture', () => {
 
     expect(shot.viewport).toBeNull()
     expect(shot.imageSize).toEqual({ width: 1024, height: 512 })
-  })
-
-  it('refuses element cropping without verified CSS viewport metrics', async () => {
-    const { contents } = captureFixture({ width: 1024, height: 512 })
-    vi.mocked(contents.debugger.sendCommand).mockImplementation((method: string) => {
-      if (method === 'Page.getLayoutMetrics') {
-        return Promise.resolve({ layoutViewport: { clientWidth: 2048, clientHeight: 1024 } })
-      }
-      return Promise.resolve(undefined)
-    })
-
-    await expect(
-      captureScreenshot(contents, { x: 10, y: 10, width: 100, height: 50 })
-    ).rejects.toThrow(/CSS viewport/)
-    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith(
-      'Page.captureScreenshot',
-      expect.anything()
-    )
-  })
-
-  it('accepts stable finite scroll offsets around the capture', async () => {
-    const { contents } = captureFixture({ width: 1024, height: 512 })
-    vi.mocked(contents.debugger.sendCommand).mockImplementation((method: string) => {
-      if (method === 'Page.getLayoutMetrics') {
-        return Promise.resolve({
-          cssLayoutViewport: {
-            clientWidth: 2048,
-            clientHeight: 1024,
-            pageX: 12,
-            pageY: 34,
-          },
-        })
-      }
-      return Promise.resolve(undefined)
-    })
-
-    await expect(captureScreenshot(contents)).resolves.toMatchObject({
-      viewport: { width: 2048, height: 1024 },
-      imageSize: { width: 1024, height: 512 },
-    })
   })
 
   it.each([

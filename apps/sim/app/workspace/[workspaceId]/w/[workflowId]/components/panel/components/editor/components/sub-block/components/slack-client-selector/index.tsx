@@ -1,9 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import { cn, comboboxVariants } from '@sim/emcn'
+import { Button, cn, comboboxVariants } from '@sim/emcn'
 import { Check, ChevronsUpDown } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
   Command,
   CommandEmpty,
@@ -34,7 +33,6 @@ interface SlackClientSelectorProps {
 export function SlackClientSelector({
   blockId,
   subBlockId,
-  title,
   layout,
   isPreview = false,
   subBlockValues,
@@ -66,7 +64,6 @@ export function SlackClientSelector({
     'Select client...'
 
   const handleSelect = (client: Client) => {
-    console.log('Selected client:', client)
     if (!isPreview && !disabled) {
       setStoreValue({ ...client, customDisplayValue: client.name })
       setOpen(false)

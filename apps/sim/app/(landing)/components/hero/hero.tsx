@@ -1,4 +1,5 @@
 import { cn } from '@sim/emcn'
+import { INTEGRATION_COUNT_LABEL } from '@/lib/landing/constants'
 import { HeroAnnouncementChip } from '@/app/(landing)/components/hero/components/hero-announcement-chip'
 import { LandingHeroHeader } from '@/app/(landing)/components/hero/components/hero-header'
 import { HeroPlatformStage } from '@/app/(landing)/components/hero/components/hero-platform-stage'
@@ -30,10 +31,10 @@ export function Hero() {
       )}
     >
       <p className='sr-only'>
-        Arena is the open-source AI workspace where teams build, deploy, and manage AI agents.
-        Connect 1,000+ integrations and every major LLM to create agents that automate real work,
-        visually, conversationally, or with code. Trusted by over 100,000 builders, SOC2 compliant,
-        and production-ready for teams of every size.
+        Arena is the open-source AI workspace where teams build, deploy, and manage AI agents for
+        their organization. Connect {INTEGRATION_COUNT_LABEL} integrations and every major LLM, then
+        govern access, spend, data, and deployment from one place. Build visually, conversationally,
+        or with code, and run Arena in your own cloud.
       </p>
 
       <div className={HOME_INSET}>

@@ -4,6 +4,7 @@ import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
 import { BrandedLayout } from '@/components/branded-layout'
+import { SettingsNavigationGuard } from '@/components/settings/settings-navigation-guard'
 import {
   creditsPerDollarHtmlAttributes,
   setCreditsPerDollar,
@@ -19,6 +20,7 @@ import {
 import { ArenaSessionShell } from '@/app/_shell/arena-session-shell'
 import { ConsentProvider } from '@/app/_shell/consent/consent-provider'
 import { DesktopUpdateGate } from '@/app/_shell/desktop-update-gate'
+import { DesktopUpdateNotification } from '@/app/_shell/desktop-update-notification'
 import { HydrationErrorHandler } from '@/app/_shell/hydration-error-handler'
 import { PasteAdmissionGuard } from '@/app/_shell/paste-admission-guard'
 import { BrowserTelemetry } from '@/app/_shell/providers/browser-telemetry'
@@ -37,6 +39,7 @@ import '@/app/_styles/globals.css'
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  interactiveWidget: 'resizes-content',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#ffffff' },
     { media: '(prefers-color-scheme: dark)', color: '#0c0c0c' },
@@ -51,6 +54,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const themeCSS = generateThemeCSS()
   const application = (
     <ToastProvider>
+      <SettingsNavigationGuard />
+      <DesktopUpdateNotification />
       <PasteAdmissionGuard />
       <PostHogProvider consentRequired={isHosted}>
         <ThemeProvider>
@@ -133,7 +138,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 // needs the same variables set before first paint.
                 try {
                   var path = window.location.pathname;
-                  if (path.indexOf('/workspace/') === -1 && path.indexOf('/o/') !== 0) {
+                  if (path.indexOf('/workspace/') === -1 && path.indexOf('/o/') !== 0 && path.indexOf('/account/settings') !== 0 && path.indexOf('/selfhost/settings') !== 0) {
                     return;
                   }
                 } catch (e) {

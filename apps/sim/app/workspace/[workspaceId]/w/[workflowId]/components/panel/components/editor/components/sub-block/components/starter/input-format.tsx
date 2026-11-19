@@ -15,15 +15,15 @@ import {
   Input,
   Label,
   languages,
-  Tooltip,
 } from '@sim/emcn'
-import { ArrowLeftRight, Plus, Trash } from '@sim/emcn/icons'
+import { Plus, Trash } from '@sim/emcn/icons'
 import Editor from 'react-simple-code-editor'
 import {
   createDefaultInputFormatField,
   isFileFieldType,
   parseInputFormatFiles,
 } from '@/lib/workflows/input-format'
+import type { InputFormatFieldState } from '@/lib/workflows/input-format-schema'
 import { FileUpload } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/file-upload/file-upload'
 import { formatDisplayText } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel/components/editor/components/sub-block/components/formatted-text'
 import {
@@ -47,14 +47,8 @@ import {
   getLinkedinSearchFilterLabel,
 } from '@/tools/unipile/linkedin_search_form'
 
-interface Field {
-  id: string
-  name: string
-  type?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'file[]'
-  value?: string
-  description?: string
-  collapsed?: boolean
-}
+type Field = Pick<InputFormatFieldState, 'id' | 'name'> &
+  Partial<Omit<InputFormatFieldState, 'id' | 'name'>>
 
 interface FieldFormatProps {
   blockId: string
@@ -179,10 +173,8 @@ export function FieldFormat({
   const nameInputRefs = useRef<Record<string, HTMLInputElement>>({})
   const overlayRefs = useRef<Record<string, HTMLDivElement>>({})
   const nameOverlayRefs = useRef<Record<string, HTMLDivElement>>({})
-  const descriptionInputRefs = useRef<Record<string, HTMLInputElement>>({})
-  const descriptionOverlayRefs = useRef<Record<string, HTMLDivElement>>({})
   const accessiblePrefixes = useAccessibleReferencePrefixes(blockId)
-  const [fileFieldModes, setFileFieldModes] = useState<Record<string, 'upload' | 'json'>>({})
+  const [fileFieldModes] = useState<Record<string, 'upload' | 'json'>>({})
 
   const inputController = useSubBlockInput({
     blockId,
@@ -223,45 +215,6 @@ export function FieldFormat({
       mode: canUseUploader ? (fileFieldModes[field.id] ?? 'upload') : 'json',
       canUseUploader,
     }
-  }
-
-  /**
-   * Renders the ⇄ toggle that switches a file field between the uploader and the
-   * raw JSON editor. Matches the canonical sub-block mode toggle. Hidden when the
-   * value can't be safely represented by the uploader.
-   */
-  const renderFileModeToggle = (field: Field) => {
-    const { mode, canUseUploader } = getFileFieldMode(field)
-    if (!canUseUploader) return null
-    const label = mode === 'upload' ? 'Switch to JSON' : 'Switch to file uploader'
-    return (
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild>
-          <button
-            type='button'
-            className='flex size-[12px] shrink-0 items-center justify-center bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-50'
-            onClick={() =>
-              setFileFieldModes((prev) => ({
-                ...prev,
-                [field.id]: mode === 'upload' ? 'json' : 'upload',
-              }))
-            }
-            disabled={isReadOnly}
-            aria-label={label}
-          >
-            <ArrowLeftRight
-              className={cn(
-                'h-[12px]! w-[12px]!',
-                mode === 'json' ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'
-              )}
-            />
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Content side='top'>
-          <p>{label}</p>
-        </Tooltip.Content>
-      </Tooltip.Root>
-    )
   }
 
   /**
@@ -356,14 +309,6 @@ export function FieldFormat({
   }
 
   /**
-   * Syncs scroll position between description input and overlay for text highlighting
-   */
-  const syncDescriptionOverlayScroll = (fieldId: string, scrollLeft: number) => {
-    const overlay = descriptionOverlayRefs.current[fieldId]
-    if (overlay) overlay.scrollLeft = scrollLeft
-  }
-
-  /**
    * Generates a unique field key for name inputs to avoid collision with value inputs
    */
   const getNameFieldKey = (fieldId: string) => `name-${fieldId}`
@@ -389,7 +334,6 @@ export function FieldFormat({
     )
     const tagSelectHandler = inputController.fieldHelpers.createTagSelectHandler(
       nameFieldKey,
-      fieldValue,
       (newValue) => updateField(field.id, 'name', newValue)
     )
 
@@ -555,7 +499,6 @@ export function FieldFormat({
     )
     const tagSelectHandler = inputController.fieldHelpers.createTagSelectHandler(
       field.id,
-      fieldValue,
       (newValue) => updateField(field.id, 'value', newValue)
     )
 

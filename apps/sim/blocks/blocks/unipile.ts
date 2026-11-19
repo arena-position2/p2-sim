@@ -5,7 +5,6 @@ import { normalizeFileInput } from '@/blocks/utils'
 import { UNIPILE_LINKEDIN_PROFILE_SECTIONS } from '@/tools/unipile/linkedin_profile_query'
 import { buildLinkedinSearchBodyFromForm } from '@/tools/unipile/linkedin_search_form'
 import { getLinkedinSearchParameterTypeDropdownOptions } from '@/tools/unipile/linkedin_search_parameter_types'
-import type { UnipileResponse } from '@/tools/unipile/types'
 
 /** Normalizes attendees to a de-duplicated string array for Unipile `attendees_ids`. */
 const UNIPILE_COMMENT_MENTION_COL_NAME = 'Display name'
@@ -24,16 +23,17 @@ type UnipileCommentMentionRow = { name: string; profile_id: string; is_company?:
 
 /** Credential id or legacy raw Unipile account id from block params (resolved at execution). */
 function unipileAccountIdFromParams(params: Record<string, unknown>): string {
-  const cred =
-    typeof params.unipileCredential === 'string'
-      ? params.unipileCredential.trim()
-      : typeof params.credential === 'string'
-        ? params.credential.trim()
-        : typeof params.oauthCredential === 'string'
-          ? params.oauthCredential.trim()
-          : ''
-  const legacy = typeof params.account_id === 'string' ? params.account_id.trim() : ''
-  return cred || legacy
+  for (const key of [
+    'unipileCredential',
+    'manualCredential',
+    'credential',
+    'oauthCredential',
+    'account_id',
+  ] as const) {
+    const value = params[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return ''
 }
 
 /** Same row shape as Start block `input-format` fields (id, name, type, value, description). */
@@ -167,7 +167,7 @@ function unipileNormalizeAttendeesIds(raw: unknown): string[] | undefined {
   return undefined
 }
 
-export const UnipileBlock: BlockConfig<UnipileResponse> = {
+export const UnipileBlock: BlockConfig = {
   type: 'unipile',
   name: 'LinkedIn (Unipile)',
   description: 'LinkedIn company data and messaging via Unipile',
@@ -460,6 +460,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       mode: 'advanced',
     },
     {
+      id: 'reactions_max',
+      title: 'Max reactions',
+      type: 'short-input',
+      placeholder: 'Stop after this many (e.g. 100). Empty loads every page.',
+      dependsOn: ['operation'],
+      condition: { field: 'operation', value: 'list_post_reactions' },
+      mode: 'advanced',
+    },
+    {
       id: 'post_comments_thread_comment_id',
       title: 'Comment ID (replies)',
       type: 'short-input',
@@ -475,6 +484,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       type: 'short-input',
       placeholder: '1–100 (optional)',
       description: 'Unipile `limit` query for this request page.',
+      dependsOn: ['operation'],
+      condition: { field: 'operation', value: 'list_post_comments' },
+      mode: 'advanced',
+    },
+    {
+      id: 'post_comments_max',
+      title: 'Max comments',
+      type: 'short-input',
+      placeholder: 'Stop after this many (e.g. 100). Empty returns one page.',
       dependsOn: ['operation'],
       condition: { field: 'operation', value: 'list_post_comments' },
       mode: 'advanced',
@@ -1231,6 +1249,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
           ) {
             out.comment_id = params.post_comments_thread_comment_id.trim()
           }
+          const maxRaw = params.post_comments_max
+          if (typeof maxRaw === 'string' && maxRaw.trim() !== '') {
+            const n = Number.parseInt(maxRaw.trim(), 10)
+            if (Number.isFinite(n)) {
+              out.max_items = n
+            }
+          } else if (typeof maxRaw === 'number' && Number.isFinite(maxRaw)) {
+            out.max_items = Math.trunc(maxRaw)
+          }
           return out
         }
         if (op === 'list_post_reactions') {
@@ -1252,6 +1279,15 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
             }
           } else if (typeof limRaw === 'number' && Number.isFinite(limRaw)) {
             out.limit = Math.trunc(limRaw)
+          }
+          const maxRaw = params.reactions_max
+          if (typeof maxRaw === 'string' && maxRaw.trim() !== '') {
+            const n = Number.parseInt(maxRaw.trim(), 10)
+            if (Number.isFinite(n)) {
+              out.max_items = n
+            }
+          } else if (typeof maxRaw === 'number' && Number.isFinite(maxRaw)) {
+            out.max_items = Math.trunc(maxRaw)
           }
           return out
         }
@@ -1573,6 +1609,10 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       type: 'string',
       description: 'List post comments: optional limit 1–100 for the request page',
     },
+    post_comments_max: {
+      type: 'string',
+      description: 'List post comments: stop after this many comments. Empty returns one page.',
+    },
     post_comments_sort: {
       type: 'string',
       description: 'List post comments: optional sort_by MOST_RECENT | MOST_RELEVANT',
@@ -1581,6 +1621,10 @@ export const UnipileBlock: BlockConfig<UnipileResponse> = {
       type: 'string',
       description:
         'List post reactions: optional 1–100 page size per upstream request (default 100); server still loads every page',
+    },
+    reactions_max: {
+      type: 'string',
+      description: 'List post reactions: stop after this many reactions. Empty loads every page.',
     },
     chat_id: { type: 'string', description: 'Chat id' },
     list_chats_account_ids_csv: {

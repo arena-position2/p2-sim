@@ -1,6 +1,15 @@
 'use client'
 
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { usePrefersReducedMotion } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { generateId } from '@sim/utils/id'
 import { useRouter } from 'next/navigation'
@@ -58,23 +67,11 @@ import { useChatStreaming } from '@/app/(interfaces)/chat/hooks'
 import SSOAuth from '@/ee/sso/components/sso-auth'
 import { useDeployedChatConfig } from '@/hooks/queries/chats'
 import { useGitHubStars } from '@/hooks/queries/github-stars'
+import { useMobileViewport } from '@/hooks/use-mobile-viewport'
 
 const logger = createLogger('ChatClient')
 
 const NEAR_BOTTOM_THRESHOLD_PX = 100
-
-interface ChatRequestFile {
-  name: string
-  size: number
-  type: string
-  data: string
-}
-
-interface ChatRequestPayload {
-  input: string
-  conversationId: string
-  files?: ChatRequestFile[]
-}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -85,8 +82,26 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+interface ChatViewportProps {
+  children: ReactNode
+}
+
+function ChatViewport({ children }: ChatViewportProps) {
+  const ref = useRef<HTMLDivElement>(null)
+  useMobileViewport({ ref })
+  return (
+    <div
+      ref={ref}
+      className='light desktop-title-bar-page fixed inset-0 z-[var(--z-dropdown)] flex flex-col bg-[var(--bg)] text-[var(--text-primary)] max-md:top-[var(--mobile-viewport-top,0px)] max-md:bottom-auto max-md:h-[var(--mobile-viewport-height,100dvh)] max-md:min-h-0!'
+    >
+      {children}
+    </div>
+  )
+}
+
 export default function ChatClient({ identifier }: { identifier: string }) {
   const router = useRouter()
+  const prefersReducedMotion = usePrefersReducedMotion()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -148,7 +163,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
    * With `force` (jump button), re-pins to bottom.
    */
   const scrollToBottom = (options?: { behavior?: ScrollBehavior; force?: boolean }) => {
-    const behavior = options?.behavior ?? 'smooth'
+    const behavior = prefersReducedMotion ? 'auto' : (options?.behavior ?? 'smooth')
     const force = options?.force === true
     if (!force && !stickToBottomRef.current) return
     if (!messagesEndRef.current) return
@@ -273,7 +288,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
 
     container.scrollTo({
       top: container.scrollTop + messageRect.top - containerRect.top,
-      behavior: 'smooth',
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
     })
   }
 
@@ -369,16 +384,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     fetchChatConfig()
   }, [identifier])
 
-  const refreshChat = () => {
-    fetchChatConfig()
-  }
-
-  const handleAuthSuccess = () => {
-    setTimeout(() => {
-      refreshChat()
-    }, 800)
-  }
-
   const handleSendMessage = async (
     messageToSend: string,
     files?: Array<{
@@ -428,7 +433,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     // Scroll to show only the user's message and loading indicator (if message exists)
     if (userMessageId) {
       setTimeout(() => {
-        scrollToMessage(userMessageId!, true)
+        scrollToMessage(userMessageId!)
       }, 100)
     }
 
@@ -734,7 +739,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
           }
         }
       } catch (err) {
-        console.error('Error fetching threads:', err)
+        logger.error('Error fetching threads:', err)
         setThreadsError(err instanceof Error ? err.message : 'Failed to fetch threads')
         setThreads([])
       } finally {
@@ -837,7 +842,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   }
 
   return (
-    <div className='light desktop-title-bar-page fixed inset-0 z-[var(--z-dropdown)] flex flex-col bg-[var(--bg)] text-[var(--text-primary)]'>
+    <ChatViewport>
       {isHistoryLoading && (
         <div className='absolute top-[72px] left-[276px] z-[105] flex h-[calc(100vh-85px)] w-[calc(100vw-286px)] items-center justify-center bg-white/60 pb-[6%]'>
           <LoadingAgentP2 size='lg' />
@@ -874,8 +879,8 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         onWelcomeQueryClick={handleWelcomeQueryClick}
       />
 
-      <div className='relative p-3 pb-4 md:p-4 md:pb-6'>
-        <div className='relative mx-auto max-w-3xl md:max-w-[768px]'>
+      <div className='relative shrink-0 md:p-4 md:pb-6'>
+        <div className='relative mx-auto max-w-3xl md:max-w-[748px]'>
           <ChatInput
             onSubmit={(value, _isVoiceInput, files) => {
               void handleSendMessage(value, files)
@@ -907,6 +912,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         onSaveQueries={handleSaveGoldenQueries}
         disabled={isStreamingResponse || isLoading || isGoldenQueriesSaving}
       />
-    </div>
+    </ChatViewport>
   )
 }

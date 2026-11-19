@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import {
   BROWSER_TOOL_AUTHORIZATION_TIMEOUT_MS,
   type BrowserPanelAction,
@@ -9,6 +10,7 @@ import {
   isCurrentBrowserToolName,
 } from '@sim/browser-protocol'
 import {
+  type DesktopExecutorDevice,
   type DesktopNotificationPayload,
   type DesktopServerChangeResult,
   type DesktopServerConfiguration,
@@ -27,10 +29,14 @@ import {
   type TerminalToolArgs,
 } from '@sim/terminal-protocol'
 import { getErrorMessage } from '@sim/utils/errors'
-import { isRecordLike } from '@sim/utils/object'
+import { isRecordLike, toRecord } from '@sim/utils/object'
 import { PASTE_LIMITS, utf8ByteLength } from '@sim/utils/paste'
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import { clipboard, ipcMain, shell } from 'electron'
+import {
+  captureAccountDataGeneration,
+  isAccountDataGenerationCurrent,
+} from '@/main/account-data-generation'
 import {
   type BrowserToolQueueBoundary,
   cancelActiveTool,
@@ -51,6 +57,7 @@ import { isAgentWebContents } from '@/main/browser-agent/registry'
 import {
   addTab,
   findInActiveTab,
+  focusPageForUser,
   getBrowserDownloadsState,
   peekTabsState,
   reorderTab,
@@ -81,7 +88,9 @@ import { isSafeInternalPath } from '@/main/config'
 import type { DesktopSettingsService } from '@/main/desktop-settings'
 import { isDesktopPreferenceKey } from '@/main/desktop-settings'
 import { hasRecentDeliberateInput, hasRecentDiscreteInput } from '@/main/input-activity'
-import type { LocalFilesystemService } from '@/main/local-filesystem'
+import type { LocalFilePermissions } from '@/main/local-file-permissions'
+import { executeLocalFileRequest } from '@/main/local-files'
+import type { LocalFileAccess, LocalFilesystemService } from '@/main/local-filesystem'
 import { isAppOrigin, openExternalSafe } from '@/main/navigation'
 import type { ScopedEventRouter } from '@/main/scoped-event-router'
 import type { TerminalRegistry } from '@/main/terminal/registry'
@@ -153,6 +162,7 @@ function isDesktopToolCallId(raw: unknown): raw is string {
 }
 
 export interface OAuthConnectScope {
+  sourceRequestId?: string
   workspaceId?: string
   credentialId?: string
   draftId?: string
@@ -301,10 +311,11 @@ export function parseDesktopNotificationPayload(raw: unknown): DesktopNotificati
   if (typeof raw !== 'object' || raw === null) {
     return null
   }
-  const { title, body, route } = raw as {
+  const { title, body, route, background } = raw as {
     title?: unknown
     body?: unknown
     route?: unknown
+    background?: unknown
   }
   if (
     typeof title !== 'string' ||
@@ -319,7 +330,12 @@ export function parseDesktopNotificationPayload(raw: unknown): DesktopNotificati
   if (route !== undefined && (typeof route !== 'string' || !isSafeInternalPath(route))) {
     return null
   }
-  return { title, body, ...(route !== undefined ? { route } : {}) }
+  return {
+    title,
+    body,
+    ...(route !== undefined ? { route } : {}),
+    ...(background === true ? { background: true } : {}),
+  }
 }
 
 export interface IpcDeps {
@@ -331,6 +347,7 @@ export interface IpcDeps {
   isLocalPageUrl: (url: string) => boolean
   retryLoad: (sender: WebContents) => void
   localFilesystem: LocalFilesystemService
+  localFilePermissions: LocalFilePermissions
   terminal: TerminalRegistry
   scopeEvents: Pick<
     ScopedEventRouter,
@@ -359,6 +376,8 @@ export interface IpcDeps {
     ) => boolean
   }
   beginOAuthConnect: (providerId: string, scope: OAuthConnectScope) => Promise<boolean>
+  prepareSourceConnect: () => string
+  cancelSourceConnect: (requestId: string) => boolean
   updates: {
     getState: () => DesktopUpdateState
     check: () => void
@@ -369,6 +388,8 @@ export interface IpcDeps {
     getConfiguration: () => DesktopServerConfiguration
     setOrigin: (origin: string) => Promise<DesktopServerChangeResult>
   }
+  /** The device a new chat turn may bind to, or null while Sim has not enabled one. */
+  getExecutorDevice: () => DesktopExecutorDevice | null
 }
 
 /**
@@ -507,7 +528,9 @@ interface DesktopToolAuthorization {
 async function fetchDesktopToolAuthorization(
   event: IpcMainInvokeEvent,
   deps: IpcDeps,
-  toolCallId: unknown
+  toolCallId: unknown,
+  claim = false,
+  onFailureStatus?: (status: number) => void
 ): Promise<DesktopToolAuthorization | null> {
   if (!isDesktopToolCallId(toolCallId)) return null
   const startedAt = Date.now()
@@ -518,11 +541,12 @@ async function fetchDesktopToolAuthorization(
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toolCallId }),
+        body: JSON.stringify({ toolCallId, ...(claim ? { claim: true } : {}) }),
         signal: AbortSignal.timeout(BROWSER_TOOL_AUTHORIZATION_TIMEOUT_MS),
       }
     )
     if (!response.ok) {
+      onFailureStatus?.(response.status)
       logger.warn('Desktop tool authorization was rejected', {
         toolCallId,
         status: response.status,
@@ -570,10 +594,13 @@ async function authorizeLocalFilesystemTool(
   request: unknown
 ): Promise<boolean> {
   if (typeof request !== 'object' || request === null) return false
+  // Claimed like an import: the server sees the read picked up, and refuses one it already
+  // failed as never started.
   const authorization = await fetchDesktopToolAuthorization(
     event,
     deps,
-    (request as { requestId?: unknown }).requestId
+    (request as { requestId?: unknown }).requestId,
+    true
   )
   return authorization
     ? deps.localFilesystem.isAuthorizedClientToolRequest(request, authorization)
@@ -587,6 +614,8 @@ async function authorizeLocalFilesystemTool(
  * unvalidated args they must parse themselves.
  */
 export function registerIpcHandlers(deps: IpcDeps): void {
+  const activeLocalFiles = new Map<string, Set<AbortController>>()
+  let activeLocalFileCount = 0
   const browserScopeBySender = new WeakMap<WebContents, string>()
   const terminalScopeBySender = new WeakMap<WebContents, string>()
   const browserPendingScopesBySender = new WeakMap<WebContents, Set<string>>()
@@ -712,6 +741,47 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         return deps.beginOAuthConnect(providerId, parsedScope)
       },
     },
+    'desktop:source-connect-prepare': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      requiresAccountData: true,
+      needsUserActivation: true,
+      denied: null,
+      handler: () => deps.prepareSourceConnect(),
+    },
+    'desktop:source-connect': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      requiresAccountData: true,
+      denied: false,
+      handler: (requestId) =>
+        typeof requestId === 'string' && /^[A-Za-z0-9_-]{32}$/.test(requestId)
+          ? deps.beginOAuthConnect('source', { sourceRequestId: requestId })
+          : false,
+    },
+    'desktop:source-connect-cancel': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      requiresAccountData: true,
+      denied: false,
+      handler: (requestId) =>
+        typeof requestId === 'string' && /^[A-Za-z0-9_-]{32}$/.test(requestId)
+          ? deps.cancelSourceConnect(requestId)
+          : false,
+    },
+    'desktop:local-files': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      requiresAccountData: true,
+      passSender: true,
+      denied: { ok: false, error: 'Local file tools are unavailable from this page.' },
+      handler: (_sender, request, authorization, access) =>
+        executeLocalFileRequest(
+          request,
+          authorization as DesktopToolAuthorization,
+          access as LocalFileAccess
+        ),
+    },
     'desktop:local-filesystem': {
       kind: 'invoke',
       gate: 'app-origin',
@@ -722,6 +792,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         error: 'Local filesystem access is not allowed from this page.',
       },
       handler: (request) => deps.localFilesystem.handle(request),
+    },
+    'desktop-executor:get-device': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      denied: null,
+      handler: () => deps.getExecutorDevice(),
     },
     'desktop:settings:get': {
       kind: 'invoke',
@@ -746,6 +822,26 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       handler: (enabled) =>
         typeof enabled === 'boolean'
           ? deps.settings.setBrowserSearchSuggestionsEnabled(enabled)
+          : deps.settings.getPreferences(),
+    },
+    'desktop:settings:set-full-file-access': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      needsUserActivation: true,
+      requiresAccountData: true,
+      denied: null,
+      handler: (enabled) =>
+        typeof enabled === 'boolean'
+          ? deps.settings.setFullFileAccess(enabled)
+          : deps.settings.getPreferences(),
+    },
+    'desktop:settings:set-prevent-sleep': {
+      kind: 'invoke',
+      gate: 'app-origin',
+      denied: null,
+      handler: (enabled) =>
+        typeof enabled === 'boolean'
+          ? deps.settings.setPreventSleepWhileRunning(enabled)
           : deps.settings.getPreferences(),
     },
     'desktop:settings:set-appearance': {
@@ -856,7 +952,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         ) {
           return { ok: false, error: `Unknown browser tool: ${String(tool)}` }
         }
-        const toolParams = isRecordLike(params) ? params : {}
+        const toolParams = toRecord(params)
         return executeTool(
           scope,
           tool,
@@ -946,6 +1042,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
             return peekTabsState()
           }
           void tab.view.webContents.loadURL(destination).catch(() => {})
+          focusPageForUser(tab.view.webContents)
           return peekTabsState()
         })
       },
@@ -1342,20 +1439,33 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       kind: 'send',
       gate: 'browser-page',
       deviationReason:
-        "the only sender in this family that is a browser PAGE rather than the Sim app, so browser-page is the correct gate and requires:'browser' follows — with the browser off no such page exists",
+        'the isolated browser preload reports its own form; app renderers cannot claim browser targets',
       requires: 'browser',
       passSender: true,
       handler: (sender, report) => {
         if (!isRecordLike(report)) return
-        const { origin, hasLoginForm, hasPasswordField } = report as {
+        const { origin, hasLoginForm, hasPasswordField, targetId, bounds } = report as {
           origin?: unknown
           hasLoginForm?: unknown
           hasPasswordField?: unknown
+          targetId?: unknown
+          bounds?: unknown
         }
         if (
           typeof origin !== 'string' ||
           typeof hasLoginForm !== 'boolean' ||
-          typeof hasPasswordField !== 'boolean'
+          typeof hasPasswordField !== 'boolean' ||
+          (targetId !== null && (typeof targetId !== 'string' || !ID_PATTERN.test(targetId))) ||
+          (bounds !== null &&
+            (!isRecordLike(bounds) ||
+              !['x', 'y', 'width', 'height'].every(
+                (key) =>
+                  typeof bounds[key] === 'number' &&
+                  Number.isFinite(bounds[key]) &&
+                  Math.abs(bounds[key]) <= 100_000
+              ) ||
+              Number(bounds.width) <= 0 ||
+              Number(bounds.height) <= 0))
         ) {
           return
         }
@@ -1363,12 +1473,66 @@ export function registerIpcHandlers(deps: IpcDeps): void {
           origin,
           hasLoginForm,
           hasPasswordField,
+          targetId: typeof targetId === 'string' ? targetId : null,
+          bounds: isRecordLike(bounds)
+            ? {
+                x: Number(bounds.x),
+                y: Number(bounds.y),
+                width: Number(bounds.width),
+                height: Number(bounds.height),
+              }
+            : null,
         })
+      },
+    },
+    'browser-credentials:fill-result': {
+      kind: 'send',
+      gate: 'browser-page',
+      deviationReason:
+        'only the isolated browser preload acknowledges a fill; no secret values are returned',
+      requires: 'browser',
+      passSender: true,
+      handler: (sender, result) => {
+        if (
+          !isRecordLike(result) ||
+          typeof result.requestId !== 'string' ||
+          !ID_PATTERN.test(result.requestId)
+        )
+          return
+        if (
+          result.status !== 'filled' &&
+          result.status !== 'stale-target' &&
+          result.status !== 'failed'
+        )
+          return
+        fillCoordinator()?.noteFillResult(sender as WebContents, {
+          requestId: result.requestId,
+          status: result.status,
+        })
+      },
+    },
+    'browser-credentials:picker': {
+      kind: 'send',
+      gate: 'browser-page',
+      deviationReason:
+        'real input in the browser page opens the trusted picker; selection is authorized separately in its bundled window',
+      requires: 'browser',
+      needsUserActivation: true,
+      passSender: true,
+      handler: (sender, action) => {
+        if (action !== 'open' && action !== 'focus' && action !== 'dismiss') return
+        void fillCoordinator()
+          ?.requestPicker(sender as WebContents, action)
+          .catch((error) => {
+            logger.warn('Could not open saved password picker', { error: getErrorMessage(error) })
+          })
       },
     },
     'browser-credentials:available': {
       kind: 'invoke',
       gate: 'app-origin',
+      deviationReason:
+        'vault availability is account data and remains readable while the browser surface is disabled',
       requiresAccountData: true,
       denied: false,
       handler: () => credentialsAvailable(),
@@ -1376,6 +1540,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     'browser-credentials:list': {
       kind: 'invoke',
       gate: 'app-origin',
+      deviationReason:
+        'password management remains available while the browser surface is disabled',
       requiresAccountData: true,
       denied: [],
       handler: () => listCredentials(),
@@ -1413,6 +1579,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     'browser-credentials:reveal': {
       kind: 'invoke',
       gate: 'app-origin',
+      deviationReason:
+        'OS-authenticated password management does not require an active browser surface',
       requiresAccountData: true,
       needsUserActivation: true,
       denied: null,
@@ -1421,6 +1589,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     'browser-credentials:copy': {
       kind: 'invoke',
       gate: 'app-origin',
+      deviationReason:
+        'OS-authenticated password copying does not require an active browser surface',
       requiresAccountData: true,
       needsUserActivation: true,
       denied: false,
@@ -1429,6 +1599,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     'browser-credentials:forget': {
       kind: 'invoke',
       gate: 'app-origin',
+      deviationReason:
+        'users must be able to remove saved credentials while the browser surface is disabled',
       requiresAccountData: true,
       needsUserActivation: true,
       denied: [],
@@ -1437,6 +1609,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     'browser-credentials:forget-all': {
       kind: 'invoke',
       gate: 'app-origin',
+      deviationReason:
+        'users must be able to clear saved credentials while the browser surface is disabled',
       requiresAccountData: true,
       needsUserActivation: true,
       denied: [],
@@ -1465,9 +1639,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         )
       },
     },
-    // Opens the native account chooser. The renderer only says "the user
-    // clicked the key icon, here"; it never learns which accounts exist, never
-    // names one, and never receives a password. The shell performs the fill.
+    /** The app requests a trusted chooser; only its selected account reaches the live page. */
     'browser-credentials:show-chooser': {
       kind: 'invoke',
       gate: 'app-origin',
@@ -1532,7 +1704,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         ) {
           return { ok: false, error: `Unknown terminal tool: ${String(tool)}` }
         }
-        const call = isRecordLike(params) ? params : {}
+        const call = toRecord(params)
         if (!isTerminalOperation(call.operation)) {
           return { ok: false, error: `Unknown terminal operation: ${String(call.operation)}` }
         }
@@ -1982,6 +2154,83 @@ export function registerIpcHandlers(deps: IpcDeps): void {
             ok: false,
             code: 'ACCESS_DENIED',
             error: 'This local filesystem request is not an authorized pending Copilot tool call.',
+          }
+        }
+        if (channel === 'desktop:local-files') {
+          const generation = captureAccountDataGeneration()
+          const origin = deps.appOrigin()
+          const request = args[0]
+          if (!isRecordLike(request) || !isDesktopToolCallId(request.toolCallId))
+            return { ok: false, error: 'Invalid local file request.' }
+          const key = JSON.stringify([event.sender.id, request.toolCallId])
+          if (request.operation === 'cancel') {
+            for (const pending of activeLocalFiles.get(key) ?? []) pending.abort()
+            return { ok: false, error: 'Local file operation cancelled.' }
+          }
+          if (activeLocalFileCount >= 128)
+            return {
+              ok: false,
+              error: 'Too many local file operations are running. Try again later.',
+            }
+          const controller = new AbortController()
+          const controllers = activeLocalFiles.get(key) ?? new Set<AbortController>()
+          controllers.add(controller)
+          activeLocalFiles.set(key, controllers)
+          activeLocalFileCount++
+          try {
+            let failureStatus: number | undefined
+            const authorization = await fetchDesktopToolAuthorization(
+              event,
+              deps,
+              request.toolCallId,
+              request.operation === 'manifest' || request.operation === 'read',
+              (status) => {
+                failureStatus = status
+              }
+            )
+            if (failureStatus === 409)
+              return {
+                ok: false,
+                code: 'ALREADY_STARTED',
+                error: 'This import is already running or was already started.',
+              }
+            if (
+              !authorization ||
+              !['read_local_file', 'import_local_files'].includes(authorization.toolName)
+            )
+              return { ok: false, error: 'This is not an authorized pending local file tool call.' }
+            if (
+              authorization.toolName === 'read_local_file'
+                ? request.operation !== 'read'
+                : request.operation !== 'manifest' && request.operation !== 'chunk'
+            )
+              return { ok: false, error: 'The operation does not match the pending tool call.' }
+            const parent = deps.getWindowForContents(event.sender)
+            if (!parent)
+              return { ok: false, error: 'A desktop window is required to approve file access.' }
+            const access = await deps.localFilePermissions.authorize(authorization, {
+              parent: async () => parent,
+              origin,
+              generation,
+              signal: controller.signal,
+              isCurrent: () =>
+                isAccountDataGenerationCurrent(generation) &&
+                deps.accountDataAvailable() &&
+                deps.appOrigin() === origin &&
+                isAppOriginSender(event, origin),
+              revalidate: async () =>
+                isDeepStrictEqual(
+                  authorization,
+                  await fetchDesktopToolAuthorization(event, deps, request.toolCallId)
+                ),
+            })
+            return await spec.handler(event.sender, request, authorization, access)
+          } catch (error) {
+            return { ok: false, error: getErrorMessage(error) }
+          } finally {
+            controllers.delete(controller)
+            if (controllers.size === 0) activeLocalFiles.delete(key)
+            activeLocalFileCount--
           }
         }
         if (spec.passSender) {

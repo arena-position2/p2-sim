@@ -66,7 +66,8 @@ async function decryptBYOKPool(
   rotationPoolKey: string,
   providerId: BYOKProviderId,
   scope: BYOKKeyScope,
-  scopeName: BYOKKeyScopeName
+  scopeName: BYOKKeyScopeName,
+  failClosed = false
 ): Promise<BYOKKeyResult | null> {
   const startIndex = nextRotationIndex(rotationPoolKey, keys.length)
   for (let offset = 0; offset < keys.length; offset++) {
@@ -84,6 +85,7 @@ async function decryptBYOKPool(
     }
   }
 
+  if (failClosed) throw new Error('Configured BYOK credentials are unavailable')
   return null
 }
 
@@ -101,7 +103,8 @@ async function decryptBYOKPool(
  */
 export async function getBYOKKey(
   workspaceId: string | undefined | null,
-  providerId: BYOKProviderId
+  providerId: BYOKProviderId,
+  options: { failClosed?: boolean } = {}
 ): Promise<BYOKKeyResult | null> {
   if (!workspaceId) {
     return null
@@ -125,7 +128,8 @@ export async function getBYOKKey(
         `${workspaceId}:${providerId}`,
         providerId,
         { workspaceId },
-        'workspace'
+        'workspace',
+        options.failClosed
       )
     }
 
@@ -173,10 +177,13 @@ export async function getBYOKKey(
       `organization:${organizationId}:${providerId}`,
       providerId,
       { workspaceId, organizationId },
-      'organization'
+      'organization',
+      options.failClosed
     )
   } catch (error) {
     logger.error('Failed to get BYOK key', { workspaceId, providerId, error })
+    if (options.failClosed)
+      throw new Error('BYOK credentials could not be resolved', { cause: error })
     return null
   }
 }
@@ -291,6 +298,13 @@ export async function getApiKeyWithBYOK(
     throw new Error(`API key is required for Baseten ${model}`)
   }
 
+  if (provider === 'nebius') {
+    const byokResult = await getBYOKKey(workspaceId, 'nebius', { failClosed: true })
+    if (byokResult) return byokResult
+    if (userProvidedKey) return { apiKey: userProvidedKey, isBYOK: false }
+    throw new Error(`API key is required for Nebius ${model}`)
+  }
+
   if (provider === 'ollama-cloud') {
     if (workspaceId) {
       const byokResult = await getBYOKKey(workspaceId, 'ollama-cloud')
@@ -307,6 +321,20 @@ export async function getApiKeyWithBYOK(
       return { apiKey: userProvidedKey, isBYOK: false }
     }
     throw new Error(`API key is required for Ollama Cloud ${model}`)
+  }
+
+  if (provider === 'kie') {
+    if (workspaceId) {
+      const byokResult = await getBYOKKey(workspaceId, 'kie')
+      if (byokResult) {
+        logger.info('Using BYOK key for Kie', { model, workspaceId, scope: byokResult.scope })
+        return byokResult
+      }
+    }
+    if (userProvidedKey) {
+      return { apiKey: userProvidedKey, isBYOK: false }
+    }
+    throw new Error(`API key is required for Kie ${model}`)
   }
 
   if (provider === 'bedrock') {
@@ -328,6 +356,7 @@ export async function getApiKeyWithBYOK(
   const isZaiModel = provider === 'zai'
   const isXaiModel = provider === 'xai'
   const isKimiModel = provider === 'kimi'
+  const isTypeSafeModel = provider === 'typesafe'
 
   const byokProviderId = isGeminiModel ? 'google' : (provider as BYOKProviderId)
 
@@ -340,7 +369,8 @@ export async function getApiKeyWithBYOK(
       isMistralModel ||
       isZaiModel ||
       isXaiModel ||
-      isKimiModel)
+      isKimiModel ||
+      isTypeSafeModel)
   ) {
     const hostedModels = getHostedModels()
     const isModelHosted = hostedModels.some((m) => m.toLowerCase() === model.toLowerCase())

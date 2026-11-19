@@ -4,7 +4,6 @@ import type { BlockConfig, BlockMeta } from '@/blocks/types'
 import { AuthMode, IntegrationType } from '@/blocks/types'
 import { createVersionedToolSelector, SERVICE_ACCOUNT_SUBBLOCKS } from '@/blocks/utils'
 import { resolveGoogleSheetsV2RangeParams } from '@/tools/google_sheets/range'
-import type { GoogleSheetsResponse, GoogleSheetsV2Response } from '@/tools/google_sheets/types'
 import { getTrigger } from '@/triggers'
 
 /**
@@ -17,8 +16,7 @@ const SPREADSHEET_FIELD = ['spreadsheetId', 'manualSpreadsheetId'] as const
 /** Canonical basic/advanced pair for the sheet tab, on the v2 block only. */
 const SHEET_FIELD = ['sheetName', 'manualSheetName'] as const
 
-// Legacy block - hidden from toolbar
-export const GoogleSheetsBlock: BlockConfig<GoogleSheetsResponse> = {
+export const GoogleSheetsBlock: BlockConfig = {
   type: 'google_sheets',
   name: 'Google Sheets (Legacy)',
   description: 'Read, write, and update data',
@@ -56,7 +54,6 @@ export const GoogleSheetsBlock: BlockConfig<GoogleSheetsResponse> = {
     },
   },
   subBlocks: [
-    // Operation selector
     {
       id: 'operation',
       title: 'Operation',
@@ -69,7 +66,6 @@ export const GoogleSheetsBlock: BlockConfig<GoogleSheetsResponse> = {
       ],
       value: () => 'read',
     },
-    // Google Sheets Credentials
     {
       id: 'credential',
       title: 'Google Account',
@@ -91,7 +87,6 @@ export const GoogleSheetsBlock: BlockConfig<GoogleSheetsResponse> = {
       required: true,
     },
     ...SERVICE_ACCOUNT_SUBBLOCKS,
-    // Spreadsheet Selector
     {
       id: 'spreadsheetId',
       title: 'Select Sheet',
@@ -105,7 +100,6 @@ export const GoogleSheetsBlock: BlockConfig<GoogleSheetsResponse> = {
       dependsOn: ['credential'],
       mode: 'basic',
     },
-    // Manual Spreadsheet ID (advanced mode)
     {
       id: 'manualSpreadsheetId',
       title: 'Spreadsheet ID',
@@ -115,7 +109,6 @@ export const GoogleSheetsBlock: BlockConfig<GoogleSheetsResponse> = {
       dependsOn: ['credential'],
       mode: 'advanced',
     },
-    // Range
     {
       id: 'range',
       title: 'Range',
@@ -149,7 +142,6 @@ Return ONLY the range string - no explanations, no quotes around the entire outp
         placeholder: 'Describe the range (e.g., "all data from Sheet1" or "A1 to D50")...',
       },
     },
-    // Write-specific Fields
     {
       id: 'values',
       title: 'Values',
@@ -185,7 +177,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       ],
       condition: { field: 'operation', value: 'write' },
     },
-    // Update-specific Fields
     {
       id: 'values',
       title: 'Values',
@@ -221,7 +212,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       ],
       condition: { field: 'operation', value: 'update' },
     },
-    // Append-specific Fields
     {
       id: 'values',
       title: 'Values',
@@ -305,7 +295,7 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           if (trimmed) {
             try {
               parsedValues = JSON.parse(trimmed)
-            } catch (error) {
+            } catch {
               throw new Error(
                 'Values must be valid JSON (e.g. [["A","B"],["C","D"]] or [{"A":"B"},{"A":"B"}]).'
               )
@@ -353,7 +343,7 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
   },
 }
 
-export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
+export const GoogleSheetsV2Block: BlockConfig = {
   type: 'google_sheets_v2',
   name: 'Google Sheets',
   description: 'Read, write, and update data with sheet selection',
@@ -427,7 +417,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
     },
   },
   subBlocks: [
-    // Operation selector
     {
       id: 'operation',
       title: 'Operation',
@@ -450,7 +439,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
       ],
       value: () => 'read',
     },
-    // Google Sheets Credentials
     {
       id: 'credential',
       title: 'Google Account',
@@ -472,7 +460,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
       required: true,
     },
     ...SERVICE_ACCOUNT_SUBBLOCKS,
-    // Spreadsheet Selector (basic mode) - not for create operation
     {
       id: 'spreadsheetId',
       title: 'Select Spreadsheet',
@@ -487,7 +474,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
       mode: 'basic',
       condition: { field: 'operation', value: 'create', not: true },
     },
-    // Manual Spreadsheet ID (advanced mode) - not for create operation
     {
       id: 'manualSpreadsheetId',
       title: 'Spreadsheet ID',
@@ -498,7 +484,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
       mode: 'advanced',
       condition: { field: 'operation', value: 'create', not: true },
     },
-    // Sheet Name Selector (basic mode) - for operations that need sheet name
     {
       id: 'sheetName',
       title: 'Sheet (Tab)',
@@ -515,7 +500,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
         value: ['read', 'write', 'update', 'append', 'clear'],
       },
     },
-    // Manual Sheet Name (advanced mode) - for operations that need sheet name
     {
       id: 'manualSheetName',
       title: 'Sheet Name',
@@ -530,7 +514,6 @@ export const GoogleSheetsV2Block: BlockConfig<GoogleSheetsV2Response> = {
         value: ['read', 'write', 'update', 'append', 'clear'],
       },
     },
-    // Cell Range (optional for read/write/update/clear)
     {
       id: 'cellRange',
       title: 'Cell Range',
@@ -564,7 +547,6 @@ Return ONLY the range string - no sheet name, no explanations, no quotes.`,
         placeholder: 'Describe the range (e.g., "first 50 rows" or "column A")...',
       },
     },
-    // Read Filter Fields (advanced mode only)
     {
       id: 'filterColumn',
       title: 'Filter Column',
@@ -600,7 +582,6 @@ Return ONLY the range string - no sheet name, no explanations, no quotes.`,
       condition: { field: 'operation', value: 'read' },
       mode: 'advanced',
     },
-    // Write-specific Fields
     {
       id: 'values',
       title: 'Values',
@@ -636,7 +617,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       ],
       condition: { field: 'operation', value: ['write', 'update', 'batch_update'] },
     },
-    // Update-specific Fields
     {
       id: 'values',
       title: 'Values',
@@ -662,7 +642,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
         generationType: 'json-object',
       },
     },
-    // Append-specific Fields
     {
       id: 'values',
       title: 'Values',
@@ -698,7 +677,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       ],
       condition: { field: 'operation', value: 'append' },
     },
-    // Create Spreadsheet Fields
     {
       id: 'title',
       title: 'Spreadsheet Title',
@@ -729,7 +707,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       dependsOn: ['credential'],
       condition: { field: 'operation', value: 'create' },
     },
-    // Batch Get Fields
     {
       id: 'ranges',
       title: 'Ranges',
@@ -766,7 +743,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
         generationType: 'json-object',
       },
     },
-    // Batch Update Fields
     {
       id: 'batchData',
       title: 'Data',
@@ -807,7 +783,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
         generationType: 'json-object',
       },
     },
-    // Batch Clear Fields
     {
       id: 'ranges',
       title: 'Ranges to Clear',
@@ -845,7 +820,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
         generationType: 'json-object',
       },
     },
-    // Copy Sheet Fields
     {
       id: 'sheetId',
       title: 'Sheet ID',
@@ -862,7 +836,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       condition: { field: 'operation', value: 'copy_sheet' },
       required: true,
     },
-    // Delete Rows / Delete Sheet Fields
     {
       id: 'deleteSheetId',
       title: 'Sheet ID',
@@ -871,7 +844,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       condition: { field: 'operation', value: ['delete_rows', 'delete_sheet'] },
       required: true,
     },
-    // Delete Rows Fields
     {
       id: 'startIndex',
       title: 'Start Row Index',
@@ -970,7 +942,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
 
         const operation = params.operation as string
 
-        // Handle create operation
         if (operation === 'create') {
           const sheetTitlesArray = sheetTitles
             ? (sheetTitles as string).split(',').map((s: string) => s.trim())
@@ -990,7 +961,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           throw new Error('Spreadsheet ID is required.')
         }
 
-        // Handle get_info operation
         if (operation === 'get_info') {
           return {
             spreadsheetId: effectiveSpreadsheetId,
@@ -998,7 +968,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           }
         }
 
-        // Handle batch_get operation
         if (operation === 'batch_get') {
           const parsedRanges = ranges ? JSON.parse(ranges as string) : []
           return {
@@ -1008,7 +977,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           }
         }
 
-        // Handle batch_update operation
         if (operation === 'batch_update') {
           const parsedData = batchData ? JSON.parse(batchData as string) : []
           return {
@@ -1019,7 +987,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           }
         }
 
-        // Handle batch_clear operation
         if (operation === 'batch_clear') {
           const parsedRanges = ranges ? JSON.parse(ranges as string) : []
           return {
@@ -1029,7 +996,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           }
         }
 
-        // Handle copy_sheet operation
         if (operation === 'copy_sheet') {
           return {
             sourceSpreadsheetId: effectiveSpreadsheetId,
@@ -1044,7 +1010,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           cellRange,
           range: params.range,
         })
-        // Handle delete_spreadsheet operation
         if (operation === 'delete_spreadsheet') {
           return {
             spreadsheetId: effectiveSpreadsheetId,
@@ -1052,7 +1017,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           }
         }
 
-        // Handle delete_sheet operation
         if (operation === 'delete_sheet') {
           const parsedSheetId = Number.parseInt(deleteSheetId as string, 10)
           if (Number.isNaN(parsedSheetId)) {
@@ -1065,7 +1029,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
           }
         }
 
-        // Handle delete_rows operation
         if (operation === 'delete_rows') {
           const parsedSheetId = Number.parseInt(deleteSheetId as string, 10)
           const parsedStartIndex = Number.parseInt(startIndex as string, 10)
@@ -1085,9 +1048,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
             oauthCredential,
           }
         }
-
-        // Handle read/write/update/append/clear operations (require sheet name)
-        // const effectiveSheetName = sheetName ? String(sheetName).trim() : ''
 
         if (!resolvedRange.sheetName) {
           throw new Error('Sheet name is required. Please select or enter a sheet name.')
@@ -1153,7 +1113,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
     },
   },
   outputs: {
-    // Read outputs
     sheetName: {
       type: 'string',
       description: 'Name of the sheet',
@@ -1175,7 +1134,6 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
         'Filter summary (present only when a filter was requested): applied, column, matchType, columnFound, matchedRows, totalRows',
       condition: { field: 'operation', value: 'read' },
     },
-    // Write/Update/Append outputs
     updatedRange: {
       type: 'string',
       description: 'Updated range',
@@ -1201,13 +1159,11 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       description: 'Table range',
       condition: { field: 'operation', value: 'append' },
     },
-    // Clear outputs
     clearedRange: {
       type: 'string',
       description: 'Range that was cleared',
       condition: { field: 'operation', value: 'clear' },
     },
-    // Get Info / Create / Batch outputs
     spreadsheetId: {
       type: 'string',
       description: 'Spreadsheet ID',
@@ -1250,13 +1206,11 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       description: 'Spreadsheet URL',
       condition: { field: 'operation', value: ['get_info', 'create'] },
     },
-    // Batch Get outputs
     valueRanges: {
       type: 'json',
       description: 'Array of value ranges read from the spreadsheet',
       condition: { field: 'operation', value: 'batch_get' },
     },
-    // Batch Update outputs
     totalUpdatedRows: {
       type: 'number',
       description: 'Total rows updated',
@@ -1282,13 +1236,11 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       description: 'Array of update responses for each range',
       condition: { field: 'operation', value: 'batch_update' },
     },
-    // Batch Clear outputs
     clearedRanges: {
       type: 'json',
       description: 'Array of ranges that were cleared',
       condition: { field: 'operation', value: 'batch_clear' },
     },
-    // Copy Sheet / Delete Rows outputs
     sheetId: {
       type: 'number',
       description:
@@ -1315,25 +1267,21 @@ Return ONLY the JSON array - no explanations, no markdown, no extra text.`,
       description: 'URL of the destination spreadsheet',
       condition: { field: 'operation', value: 'copy_sheet' },
     },
-    // Delete Rows outputs
     deletedRowRange: {
       type: 'string',
       description: 'Description of the deleted row range',
       condition: { field: 'operation', value: 'delete_rows' },
     },
-    // Delete Sheet outputs
     deletedSheetId: {
       type: 'number',
       description: 'The numeric ID of the deleted sheet',
       condition: { field: 'operation', value: 'delete_sheet' },
     },
-    // Delete Spreadsheet outputs
     deleted: {
       type: 'boolean',
       description: 'Whether the spreadsheet was successfully deleted',
       condition: { field: 'operation', value: 'delete_spreadsheet' },
     },
-    // Common metadata
     metadata: {
       type: 'json',
       description: 'Spreadsheet metadata including ID and URL',

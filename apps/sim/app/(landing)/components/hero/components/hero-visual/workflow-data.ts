@@ -1,11 +1,11 @@
-import type { ComponentType, SVGProps } from 'react'
+import { CsvIcon, DocxIcon, MarkdownIcon, PdfIcon } from '@sim/emcn/icons'
 import type {
   BLOCK_DIMENSIONS,
   CONNECTION_KNOB_PEAK_PX,
   HANDLE_POSITIONS,
 } from '@sim/workflow-renderer'
 import { AgentIcon, GithubIcon, JiraIcon } from '@/components/icons'
-import { CsvIcon, DocxIcon, MarkdownIcon, PdfIcon } from '@/components/icons/document-icons'
+import type { BlockIcon } from '@/blocks/types'
 
 /**
  * Shared data + geometry for the hero visual - the single source of truth the
@@ -18,7 +18,8 @@ import { CsvIcon, DocxIcon, MarkdownIcon, PdfIcon } from '@/components/icons/doc
  * bounding box of that space; the stage scales it to fit the hero panel.
  */
 
-type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
+/** Accepts Lucide/SVG icons and Arena Next-Image wrappers (e.g. AgentIcon). */
+type IconComponent = BlockIcon
 
 /** A single field row inside a block card (label → value), faithful to the real WorkflowBlock. */
 export interface BlockRow {
@@ -162,7 +163,7 @@ export const BLOCKS: BlockDef[] = [
     bgColor: '#FFFFFF',
     sentence: {
       segments: ['Prompt', { subBlockId: 'model', noun: 'a model' }],
-      values: { model: 'claude-sonnet-5' },
+      values: { model: 'claude-sonnet-5-5' },
     },
     rows: [],
     x: 300,

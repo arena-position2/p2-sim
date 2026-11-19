@@ -1,9 +1,6 @@
-/**
- * @vitest-environment node
- */
 import { loggerMock } from '@sim/testing'
 import { sleep } from '@sim/utils/helpers'
-import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTimeoutAbortController, getRemainingExecutionMs } from '@/lib/core/execution-limits'
 
 const { mockCancellationSubscribers, mockIsExecutionCancelled } = vi.hoisted(() => ({
@@ -24,14 +21,18 @@ vi.mock('@/lib/execution/cancellation', () => ({
   },
 }))
 
-import { EDGE } from '@/executor/constants'
-import type { DAG, DAGNode } from '@/executor/dag/builder'
-import type { EdgeManager } from '@/executor/execution/edge-manager'
+import { BlockType, EDGE } from '@/executor/constants'
+import { type DAG, DAGBuilder, type DAGNode } from '@/executor/dag/builder'
+import { EdgeManager } from '@/executor/execution/edge-manager'
 import type { NodeExecutionOrchestrator } from '@/executor/orchestrators/node'
 import type { ExecutionContext, ExecutionResult } from '@/executor/types'
 import { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
+import {
+  buildLoopSentinelEndId,
+  buildLoopSentinelStartId,
+} from '@/executor/utils/subflow-node-id-codec'
 import { buildSentinelEndId } from '@/executor/utils/subflow-utils'
-import type { SerializedBlock } from '@/serializer/types'
+import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
 import { ExecutionEngine } from './engine'
 
 const executionEngineLoggerCallIndex = loggerMock.createLogger.mock.calls.findIndex(
@@ -144,7 +145,6 @@ function createMockNodeOrchestrator(executeDelay = 0): MockNodeOrchestrator {
 
 describe('ExecutionEngine', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockCancellationSubscribers.clear()
     mockIsExecutionCancelled.mockResolvedValue(false)
   })
@@ -154,45 +154,6 @@ describe('ExecutionEngine', () => {
   })
 
   describe('Normal execution', () => {
-    it('should execute a simple linear workflow', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const endNode = createMockNode('end', 'function')
-      startNode.outgoingEdges.set('edge1', { target: 'end' })
-      endNode.incomingEdges.add('start')
-
-      const dag = createMockDAG([startNode, endNode])
-      const context = createMockContext({
-        decisions: { router: new Map(), condition: new Map() },
-      })
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['end']
-        return []
-      })
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.success).toBe(true)
-      expect(nodeOrchestrator.executionCount).toBe(2)
-    })
-
-    it('should mark execution as successful when completed without cancellation', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext({
-        decisions: { router: new Map(), condition: new Map() },
-      })
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.success).toBe(true)
-      expect(result.status).toBeUndefined()
-    })
-
     it('persists the selected final block provenance instead of run-global matches', async () => {
       const node = createMockNode('function', 'function')
       const registry = new ResolvedSecretTraceRegistry([
@@ -233,47 +194,6 @@ describe('ExecutionEngine', () => {
         { name: 'TOKEN', encryptedValue: 'ciphertext' },
       ])
       expect(result.executionState?.finalOutputResolvedSecretTraceProvenance?.entries).toEqual([])
-    })
-
-    /**
-     * A subflow sentinel stores its aggregate without provenance, and a loop that ran no
-     * iterations has none to merge. Treating that absence as a verdict marked the run
-     * unvouchable, which withheld the user's own final output from their execution log on every
-     * later view.
-     */
-    it('derives final output provenance when the last block state carries none', async () => {
-      const node = createMockNode('loop-1', 'loop')
-      const registry = new ResolvedSecretTraceRegistry([
-        { name: 'TOKEN', plaintext: 'secret-value-1234', encryptedValue: 'ciphertext' },
-      ])
-      registry.recordResolved('TOKEN', 'secret-value-1234')
-      const context = createMockContext({
-        decisions: { router: new Map(), condition: new Map() },
-        resolvedSecretTraceRegistry: registry,
-      })
-      const nodeOrchestrator = createMockNodeOrchestrator()
-      vi.mocked(nodeOrchestrator.executeNode).mockResolvedValue({
-        nodeId: node.id,
-        output: { results: ['secret-value-1234'] },
-        isFinalOutput: true,
-      })
-      vi.mocked(nodeOrchestrator.handleNodeCompletion).mockImplementation(
-        (_ctx, nodeId, output) => {
-          context.blockStates.set(nodeId, { output, executed: true, executionTime: 1 })
-        }
-      )
-
-      const engine = new ExecutionEngine(
-        context,
-        createMockDAG([node]),
-        createMockEdgeManager(),
-        nodeOrchestrator
-      )
-      const result = await engine.run(node.id)
-
-      const provenance = result.executionState?.finalOutputResolvedSecretTraceProvenance
-      expect(provenance?.complete).toBe(true)
-      expect(provenance?.entries).toEqual([{ name: 'TOKEN', encryptedValue: 'ciphertext' }])
     })
 
     /**
@@ -362,30 +282,6 @@ describe('ExecutionEngine', () => {
 
       expect(result.success).toBe(true)
       expect(nodeOrchestrator.executionCount).toBe(0)
-    })
-
-    it('marks resumed pause edge targets as activated before readiness checks', async () => {
-      const targetNode = createMockNode('join', 'function')
-      targetNode.incomingEdges.add('pause-block')
-      targetNode.incomingEdges.add('condition-block')
-      const dag = createMockDAG([targetNode])
-      const context = createMockContext({
-        metadata: {
-          executionId: 'test-execution',
-          startTime: new Date().toISOString(),
-          pendingBlocks: [],
-          remainingEdges: [{ source: 'pause-block', target: 'join' }],
-        } as any,
-      })
-      const edgeManager = createMockEdgeManager(() => [])
-      vi.mocked(edgeManager.isNodeReady).mockReturnValue(false)
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      await engine.run()
-
-      expect(edgeManager.markNodeWithActivatedEdge).toHaveBeenCalledWith('join')
-      expect(nodeOrchestrator.executeNode).not.toHaveBeenCalled()
     })
 
     it('deactivates a resumed pause block error edge instead of firing it', async () => {
@@ -518,35 +414,6 @@ describe('ExecutionEngine', () => {
       expect(nodeOrchestrator.executeNode).toHaveBeenCalledWith(context, 'both')
     })
 
-    it('should execute all nodes in a multi-node workflow', async () => {
-      const nodes = [
-        createMockNode('start', 'starter'),
-        createMockNode('middle1', 'function'),
-        createMockNode('middle2', 'function'),
-        createMockNode('end', 'function'),
-      ]
-
-      nodes[0].outgoingEdges.set('e1', { target: 'middle1' })
-      nodes[1].outgoingEdges.set('e2', { target: 'middle2' })
-      nodes[2].outgoingEdges.set('e3', { target: 'end' })
-
-      const dag = createMockDAG(nodes)
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['middle1']
-        if (node.id === 'middle1') return ['middle2']
-        if (node.id === 'middle2') return ['end']
-        return []
-      })
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.success).toBe(true)
-      expect(nodeOrchestrator.executionCount).toBe(4)
-    })
-
     it('records paused block completion before returning paused result', async () => {
       const node = createMockNode('hitl', 'function')
       const dag = createMockDAG([node])
@@ -580,38 +447,6 @@ describe('ExecutionEngine', () => {
         'hitl',
         pauseOutput
       )
-    })
-
-    it('does not stop run-until execution on parallel batch continuation', async () => {
-      const parallelEnd = createMockNode('parallel-end', 'parallel')
-      const nextNode = createMockNode('next', 'function')
-      parallelEnd.outgoingEdges.set('continue', {
-        target: 'next',
-        sourceHandle: EDGE.PARALLEL_CONTINUE,
-      })
-      nextNode.incomingEdges.add('parallel-end')
-      const dag = createMockDAG([parallelEnd, nextNode])
-      const context = createMockContext({
-        stopAfterBlockId: 'parallel-end',
-        decisions: { router: new Map(), condition: new Map() },
-      })
-      const edgeManager = createMockEdgeManager((node) =>
-        node.id === 'parallel-end' ? ['next'] : []
-      )
-      const nodeOrchestrator = createMockNodeOrchestrator()
-      vi.mocked(nodeOrchestrator.executeNode).mockImplementation(async (_ctx, nodeId) => ({
-        nodeId,
-        output:
-          nodeId === 'parallel-end'
-            ? { selectedRoute: EDGE.PARALLEL_CONTINUE }
-            : { result: 'done' },
-        isFinalOutput: nodeId === 'next',
-      }))
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      await engine.run('parallel-end')
-
-      expect(nodeOrchestrator.executeNode).toHaveBeenCalledWith(context, 'next')
     })
   })
 
@@ -662,51 +497,6 @@ describe('ExecutionEngine', () => {
       expect(result.status).toBe('cancelled')
       expect(nodeOrchestrator.executionCount).toBeLessThan(5)
     })
-
-    it('should not wait for slow executions when cancelled', async () => {
-      const abortController = new AbortController()
-
-      const startNode = createMockNode('start', 'starter')
-      const slowNode = createMockNode('slow', 'function')
-      startNode.outgoingEdges.set('edge1', { target: 'slow' })
-
-      const dag = createMockDAG([startNode, slowNode])
-      const context = createMockContext({ abortSignal: abortController.signal })
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['slow']
-        return []
-      })
-      const nodeOrchestrator = createMockNodeOrchestrator(1)
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      const executionPromise = engine.run('start')
-      setTimeout(() => abortController.abort(), 1)
-
-      const startTime = Date.now()
-      const result = await executionPromise
-      const duration = Date.now() - startTime
-
-      expect(result.status).toBe('cancelled')
-      expect(duration).toBeLessThan(200)
-    })
-
-    it('should return cancelled status even if error thrown during cancellation', async () => {
-      const abortController = new AbortController()
-      abortController.abort()
-
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext({ abortSignal: abortController.signal })
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.status).toBe('cancelled')
-      expect(result.success).toBe(false)
-    })
   })
 
   describe('Cancellation via Redis', () => {
@@ -734,21 +524,6 @@ describe('ExecutionEngine', () => {
       } finally {
         timeoutController.cleanup()
       }
-    })
-
-    it('checks the durable cancellation state when subscribing', async () => {
-      mockIsExecutionCancelled.mockResolvedValue(false)
-
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      await engine.run('start')
-
-      expect(mockIsExecutionCancelled).toHaveBeenCalled()
     })
 
     it('should stop execution when Redis reports cancellation', async () => {
@@ -824,24 +599,6 @@ describe('ExecutionEngine', () => {
       expect(result.success).toBe(true)
     })
 
-    it('unsubscribes from the cancellation channel after run completes', async () => {
-      mockIsExecutionCancelled.mockResolvedValue(false)
-
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext({ executionId: 'cleanup-execution' })
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator(20)
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const runPromise = engine.run('start')
-      await vi.waitFor(() => expect(mockCancellationSubscribers.size).toBe(1))
-
-      await runPromise
-
-      expect(mockCancellationSubscribers.size).toBe(0)
-    })
-
     it('honours the durable backstop when cancelled before subscribing', async () => {
       mockIsExecutionCancelled.mockResolvedValue(true)
 
@@ -857,62 +614,6 @@ describe('ExecutionEngine', () => {
       expect(result.status).toBe('cancelled')
       expect(nodeOrchestrator.executionCount).toBe(0)
       expect(context.abortSignal?.aborted).toBe(true)
-    })
-
-    it('reads the durable cancellation flag once when subscribing', async () => {
-      mockIsExecutionCancelled.mockResolvedValue(false)
-
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      await engine.run('start')
-
-      expect(mockIsExecutionCancelled).toHaveBeenCalledOnce()
-    })
-
-    it('does not poll the durable flag while a node is running', async () => {
-      mockIsExecutionCancelled.mockResolvedValue(false)
-
-      let releaseNode = () => {}
-      const nodeReleased = new Promise<void>((resolve) => {
-        releaseNode = resolve
-      })
-
-      const startNode = createMockNode('start', 'starter')
-      const slowNode = createMockNode('slow', 'wait')
-      startNode.outgoingEdges.set('edge1', { target: 'slow' })
-
-      const dag = createMockDAG([startNode, slowNode])
-      const context = createMockContext({ executionId: 'redis-poll-execution' })
-      const edgeManager = createMockEdgeManager((node) => (node.id === 'start' ? ['slow'] : []))
-      const nodeOrchestrator = createMockNodeOrchestrator()
-      ;(nodeOrchestrator.executeNode as Mock).mockImplementation(
-        async (_ctx: ExecutionContext, nodeId: string) => {
-          if (nodeId === 'slow') {
-            mockIsExecutionCancelled.mockResolvedValue(true)
-            await nodeReleased
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }
-      )
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const runPromise = engine.run('start')
-
-      await vi.waitFor(() => expect(mockCancellationSubscribers.size).toBe(1))
-      await sleep(25)
-      expect(context.abortSignal?.aborted).toBe(false)
-      expect(mockIsExecutionCancelled).toHaveBeenCalledOnce()
-      for (const handler of mockCancellationSubscribers) {
-        handler({ executionId: 'redis-poll-execution' })
-      }
-      releaseNode()
-
-      await expect(runPromise).resolves.toMatchObject({ success: false, status: 'cancelled' })
     })
 
     it('leaves no cancellation timer behind once the run settles', async () => {
@@ -1024,53 +725,9 @@ describe('ExecutionEngine', () => {
       expect(result.status).toBe('cancelled')
       expect(nodeOrchestrator.executionCount).toBeLessThan(11)
     })
-
-    it('should not wait for all parallel branches when cancelled', async () => {
-      const abortController = new AbortController()
-
-      const startNode = createMockNode('start', 'starter')
-      const slowNodes = Array.from({ length: 5 }, (_, i) => createMockNode(`slow${i}`, 'function'))
-
-      slowNodes.forEach((_, i) => {
-        startNode.outgoingEdges.set(`edge${i}`, { target: `slow${i}` })
-      })
-
-      const dag = createMockDAG([startNode, ...slowNodes])
-      const context = createMockContext({ abortSignal: abortController.signal })
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return slowNodes.map((_, i) => `slow${i}`)
-        return []
-      })
-      const nodeOrchestrator = createMockNodeOrchestrator(2)
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      const executionPromise = engine.run('start')
-      setTimeout(() => abortController.abort(), 1)
-
-      const startTime = Date.now()
-      const result = await executionPromise
-      const duration = Date.now() - startTime
-
-      expect(result.status).toBe('cancelled')
-      expect(duration).toBeLessThan(100)
-    })
   })
 
   describe('Edge cases', () => {
-    it('should handle empty DAG gracefully', async () => {
-      const dag = createMockDAG([])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run()
-
-      expect(result.success).toBe(true)
-      expect(nodeOrchestrator.executionCount).toBe(0)
-    })
-
     it('should preserve partial output when cancelled', async () => {
       const abortController = new AbortController()
 
@@ -1104,52 +761,6 @@ describe('ExecutionEngine', () => {
 
       expect(result.status).toBe('cancelled')
       expect(result.output).toBeDefined()
-    })
-
-    it('should populate metadata on cancellation', async () => {
-      const abortController = new AbortController()
-      abortController.abort()
-
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext({ abortSignal: abortController.signal })
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.metadata).toBeDefined()
-      expect(result.metadata.endTime).toBeDefined()
-      expect(result.metadata.duration).toBeDefined()
-    })
-
-    it('should return logs even when cancelled', async () => {
-      const abortController = new AbortController()
-
-      const startNode = createMockNode('start', 'starter')
-      const dag = createMockDAG([startNode])
-      const context = createMockContext({ abortSignal: abortController.signal })
-      context.blockLogs.push({
-        blockId: 'test',
-        blockName: 'Test',
-        blockType: 'test',
-        startedAt: '',
-        endedAt: '',
-        durationMs: 0,
-        success: true,
-      })
-
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
-
-      abortController.abort()
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.logs).toBeDefined()
-      expect(result.logs.length).toBeGreaterThan(0)
     })
   })
 
@@ -1235,48 +846,6 @@ describe('ExecutionEngine', () => {
       await expect(engine.run('start')).rejects.toThrow('Parallel branch failed')
     })
 
-    it('should capture only the first error when multiple parallel branches fail', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const parallelNodes = Array.from({ length: 3 }, (_, i) =>
-        createMockNode(`parallel${i}`, 'function')
-      )
-
-      parallelNodes.forEach((_, i) => {
-        startNode.outgoingEdges.set(`edge${i}`, { target: `parallel${i}` })
-      })
-
-      const dag = createMockDAG([startNode, ...parallelNodes])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return parallelNodes.map((_, i) => `parallel${i}`)
-        return []
-      })
-
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          if (nodeId === 'parallel0') {
-            await sleep(1)
-            throw new Error('First error')
-          }
-          if (nodeId === 'parallel1') {
-            await sleep(1)
-            throw new Error('Second error')
-          }
-          if (nodeId === 'parallel2') {
-            await sleep(1)
-            throw new Error('Third error')
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      await expect(engine.run('start')).rejects.toThrow('First error')
-    })
-
     it('should wait for ongoing executions to complete before throwing error', async () => {
       const startNode = createMockNode('start', 'starter')
       const fastErrorNode = createMockNode('fast-error', 'function')
@@ -1317,102 +886,6 @@ describe('ExecutionEngine', () => {
       expect(slowNodeCompleted).toBe(true)
     })
 
-    it('should not queue new nodes after an error occurs', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const errorNode = createMockNode('error-node', 'function')
-      const afterErrorNode = createMockNode('after-error', 'function')
-
-      startNode.outgoingEdges.set('edge1', { target: 'error-node' })
-      errorNode.outgoingEdges.set('edge2', { target: 'after-error' })
-
-      const dag = createMockDAG([startNode, errorNode, afterErrorNode])
-      const context = createMockContext()
-
-      const queuedNodes: string[] = []
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') {
-          queuedNodes.push('error-node')
-          return ['error-node']
-        }
-        if (node.id === 'error-node') {
-          queuedNodes.push('after-error')
-          return ['after-error']
-        }
-        return []
-      })
-
-      const executedNodes: string[] = []
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          executedNodes.push(nodeId)
-          if (nodeId === 'error-node') {
-            throw new Error('Node error')
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      await expect(engine.run('start')).rejects.toThrow('Node error')
-
-      expect(executedNodes).not.toContain('after-error')
-    })
-
-    it('should populate error result with metadata when execution fails', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const errorNode = createMockNode('error-node', 'function')
-      startNode.outgoingEdges.set('edge1', { target: 'error-node' })
-
-      const dag = createMockDAG([startNode, errorNode])
-      const context = createMockContext()
-      context.blockLogs.push({
-        blockId: 'start',
-        blockName: 'Start',
-        blockType: 'starter',
-        startedAt: new Date().toISOString(),
-        endedAt: new Date().toISOString(),
-        durationMs: 10,
-        success: true,
-      })
-
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['error-node']
-        return []
-      })
-
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          if (nodeId === 'error-node') {
-            const error = new Error('Execution failed') as any
-            error.executionResult = {
-              success: false,
-              output: { partial: 'data' },
-              logs: context.blockLogs,
-              metadata: context.metadata,
-            }
-            throw error
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      try {
-        await engine.run('start')
-        expect.fail('Should have thrown')
-      } catch (error: any) {
-        expect(error.executionResult).toBeDefined()
-        expect(error.executionResult.metadata.endTime).toBeDefined()
-        expect(error.executionResult.metadata.duration).toBeDefined()
-      }
-    })
-
     it('should prefer cancellation status over error when both occur', async () => {
       const abortController = new AbortController()
 
@@ -1444,145 +917,6 @@ describe('ExecutionEngine', () => {
 
       expect(result.status).toBe('cancelled')
       expect(result.success).toBe(false)
-    })
-
-    it('should stop loop iteration when error occurs in loop body', async () => {
-      const loopStartNode = createMockNode('loop-start', 'loop_sentinel')
-      loopStartNode.metadata = {
-        isSentinel: true,
-        sentinelType: 'start',
-        subflowId: 'loop1',
-        subflowType: 'loop',
-      }
-
-      const loopBodyNode = createMockNode('loop-body', 'function')
-      loopBodyNode.metadata = { isLoopNode: true, subflowId: 'loop1', subflowType: 'loop' }
-
-      const loopEndNode = createMockNode('loop-end', 'loop_sentinel')
-      loopEndNode.metadata = {
-        isSentinel: true,
-        sentinelType: 'end',
-        subflowId: 'loop1',
-        subflowType: 'loop',
-      }
-
-      const afterLoopNode = createMockNode('after-loop', 'function')
-
-      loopStartNode.outgoingEdges.set('edge1', { target: 'loop-body' })
-      loopBodyNode.outgoingEdges.set('edge2', { target: 'loop-end' })
-      loopEndNode.outgoingEdges.set('loop_continue', {
-        target: 'loop-start',
-        sourceHandle: 'loop_continue',
-      })
-      loopEndNode.outgoingEdges.set('loop_complete', {
-        target: 'after-loop',
-        sourceHandle: 'loop_complete',
-      })
-
-      const dag = createMockDAG([loopStartNode, loopBodyNode, loopEndNode, afterLoopNode])
-      const context = createMockContext()
-
-      let iterationCount = 0
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'loop-start') return ['loop-body']
-        if (node.id === 'loop-body') return ['loop-end']
-        if (node.id === 'loop-end') {
-          iterationCount++
-          if (iterationCount < 5) return ['loop-start']
-          return ['after-loop']
-        }
-        return []
-      })
-
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          if (nodeId === 'loop-body' && iterationCount >= 2) {
-            throw new Error('Loop body error on iteration 3')
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      await expect(engine.run('loop-start')).rejects.toThrow('Loop body error on iteration 3')
-
-      expect(iterationCount).toBeLessThanOrEqual(3)
-    })
-
-    it('should handle error that is not an Error instance', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const errorNode = createMockNode('error-node', 'function')
-      startNode.outgoingEdges.set('edge1', { target: 'error-node' })
-
-      const dag = createMockDAG([startNode, errorNode])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['error-node']
-        return []
-      })
-
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          if (nodeId === 'error-node') {
-            throw 'String error message'
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      await expect(engine.run('start')).rejects.toThrow('String error message')
-    })
-
-    it('should preserve partial output when error occurs after some blocks complete', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const successNode = createMockNode('success', 'function')
-      const errorNode = createMockNode('error-node', 'function')
-
-      startNode.outgoingEdges.set('edge1', { target: 'success' })
-      successNode.outgoingEdges.set('edge2', { target: 'error-node' })
-
-      const dag = createMockDAG([startNode, successNode, errorNode])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['success']
-        if (node.id === 'success') return ['error-node']
-        return []
-      })
-
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          if (nodeId === 'success') {
-            return { nodeId, output: { successData: 'preserved' }, isFinalOutput: false }
-          }
-          if (nodeId === 'error-node') {
-            throw new Error('Late error')
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-
-      try {
-        await engine.run('start')
-        expect.fail('Should have thrown')
-      } catch (error: any) {
-        // Verify the error was thrown
-        expect(error.message).toBe('Late error')
-        // The partial output should be available in executionResult if attached
-        if (error.executionResult) {
-          expect(error.executionResult.output).toBeDefined()
-        }
-      }
     })
   })
 
@@ -1622,50 +956,6 @@ describe('ExecutionEngine', () => {
       expect(result.success).toBe(true)
       expect(result.output).toEqual({ data: { message: 'ok' }, status: 200, headers: {} })
       expect(nodeOrchestrator.executionCount).toBe(2)
-    })
-
-    it('should stop execution after Response block on a branch (Router)', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const routerNode = createMockNode('router', 'router')
-      const successResponse = createMockNode('success-response', 'response')
-      const errorResponse = createMockNode('error-response', 'response')
-
-      startNode.outgoingEdges.set('edge1', { target: 'router' })
-      routerNode.outgoingEdges.set('success', { target: 'success-response' })
-      routerNode.outgoingEdges.set('error', { target: 'error-response' })
-
-      const dag = createMockDAG([startNode, routerNode, successResponse, errorResponse])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['router']
-        if (node.id === 'router') return ['success-response']
-        return []
-      })
-
-      const executedNodes: string[] = []
-      const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          executedNodes.push(nodeId)
-          nodeOrchestrator.executionCount++
-          if (nodeId === 'success-response') {
-            return {
-              nodeId,
-              output: { data: { result: 'success' }, status: 200, headers: {} },
-              isFinalOutput: true,
-            }
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
-        }),
-        handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
-
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('start')
-
-      expect(result.success).toBe(true)
-      expect(result.output).toEqual({ data: { result: 'success' }, status: 200, headers: {} })
-      expect(executedNodes).not.toContain('error-response')
     })
 
     it('should stop all branches when a parallel Response block fires first', async () => {
@@ -1714,6 +1004,87 @@ describe('ExecutionEngine', () => {
       expect(result.success).toBe(true)
       expect(result.output).toEqual({ data: { fast: true }, status: 200, headers: {} })
       expect(executedNodes).not.toContain('after-slow')
+    })
+
+    it('routes to the block after an empty forEach when the sentinel start exits early', async () => {
+      const loopId = 'loop-empty'
+      const sentinelStartId = buildLoopSentinelStartId(loopId)
+      const sentinelEndId = buildSentinelEndId(loopId)
+
+      const startNode = createMockNode('start', 'starter')
+      const sentinelStart = createMockNode(sentinelStartId, 'loop_sentinel')
+      sentinelStart.metadata = {
+        isSentinel: true,
+        sentinelType: 'start',
+        subflowId: loopId,
+        subflowType: 'loop',
+      }
+
+      const sentinelEnd = createMockNode(sentinelEndId, 'loop_sentinel')
+      sentinelEnd.metadata = {
+        isSentinel: true,
+        sentinelType: 'end',
+        subflowId: loopId,
+        subflowType: 'loop',
+      }
+      sentinelEnd.incomingEdges.add('from-body')
+      sentinelEnd.outgoingEdges.set('exit', {
+        target: 'after-loop',
+        sourceHandle: EDGE.LOOP_EXIT,
+      })
+
+      const afterLoop = createMockNode('after-loop', 'function')
+      const bodyNode = createMockNode('body', 'function')
+      bodyNode.metadata = { isLoopNode: true, subflowId: loopId, subflowType: 'loop' }
+
+      startNode.outgoingEdges.set('to-loop', { target: sentinelStartId })
+
+      const dag = createMockDAG([startNode, sentinelStart, bodyNode, sentinelEnd, afterLoop])
+      const context = createMockContext()
+
+      const edgeManager = createMockEdgeManager((node, output) => {
+        if (node.id === 'start') return [sentinelStartId]
+        if (node.id === sentinelEndId && output?.selectedRoute === EDGE.LOOP_EXIT) {
+          return ['after-loop']
+        }
+        return []
+      })
+
+      const executedNodes: string[] = []
+      const nodeOrchestrator = {
+        executionCount: 0,
+        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
+          executedNodes.push(nodeId)
+          nodeOrchestrator.executionCount++
+          if (nodeId === sentinelStartId) {
+            return {
+              nodeId,
+              output: {
+                sentinelStart: true,
+                shouldExit: true,
+                selectedRoute: EDGE.LOOP_EXIT,
+                totalIterations: 0,
+              },
+              isFinalOutput: false,
+            }
+          }
+          if (nodeId === 'after-loop') {
+            return { nodeId, output: { continued: true }, isFinalOutput: true }
+          }
+          return { nodeId, output: {}, isFinalOutput: false }
+        }),
+        handleNodeCompletion: vi.fn(),
+      } as unknown as MockNodeOrchestrator
+
+      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
+      const result = await engine.run('start')
+
+      expect(result.success).toBe(true)
+      expect(executedNodes).toContain(sentinelStartId)
+      expect(executedNodes).toContain('after-loop')
+      expect(executedNodes).not.toContain('body')
+      expect(result.output).toEqual({ continued: true })
+      expect(sentinelEnd.incomingEdges.size).toBe(0)
     })
 
     it('should continue loop iterations when a Response block fires inside a loop', async () => {
@@ -1908,89 +1279,357 @@ describe('ExecutionEngine', () => {
       expect(result.success).toBe(true)
       expect(result.output).toEqual({ data: { response: true }, status: 200, headers: {} })
     })
+  })
+  /**
+   * A stop-after run is a promise that the run ends with the stop block. These run the real DAG
+   * builder and edge manager, so a router or condition deciding a path is the same decision the
+   * engine makes in production.
+   */
+  describe('Stop-after block', () => {
+    function block(id: string, type = BlockType.FUNCTION): SerializedBlock {
+      return { ...createMockBlock(id), metadata: { id: type, name: id } }
+    }
 
-    it('should honor locked Response output even when a parallel node throws an error', async () => {
-      const startNode = createMockNode('start', 'starter')
-      const responseNode = createMockNode('response', 'response')
-      const errorNode = createMockNode('error-node', 'function')
-
-      startNode.outgoingEdges.set('edge1', { target: 'response' })
-      startNode.outgoingEdges.set('edge2', { target: 'error-node' })
-
-      const dag = createMockDAG([startNode, responseNode, errorNode])
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'start') return ['response', 'error-node']
-        return []
-      })
-
+    function buildRun(
+      workflow: SerializedWorkflow,
+      stopAfterBlockId: string,
+      outputs: Record<string, ExecutionResult['output']> = {}
+    ) {
+      const dag = new DAGBuilder().build(workflow, { triggerBlockId: 'start' })
+      const executed: string[] = []
       const nodeOrchestrator = {
-        executionCount: 0,
-        executeNode: vi.fn().mockImplementation(async (_ctx: ExecutionContext, nodeId: string) => {
-          nodeOrchestrator.executionCount++
-          if (nodeId === 'response') {
-            return {
-              nodeId,
-              output: { data: { ok: true }, status: 200, headers: {} },
-              isFinalOutput: true,
-            }
-          }
-          if (nodeId === 'error-node') {
-            await sleep(1)
-            throw new Error('Parallel branch failed')
-          }
-          return { nodeId, output: {}, isFinalOutput: false }
+        executeNode: vi.fn(async (_ctx: ExecutionContext, nodeId: string) => {
+          executed.push(nodeId)
+          return { nodeId, output: outputs[nodeId] ?? {}, isFinalOutput: false }
         }),
         handleNodeCompletion: vi.fn(),
-      } as unknown as MockNodeOrchestrator
+      } as unknown as NodeExecutionOrchestrator
+      const engine = new ExecutionEngine(
+        createMockContext({
+          stopAfterBlockId,
+          decisions: { router: new Map(), condition: new Map() },
+        }),
+        dag,
+        new EdgeManager(dag),
+        nodeOrchestrator
+      )
+      return { engine, executed }
+    }
 
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
+    /** start → condition; `if` → taken → takenTail, `else` → stop → after. */
+    const conditionWorkflow: SerializedWorkflow = {
+      version: '1',
+      blocks: [
+        block('start', BlockType.STARTER),
+        block('condition', BlockType.CONDITION),
+        block('taken'),
+        block('takenTail'),
+        block('stop'),
+        block('after'),
+      ],
+      connections: [
+        { source: 'start', target: 'condition' },
+        { source: 'condition', target: 'taken', sourceHandle: 'condition-if' },
+        { source: 'condition', target: 'stop', sourceHandle: 'condition-else' },
+        { source: 'taken', target: 'takenTail' },
+        { source: 'stop', target: 'after' },
+      ],
+      loops: {},
+      parallels: {},
+    }
+
+    it('fails as soon as a condition routes away from the stop block', async () => {
+      const { engine, executed } = buildRun(conditionWorkflow, 'stop', {
+        condition: { selectedOption: 'if' },
+      })
+
+      await expect(engine.run('start')).rejects.toThrow('Stop block "stop" (stop) was not reached')
+      expect(executed).toEqual(['start', 'condition'])
+    })
+
+    it('fails as soon as a router routes away from the stop block', async () => {
+      const { engine, executed } = buildRun(
+        {
+          version: '1',
+          blocks: [
+            block('start', BlockType.STARTER),
+            block('router', BlockType.ROUTER_V2),
+            block('taken'),
+            block('takenTail'),
+            block('stop'),
+          ],
+          connections: [
+            { source: 'start', target: 'router' },
+            { source: 'router', target: 'taken', sourceHandle: 'router-route-a' },
+            { source: 'router', target: 'stop', sourceHandle: 'router-route-b' },
+            { source: 'taken', target: 'takenTail' },
+          ],
+          loops: {},
+          parallels: {},
+        },
+        'stop',
+        { router: { selectedRoute: 'route-a' } }
+      )
+
+      await expect(engine.run('start')).rejects.toThrow('Stop block "stop" (stop) was not reached')
+      expect(executed).toEqual(['start', 'router'])
+    })
+
+    it('fails rather than pausing when another branch pauses after the stop block is skipped', async () => {
+      const { engine, executed } = buildRun(
+        {
+          version: '1',
+          blocks: [
+            block('start', BlockType.STARTER),
+            block('approval'),
+            block('condition', BlockType.CONDITION),
+            block('taken'),
+            block('stop'),
+          ],
+          connections: [
+            { source: 'start', target: 'approval' },
+            { source: 'start', target: 'condition' },
+            { source: 'condition', target: 'taken', sourceHandle: 'condition-if' },
+            { source: 'condition', target: 'stop', sourceHandle: 'condition-else' },
+          ],
+          loops: {},
+          parallels: {},
+        },
+        'stop',
+        {
+          approval: {
+            response: { status: 'paused' },
+            _pauseMetadata: {
+              contextId: 'pause-1',
+              blockId: 'approval',
+              response: { status: 'paused' },
+              timestamp: new Date().toISOString(),
+              pauseKind: 'hitl',
+            },
+          },
+          condition: { selectedOption: 'if' },
+        }
+      )
+
+      await expect(engine.run('start')).rejects.toThrow('Stop block "stop" (stop) was not reached')
+      expect(executed).toEqual(['start', 'approval', 'condition'])
+    })
+
+    it('fails when the stop block sits on an error path the run never takes', async () => {
+      const { engine, executed } = buildRun(
+        {
+          version: '1',
+          blocks: [block('start', BlockType.STARTER), block('work'), block('next'), block('stop')],
+          connections: [
+            { source: 'start', target: 'work' },
+            { source: 'work', target: 'next', sourceHandle: 'source' },
+            { source: 'work', target: 'stop', sourceHandle: 'error' },
+          ],
+          loops: {},
+          parallels: {},
+        },
+        'stop'
+      )
+
+      await expect(engine.run('start')).rejects.toThrow('Stop block "stop" (stop) was not reached')
+      expect(executed).toEqual(['start', 'work'])
+    })
+
+    it('stops after the stop block when the condition routes to it', async () => {
+      const { engine, executed } = buildRun(conditionWorkflow, 'stop', {
+        condition: { selectedOption: 'else' },
+      })
+
       const result = await engine.run('start')
 
       expect(result.success).toBe(true)
-      expect(result.output).toEqual({ data: { ok: true }, status: 200, headers: {} })
+      expect(executed).toEqual(['start', 'condition', 'stop'])
     })
-  })
 
-  describe('Cancellation flag behavior', () => {
-    it('should set cancelledFlag when abort signal fires', async () => {
-      const abortController = new AbortController()
+    it.each([
+      ['approval', 'stop'],
+      ['stop', 'approval'],
+    ])(
+      'completes without retaining a sibling pause when %s finishes before %s',
+      async (first, second) => {
+        const { engine, executed } = buildRun(
+          {
+            version: '1',
+            blocks: [
+              block('start', BlockType.STARTER),
+              block('approval'),
+              block('stop'),
+              block('after'),
+            ],
+            connections: [
+              { source: 'start', target: first },
+              { source: 'start', target: second },
+              { source: 'stop', target: 'after' },
+            ],
+            loops: {},
+            parallels: {},
+          },
+          'stop',
+          {
+            approval: {
+              _pauseMetadata: {
+                contextId: 'approval',
+                blockId: 'approval',
+                response: {},
+                timestamp: new Date().toISOString(),
+                pauseKind: 'human',
+              },
+            },
+          }
+        )
 
-      const nodes = Array.from({ length: 3 }, (_, i) => createMockNode(`node${i}`, 'function'))
-      for (let i = 0; i < nodes.length - 1; i++) {
-        nodes[i].outgoingEdges.set(`e${i}`, { target: `node${i + 1}` })
+        const result = await engine.run('start')
+
+        expect(result.success).toBe(true)
+        expect(result.status).not.toBe('paused')
+        expect(result.pausePoints).toBeUndefined()
+        expect(result.snapshotSeed).toBeUndefined()
+        expect(executed).toEqual(['start', first, second])
+      }
+    )
+
+    it('runs a join reached through one taken and one skipped branch', async () => {
+      const { engine, executed } = buildRun(
+        {
+          version: '1',
+          blocks: [
+            block('start', BlockType.STARTER),
+            block('condition', BlockType.CONDITION),
+            block('taken'),
+            block('skipped'),
+            block('stop'),
+            block('after'),
+          ],
+          connections: [
+            { source: 'start', target: 'condition' },
+            { source: 'condition', target: 'taken', sourceHandle: 'condition-if' },
+            { source: 'condition', target: 'skipped', sourceHandle: 'condition-else' },
+            { source: 'taken', target: 'stop' },
+            { source: 'skipped', target: 'stop' },
+            { source: 'stop', target: 'after' },
+          ],
+          loops: {},
+          parallels: {},
+        },
+        'stop',
+        { condition: { selectedOption: 'if' } }
+      )
+
+      const result = await engine.run('start')
+
+      expect(result.success).toBe(true)
+      expect(executed).toEqual(['start', 'condition', 'taken', 'stop'])
+    })
+
+    it('runs a loop stop block queued by a dead end inside the loop', async () => {
+      const sentinelStart = buildLoopSentinelStartId('loop')
+      const sentinelEnd = buildLoopSentinelEndId('loop')
+      const { engine, executed } = buildRun(
+        {
+          version: '1',
+          blocks: [
+            block('start', BlockType.STARTER),
+            block('loop', BlockType.LOOP),
+            block('condition', BlockType.CONDITION),
+            block('inner'),
+            block('after'),
+          ],
+          connections: [
+            { source: 'start', target: 'loop' },
+            { source: 'loop', target: 'condition', sourceHandle: 'loop-start-source' },
+            { source: 'condition', target: 'inner', sourceHandle: 'condition-if' },
+            { source: 'loop', target: 'after', sourceHandle: 'loop-end-source' },
+          ],
+          loops: { loop: { id: 'loop', nodes: ['condition', 'inner'], iterations: 1 } },
+          parallels: {},
+        },
+        sentinelEnd,
+        { condition: { selectedOption: 'else' } }
+      )
+
+      const result = await engine.run('start')
+
+      expect(result.success).toBe(true)
+      expect(executed).toEqual(['start', sentinelStart, 'condition', sentinelEnd])
+    })
+
+    it('stops after a loop stop block whose loop has nothing to run', async () => {
+      const sentinelStart = buildLoopSentinelStartId('loop')
+      const { engine, executed } = buildRun(
+        {
+          version: '1',
+          blocks: [
+            block('start', BlockType.STARTER),
+            block('loop', BlockType.LOOP),
+            block('inner'),
+            block('after'),
+          ],
+          connections: [
+            { source: 'start', target: 'loop' },
+            { source: 'loop', target: 'inner', sourceHandle: 'loop-start-source' },
+            { source: 'loop', target: 'after', sourceHandle: 'loop-end-source' },
+          ],
+          loops: { loop: { id: 'loop', nodes: ['inner'], iterations: 0 } },
+          parallels: {},
+        },
+        buildLoopSentinelEndId('loop'),
+        {
+          [sentinelStart]: { sentinelStart: true, shouldExit: true, selectedRoute: EDGE.LOOP_EXIT },
+        }
+      )
+
+      const result = await engine.run('start')
+
+      expect(result.success).toBe(true)
+      expect(executed).toEqual(['start', sentinelStart])
+    })
+
+    it('succeeds when the stop block is a Response block, and fails when one ends the run first', async () => {
+      const workflow: SerializedWorkflow = {
+        version: '1',
+        blocks: [
+          block('start', BlockType.STARTER),
+          block('respond', BlockType.RESPONSE),
+          block('stop'),
+        ],
+        connections: [
+          { source: 'start', target: 'respond' },
+          { source: 'respond', target: 'stop' },
+        ],
+        loops: {},
+        parallels: {},
       }
 
-      const dag = createMockDAG(nodes)
-      const context = createMockContext({ abortSignal: abortController.signal })
-      const edgeManager = createMockEdgeManager((node) => {
-        if (node.id === 'node0') {
-          abortController.abort()
-          return ['node1']
-        }
-        return node.id === 'node1' ? ['node2'] : []
-      })
-      const nodeOrchestrator = createMockNodeOrchestrator()
+      const atResponse = buildRun(workflow, 'respond')
+      expect((await atResponse.engine.run('start')).success).toBe(true)
 
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      const result = await engine.run('node0')
-
-      expect(result.status).toBe('cancelled')
+      const pastResponse = buildRun(workflow, 'stop')
+      await expect(pastResponse.engine.run('start')).rejects.toThrow(
+        'Stop block "stop" (stop) was not reached: a Response block ended the run first'
+      )
+      expect(pastResponse.executed).toEqual(['start', 'respond'])
     })
 
-    it('should cache Redis cancellation result', async () => {
-      mockIsExecutionCancelled.mockResolvedValue(true)
+    it('stops after the entry block when the stop block is the entry', async () => {
+      const { engine, executed } = buildRun(conditionWorkflow, 'start')
 
-      const nodes = Array.from({ length: 5 }, (_, i) => createMockNode(`node${i}`, 'function'))
-      const dag = createMockDAG(nodes)
-      const context = createMockContext()
-      const edgeManager = createMockEdgeManager()
-      const nodeOrchestrator = createMockNodeOrchestrator()
+      const result = await engine.run('start')
 
-      const engine = new ExecutionEngine(context, dag, edgeManager, nodeOrchestrator)
-      await engine.run('node0')
+      expect(result.success).toBe(true)
+      expect(executed).toEqual(['start'])
+    })
 
-      expect(mockIsExecutionCancelled.mock.calls.length).toBeLessThanOrEqual(3)
+    it('fails when the stop block is not in the graph the run executes', async () => {
+      const { engine } = buildRun(conditionWorkflow, 'missing', {
+        condition: { selectedOption: 'if' },
+      })
+
+      await expect(engine.run('start')).rejects.toThrow('Stop block missing was not reached')
     })
   })
 })

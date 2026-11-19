@@ -45,7 +45,7 @@ export function PrivacyView({ onBack }: PrivacyViewProps) {
     <SettingsPanel
       back={{ text: 'General', icon: ArrowLeft, onSelect: onBack }}
       title='Privacy'
-      description='Control what Sim collects about how you use it.'
+      description='Control what Arena collects about how you use it.'
     >
       <SettingsSection label='Telemetry'>
         <div className='flex flex-col gap-3'>
@@ -59,7 +59,7 @@ export function PrivacyView({ onBack }: PrivacyViewProps) {
             />
           </div>
           <p className='text-[var(--text-muted)] text-small'>
-            Share browser performance and error diagnostics to improve Sim. You can opt out at any
+            Share browser performance and error diagnostics to improve Arena. You can opt out at any
             time. This does not control server operational logs.
           </p>
         </div>

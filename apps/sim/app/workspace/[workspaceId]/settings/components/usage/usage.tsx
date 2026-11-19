@@ -959,7 +959,7 @@ export function Usage() {
   }, [organizationData?.workspaces])
 
   const userWorkspaceFilterOptions = useMemo(() => {
-    const options = [
+    const options: Array<{ label: string; value: string }> = [
       { label: 'Current workspace', value: USER_WORKSPACE_FILTER_CURRENT },
       { label: 'All workspaces', value: USER_WORKSPACE_FILTER_ALL },
     ]

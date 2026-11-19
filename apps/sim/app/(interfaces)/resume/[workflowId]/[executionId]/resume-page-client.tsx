@@ -131,7 +131,7 @@ function truncateForPreview(text: string): { text: string; truncated: boolean } 
 
 function renderStructuredValuePreview(value: unknown) {
   if (value === null || value === undefined || value === '') {
-    return <span className='text-[12px] text-[var(--text-muted)]'>—</span>
+    return <span className='text-[var(--text-muted)] text-caption'>—</span>
   }
 
   if (typeof value === 'object') {
@@ -158,7 +158,7 @@ function renderStructuredValuePreview(value: unknown) {
   const { text: stringValue, truncated } = truncateForPreview(String(value))
   return (
     <div className='max-w-full'>
-      <div className='inline-flex max-w-full rounded-[6px] border border-[var(--border)] bg-[var(--surface-5)] px-2 py-1 font-mono text-[12px] text-[var(--text-primary)] leading-4 [white-space:pre-wrap] [word-break:break-word]'>
+      <div className='inline-flex max-w-full rounded-[6px] border border-[var(--border)] bg-[var(--surface-5)] px-2 py-1 font-mono text-[var(--text-primary)] text-caption leading-4 [white-space:pre-wrap] [word-break:break-word]'>
         {truncated ? `${stringValue}…` : stringValue}
       </div>
       {truncated && (
@@ -208,9 +208,7 @@ export default function ResumeExecutionPage({
   const queuePosition = selectedDetail?.pausePoint.queuePosition
   const resumeInputsRef = useRef<Record<string, string>>({})
   const [resumeInput, setResumeInput] = useState('')
-  const [formValuesByContext, setFormValuesByContext] = useState<
-    Record<string, Record<string, string>>
-  >({})
+  const formValuesByContextRef = useRef<Record<string, Record<string, string>>>({})
   const [formValues, setFormValues] = useState<Record<string, string>>({})
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [loadingAction, setLoadingAction] = useState(false)
@@ -308,17 +306,6 @@ export default function ResumeExecutionPage({
     [formatValueForInputField]
   )
 
-  const formatStructureValue = useCallback((value: any): string => {
-    if (value === null || value === undefined) return '—'
-    if (typeof value === 'string') return value
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-    try {
-      return JSON.stringify(value, null, 2)
-    } catch {
-      return String(value)
-    }
-  }, [])
-
   const parseFormValue = useCallback(
     (field: NormalizedInputField, rawValue: string): { value: any; error?: string } => {
       const value = rawValue ?? ''
@@ -358,11 +345,12 @@ export default function ResumeExecutionPage({
   const handleFormFieldChange = useCallback(
     (fieldName: string, newValue: string) => {
       if (!selectedContextId) return
-      setFormValues((prev) => {
-        const updated = { ...prev, [fieldName]: newValue }
-        setFormValuesByContext((map) => ({ ...map, [selectedContextId]: updated }))
-        return updated
-      })
+      const updated = {
+        ...formValuesByContextRef.current[selectedContextId],
+        [fieldName]: newValue,
+      }
+      formValuesByContextRef.current[selectedContextId] = updated
+      setFormValues(updated)
       setFormErrors((prev) => {
         if (!prev[fieldName]) return prev
         const { [fieldName]: _, ...rest } = prev
@@ -516,12 +504,9 @@ export default function ResumeExecutionPage({
           : undefined
       if (operation === 'human' && fetchedInputFields.length > 0) {
         const baseValues = buildInitialFormValues(fetchedInputFields, submission)
-        let mergedValues = baseValues
-        setFormValuesByContext((prev) => {
-          const existingValues = prev[detail.pausePoint.contextId]
-          if (existingValues) mergedValues = { ...baseValues, ...existingValues }
-          return { ...prev, [detail.pausePoint.contextId]: mergedValues }
-        })
+        const existingValues = formValuesByContextRef.current[detail.pausePoint.contextId]
+        const mergedValues = existingValues ? { ...baseValues, ...existingValues } : baseValues
+        formValuesByContextRef.current[detail.pausePoint.contextId] = mergedValues
         setFormValues(mergedValues)
         setFormErrors({})
         if (resumeInputsRef.current[detail.pausePoint.contextId] !== undefined) {
@@ -563,137 +548,133 @@ export default function ResumeExecutionPage({
     }
   }, [refetchExecutionDetail, selectedContextId])
 
-  const handleResume = useCallback(
-    async () => {
-      if (!selectedContextId || !selectedDetail) {
-        setError('No pause point is selected. Refresh and try again.')
-        return
-      }
-      setLoadingAction(true)
-      setError(null)
-      setMessage(null)
-      let resumePayload: any
-      try {
-        if (isHumanMode && hasInputFormat) {
-          const errors: Record<string, string> = {}
-          const submission: Record<string, any> = {}
-          for (const field of inputFormatFields) {
-            const rawValue = formValues[field.name] ?? ''
-            const hasValue =
-              field.type === 'boolean'
-                ? rawValue === 'true' || rawValue === 'false'
-                : rawValue.trim().length > 0 && rawValue !== '__unset__'
-            if (!hasValue || rawValue === '__unset__') {
-              if (field.required) errors[field.name] = 'This field is required.'
-              continue
-            }
-            const { value, error: parseError } = parseFormValue(field, rawValue)
-            if (parseError) {
-              errors[field.name] = parseError
-              continue
-            }
-            if (value !== undefined) submission[field.name] = value
+  const handleResume = useCallback(async () => {
+    if (!selectedContextId || !selectedDetail) {
+      setError('No pause point is selected. Refresh and try again.')
+      return
+    }
+    setLoadingAction(true)
+    setError(null)
+    setMessage(null)
+    let resumePayload: any
+    try {
+      if (isHumanMode && hasInputFormat) {
+        const errors: Record<string, string> = {}
+        const submission: Record<string, any> = {}
+        for (const field of inputFormatFields) {
+          const rawValue = formValues[field.name] ?? ''
+          const hasValue =
+            field.type === 'boolean'
+              ? rawValue === 'true' || rawValue === 'false'
+              : rawValue.trim().length > 0 && rawValue !== '__unset__'
+          if (!hasValue || rawValue === '__unset__') {
+            if (field.required) errors[field.name] = 'This field is required.'
+            continue
           }
-          if (Object.keys(errors).length > 0) {
-            setFormErrors(errors)
-            setError('Fix the highlighted fields before resuming.')
+          const { value, error: parseError } = parseFormValue(field, rawValue)
+          if (parseError) {
+            errors[field.name] = parseError
+            continue
+          }
+          if (value !== undefined) submission[field.name] = value
+        }
+        if (Object.keys(errors).length > 0) {
+          setFormErrors(errors)
+          setError('Fix the highlighted fields before resuming.')
+          setLoadingAction(false)
+          return
+        }
+        setFormErrors({})
+        resumePayload = { submission }
+      } else {
+        let parsedInput: any
+        if (resumeInput && resumeInput.trim().length > 0) {
+          try {
+            parsedInput = JSON.parse(resumeInput)
+          } catch {
+            setError('Resume input must be valid JSON.')
             setLoadingAction(false)
             return
           }
-          setFormErrors({})
-          resumePayload = { submission }
-        } else {
-          let parsedInput: any
-          if (resumeInput && resumeInput.trim().length > 0) {
-            try {
-              parsedInput = JSON.parse(resumeInput)
-            } catch {
-              setError('Resume input must be valid JSON.')
-              setLoadingAction(false)
-              return
-            }
-          }
-          resumePayload = parsedInput
         }
-      } catch (err: any) {
-        setError(err?.message || 'Failed to prepare resume payload.')
-        setLoadingAction(false)
+        resumePayload = parsedInput
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to prepare resume payload.')
+      setLoadingAction(false)
+      return
+    }
+    try {
+      const { ok, payload } = await resumeMutation.mutateAsync({
+        workflowId,
+        executionId,
+        contextId: selectedContextId,
+        input: resumePayload,
+      })
+      if (!ok) {
+        setError(payload.error || 'Failed to resume execution.')
         return
       }
-      try {
-        const { ok, payload } = await resumeMutation.mutateAsync({
-          workflowId,
-          executionId,
-          contextId: selectedContextId,
-          input: resumePayload,
-        })
-        if (!ok) {
-          setError(payload.error || 'Failed to resume execution.')
-          return
+      const nextStatus = payload.status === 'queued' ? 'queued' : 'resuming'
+      const nextQueuePosition = payload.queuePosition ?? null
+      const fallbackContextId =
+        executionDetail?.pausePoints.find(
+          (point) => point.contextId !== selectedContextId && point.resumeStatus === 'paused'
+        )?.contextId ?? null
+      queryClient.setQueryData<PausedExecutionDetail>(
+        resumeKeys.execution(workflowId, executionId),
+        (prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            pausePoints: prev.pausePoints.map((point) =>
+              point.contextId === selectedContextId
+                ? { ...point, resumeStatus: nextStatus, queuePosition: nextQueuePosition }
+                : point
+            ),
+          }
         }
-        const nextStatus = payload.status === 'queued' ? 'queued' : 'resuming'
-        const nextQueuePosition = payload.queuePosition ?? null
-        const fallbackContextId =
-          executionDetail?.pausePoints.find(
-            (point) => point.contextId !== selectedContextId && point.resumeStatus === 'paused'
-          )?.contextId ?? null
-        queryClient.setQueryData<PausedExecutionDetail>(
-          resumeKeys.execution(workflowId, executionId),
-          (prev) => {
-            if (!prev) return prev
-            return {
-              ...prev,
-              pausePoints: prev.pausePoints.map((point) =>
-                point.contextId === selectedContextId
-                  ? { ...point, resumeStatus: nextStatus, queuePosition: nextQueuePosition }
-                  : point
-              ),
-            }
+      )
+      queryClient.setQueryData<PauseContextDetail | null>(
+        resumeKeys.context(workflowId, executionId, selectedContextId),
+        (prev) => {
+          if (!prev || prev.pausePoint.contextId !== selectedContextId) return prev
+          return {
+            ...prev,
+            pausePoint: {
+              ...prev.pausePoint,
+              resumeStatus: nextStatus,
+              queuePosition: nextQueuePosition,
+            },
           }
-        )
-        queryClient.setQueryData<PauseContextDetail | null>(
-          resumeKeys.context(workflowId, executionId, selectedContextId),
-          (prev) => {
-            if (!prev || prev.pausePoint.contextId !== selectedContextId) return prev
-            return {
-              ...prev,
-              pausePoint: {
-                ...prev.pausePoint,
-                resumeStatus: nextStatus,
-                queuePosition: nextQueuePosition,
-              },
-            }
-          }
-        )
-        setSelectedContextIdOverride((override) => {
-          const currentContextId = override === undefined ? (defaultContextId ?? null) : override
-          return currentContextId !== selectedContextId ? override : fallbackContextId
-        })
-        setMessage(
-          payload.status === 'queued' ? 'Resume request queued.' : 'Resume started successfully.'
-        )
-      } catch (err: any) {
-        setError(err.message || 'Unexpected error while resuming execution.')
-      } finally {
-        setLoadingAction(false)
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      workflowId,
-      executionId,
-      selectedContextId,
-      isHumanMode,
-      hasInputFormat,
-      inputFormatFields,
-      formValues,
-      parseFormValue,
-      resumeInput,
-      selectedDetail,
-      executionDetail,
-      queryClient,
-    ]
-  )
+        }
+      )
+      setSelectedContextIdOverride((override) => {
+        const currentContextId = override === undefined ? (defaultContextId ?? null) : override
+        return currentContextId !== selectedContextId ? override : fallbackContextId
+      })
+      setMessage(
+        payload.status === 'queued' ? 'Resume request queued.' : 'Resume started successfully.'
+      )
+    } catch (err: any) {
+      setError(err.message || 'Unexpected error while resuming execution.')
+    } finally {
+      setLoadingAction(false)
+    }
+  }, [
+    workflowId,
+    executionId,
+    selectedContextId,
+    isHumanMode,
+    hasInputFormat,
+    inputFormatFields,
+    formValues,
+    parseFormValue,
+    resumeInput,
+    selectedDetail,
+    executionDetail,
+    queryClient,
+  ])
 
   const isFormComplete = useMemo(() => {
     if (!isHumanMode || !hasInputFormat) return true
@@ -806,7 +787,7 @@ export default function ResumeExecutionPage({
             </div>
             <div>
               {pausePoints.length === 0 ? (
-                <div className='px-4 py-8 text-center text-[13px] text-[var(--text-secondary)]'>
+                <div className='px-4 py-8 text-center text-[var(--text-secondary)] text-small'>
                   No pause points
                 </div>
               ) : (
@@ -821,7 +802,7 @@ export default function ResumeExecutionPage({
                     }}
                     className='w-full justify-between rounded-none px-4 py-3'
                   >
-                    <span className='text-[13px]'>{getBlockName(pause)}</span>
+                    <span className='text-small'>{getBlockName(pause)}</span>
                     <StatusBadge status={pause.resumeStatus} />
                   </Button>
                 ))
@@ -833,17 +814,17 @@ export default function ResumeExecutionPage({
           <div>
             {loadingDetail && !selectedDetail ? (
               <div className='flex h-[200px] items-center justify-center rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)]'>
-                <span className='text-[13px] text-[var(--text-secondary)]'>Loading…</span>
+                <span className='text-[var(--text-secondary)] text-small'>Loading…</span>
               </div>
             ) : !selectedContextId ? (
               <div className='flex h-[200px] items-center justify-center rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)]'>
-                <span className='text-[13px] text-[var(--text-secondary)]'>
+                <span className='text-[var(--text-secondary)] text-small'>
                   Select a pause point
                 </span>
               </div>
             ) : !selectedDetail ? (
               <div className='flex h-[200px] items-center justify-center rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)]'>
-                <span className='text-[13px] text-[var(--text-secondary)]'>
+                <span className='text-[var(--text-secondary)] text-small'>
                   Could not load details
                 </span>
               </div>
@@ -853,7 +834,7 @@ export default function ResumeExecutionPage({
                 <div className='flex items-center justify-between rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3'>
                   <div>
                     <Label>{getBlockName(selectedDetail.pausePoint)}</Label>
-                    <p className='mt-[2px] text-[12px] text-[var(--text-muted)]'>
+                    <p className='mt-[2px] text-[var(--text-muted)] text-caption'>
                       Paused at {formatDate(selectedDetail.pausePoint.registeredAt)}
                     </p>
                   </div>
@@ -870,10 +851,10 @@ export default function ResumeExecutionPage({
                 {selectedDetail.pausePoint.automaticResumeWaitingReason && (
                   <div className='rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3'>
                     <Label>Waiting to resume automatically</Label>
-                    <p className='mt-1 text-[13px] text-[var(--text-secondary)]'>
+                    <p className='mt-1 text-[var(--text-secondary)] text-small'>
                       {selectedDetail.pausePoint.automaticResumeWaitingReason}
                     </p>
-                    <p className='mt-1 text-[12px] text-[var(--text-muted)]'>
+                    <p className='mt-1 text-[var(--text-muted)] text-caption'>
                       Arena AI will retry automatically.
                     </p>
                   </div>
@@ -898,7 +879,7 @@ export default function ResumeExecutionPage({
                           <div key={field.id} className='flex flex-col gap-[9px]'>
                             <Label>{field.label}</Label>
                             {field.description && (
-                              <p className='text-[12px] text-[var(--text-muted)]'>
+                              <p className='text-[var(--text-muted)] text-caption'>
                                 {field.description}
                               </p>
                             )}
@@ -922,7 +903,7 @@ export default function ResumeExecutionPage({
                           rows={6}
                         />
                       ) : (
-                        <p className='text-[13px] text-[var(--text-muted)]'>
+                        <p className='text-[var(--text-muted)] text-small'>
                           No input data provided
                         </p>
                       )}
@@ -963,7 +944,7 @@ export default function ResumeExecutionPage({
                           <Label>Display Data</Label>
                         </div>
                         <div className='p-4'>
-                          <p className='text-[13px] text-[var(--text-muted)]'>
+                          <p className='text-[var(--text-muted)] text-small'>
                             No display data configured
                           </p>
                         </div>
@@ -986,7 +967,7 @@ export default function ResumeExecutionPage({
                                 )}
                               </Label>
                               {field.description && (
-                                <p className='text-[12px] text-[var(--text-muted)]'>
+                                <p className='text-[var(--text-muted)] text-caption'>
                                   {field.description}
                                 </p>
                               )}

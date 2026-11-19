@@ -15,7 +15,7 @@ import {
 } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
-import { useActiveOrganization, useSession } from '@/lib/auth/auth-client'
+import { useSession } from '@/lib/auth/auth-client'
 import { resourceScopeFields, resourceScopeFromOwner } from '@/lib/core/resource-scope'
 import type { OAuthReturnContext } from '@/lib/credentials/client-state'
 import {
@@ -30,24 +30,19 @@ import {
   type OAuthProvider,
   parseProvider,
 } from '@/lib/oauth'
-import { getCustomOAuthAppConfig, requiresCustomOAuthApp } from '@/lib/oauth/custom-app-config'
 import { getScopeDescription, getServiceConfigByProviderId } from '@/lib/oauth/utils'
-import { isAdminOrOwner } from '@/lib/workspaces/organization'
 import {
   MicrosoftDataverseEnvironmentField,
   useMicrosoftDataverseEnvironmentForm,
 } from '@/app/workspace/[workspaceId]/components/connect-oauth-modal/microsoft-dataverse-environment'
 import { withBrandIcon } from '@/blocks/brand-icon'
 import { useCreateCredentialDraft } from '@/hooks/queries/credentials'
+import { useConnectOAuthService } from '@/hooks/queries/oauth/connections'
 import {
   assertMicrosoftDataverseWebOAuthAvailable,
   useConnectMicrosoftDataverseOAuthService,
 } from '@/hooks/queries/oauth/microsoft-dataverse-connections'
-import { useConnectOAuthService } from '@/hooks/queries/oauth/oauth-connections'
-import { useOrganization } from '@/hooks/queries/organization'
-import { useOrganizationOAuthApps } from '@/hooks/queries/organization-oauth-apps'
 import { useScopedCredentials } from '@/hooks/queries/scoped-credentials'
-import { useWorkspaceSettings } from '@/hooks/queries/workspace'
 
 const logger = createLogger('ConnectOAuthModal')
 
@@ -234,28 +229,6 @@ export function ConnectOAuthModal(props: ConnectOAuthModalProps) {
 
   const workspaceId = isConnect ? props.workspaceId : props.reconnectTarget?.workspaceId
   const organizationId = isConnect ? props.organizationId : props.reconnectTarget?.organizationId
-  const { data: workspaceSettings } = useWorkspaceSettings(workspaceId ?? '')
-  /** Marketplace-app lookup; not credential ownership (workspace XOR organization). */
-  const customAppOrganizationId =
-    organizationId ?? workspaceSettings?.settings?.workspace?.organizationId ?? undefined
-
-  const { data: activeOrganization } = useActiveOrganization()
-  const { data: organization } = useOrganization(activeOrganization?.id || '')
-  const isOrgAdmin = isAdminOrOwner(organization, session?.user?.email)
-
-  const needsCustomApp = requiresCustomOAuthApp(providerId)
-  const customAppConfig = needsCustomApp ? getCustomOAuthAppConfig(providerId) : undefined
-  const { data: orgOAuthApps = [] } = useOrganizationOAuthApps(
-    customAppOrganizationId,
-    Boolean(customAppOrganizationId) && isOrgAdmin && needsCustomApp && open
-  )
-  const customAppConfigured = needsCustomApp
-    ? orgOAuthApps.some(
-        (app) =>
-          app.appKey === customAppConfig?.appKey && app.hasClientSecret && Boolean(app.clientId)
-      )
-    : true
-
   const clientConfiguration = getServiceConfigByProviderId(providerId)?.clientConfiguration
   const oauthClientRedirectUri =
     clientConfiguration?.redirectPath && typeof window !== 'undefined'
@@ -470,7 +443,6 @@ export function ConnectOAuthModal(props: ConnectOAuthModalProps) {
             })),
             ...resourceScopeFields(resourceScopeFromOwner(props.reconnectTarget)),
             reconnect: true,
-            credentialId: props.reconnectTarget.credentialId,
             requestedAt: Date.now(),
           })
           returnContextWritten = true
@@ -518,15 +490,12 @@ export function ConnectOAuthModal(props: ConnectOAuthModalProps) {
     (createsDraft && createDraft.isPending) ||
     connectOAuthService.isPending ||
     connectMicrosoftDataverseOAuthService.isPending
-  const customAppBlocked =
-    needsCustomApp && (!customAppOrganizationId || (isOrgAdmin && !customAppConfigured))
   const isDisabled = isConnect
     ? !displayName.trim() ||
       !dataverseEnvironmentForm.isComplete ||
       Boolean(clientConfiguration?.fields.some((field) => !oauthClientFields[field.id]?.trim())) ||
       isPending ||
-      Boolean(existingCredential) ||
-      customAppBlocked
+      Boolean(existingCredential)
     : !dataverseEnvironmentForm.isComplete ||
       Boolean(clientConfiguration?.fields.some((field) => !oauthClientFields[field.id]?.trim())) ||
       isPending
@@ -677,36 +646,6 @@ export function ConnectOAuthModal(props: ConnectOAuthModalProps) {
               </InfoCardList>
             </InfoCard>
           </ChipModalField>
-        )}
-
-        {needsCustomApp && (
-          <InfoCard>
-            <InfoCardList>
-              {!customAppOrganizationId ? (
-                <InfoCardItem>
-                  Zoom is only available for organization workspaces. Move this workspace into an
-                  organization or ask your admin to configure a Zoom OAuth app.
-                </InfoCardItem>
-              ) : isOrgAdmin && !customAppConfigured ? (
-                <InfoCardItem>
-                  Configure your organization&apos;s Zoom Marketplace app in Settings → Custom OAuth
-                  Apps before teammates can connect.{' '}
-                  <a
-                    href={`/workspace/${workspaceId}/settings/oauth-apps`}
-                    className='text-[var(--text-link)] underline'
-                  >
-                    Open Custom OAuth Apps
-                  </a>
-                </InfoCardItem>
-              ) : (
-                <InfoCardItem>
-                  Your organization admin must register a Zoom Marketplace app before you can
-                  connect. If you recently migrated from a shared Arena AI Zoom app, reconnect after
-                  your admin saves the new credentials.
-                </InfoCardItem>
-              )}
-            </InfoCardList>
-          </InfoCard>
         )}
 
         <ChipModalError>{submitError}</ChipModalError>

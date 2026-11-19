@@ -7,11 +7,14 @@ import { useSession } from '@/lib/auth/auth-client'
 import { isArenaBilling } from '@/lib/billing/arena/env'
 import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { APP_ENTRY_PATH } from '@/lib/navigation/paths'
+import {
+  popSettingsReturnUrl as consumeSettingsReturnUrl,
+  SETTINGS_RETURN_URL_KEY,
+  rememberSettingsReturnUrl as storeSettingsReturnUrl,
+} from '@/lib/navigation/settings-return'
 import { openSettingsPageEvent } from '@/app/arenaMixpanelEvents/mixpanelEvents'
 import { useOptionalWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import type { SettingsSection } from '@/app/workspace/[workspaceId]/settings/navigation'
-
-export const SETTINGS_RETURN_URL_KEY = 'settings-return-url'
 
 interface SettingsNavigationOptions {
   section?: SettingsSection
@@ -54,7 +57,7 @@ export function resolveSettingsHref({
     hostContext &&
     !canManageWorkspaceBilling(hostContext, viewerUserId)
   ) {
-    return `/workspace/${workspaceId}/settings/usage`
+    return `/workspace/${workspaceId}/settings/arena-usage`
   }
 
   const searchParams = new URLSearchParams()
@@ -65,31 +68,6 @@ export function resolveSettingsHref({
   const query = searchParams.toString()
   const pathname = `/workspace/${workspaceId}/settings/${section}`
   return query ? `${pathname}?${query}` : pathname
-}
-
-interface ResolveSettingsReturnUrlParams {
-  storedUrl: string | null
-  workspaceId?: string
-  fallback: string
-}
-
-/**
- * Resolves the stored settings return url, discarding it when it points at a
- * different workspace than the one currently open. Switching workspaces from
- * settings keeps the user on the new workspace, so a return url captured in the
- * old one would silently navigate them back out of it.
- */
-export function resolveSettingsReturnUrl({
-  storedUrl,
-  workspaceId,
-  fallback,
-}: ResolveSettingsReturnUrlParams): string {
-  if (!storedUrl) return fallback
-  const [, root, storedWorkspaceId] = storedUrl.split('/')
-  if (root === 'workspace' && storedWorkspaceId && storedWorkspaceId !== workspaceId) {
-    return fallback
-  }
-  return storedUrl
 }
 
 export function useSettingsNavigation(): UseSettingsNavigationReturn {
@@ -113,25 +91,13 @@ export function useSettingsNavigation(): UseSettingsNavigationReturn {
   )
 
   const popSettingsReturnUrl = useCallback(
-    (fallback: string): string => {
-      try {
-        const storedUrl = sessionStorage.getItem(SETTINGS_RETURN_URL_KEY)
-        sessionStorage.removeItem(SETTINGS_RETURN_URL_KEY)
-        return resolveSettingsReturnUrl({ storedUrl, workspaceId, fallback })
-      } catch {
-        return fallback
-      }
-    },
-    [workspaceId]
+    (fallback: string): string => consumeSettingsReturnUrl(fallback),
+    []
   )
 
   const rememberSettingsReturnUrl = useCallback(() => {
-    const currentPath = window.location.pathname
-    if (currentPath.startsWith(settingsPrefix)) return
-    try {
-      sessionStorage.setItem(SETTINGS_RETURN_URL_KEY, currentPath)
-    } catch {}
-  }, [settingsPrefix])
+    storeSettingsReturnUrl(getSettingsHref())
+  }, [getSettingsHref])
 
   const clearSettingsReturnUrl = useCallback(() => {
     try {
@@ -148,9 +114,7 @@ export function useSettingsNavigation(): UseSettingsNavigationReturn {
         void openSettingsPageEvent({
           Section: options?.section || 'general',
         })
-        try {
-          sessionStorage.setItem(SETTINGS_RETURN_URL_KEY, currentPath)
-        } catch {}
+        storeSettingsReturnUrl(getSettingsHref(options))
         router.push(getSettingsHref(options))
       }
     },
