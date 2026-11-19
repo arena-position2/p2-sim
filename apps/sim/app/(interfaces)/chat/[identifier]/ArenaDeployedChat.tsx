@@ -197,8 +197,10 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
 
   const [showScrollButton, setShowScrollButton] = useState(false)
-  const [userHasScrolled, setUserHasScrolled] = useState(false)
-  const isUserScrollingRef = useRef(false)
+  const [, setUserHasScrolled] = useState(false)
+  const userHasScrolledRef = useRef(false)
+  const isProgrammaticScrollRef = useRef(false)
+  const programmaticScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChatIdRef = useRef(currentChatId)
   const messagesRef = useRef(messages)
   const streamingChatIdRef = useRef<string | null>(null)
@@ -319,17 +321,56 @@ export default function ChatClient({ identifier }: { identifier: string }) {
 
   const isNewChatActive = isUnsavedChat && !showFeedbackView && !isGoldenQueriesOpen
 
-  const scrollToBottom = useCallback(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+  const markProgrammaticScroll = useCallback(() => {
+    isProgrammaticScrollRef.current = true
+    if (programmaticScrollTimeoutRef.current) {
+      clearTimeout(programmaticScrollTimeoutRef.current)
     }
+    programmaticScrollTimeoutRef.current = setTimeout(() => {
+      isProgrammaticScrollRef.current = false
+      programmaticScrollTimeoutRef.current = null
+    }, 150)
   }, [])
 
-  /** Stick-to-bottom only while viewing the chat that owns the active stream. */
+  /**
+   * Arena deployed-chat scroll contract (keep on upstream sync):
+   * 1. Stream start / send prompt → stickiness on + scroll to bottom
+   * 2. Manual scroll away while streaming on this chat → stickiness off
+   * 3. Scroll-to-bottom button → stickiness on + scroll
+   * 4. Auto-scroll only when URL/left-nav chatId === streaming chatId
+   */
+  const scrollContainerToBottom = useCallback(
+    (behavior: ScrollBehavior = 'smooth') => {
+      const container = messagesContainerRef.current
+      markProgrammaticScroll()
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior })
+        return
+      }
+      messagesEndRef.current?.scrollIntoView({ behavior })
+    },
+    [markProgrammaticScroll]
+  )
+
+  const enableStreamStickiness = useCallback(() => {
+    userHasScrolledRef.current = false
+    setUserHasScrolled(false)
+  }, [])
+
   const scrollActiveStreamToBottom = useCallback(() => {
+    // Scenario 4/5: never pull other threads; never fight a manual scroll-away.
     if (currentChatIdRef.current !== streamingChatIdRef.current) return
-    scrollToBottom()
-  }, [scrollToBottom])
+    if (userHasScrolledRef.current) return
+    // Instant during stream so smooth animations cannot lock the scrollbar.
+    scrollContainerToBottom('auto')
+  }, [scrollContainerToBottom])
+
+  const handleScrollToBottomClick = useCallback(() => {
+    enableStreamStickiness()
+    scrollContainerToBottom('smooth')
+  }, [enableStreamStickiness, scrollContainerToBottom])
+
+  const scrollToBottom = handleScrollToBottomClick
 
   useEffect(() => {
     const incoming = chatConfig?.customizations?.goldenQueries ?? []
@@ -386,12 +427,14 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
       setShowScrollButton(distanceFromBottom > 100)
 
-      // Only treat scroll as "user interrupted stream stickiness" on the running thread.
+      // User scrolled away from the bottom on the running thread — pause stickiness.
       if (
         isStreamingResponse &&
         currentChatIdRef.current === streamingChatIdRef.current &&
-        !isUserScrollingRef.current
+        !isProgrammaticScrollRef.current &&
+        distanceFromBottom > 100
       ) {
+        userHasScrolledRef.current = true
         setUserHasScrolled(true)
       }
     }, 100),
@@ -616,20 +659,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     return () => container.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
-  // Reset user scroll tracking when streaming starts on the thread being viewed.
+  // Scenario 1/5: viewing the running chat → stickiness on (chunks may auto-scroll).
+  // Leaving the thread clears isViewingActiveStream so other chats stay free to scroll.
   useEffect(() => {
     if (!isViewingActiveStream) return
-
-    setUserHasScrolled(false)
-
-    // Give a small delay to distinguish between programmatic scroll and user scroll
-    isUserScrollingRef.current = true
-    const timeoutId = setTimeout(() => {
-      isUserScrollingRef.current = false
-    }, 1000)
-
-    return () => clearTimeout(timeoutId)
-  }, [isViewingActiveStream])
+    enableStreamStickiness()
+  }, [isViewingActiveStream, enableStreamStickiness])
 
   const fetchChatConfig = async () => {
     try {
@@ -843,10 +878,10 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       filesCount: (files?.length ?? 0) + effectiveGeneratedImages.length,
     })
 
-    // Reset userHasScrolled when sending a new message
-    setUserHasScrolled(false)
+    // Scenario 1/4: sending a prompt (even from the top of history) enables
+    // stickiness and jumps to the bottom before the stream starts.
+    enableStreamStickiness()
 
-    let userMessageId: string | null = null
     // Create abort controller for request cancellation
     const abortController = new AbortController()
     const timeoutId = setTimeout(() => {
@@ -897,7 +932,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
             dataUrl: file.dataUrl || '',
           })),
         }
-        userMessageId = userMessage.id
         setMessages((prev) => {
           const next = [...prev, userMessage]
           messagesRef.current = next
@@ -912,12 +946,9 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       clearSelectedGeneratedImages()
       setIsLoading(true)
 
-      if (userMessageId) {
-        // Scroll to show only the user's message and loading indicator (if message exists)
-        setTimeout(() => {
-          scrollToMessage(userMessageId!, true)
-        }, 100)
-      }
+      setTimeout(() => {
+        scrollContainerToBottom('smooth')
+      }, 100)
 
       // Build complete workflow input with all Start Block fields
       // Use messageToSend directly (may be empty if form was submitted)
@@ -997,6 +1028,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
 
       streamingChatIdRef.current = currentChatId
       setStreamingChatId(currentChatId)
+      enableStreamStickiness()
       if (currentChatId) {
         messagesByChatIdRef.current.set(currentChatId, messagesRef.current)
       }
@@ -1766,7 +1798,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                       showScrollButton={showScrollButton}
                       messagesContainerRef={messagesContainerRef as RefObject<HTMLDivElement>}
                       messagesEndRef={messagesEndRef as RefObject<HTMLDivElement>}
-                      scrollToBottom={scrollToBottom}
+                      scrollToBottom={handleScrollToBottomClick}
                       scrollToMessage={scrollToMessage}
                       chatConfig={chatConfig}
                       setMessages={setMessages}
