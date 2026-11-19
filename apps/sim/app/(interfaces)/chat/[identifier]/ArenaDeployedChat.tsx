@@ -1,6 +1,14 @@
 'use client'
 
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type RefObject,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { ToastProvider, toast } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
@@ -36,6 +44,10 @@ import {
 } from '@/app/(interfaces)/chat/constants'
 import { useChatKeyboardShortcuts, useChatStreaming } from '@/app/(interfaces)/chat/hooks'
 import { downloadTextFile, exportChatAsMarkdown } from '@/app/(interfaces)/chat/utils/export-chat'
+import {
+  routeStreamMessagesUpdate,
+  shouldApplyHistoryMessages,
+} from '@/app/(interfaces)/chat/utils/thread-stream-cache'
 // import { getFormattedGitHubStars } from '@/app/(landing)/actions/github'
 import {
   deployedChatPromptSentEvent,
@@ -164,6 +176,11 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const [messagesScrollNode, setMessagesScrollNode] = useState<HTMLDivElement | null>(null)
+  const attachMessagesContainer = useCallback((node: HTMLDivElement | null) => {
+    messagesContainerRef.current = node
+    setMessagesScrollNode(node)
+  }, [])
   const threadSearchInputRef = useRef<HTMLInputElement>(null)
   const chatInputWrapperRef = useRef<HTMLDivElement>(null)
   const [conversationId, setConversationId] = useState('')
@@ -172,6 +189,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     if (typeof window === 'undefined') return null
     return new URLSearchParams(window.location.search).get('chatId')
   })
+  const [streamingChatId, setStreamingChatId] = useState<string | null>(null)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('deployed-chat-sidebar-collapsed') === 'true'
@@ -184,8 +202,15 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
 
   const [showScrollButton, setShowScrollButton] = useState(false)
-  const [userHasScrolled, setUserHasScrolled] = useState(false)
-  const isUserScrollingRef = useRef(false)
+  /** ChatGPT-style: follow the stream only while pinned to the bottom. */
+  const stickToBottomRef = useRef(true)
+  const ignoreScrollRef = useRef(false)
+  const ignoreScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const currentChatIdRef = useRef(currentChatId)
+  const messagesRef = useRef(messages)
+  const streamingChatIdRef = useRef<string | null>(null)
+  const messagesByChatIdRef = useRef(new Map<string, ChatMessage[]>())
+  const NEAR_BOTTOM_THRESHOLD_PX = 100
 
   const [authRequired, setAuthRequired] = useState<'password' | 'email' | 'sso' | null>(null)
 
@@ -218,6 +243,45 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   )
 
   const { isStreamingResponse, stopStreaming, handleStreamedResponse } = useChatStreaming()
+  const isViewingActiveStream = isStreamingResponse && streamingChatId === currentChatId
+
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId
+  }, [currentChatId])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    if (!isStreamingResponse) {
+      streamingChatIdRef.current = null
+      setStreamingChatId(null)
+    }
+  }, [isStreamingResponse])
+
+  const applyStreamMessages = useCallback((updater: SetStateAction<ChatMessage[]>) => {
+    const { nextViewingMessages } = routeStreamMessagesUpdate({
+      updater,
+      viewingChatId: currentChatIdRef.current,
+      streamingChatId: streamingChatIdRef.current,
+      cache: messagesByChatIdRef.current,
+      viewingMessages: messagesRef.current,
+    })
+
+    if (nextViewingMessages === undefined) return
+
+    messagesRef.current = nextViewingMessages
+    setMessages(nextViewingMessages)
+  }, [])
+
+  const cacheThreadMessages = useCallback(
+    (chatId: string | null, threadMessages: ChatMessage[]) => {
+      if (!chatId) return
+      messagesByChatIdRef.current.set(chatId, threadMessages)
+    },
+    []
+  )
 
   const [chatDepartment, setChatDepartment] = useState<string | null>('Default')
 
@@ -263,11 +327,77 @@ export default function ChatClient({ identifier }: { identifier: string }) {
 
   const isNewChatActive = isUnsavedChat && !showFeedbackView && !isGoldenQueriesOpen
 
-  const scrollToBottom = useCallback(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+  const markProgrammaticScroll = useCallback((behavior: ScrollBehavior) => {
+    ignoreScrollRef.current = true
+    if (ignoreScrollTimeoutRef.current) {
+      clearTimeout(ignoreScrollTimeoutRef.current)
     }
+    ignoreScrollTimeoutRef.current = setTimeout(
+      () => {
+        ignoreScrollRef.current = false
+        ignoreScrollTimeoutRef.current = null
+      },
+      behavior === 'smooth' ? 400 : 50
+    )
   }, [])
+
+  /**
+   * Arena deployed-chat scroll (ChatGPT-style; keep on upstream sync):
+   * - Stream / send → pin to bottom and follow chunks
+   * - Wheel/touch scroll away → unpin immediately (manual scroll works)
+   * - Near bottom again or jump button → re-pin
+   * - Only the streaming chatId is followed; other threads are untouched
+   */
+  const scrollContainerToBottom = useCallback(
+    (behavior: ScrollBehavior = 'smooth', options?: { force?: boolean }) => {
+      const force = options?.force === true
+      if (!force && !stickToBottomRef.current) return
+      if (force) {
+        stickToBottomRef.current = true
+        setShowScrollButton(false)
+      }
+
+      const container = messagesContainerRef.current
+      markProgrammaticScroll(behavior)
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior })
+        return
+      }
+      messagesEndRef.current?.scrollIntoView({ behavior })
+    },
+    [markProgrammaticScroll]
+  )
+
+  const enableStreamStickiness = useCallback(() => {
+    stickToBottomRef.current = true
+    setShowScrollButton(false)
+  }, [])
+
+  const scrollActiveStreamToBottom = useCallback(() => {
+    if (currentChatIdRef.current !== streamingChatIdRef.current) return
+    if (!stickToBottomRef.current) return
+
+    // Safety net for scrollbar-drag races: if the user already left the bottom,
+    // unpin and do not yank them back on the next chunk.
+    const container = messagesContainerRef.current
+    if (container) {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight
+      if (distanceFromBottom > NEAR_BOTTOM_THRESHOLD_PX) {
+        stickToBottomRef.current = false
+        setShowScrollButton(true)
+        return
+      }
+    }
+
+    scrollContainerToBottom('auto')
+  }, [scrollContainerToBottom])
+
+  const handleScrollToBottomClick = useCallback(() => {
+    scrollContainerToBottom('smooth', { force: true })
+  }, [scrollContainerToBottom])
+
+  const scrollToBottom = handleScrollToBottomClick
 
   useEffect(() => {
     const incoming = chatConfig?.customizations?.goldenQueries ?? []
@@ -319,18 +449,62 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     throttle(() => {
       const container = messagesContainerRef.current
       if (!container) return
+      // Ignore our own stick-to-bottom writes so they do not flip the pin.
+      if (ignoreScrollRef.current) return
 
       const { scrollTop, scrollHeight, clientHeight } = container
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      setShowScrollButton(distanceFromBottom > 100)
-
-      // Track if user is manually scrolling during streaming
-      if (isStreamingResponse && !isUserScrollingRef.current) {
-        setUserHasScrolled(true)
-      }
+      const nearBottom = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+      stickToBottomRef.current = nearBottom
+      setShowScrollButton(!nearBottom)
     }, 100),
-    [isStreamingResponse]
+    []
   )
+
+  /**
+   * Detach stickiness on real user intent (wheel/touch) immediately — do not wait
+   * for a scroll event that may be masked by programmatic ignoreScrollRef.
+   */
+  useEffect(() => {
+    const container = messagesScrollNode
+    if (!container) return
+
+    const detachIfStreamingThisChat = () => {
+      if (!isStreamingResponse) return
+      if (currentChatIdRef.current !== streamingChatIdRef.current) return
+      stickToBottomRef.current = false
+      setShowScrollButton(true)
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      // Scroll-up intent leaves the bottom; that is when ChatGPT stops following.
+      if (event.deltaY < 0) {
+        detachIfStreamingThisChat()
+      }
+    }
+
+    let touchStartY: number | null = null
+    const onTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? null
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY
+      if (touchStartY == null || currentY == null) return
+      // Finger moving down → content scrolls up → leave the live tail.
+      if (currentY > touchStartY + 8) {
+        detachIfStreamingThisChat()
+      }
+    }
+
+    container.addEventListener('wheel', onWheel, { passive: true })
+    container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchmove', onTouchMove, { passive: true })
+    return () => {
+      container.removeEventListener('wheel', onWheel)
+      container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchmove', onTouchMove)
+    }
+  }, [isStreamingResponse, messagesScrollNode])
 
   // Fetch history messages
   useEffect(() => {
@@ -368,6 +542,29 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       hasHistory: boolean
     ) => {
       if (historyRequestChatIdRef.current !== requestChatId) return
+
+      const cachedMessages = messagesByChatIdRef.current.get(requestChatId)
+      if (
+        !shouldApplyHistoryMessages({
+          requestChatId,
+          streamingChatId: streamingChatIdRef.current,
+          historyMessages: nextMessages,
+          cachedMessages,
+        })
+      ) {
+        if (cachedMessages) {
+          messagesRef.current = cachedMessages
+          setMessages(cachedMessages)
+        }
+        hasShownModalRef.current =
+          hasHistory || Boolean(cachedMessages?.some((m) => !m.isInitialMessage))
+        setIsHistoryLoading(false)
+        setHasCheckedHistory(true)
+        return
+      }
+
+      messagesByChatIdRef.current.set(requestChatId, nextMessages)
+      messagesRef.current = nextMessages
       setMessages(nextMessages)
       hasShownModalRef.current = hasHistory
       setIsHistoryLoading(false)
@@ -496,6 +693,19 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       return
     }
 
+    // Keep the live SSE message list while this chat is still streaming — a
+    // history fetch would wipe the ephemeral assistant id and leave an empty reply.
+    if (streamingChatIdRef.current === currentChatId) {
+      const cachedMessages = messagesByChatIdRef.current.get(currentChatId)
+      if (cachedMessages) {
+        messagesRef.current = cachedMessages
+        setMessages(cachedMessages)
+        setIsHistoryLoading(false)
+        setHasCheckedHistory(true)
+        return
+      }
+    }
+
     historyAbortRef.current?.abort()
     const controller = new AbortController()
     historyAbortRef.current = controller
@@ -507,26 +717,30 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   }, [identifier, chatConfig, currentChatId, historyRefreshKey, userName, scrollToBottom])
 
   useEffect(() => {
-    const container = messagesContainerRef.current
+    const container = messagesScrollNode
     if (!container) return
 
     container.addEventListener('scroll', handleScroll, { passive: true })
     return () => container.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
+  }, [handleScroll, messagesScrollNode])
 
-  // Reset user scroll tracking when streaming starts
+  // Scenario 1: stream begins on the viewed chat → pin to bottom once.
   useEffect(() => {
-    if (isStreamingResponse) {
-      // Reset userHasScrolled when streaming starts
-      setUserHasScrolled(false)
-
-      // Give a small delay to distinguish between programmatic scroll and user scroll
-      isUserScrollingRef.current = true
-      setTimeout(() => {
-        isUserScrollingRef.current = false
-      }, 1000)
+    if (!isViewingActiveStream) return
+    stickToBottomRef.current = true
+    setShowScrollButton(false)
+    const container = messagesScrollNode ?? messagesContainerRef.current
+    ignoreScrollRef.current = true
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
     }
-  }, [isStreamingResponse])
+    const timeoutId = setTimeout(() => {
+      ignoreScrollRef.current = false
+    }, 50)
+    return () => clearTimeout(timeoutId)
+  }, [isViewingActiveStream, messagesScrollNode])
 
   const fetchChatConfig = async () => {
     try {
@@ -740,10 +954,10 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       filesCount: (files?.length ?? 0) + effectiveGeneratedImages.length,
     })
 
-    // Reset userHasScrolled when sending a new message
-    setUserHasScrolled(false)
+    // Scenario 1/4: sending a prompt (even from the top of history) enables
+    // stickiness and jumps to the bottom before the stream starts.
+    enableStreamStickiness()
 
-    let userMessageId: string | null = null
     // Create abort controller for request cancellation
     const abortController = new AbortController()
     const timeoutId = setTimeout(() => {
@@ -772,7 +986,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
           const lastUserIndex = [...prev].reverse().findIndex((m) => m.type === 'user')
           if (lastUserIndex === -1) return prev
           const index = prev.length - 1 - lastUserIndex
-          return prev.slice(0, index + 1)
+          const next = prev.slice(0, index + 1)
+          messagesRef.current = next
+          if (currentChatId) {
+            messagesByChatIdRef.current.set(currentChatId, next)
+          }
+          return next
         })
       } else if (messageToSend.trim() || combinedFiles.length > 0) {
         // Add the user's message to the chat
@@ -789,20 +1008,23 @@ export default function ChatClient({ identifier }: { identifier: string }) {
             dataUrl: file.dataUrl || '',
           })),
         }
-        userMessageId = userMessage.id
-        setMessages((prev) => [...prev, userMessage])
+        setMessages((prev) => {
+          const next = [...prev, userMessage]
+          messagesRef.current = next
+          if (currentChatId) {
+            messagesByChatIdRef.current.set(currentChatId, next)
+          }
+          return next
+        })
       }
 
       setInputValue('')
       clearSelectedGeneratedImages()
       setIsLoading(true)
 
-      if (userMessageId) {
-        // Scroll to show only the user's message and loading indicator (if message exists)
-        setTimeout(() => {
-          scrollToMessage(userMessageId!, true)
-        }, 100)
-      }
+      setTimeout(() => {
+        scrollContainerToBottom('smooth')
+      }, 100)
 
       // Build complete workflow input with all Start Block fields
       // Use messageToSend directly (may be empty if form was submitted)
@@ -880,10 +1102,23 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       logger.info('Starting to handle streamed response')
       setIsConversationFinished(true)
 
-      await handleStreamedResponse(response, setMessages, setIsLoading, scrollToBottom, {
-        outputConfigs: chatConfig?.outputConfigs,
-        abortController,
-      })
+      streamingChatIdRef.current = currentChatId
+      setStreamingChatId(currentChatId)
+      enableStreamStickiness()
+      if (currentChatId) {
+        messagesByChatIdRef.current.set(currentChatId, messagesRef.current)
+      }
+
+      await handleStreamedResponse(
+        response,
+        applyStreamMessages,
+        setIsLoading,
+        scrollActiveStreamToBottom,
+        {
+          outputConfigs: chatConfig?.outputConfigs,
+          abortController,
+        }
+      )
       deployedChatPromptSentEvent({
         'Prompt Content': messageToSend,
         'Prompt Type': 'Text',
@@ -893,6 +1128,8 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     } catch (error: any) {
       // Clear timeout in case of error
       clearTimeout(timeoutId)
+      streamingChatIdRef.current = null
+      setStreamingChatId(null)
 
       if (error.name === 'AbortError') {
         logger.info('Request aborted by user or timeout')
@@ -914,7 +1151,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
         type: 'assistant',
         timestamp: new Date(),
       }
-      setMessages((prev) => [...prev, errorMessage])
+      applyStreamMessages((prev) => [...prev, errorMessage])
     }
   }
 
@@ -1124,7 +1361,14 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   useEffect(() => {
     const syncChatIdFromUrl = () => {
       const chatId = new URLSearchParams(window.location.search).get('chatId')
-      setCurrentChatId(chatId)
+      setCurrentChatId((prev) => {
+        if (prev === chatId) return prev
+        if (prev) {
+          messagesByChatIdRef.current.set(prev, messagesRef.current)
+        }
+        currentChatIdRef.current = chatId
+        return chatId
+      })
     }
 
     syncChatIdFromUrl()
@@ -1181,12 +1425,35 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const handleSelectThread = useCallback(
     (chatId: string) => {
       if (currentChatId === chatId) return
+
+      cacheThreadMessages(currentChatId, messagesRef.current)
+
       setShowFeedbackView(false)
       setIsGoldenQueriesOpen(false)
       setFeedbackError(null)
       setShowScrollButton(false)
-      setIsHistoryLoading(true)
-      setHasCheckedHistory(false)
+
+      const cachedMessages = messagesByChatIdRef.current.get(chatId)
+      const returningToActiveStream = streamingChatIdRef.current === chatId
+
+      if (
+        cachedMessages &&
+        (returningToActiveStream || cachedMessages.some((m) => m.isStreaming))
+      ) {
+        messagesRef.current = cachedMessages
+        setMessages(cachedMessages)
+        setIsHistoryLoading(false)
+        setHasCheckedHistory(true)
+      } else {
+        setIsHistoryLoading(true)
+        setHasCheckedHistory(false)
+        if (cachedMessages) {
+          messagesRef.current = cachedMessages
+          setMessages(cachedMessages)
+        }
+      }
+
+      currentChatIdRef.current = chatId
       setCurrentChatId(chatId)
       updateUrlChatId(chatId)
 
@@ -1204,6 +1471,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       chatDepartment,
       identifier,
       updateUrlChatId,
+      cacheThreadMessages,
     ]
   )
 
@@ -1218,6 +1486,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   }, [currentChatId])
 
   const handleNewChat = useCallback(() => {
+    cacheThreadMessages(currentChatId, messagesRef.current)
     setShowFeedbackView(false)
     setIsGoldenQueriesOpen(false)
     setFeedbackError(null)
@@ -1226,6 +1495,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     setHasCheckedHistory(false)
     hasShownModalRef.current = false
     const id = generateId()
+    currentChatIdRef.current = id
     setCurrentChatId(id)
     // Clear messages except initial messages (greeting + welcome)
     setMessages((prev) => {
@@ -1253,8 +1523,12 @@ export default function ChatClient({ identifier }: { identifier: string }) {
             isInitialMessage: true,
           })
         }
+        messagesRef.current = newInitialMessages
+        messagesByChatIdRef.current.set(id, newInitialMessages)
         return newInitialMessages
       }
+      messagesRef.current = initialMessages
+      messagesByChatIdRef.current.set(id, initialMessages)
       return initialMessages
     })
     updateUrlChatId(id)
@@ -1272,7 +1546,15 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       'Agent ID': identifier,
       'Conversation(chat) ID': id,
     })
-  }, [updateUrlChatId, chatConfig, userName, chatDepartment, identifier])
+  }, [
+    updateUrlChatId,
+    chatConfig,
+    userName,
+    chatDepartment,
+    identifier,
+    currentChatId,
+    cacheThreadMessages,
+  ])
 
   const fetchFeedbackPage = useCallback(
     async (page: number) => {
@@ -1574,7 +1856,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                   onSubmit={(value, _isVoiceInput, files) => {
                     void handleSendMessage(value, false, files)
                   }}
-                  onStopStreaming={() => stopStreaming(setMessages)}
+                  onStopStreaming={() => stopStreaming(applyStreamMessages)}
                   selectedGeneratedImages={effectiveGeneratedImages}
                   onRemoveSelectedGeneratedImage={removeSelectedGeneratedImage}
                   inputWrapperRef={chatInputWrapperRef}
@@ -1585,12 +1867,14 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                   <div className='relative flex min-h-0 flex-1 flex-col overflow-hidden'>
                     <ChatMessageContainer
                       messages={messages}
-                      isLoading={isLoading}
-                      isStreaming={isStreamingResponse}
+                      isLoading={
+                        isLoading && (!streamingChatId || streamingChatId === currentChatId)
+                      }
+                      isStreaming={isViewingActiveStream}
                       showScrollButton={showScrollButton}
-                      messagesContainerRef={messagesContainerRef as RefObject<HTMLDivElement>}
+                      messagesContainerRef={attachMessagesContainer}
                       messagesEndRef={messagesEndRef as RefObject<HTMLDivElement>}
-                      scrollToBottom={scrollToBottom}
+                      scrollToBottom={handleScrollToBottomClick}
                       scrollToMessage={scrollToMessage}
                       chatConfig={chatConfig}
                       setMessages={setMessages}
@@ -1631,7 +1915,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                           void handleSendMessage(value, false, files)
                         }}
                         isStreaming={isLoading || isStreamingResponse}
-                        onStopStreaming={() => stopStreaming(setMessages)}
+                        onStopStreaming={() => stopStreaming(applyStreamMessages)}
                         selectedGeneratedImages={effectiveGeneratedImages}
                         onRemoveSelectedGeneratedImage={removeSelectedGeneratedImage}
                       />
