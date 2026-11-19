@@ -959,6 +959,9 @@ export const SETTINGS_SECTION_REGISTRY: readonly SettingsSectionRegistryEntry[] 
       account: { id: 'skill-share', group: 'platform', order: 5 },
     },
   },
+  // Arena: platform-admin inbox gated by NEXT_PUBLIC_PLATFORM_ADMIN_EMAILS.
+  // On upstream sync, keep `requiresPlatformAdminEmail: true` and the matching
+  // filters in settings-sidebar.tsx + use-visible-settings-navigation.ts.
   {
     label: 'Agent access requests',
     icon: ClipboardList,
