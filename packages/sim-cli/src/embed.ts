@@ -66,6 +66,7 @@ export function createEmbeddedClient(identity: EmbeddedCliIdentity): SimClient {
     endpoint: identity.endpoint,
     apiKey: identity.apiKey,
     workspaceId: identity.workspaceId ?? null,
+    billingEmail: identity.billingEmail ?? null,
     output: 'json',
     ...(identity.transport ? { transport: identity.transport } : {}),
     ...(identity.signal ? { signal: identity.signal } : {}),

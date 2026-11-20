@@ -5623,6 +5623,7 @@ export type ExecuteWorkflowBody = {
 export type ExecuteWorkflowHeaders = {
   'x-run-id'?: string
   'x-sim-via'?: string
+  'x-sim-email': string
 }
 
 type ExecuteWorkflowResponseRef0 = {
@@ -8609,7 +8610,7 @@ export type ListBillingLogsQuery = {
     | 'voice-output'
     | 'api-tool'
   workspaceId?: string
-  period?: '1d' | '7d' | '30d' | 'all' | 'custom'
+  period?: '1d' | '7d' | '30d' | '90d' | 'all' | 'custom'
   startDate?: string
   endDate?: string
   limit?: number
@@ -20420,7 +20421,7 @@ export const V2_OPERATIONS = {
       },
       period: {
         kind: 'enum',
-        values: ['1d', '7d', '30d', 'all', 'custom'] as const,
+        values: ['1d', '7d', '30d', '90d', 'all', 'custom'] as const,
         default: '30d',
         describe:
           'Relative window, all history, or a custom date range. `startDate` and `endDate` are accepted only with `custom`; every other value computes its own window.',

@@ -78,6 +78,7 @@ const ROOT_VALUE_FLAGS: ReadonlySet<string> = new Set([
   '--endpoint',
   '-w',
   '--workspace',
+  '--billing-email',
   '--output',
 ])
 
@@ -176,6 +177,10 @@ export function buildProgram(
     .option('-P, --profile <name>', 'Profile to use (env: SIM_PROFILE)')
     .option('--endpoint <url>', 'Sim deployment to talk to (env: SIM_ENDPOINT)')
     .option('-w, --workspace <id>', 'Workspace to target (env: SIM_WORKSPACE)')
+    .option(
+      '--billing-email <email>',
+      'Email sent as X-Sim-Email on workflow API calls (env: SIM_BILLING_EMAIL)'
+    )
     .addOption(
       new Option('--output <format>', 'Output format for this command').choices([...OUTPUT_FORMATS])
     )

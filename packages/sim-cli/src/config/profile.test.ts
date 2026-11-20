@@ -24,7 +24,14 @@ import {
 } from './profile'
 
 let dir: string
-const ENV_KEYS = ['SIM_PROFILE', 'SIM_ENDPOINT', 'SIM_API_KEY', 'SIM_WORKSPACE', 'SIM_OUTPUT']
+const ENV_KEYS = [
+  'SIM_PROFILE',
+  'SIM_ENDPOINT',
+  'SIM_API_KEY',
+  'SIM_WORKSPACE',
+  'SIM_BILLING_EMAIL',
+  'SIM_OUTPUT',
+]
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'sim-cli-'))
@@ -124,6 +131,15 @@ describe('profile resolution', () => {
       endpoint: 'https://flag.example',
     })
     expect(resolveProfile({ endpoint: 'https://flag.example' }).sources.endpoint).toBe('flag')
+  })
+
+  it('takes the workflow billing email from the flag, then the environment', () => {
+    writeCredentialsProfile('default', { kind: 'api_key', apiKey: 'key_default' })
+    process.env.SIM_BILLING_EMAIL = 'env@example.com'
+    expect(resolveProfile().billingEmail).toBe('env@example.com')
+    expect(resolveProfile({ billingEmail: 'flag@example.com' }).billingEmail).toBe(
+      'flag@example.com'
+    )
   })
 
   it('refuses an unknown profile instead of silently resolving it to production', () => {

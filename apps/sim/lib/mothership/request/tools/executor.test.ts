@@ -84,6 +84,10 @@ vi.mock('@/lib/mothership/request/tools/workflow-context', () => ({
 vi.mock('@/lib/mothership/chat/delegation', () => ({
   mintDelegationToken: async () => 'local-cli-budget-fixture',
 }))
+vi.mock('@/lib/users/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/users/queries')>()
+  return { ...actual, getUserEmailById: async () => 'payer@example.com' }
+})
 
 const {
   mockCompleteAsyncToolCall: completeAsyncToolCall,
@@ -399,6 +403,7 @@ describe('executeToolAndReport provenance isolation', () => {
     const runWorkflow = vi.fn(async (request: Request) => {
       expect(request.url).toBe('https://cli-budget.test/api/v2/workflows/workflow-1/execute')
       expect(request.method).toBe('POST')
+      expect(request.headers.get('x-sim-email')).toBe('payer@example.com')
       await sleep(70_000)
       request.signal.throwIfAborted()
       return Response.json({

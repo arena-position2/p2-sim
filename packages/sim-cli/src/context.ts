@@ -13,6 +13,7 @@ export interface GlobalOptions {
   profile?: string
   endpoint?: string
   workspace?: string
+  billingEmail?: string
   output?: OutputFormat
 }
 
@@ -31,6 +32,7 @@ export function profileFrom(command: Command, extra: ProfileOverrides = {}): Res
     profile: globals.profile,
     endpoint: globals.endpoint,
     workspaceId: globals.workspace,
+    billingEmail: globals.billingEmail,
     output: globals.output,
     ...extra,
   })

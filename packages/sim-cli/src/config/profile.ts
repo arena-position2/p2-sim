@@ -158,6 +158,11 @@ export interface ResolvedProfile {
   apiKey: string | null
   oauth: StoredOAuthCredential | null
   workspaceId: string | null
+  /**
+   * Payer email sent as `X-Sim-Email` on workflow API calls. Absent on a profile
+   * that has not been told who to bill.
+   */
+  billingEmail?: string | null
   output: OutputFormat
   /**
    * Replaces global `fetch` for every request. Only an embedding server sets it, to
@@ -182,6 +187,7 @@ export interface ProfileOverrides {
   endpoint?: string
   apiKey?: string
   workspaceId?: string
+  billingEmail?: string
   output?: OutputFormat
   /**
    * Skips the "does this profile exist?" check for the two commands that
@@ -690,6 +696,7 @@ const OVERRIDE_FLAGS = {
   profile: '--profile',
   endpoint: '--endpoint',
   workspaceId: '--workspace',
+  billingEmail: '--billing-email',
 } as const
 
 /**
@@ -779,6 +786,15 @@ export function resolveProfile(overrides: ProfileOverrides = {}): ResolvedProfil
     'unset'
   )
 
+  const billingEmail = resolve<string>(
+    [
+      ['flag', overrides.billingEmail],
+      ['env', process.env.SIM_BILLING_EMAIL],
+    ],
+    null,
+    'unset'
+  )
+
   const output = resolve<string>(
     [
       ['flag', overrides.output],
@@ -801,6 +817,7 @@ export function resolveProfile(overrides: ProfileOverrides = {}): ResolvedProfil
     apiKey: apiKey.value,
     oauth,
     workspaceId: workspaceId.value,
+    billingEmail: billingEmail.value,
     output: output.value as OutputFormat,
     sources: {
       endpoint: endpoint.source,

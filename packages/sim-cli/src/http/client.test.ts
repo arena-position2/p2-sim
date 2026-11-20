@@ -366,6 +366,36 @@ describe('raw requests', () => {
     expect(headers).not.toHaveProperty('x-api-key')
   })
 
+  it('sends X-Sim-Email on workflow API calls when the profile names a payer', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const billed = new SimClient({
+      name: 'default',
+      endpoint: 'https://sim.example',
+      authProfile: 'default',
+      apiKey: 'key',
+      oauth: null,
+      workspaceId: 'ws_1',
+      billingEmail: 'payer@example.com',
+      output: 'json',
+      sources: {
+        endpoint: 'default',
+        credential: 'env',
+        workspaceId: 'env',
+        output: 'default',
+      },
+    })
+
+    await billed.request('/api/v2/workflows/wf_1/execute', { method: 'POST', body: {} })
+    await billed.request('/api/v2/workflows', { method: 'GET' })
+    await billed.request('/api/v2/tables', { method: 'GET' })
+
+    const headerAt = (call: number) => fetch.mock.calls[call][1].headers['x-sim-email']
+    expect(headerAt(0)).toBe('payer@example.com')
+    expect(headerAt(1)).toBe('payer@example.com')
+    expect(headerAt(2)).toBeUndefined()
+  })
+
   it('keeps authentication required by default for every other command', async () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)

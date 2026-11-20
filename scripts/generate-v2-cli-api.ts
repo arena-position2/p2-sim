@@ -503,8 +503,10 @@ export function renderBodyDiscriminator(schema: z.ZodType | undefined, indent: s
  * `options.headers` is spread last over the client's own header block, so a
  * flag spelled `--x-api-key` would let argv replace the profile's credential —
  * a footgun on every command that carries it, and an authentication decision
- * argv has no business making. No contract declares one of these today; the
- * exclusion exists so that adding one does not quietly grow a flag for it.
+ * argv has no business making. `x-sim-email` is the billing-payer header Arena
+ * attaches from the acting user (`--billing-email` / `SIM_BILLING_EMAIL`, or
+ * the in-process caller's account). A generated `--x-sim-email` would require
+ * it on every workflow command under the raw header spelling.
  */
 export const CLI_MANAGED_HEADERS: ReadonlySet<string> = new Set([
   'x-api-key',
@@ -512,6 +514,7 @@ export const CLI_MANAGED_HEADERS: ReadonlySet<string> = new Set([
   'accept',
   'content-type',
   'user-agent',
+  'x-sim-email',
 ])
 
 export function renderSlotMap(

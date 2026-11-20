@@ -43,6 +43,27 @@ export interface RequestAllPagesOptions extends Omit<RequestOptions, 'query'> {
 export type QueryValue = string | number | boolean | null | undefined
 export type AuthRequirement = 'required' | 'optional'
 
+/** Workflow routes bill the named person. Other v2 routes ignore the header. */
+function isWorkflowApiPath(path: string): boolean {
+  return /^\/api\/(?:v2\/)?workflows(?:\/|$)/.test(path)
+}
+
+/**
+ * Attaches `X-Sim-Email` when this profile knows who to bill. A header the
+ * caller already set is left alone.
+ */
+function withBillingEmailHeader(
+  path: string,
+  headers: Record<string, string> | undefined,
+  billingEmail: string | null
+): Record<string, string> | undefined {
+  if (!billingEmail || !isWorkflowApiPath(path)) return headers
+  if (headers && Object.keys(headers).some((name) => name.toLowerCase() === 'x-sim-email')) {
+    return headers
+  }
+  return { ...headers, 'x-sim-email': billingEmail }
+}
+
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   query?: Record<string, QueryValue>
@@ -669,7 +690,7 @@ export class SimClient {
           accept: 'application/json',
           ...identityHeaders(),
           ...(hasBody ? { 'content-type': 'application/json' } : {}),
-          ...options.headers,
+          ...withBillingEmailHeader(path, options.headers, this.profile.billingEmail ?? null),
         },
         body: hasBody ? JSON.stringify(options.body) : undefined,
         signal,

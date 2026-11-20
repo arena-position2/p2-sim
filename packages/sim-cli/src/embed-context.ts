@@ -13,6 +13,12 @@ export interface EmbeddedCliIdentity {
   apiKey: string
   workspaceId?: string
   /**
+   * Sent as `X-Sim-Email` on workflow API calls so the run bills this person.
+   * The in-process host sets it from the acting user; the installed CLI uses
+   * `--billing-email` or `SIM_BILLING_EMAIL`.
+   */
+  billingEmail?: string
+  /**
    * How requests reach the endpoint. A host that serves the v2 routes itself passes a
    * transport that dispatches to them in-process, so an embedded run never leaves the
    * server: no network hop, no proxy body ceiling, no per-key rate limit meant for
@@ -99,6 +105,7 @@ export function embeddedProfile(): ResolvedProfile | null {
     endpoint: ctx.identity.endpoint,
     apiKey: ctx.identity.apiKey,
     workspaceId: ctx.identity.workspaceId ?? null,
+    billingEmail: ctx.identity.billingEmail ?? null,
     output: 'json',
     ...(ctx.identity.transport ? { transport: ctx.identity.transport } : {}),
     ...(ctx.identity.signal ? { signal: ctx.identity.signal } : {}),
