@@ -394,6 +394,151 @@ export function patchKnowledgeBaseToolParameters(
   }
 }
 
+/** Parameter schemas for file/folder leaf tools Cloud no longer emits in TS. */
+const FILE_FOLDER_TOOL_PARAMETER_SCHEMAS: Record<string, Record<string, unknown>> = {
+  list_file_folders: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      parentPath: {
+        type: 'string',
+        description:
+          'Optional folder to list under (e.g. "files" or "files/Reports"). Defaults to the whole tree.',
+      },
+      path: {
+        type: 'string',
+        description: 'Alias for parentPath.',
+      },
+      recursive: {
+        type: 'boolean',
+        description: 'When true with parentPath, include nested folders. Default false.',
+      },
+      search: {
+        type: 'string',
+        description: 'Optional case-insensitive folder-name substring filter.',
+      },
+    },
+  },
+  create_file_folder: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: 'string',
+        description:
+          'Full VFS folder path to create, e.g. "files/Reports/Q3". Parents are created as needed.',
+      },
+      name: {
+        type: 'string',
+        description: 'Folder name when not using path. Combine with optional parentPath.',
+      },
+      parentPath: {
+        type: 'string',
+        description:
+          'Parent VFS folder when using name (e.g. "files" or "files/Reports"). Defaults to files root.',
+      },
+    },
+  },
+  rename_file_folder: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Existing folder VFS path, e.g. "files/Reports".',
+      },
+      name: {
+        type: 'string',
+        description: 'New folder name (leaf only, not a path).',
+      },
+    },
+    required: ['path', 'name'],
+  },
+  move_file_folder: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Folder VFS path to move, e.g. "files/Reports/Q3".',
+      },
+      destinationPath: {
+        type: 'string',
+        description: 'Destination folder VFS path, or "files" / omit for root.',
+      },
+    },
+    required: ['path'],
+  },
+  delete_file_folder: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      paths: {
+        type: 'array',
+        description: 'Folder VFS paths to delete, e.g. ["files/Reports"].',
+        items: { type: 'string' },
+      },
+      path: {
+        type: 'string',
+        description: 'Single folder path alias when paths is omitted.',
+      },
+      recursive: {
+        type: 'boolean',
+        description: 'Delete nested contents. Default true.',
+      },
+    },
+  },
+  rename_file: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Existing files/ VFS path, e.g. "files/Notes.md".',
+      },
+      newName: {
+        type: 'string',
+        description: 'New file name including extension.',
+      },
+    },
+    required: ['path', 'newName'],
+  },
+  move_file: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      paths: {
+        type: 'array',
+        description: 'files/ VFS paths to move.',
+        items: { type: 'string' },
+      },
+      path: {
+        type: 'string',
+        description: 'Single file path alias when paths is omitted.',
+      },
+      destinationPath: {
+        type: 'string',
+        description: 'Destination folder VFS path, or "files" / omit for root.',
+      },
+    },
+  },
+  delete_file: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      paths: {
+        type: 'array',
+        description: 'files/ VFS paths to delete. Only call when the user explicitly asked.',
+        items: { type: 'string' },
+      },
+      path: {
+        type: 'string',
+        description: 'Single file path alias when paths is omitted.',
+      },
+    },
+  },
+}
+
 export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefinition[] {
   return MOTHERSHIP_DELEGATED_TOOL_NAMES.map((name) => {
     // Arena leaf names (create_file) share Cloud JSON schemas (create_empty_file).
@@ -450,6 +595,13 @@ export function buildMothershipDelegatedToolDefinitions(): LocalCopilotToolDefin
         },
         required: ['serverId'],
       }
+    }
+
+    // Cloud dropped file/folder leaf schemas from the generated TS catalog; Arena
+    // still advertises and executes them locally (see vfs-file-folder-tools).
+    const fileFolderSchema = FILE_FOLDER_TOOL_PARAMETER_SCHEMAS[name]
+    if (fileFolderSchema) {
+      parameters = fileFolderSchema
     }
 
     // Cloud catalog omits list/delete/get_connector_schema from the operation enum

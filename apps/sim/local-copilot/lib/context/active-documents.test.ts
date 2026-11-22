@@ -176,6 +176,36 @@ describe('extractActiveDocumentTouch', () => {
   })
 })
 
+describe('updateActiveDocumentsFromTurn materialize', () => {
+  it('drops the uploads twin when materialize promotes to files/', () => {
+    const previous = touchActiveDocument(null, {
+      path: 'uploads/Final Todo.html',
+      role: 'upload',
+      lastTouchedAt: '2026-01-01T00:00:00.000Z',
+    })
+    const next = updateActiveDocumentsFromTurn({
+      previous,
+      currentTurnUploadPaths: [],
+      toolRecords: [
+        {
+          name: 'materialize_file',
+          success: true,
+          result: {
+            success: true,
+            path: 'files/Final Todo.html',
+            vfsPath: 'files/Final Todo.html',
+            message:
+              'File "Final Todo.html" materialized. It is now available at files/Final Todo.html and will persist.',
+          },
+        },
+      ],
+    })
+    expect(next?.preferredPath).toBe('files/Final Todo.html')
+    expect(next?.documents.map((doc) => doc.path)).toEqual(['files/Final Todo.html'])
+    expect(next?.documents.some((doc) => doc.path.startsWith('uploads/'))).toBe(false)
+  })
+})
+
 describe('pathsFromCurrentTurnUploads', () => {
   it('collects attachment and context upload paths', () => {
     expect(

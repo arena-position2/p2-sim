@@ -4,20 +4,31 @@
 import { describe, expect, it } from 'vitest'
 import {
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
   MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
   MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+  MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS,
+  MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
 } from '@/local-copilot/lib/agent/limits'
 import {
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
+  buildHtmlImproveFirstCallNudgeMessage,
+  buildHtmlRedesignStagnationUserMessage,
+  buildHtmlSandboxInspectNudgeMessage,
+  countHtmlSandboxInspects,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
   hasHtmlEditContext,
+  isHtmlSandboxInspectCall,
   looksLikeHtmlAnalysisOnly,
   looksLikeHtmlEditIntent,
+  looksLikeHtmlRedesignIntent,
   shouldForceHtmlEditGrepNudge,
   shouldForceHtmlEditWriteNudge,
+  shouldForceHtmlImproveFirstCallNudge,
+  shouldForceHtmlSandboxInspectNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
 
@@ -33,6 +44,13 @@ describe('looksLikeHtmlEditIntent / analysis-only', () => {
     expect(looksLikeHtmlEditIntent('Apply suggestion 3 to the CTA')).toBe(true)
     expect(looksLikeHtmlEditIntent('Make the Generate Ad button stronger')).toBe(true)
     expect(looksLikeHtmlAnalysisOnly("Great let's move to the 3rd point.")).toBe(false)
+  })
+
+  it('detects whole-UI redesign asks', () => {
+    expect(looksLikeHtmlRedesignIntent('Improve the UI of Final Todo.html')).toBe(true)
+    expect(looksLikeHtmlRedesignIntent('Redesign this page theme')).toBe(true)
+    expect(looksLikeHtmlEditIntent('Improve the UI of this HTML')).toBe(true)
+    expect(looksLikeHtmlRedesignIntent('Change the Generate Ad button color')).toBe(false)
   })
 })
 
@@ -69,6 +87,83 @@ describe('hasHtmlEditContext', () => {
         preferredPath: 'files/notes.md',
       })
     ).toBe(false)
+  })
+})
+
+describe('shouldForceHtmlImproveFirstCallNudge', () => {
+  const base = {
+    postBuildToolMode: 'all',
+    forcedHtmlImproveFirstCallNudges: 0,
+    maxForcedHtmlImproveFirstCallNudges: MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS,
+    round: 1,
+    maxToolRounds: 10,
+    userMessage: 'Improve the UI of this HTML',
+    hasHtmlContext: true,
+    preferredPath: 'files/Final Todo.html',
+    turnToolRecords: [{ name: 'list_file_folders', success: true, args: {} }],
+    hasFileMutationTools: false,
+    streamedUserFacingText: '',
+    roundDisplayText: '',
+  }
+
+  it('nudges when the first tool was list_file_folders', () => {
+    expect(shouldForceHtmlImproveFirstCallNudge(base)).toBe(true)
+  })
+
+  it('nudges when the first tool was function_execute HTML inspect', () => {
+    expect(
+      shouldForceHtmlImproveFirstCallNudge({
+        ...base,
+        turnToolRecords: [
+          {
+            name: 'function_execute',
+            success: true,
+            args: {
+              title: 'Inspect body styles',
+              code: 'open("Final Todo.html")',
+              language: 'python',
+            },
+          },
+        ],
+      })
+    ).toBe(true)
+  })
+
+  it('nudges when uploads/ miss happens and preferredPath is files/', () => {
+    expect(
+      shouldForceHtmlImproveFirstCallNudge({
+        ...base,
+        turnToolRecords: [
+          {
+            name: 'read',
+            success: false,
+            args: { path: 'uploads/Final Todo.html', offset: 200 },
+          },
+        ],
+      })
+    ).toBe(true)
+  })
+
+  it('does not nudge after a successful files/ content read', () => {
+    expect(
+      shouldForceHtmlImproveFirstCallNudge({
+        ...base,
+        turnToolRecords: [
+          { name: 'list_file_folders', success: true, args: {} },
+          {
+            name: 'read',
+            success: true,
+            args: { path: 'files/Final Todo.html/content', offset: 0 },
+          },
+        ],
+      })
+    ).toBe(false)
+  })
+
+  it('buildHtmlImproveFirstCallNudgeMessage points at preferredPath', () => {
+    expect(
+      buildHtmlImproveFirstCallNudgeMessage({ preferredPath: 'files/Final Todo.html' })
+    ).toMatch(/files\/Final Todo\.html\/content/)
   })
 })
 
@@ -127,6 +222,74 @@ describe('buildHtmlEditGrepNudgeMessage', () => {
 
   it('falls back when no tokens were extracted', () => {
     expect(buildHtmlEditGrepNudgeMessage([])).toMatch(/distinctive label/i)
+  })
+})
+
+describe('HTML sandbox inspect nudge', () => {
+  const sandboxArgs = {
+    title: 'Inspect card and input styles',
+    language: 'python',
+    code: 'with open("/home/user/files/Final Todo.html") as f:\n  print(f.read().splitlines()[10:40])',
+    inputs: {
+      files: [{ path: 'files/Final%20Todo.html', sandboxPath: '/home/user/files/Final Todo.html' }],
+    },
+  }
+
+  it('detects function_execute HTML inspects', () => {
+    expect(isHtmlSandboxInspectCall({ name: 'function_execute', args: sandboxArgs })).toBe(true)
+    expect(
+      isHtmlSandboxInspectCall({
+        name: 'function_execute',
+        args: { title: 'sum numbers', code: 'print(1+1)', language: 'python' },
+      })
+    ).toBe(false)
+  })
+
+  it('counts successful sandbox HTML inspects', () => {
+    expect(
+      countHtmlSandboxInspects([
+        { name: 'function_execute', success: true, args: sandboxArgs },
+        { name: 'function_execute', success: true, args: sandboxArgs },
+        { name: 'read', success: true, args: { path: 'files/Final Todo.html/content' } },
+      ])
+    ).toBe(2)
+  })
+
+  it('nudges after enough sandbox inspects with no mutation', () => {
+    expect(
+      shouldForceHtmlSandboxInspectNudge({
+        postBuildToolMode: 'all',
+        forcedHtmlSandboxInspectNudges: 0,
+        maxForcedHtmlSandboxInspectNudges: MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
+        sandboxInspectsBeforeNudge: HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
+        sandboxInspectCount: HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
+        round: 3,
+        maxToolRounds: 20,
+        userMessage: 'Improve the UI of Final Todo.html',
+        hasHtmlContext: true,
+        hasFileMutationTools: false,
+        streamedUserFacingText: '',
+        roundDisplayText: '',
+      })
+    ).toBe(true)
+  })
+
+  it('buildHtmlSandboxInspectNudgeMessage bans function_execute inspect', () => {
+    const message = buildHtmlSandboxInspectNudgeMessage({
+      preferredPath: 'files/Final Todo.html',
+      redesign: true,
+    })
+    expect(message).toMatch(/function_execute/i)
+    expect(message).toMatch(/operation=update/i)
+  })
+
+  it('buildHtmlRedesignStagnationUserMessage prefers rewrite over button labels', () => {
+    expect(
+      buildHtmlRedesignStagnationUserMessage({ hadSuccessfulMutation: true, count: 2 })
+    ).toMatch(/partial theme|full rewrite/i)
+    expect(
+      buildHtmlRedesignStagnationUserMessage({ hadSuccessfulMutation: false, count: 2 })
+    ).not.toMatch(/button label/i)
   })
 })
 
@@ -211,5 +374,23 @@ describe('HTML edit write nudge', () => {
     })
     expect(giveUp).toMatch(/left unchanged/i)
     expect(giveUp).toMatch(/exact button label|function name/i)
+
+    const redesignGiveUp = buildHtmlEditWriteGiveUpMessage({
+      tokens: [],
+      preferredPath: 'files/Final Todo.html',
+      userMessage: 'Improve the UI of Final Todo.html',
+    })
+    expect(redesignGiveUp).toMatch(/full rewrite|operation=update/i)
+    expect(redesignGiveUp).not.toMatch(/button label/i)
+
+    const redesignWrite = buildHtmlEditWriteNudgeMessage({
+      tokens: [],
+      preferredPath: 'files/Final Todo.html',
+      attempt: 1,
+      maxAttempts: 2,
+      redesign: true,
+    })
+    expect(redesignWrite).toMatch(/operation=update/i)
+    expect(redesignWrite).toMatch(/function_execute/i)
   })
 })

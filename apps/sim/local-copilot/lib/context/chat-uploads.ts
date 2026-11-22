@@ -42,8 +42,8 @@ export function formatOversizedUploadInlineNote(params: {
   const mediaPart = media ? ` [${media}]` : ''
   return [
     `File "${params.filename}"${sizePart}${mediaPart} is too large to inline into this turn.`,
-    `It is available at uploads/${params.filename} — call read("uploads/${params.filename}") or grep, then edit with workspace_file patch.`,
-    'Do not ask the user to re-upload. Do not invent file contents from memory.',
+    `It is available at uploads/${params.filename} while still chat-scoped — call read("uploads/${params.filename}") or materialize_file then only files/${params.filename}.`,
+    'After materialize, never retry uploads/. Do not ask the user to re-upload. Do not invent file contents from memory.',
   ].join(' ')
 }
 
@@ -60,7 +60,7 @@ export function formatAttachmentHistoryStub(params: {
     typeof params.size === 'number' && Number.isFinite(params.size) && params.size >= 0
       ? `, ${formatByteSize(params.size)}`
       : ''
-  return `[Attached: ${params.filename} (${media}${size}). Still on this chat at uploads/${params.filename} — read("uploads/${params.filename}") when you need contents. Do not ask the user to re-upload.]`
+  return `[Attached: ${params.filename} (${media}${size}). Chat-scoped at uploads/${params.filename} until materialize_file → files/${params.filename}. Prefer Active documents preferredPath / workspaceFiles over inventing uploads/. Do not ask the user to re-upload.]`
 }
 
 /**
@@ -104,7 +104,7 @@ export function formatChatUploadsInventorySystemMessage(
   return [
     CHAT_UPLOADS_INVENTORY_SYSTEM_PREFIX,
     ...lines,
-    'These files are already attached to this chat. Use read("uploads/<filename>") (or tool equivalents) when you need their contents. Large text/HTML uploads are not fully inlined into the prompt — read/grep them, then patch. Never ask the user to re-upload a file that appears here.',
+    'These files are already attached to this chat (chat-scoped). Use read("uploads/<filename>") while still listed here, or materialize_file into files/… for durable edits / sandbox. Once materialized (or already under files/), never retry uploads/ — use preferredPath / workspaceFiles / glob("files/**…"). Large text/HTML uploads are not fully inlined — read/grep the live path, then patch. Never ask the user to re-upload a file that appears here.',
   ].join('\n')
 }
 

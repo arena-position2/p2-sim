@@ -140,7 +140,8 @@ export function formatActiveDocumentsSystemMessage(
       'Current-turn uploads win over older preferred documents.',
       'If the user names a file, edit that path only.',
       'If multiple documents could match and the user is vague, ask which file — do not silently patch the wrong one.',
-      'After create_file / materialize / successful edit, keep editing that same path (do not create a duplicate).',
+      'After create_file / materialize / successful edit, keep editing that same files/ path (do not create a duplicate; do not retry uploads/).',
+      'Once preferredPath is under files/, never call read/grep on uploads/ for that file.',
     ],
   }
   return {
@@ -308,9 +309,36 @@ export function updateActiveDocumentsFromTurn(params: {
     const touch = extractActiveDocumentTouch(record.name, record.success, record.result, now)
     if (!touch) continue
     next = touchActiveDocument(next, touch)
+    // Materialize promotes uploads/X → files/X; drop the stale uploads twin so
+    // history/preferredPath stop advertising a path that no longer resolves.
+    if (
+      (record.name === 'materialize_file' || record.name === 'save_upload') &&
+      touch.path.startsWith('files/')
+    ) {
+      next = dropUploadTwinForFilesPath(next, touch.path)
+    }
   }
 
   return next
+}
+
+/**
+ * Removes `uploads/<same-name>` when a matching `files/<name>` becomes preferred.
+ */
+export function dropUploadTwinForFilesPath(
+  state: ActiveDocumentsState | null,
+  filesPath: string
+): ActiveDocumentsState | null {
+  if (!state) return state
+  const normalized = normalizeDocumentPath(filesPath)
+  if (!normalized.startsWith('files/')) return state
+  const leaf = fileNameFromPath(normalized)
+  if (!leaf) return state
+  const uploadTwin = normalizeDocumentPath(`uploads/${leaf}`)
+  const documents = state.documents.filter((doc) => doc.path !== uploadTwin)
+  if (documents.length === state.documents.length) return state
+  const preferredPath = state.preferredPath === uploadTwin ? normalized : state.preferredPath
+  return clampActiveDocumentsState({ documents, preferredPath })
 }
 
 /**

@@ -63,6 +63,10 @@ import {
   executeLoadUserSkill,
   LOAD_USER_SKILL_TOOL_NAME,
 } from '@/local-copilot/lib/tools/user-skills'
+import {
+  executeLocalFileFolderTool,
+  isLocalFileFolderToolName,
+} from '@/local-copilot/lib/tools/vfs-file-folder-tools'
 import { executeLocalVfsTool, isLocalVfsToolName } from '@/local-copilot/lib/tools/vfs-read-tools'
 import {
   runCreateWorkflowTool,
@@ -458,16 +462,55 @@ async function runLocalVfsTool(
   const executed = await executeLocalVfsTool(toolName, args, ctx)
 
   if (!executed.success) {
+    const failureResult =
+      executed.output && typeof executed.output === 'object'
+        ? executed.output
+        : { error: executed.error }
+    return {
+      toolName,
+      success: false,
+      error: executed.error,
+      result: failureResult,
+    }
+  }
+
+  if (toolName === 'read') {
+    rememberReadVfsPath(ctx, args)
+  }
+
+  return {
+    toolName,
+    success: true,
+    result: executed.output ?? { success: true },
+  }
+}
+
+/**
+ * Arena-local file/folder leaf tools (list/create/rename/move/delete). Same
+ * Cloud-handler gap as glob/grep/read — execute against workspace-file use cases.
+ */
+async function runLocalFileFolderTool(
+  toolName:
+    | 'list_file_folders'
+    | 'create_file_folder'
+    | 'rename_file_folder'
+    | 'move_file_folder'
+    | 'delete_file_folder'
+    | 'rename_file'
+    | 'move_file'
+    | 'delete_file',
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const executed = await executeLocalFileFolderTool(toolName, args, ctx)
+
+  if (!executed.success) {
     return {
       toolName,
       success: false,
       error: executed.error,
       result: { error: executed.error },
     }
-  }
-
-  if (toolName === 'read') {
-    rememberReadVfsPath(ctx, args)
   }
 
   return {
@@ -684,6 +727,12 @@ async function executeLocalCopilotToolInner(
   if (isLocalVfsToolName(toolName)) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runLocalVfsTool(toolName, args, ctx)
+  }
+
+  // list/create/rename/move/delete file + folder: same Cloud-handler gap.
+  if (isLocalFileFolderToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return runLocalFileFolderTool(toolName, args, ctx)
   }
 
   // Workspace MCP deploy family (publish workflows as MCP servers). Distinct

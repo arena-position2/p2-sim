@@ -322,7 +322,7 @@ const RECOVERABLE_PATCH_ERROR_TYPES = new Set([
 ])
 
 const PATCH_REPAIR_FOLLOW_UP_HINT =
-  'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated/invented search — file is still there). Call read or grep on the file path NOW, copy a short unique substring from the live excerpt into search (well under 600 chars; must reuse a live token), then workspace_file operation=patch once. Do not reuse the previous search and do not invent new markup. Do not regenerate the whole file. Do not tell the user the file is missing or that the edit permanently failed.'
+  'Patch search did not match the live file (stale/truncated/too long/ambiguous/repeated/invented search — file is still there). Call read or grep on the file path NOW, copy a short unique substring from the live excerpt into search (well under 600 chars; must reuse a live token from that excerpt — never from a Thinking-only redesigned CSS/HTML draft), then workspace_file operation=patch once. Do not reuse the previous search and do not invent new markup. For whole-UI redesign of lean HTML (<~40KB), prefer one operation=update instead of more fragile CSS patches. Do not regenerate via create_file. Do not tell the user the file is missing or that the edit permanently failed.'
 
 const HTML_FULL_UPDATE_FOLLOW_UP_HINT =
   'Full HTML update was blocked because the file is too large. Call grep (or a tight read) for the region to change, then workspace_file operation=patch with search_replace and a short unique live substring, then edit_content with only the replacement. Do not retry operation=update and do not create_file a full rewrite of this page.'
@@ -689,7 +689,55 @@ export function formatToolResultForLlm(
       formatted = {
         ...record,
         followUpHint:
-          'No folders yet — that is normal. Call create_file_folder if you need a subfolder, or create_file directly under files/. An empty folder list is not a tool failure.',
+          'No folders yet — that is normal. Call create_file_folder if you need a subfolder, or create_file directly under files/. An empty folder list is not a tool failure. For HTML improve/redesign, skip listing folders — read preferredPath or files/<name>/content at offset 0 (or grep).',
+      }
+    } else {
+      formatted = {
+        ...record,
+        followUpHint:
+          typeof record.followUpHint === 'string' && record.followUpHint.trim()
+            ? record.followUpHint
+            : 'For HTML improve/redesign, do not keep listing folders — read preferredPath or files/<name>/content at offset 0 (or grep), then patch.',
+      }
+    }
+  } else if (toolName === 'materialize_file' || toolName === 'save_upload') {
+    const record = asRecord(result)
+    if (record.success !== false) {
+      const vfsPath =
+        typeof record.vfsPath === 'string'
+          ? record.vfsPath
+          : typeof record.path === 'string'
+            ? record.path
+            : null
+      const already =
+        record.alreadyMaterialized === true
+          ? vfsPath
+            ? `Already at ${vfsPath}. Use ${vfsPath}/content — do not rematerialize or retry uploads/.`
+            : 'Already materialized under files/. Use that files/ path — do not rematerialize or retry uploads/.'
+          : null
+      formatted = {
+        ...record,
+        followUpHint:
+          typeof record.followUpHint === 'string' && record.followUpHint.trim()
+            ? record.followUpHint
+            : already
+              ? already
+              : vfsPath
+                ? `Upload was materialized. Use ${vfsPath}/content for read/grep/patch — never retry uploads/.`
+                : 'Upload was materialized under files/. Use that files/ path only — never retry uploads/.',
+      }
+    } else {
+      formatted = record
+    }
+  } else if (toolName === 'read') {
+    const record = asRecord(result)
+    if (record.success === false && record.errorType === 'upload_materialized') {
+      formatted = {
+        ...record,
+        followUpHint:
+          typeof record.followUpHint === 'string' && record.followUpHint.trim()
+            ? record.followUpHint
+            : 'Upload was materialized; use the suggested files/…/content path. Do not retry uploads/.',
       }
     } else {
       formatted = record

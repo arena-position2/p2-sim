@@ -10,11 +10,14 @@ import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
   MAX_FORCED_FOLLOW_UP_ROUNDS,
   MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
   MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+  MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS,
+  MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
   MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS,
   MAX_INTENT_CONTINUATION_ROUNDS,
   MAX_POPULATE_EDITS,
@@ -266,11 +269,18 @@ import {
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
+  buildHtmlImproveFirstCallNudgeMessage,
+  buildHtmlRedesignStagnationUserMessage,
+  buildHtmlSandboxInspectNudgeMessage,
+  countHtmlSandboxInspects,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
   hasHtmlEditContext,
+  looksLikeHtmlRedesignIntent,
   shouldForceHtmlEditGrepNudge,
   shouldForceHtmlEditWriteNudge,
+  shouldForceHtmlImproveFirstCallNudge,
+  shouldForceHtmlSandboxInspectNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
 import { createTurnMutations } from '@/local-copilot/lib/writes/turn-mutations'
@@ -1054,6 +1064,8 @@ export async function* runLocalCopilotAgent(
   let forcedFileEditContinuations = 0
   let forcedHtmlEditGrepNudges = 0
   let forcedHtmlEditWriteNudges = 0
+  let forcedHtmlImproveFirstCallNudges = 0
+  let forcedHtmlSandboxInspectNudges = 0
   let forcedResearchSearchContinuations = 0
   /** Successful get_blocks_metadata calls after create and before the first populate edit. */
   let prePopulateDiscoveryCalls = 0
@@ -1101,11 +1113,24 @@ export async function* runLocalCopilotAgent(
       stagnationHit,
       pendingFollowUps.map((item) => item.id)
     )
+    const redesignStopMessage =
+      action.stop &&
+      looksLikeHtmlRedesignIntent(userTurnText) &&
+      hasHtmlEditContext({
+        userMessage: userTurnText,
+        preferredPath: activeEditTarget.preferredPath,
+        candidatePaths: activeEditTarget.candidates,
+      })
+        ? buildHtmlRedesignStagnationUserMessage({
+            hadSuccessfulMutation: turnHasFileMutationTools(turnToolRecords),
+            count: stagnationHit.count,
+          })
+        : null
     return {
       stop: action.stop,
       skipModelRound: false,
       systemMessage: action.systemMessage,
-      userMessage: action.stop ? stagnationHit.message : null,
+      userMessage: action.stop ? (redesignStopMessage ?? stagnationHit.message) : null,
     }
   }
 
@@ -1667,8 +1692,82 @@ export async function* runLocalCopilotAgent(
         candidatePaths: activeEditTarget.candidates,
       })
       const fileInspectionCount = countSuccessfulFileInspections(turnToolRecords)
+      const htmlSandboxInspectCount = countHtmlSandboxInspects(turnToolRecords)
       const hasFileMutations = turnHasFileMutationTools(turnToolRecords)
       const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+      const htmlRedesignIntent = looksLikeHtmlRedesignIntent(userTurnText)
+
+      const canForceHtmlImproveFirstCall = shouldForceHtmlImproveFirstCallNudge({
+        postBuildToolMode,
+        forcedHtmlImproveFirstCallNudges,
+        maxForcedHtmlImproveFirstCallNudges: MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        preferredPath: activeEditTarget.preferredPath,
+        turnToolRecords,
+        hasFileMutationTools: hasFileMutations,
+        streamedUserFacingText,
+        roundDisplayText: intentDisplay,
+      })
+
+      if (canForceHtmlImproveFirstCall) {
+        forcedHtmlImproveFirstCallNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildHtmlImproveFirstCallNudgeMessage({
+            preferredPath: activeEditTarget.preferredPath,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML improve first-call nudge', {
+          round,
+          forcedHtmlImproveFirstCallNudges,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
+      const canForceHtmlSandboxInspect = shouldForceHtmlSandboxInspectNudge({
+        postBuildToolMode,
+        forcedHtmlSandboxInspectNudges,
+        maxForcedHtmlSandboxInspectNudges: MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
+        sandboxInspectsBeforeNudge: HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
+        sandboxInspectCount: htmlSandboxInspectCount,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasFileMutationTools: hasFileMutations,
+        streamedUserFacingText,
+        roundDisplayText: intentDisplay,
+      })
+
+      if (canForceHtmlSandboxInspect) {
+        forcedHtmlSandboxInspectNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildHtmlSandboxInspectNudgeMessage({
+            preferredPath: activeEditTarget.preferredPath,
+            redesign: htmlRedesignIntent,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML sandbox-inspect nudge', {
+          round,
+          forcedHtmlSandboxInspectNudges,
+          htmlSandboxInspectCount,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
 
       const canForceHtmlEditGrep = shouldForceHtmlEditGrepNudge({
         postBuildToolMode,
@@ -1732,6 +1831,7 @@ export async function* runLocalCopilotAgent(
             preferredPath: activeEditTarget.preferredPath,
             attempt: forcedHtmlEditWriteNudges,
             maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+            redesign: htmlRedesignIntent,
           }),
         })
         logger.info('Arena Copilot forcing HTML edit write nudge', {
@@ -1740,6 +1840,7 @@ export async function* runLocalCopilotAgent(
           fileInspectionCount,
           grepTokens: htmlEditGrepTokens,
           preferredPath: activeEditTarget.preferredPath,
+          redesign: htmlRedesignIntent,
         })
         continue
       }
@@ -2189,6 +2290,7 @@ export async function* runLocalCopilotAgent(
               name: parallelCall.name,
               success: toolResult.success,
               result: toolResult.result,
+              args: parallelArgs,
               ...(toolResult.error ? { error: toolResult.error } : {}),
             })
 
@@ -2556,6 +2658,7 @@ export async function* runLocalCopilotAgent(
         name: call.name,
         success: toolResult.success,
         result: toolResult.result,
+        args: parsedArgs,
         ...(toolResult.error ? { error: toolResult.error } : {}),
       })
       if (isWorkflowRunToolName(call.name)) {

@@ -19,6 +19,10 @@ const HTML_EDIT_SIGNAL_PATTERN =
 const HTML_MAKE_BETTER_PATTERN =
   /\bmake\b[\s\S]{0,40}\b(better|stronger|bigger|green|bold|clearer|more|prominent)\b/i
 
+/** Whole-UI polish (vs a single label/section micro-edit). */
+const HTML_REDESIGN_PATTERN =
+  /\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b[\s\S]{0,80}\b(ui|ux|html|page|design|theme|look|layout|style|stylesheet|css)\b|\b(ui|ux|page|html|theme|look|layout)\b[\s\S]{0,40}\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b|\bmake\b[\s\S]{0,40}\b(ui|page|html|design)\b[\s\S]{0,40}\b(better|modern|cleaner|prettier|nicer)\b/i
+
 const HTML_MENTION_PATTERN = /\b(\.html?\b|html\b|the page|this page|the file)\b/i
 
 const TOKEN_STOPWORDS = new Set([
@@ -51,7 +55,18 @@ export function looksLikeHtmlEditIntent(message: string): boolean {
   const text = message.trim()
   if (!text) return false
   if (HTML_EDIT_SIGNAL_PATTERN.test(text) || HTML_MAKE_BETTER_PATTERN.test(text)) return true
+  if (HTML_REDESIGN_PATTERN.test(text)) return true
   return false
+}
+
+/**
+ * True when the ask is whole-UI improve/redesign (not a single button/label patch).
+ */
+export function looksLikeHtmlRedesignIntent(message: string): boolean {
+  const text = message.trim()
+  if (!text) return false
+  if (looksLikeHtmlAnalysisOnly(text)) return false
+  return HTML_REDESIGN_PATTERN.test(text)
 }
 
 /**
@@ -125,6 +140,16 @@ export function buildHtmlEditGrepNudgeMessage(tokens: string[]): string {
 
 const FILE_INSPECTION_TOOL_NAMES = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
 
+/** First-call tools that waste an HTML improve/redesign turn. */
+const HTML_IMPROVE_BAD_FIRST_TOOLS = new Set([
+  'list_file_folders',
+  'create_file_folder',
+  'function_execute',
+  'run_function',
+])
+
+const SANDBOX_TOOL_NAMES = new Set(['function_execute', 'run_function'])
+
 /**
  * Counts successful file-inspection tool calls this turn.
  */
@@ -133,6 +158,203 @@ export function countSuccessfulFileInspections(
 ): number {
   return records.filter((record) => record.success && FILE_INSPECTION_TOOL_NAMES.has(record.name))
     .length
+}
+
+/**
+ * True when function_execute is dumping / browsing an HTML file instead of
+ * doing real compute.
+ */
+export function isHtmlSandboxInspectCall(record: {
+  name: string
+  args?: Record<string, unknown>
+}): boolean {
+  if (!SANDBOX_TOOL_NAMES.has(record.name)) return false
+  const args = record.args ?? {}
+  const code = typeof args.code === 'string' ? args.code : ''
+  const title = typeof args.title === 'string' ? args.title : ''
+  const blob = `${title}\n${code}`.toLowerCase()
+
+  if (sandboxInputsMountHtml(args.inputs)) return true
+  if (/\.html?\b/.test(blob) && /\b(open|read|splitlines|print|inspect|lines)\b/.test(blob)) {
+    return true
+  }
+  if (/\binspect\b/.test(title.toLowerCase()) && /\b(html|css|style|body|form|card)\b/.test(blob)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Counts successful sandbox HTML-inspection calls this turn.
+ */
+export function countHtmlSandboxInspects(
+  records: ReadonlyArray<{ name: string; success: boolean; args?: Record<string, unknown> }>
+): number {
+  return records.filter((record) => record.success && isHtmlSandboxInspectCall(record)).length
+}
+
+function sandboxInputsMountHtml(inputs: unknown): boolean {
+  if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return false
+  const files = (inputs as Record<string, unknown>).files
+  if (!Array.isArray(files)) return false
+  return files.some((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false
+    const row = entry as Record<string, unknown>
+    const path =
+      (typeof row.path === 'string' && row.path) ||
+      (typeof row.sandboxPath === 'string' && row.sandboxPath) ||
+      ''
+    return /\.html?(?:\/content)?$/i.test(path) || /\/[^/]+\.html?\b/i.test(path)
+  })
+}
+
+/**
+ * True when the turn's early tools skipped preferredPath/files content and
+ * went to folder listing or uploads/ discovery instead.
+ */
+export function shouldForceHtmlImproveFirstCallNudge(options: {
+  postBuildToolMode: string
+  forcedHtmlImproveFirstCallNudges: number
+  maxForcedHtmlImproveFirstCallNudges: number
+  round: number
+  maxToolRounds: number
+  userMessage: string
+  hasHtmlContext: boolean
+  preferredPath?: string | null
+  turnToolRecords: ReadonlyArray<{
+    name: string
+    success: boolean
+    args?: Record<string, unknown>
+  }>
+  hasFileMutationTools: boolean
+  streamedUserFacingText: string
+  roundDisplayText: string
+}): boolean {
+  if (options.postBuildToolMode !== 'all') return false
+  if (options.forcedHtmlImproveFirstCallNudges >= options.maxForcedHtmlImproveFirstCallNudges) {
+    return false
+  }
+  if (options.round >= options.maxToolRounds - 1) return false
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (options.turnToolRecords.length === 0 || options.turnToolRecords.length > 3) return false
+
+  const hasGoodContentRead = options.turnToolRecords.some((record) => {
+    if (record.name !== 'read' && record.name !== 'grep') return false
+    if (!record.success) return false
+    const path = typeof record.args?.path === 'string' ? record.args.path : ''
+    if (!path) return record.name === 'grep'
+    if (path.startsWith('files/')) return true
+    if (options.preferredPath && path.startsWith(options.preferredPath)) return true
+    return false
+  })
+  if (hasGoodContentRead) return false
+
+  const usedBadFirstTool = options.turnToolRecords.some((record) => {
+    if (HTML_IMPROVE_BAD_FIRST_TOOLS.has(record.name)) return true
+    if (record.name === 'read' || record.name === 'glob' || record.name === 'grep') {
+      const path =
+        typeof record.args?.path === 'string'
+          ? record.args.path
+          : typeof record.args?.pattern === 'string'
+            ? record.args.pattern
+            : ''
+      if (path.startsWith('uploads/') || path.startsWith('uploads')) {
+        const offset = typeof record.args?.offset === 'number' ? record.args.offset : undefined
+        // Any uploads probe after preferredPath exists, or high-offset uploads read.
+        if (options.preferredPath?.startsWith('files/') || (offset !== undefined && offset >= 50)) {
+          return true
+        }
+        if (!record.success) return true
+      }
+    }
+    return false
+  })
+  if (!usedBadFirstTool) return false
+
+  const streamed = options.streamedUserFacingText.trim()
+  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
+  const roundDisplay = options.roundDisplayText.trim()
+  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
+
+  return true
+}
+
+/**
+ * System nudge: stop folder/uploads discovery; read preferredPath or files content.
+ */
+export function buildHtmlImproveFirstCallNudgeMessage(options: {
+  preferredPath?: string | null
+}): string {
+  const preferred = options.preferredPath?.trim()
+  const pathHint = preferred
+    ? preferred.startsWith('files/')
+      ? `read("${preferred.replace(/\/content$/, '')}/content", offset: 0) or grep that path`
+      : `materialize_file if still chat-scoped, then read files/…/content — preferredPath is ${preferred}`
+    : 'read("files/<name>/content", offset: 0) or glob("files/**<name>*") / use preferredPath'
+
+  return (
+    `[System] HTML improve/redesign first-call policy: do NOT call list_file_folders, do not keep probing uploads/ (especially with a high offset), and do NOT use function_execute to inspect HTML. ` +
+    `Next tool MUST be ${pathHint}. ` +
+    'If uploads/ returned not found, the file was likely materialized — use files/ or preferredPath. For lean HTML under ~40KB prefer one workspace_file operation=update after reading. Do not dump HTML into chat.'
+  )
+}
+
+/**
+ * Soft orchestration: HTML edit turn is thrashing function_execute line dumps.
+ */
+export function shouldForceHtmlSandboxInspectNudge(options: {
+  postBuildToolMode: string
+  forcedHtmlSandboxInspectNudges: number
+  maxForcedHtmlSandboxInspectNudges: number
+  sandboxInspectsBeforeNudge: number
+  sandboxInspectCount: number
+  round: number
+  maxToolRounds: number
+  userMessage: string
+  hasHtmlContext: boolean
+  hasFileMutationTools: boolean
+  streamedUserFacingText: string
+  roundDisplayText: string
+}): boolean {
+  if (options.postBuildToolMode !== 'all') return false
+  if (options.forcedHtmlSandboxInspectNudges >= options.maxForcedHtmlSandboxInspectNudges) {
+    return false
+  }
+  if (options.round >= options.maxToolRounds - 1) return false
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (options.sandboxInspectCount < options.sandboxInspectsBeforeNudge) return false
+
+  const streamed = options.streamedUserFacingText.trim()
+  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
+  const roundDisplay = options.roundDisplayText.trim()
+  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
+
+  return true
+}
+
+/**
+ * System nudge: stop function_execute HTML inspection; use read/grep + write.
+ */
+export function buildHtmlSandboxInspectNudgeMessage(options: {
+  preferredPath?: string | null
+  redesign: boolean
+}): string {
+  const pathHint = options.preferredPath?.trim() ? ` on ${options.preferredPath.trim()}` : ''
+  const writeHint = options.redesign
+    ? 'For whole-UI improve/redesign of lean HTML (<~40KB), call ONE workspace_file operation=update with the improved page (or patch if the file is larger).'
+    : 'Call workspace_file operation=patch with a short unique live substring from read/grep, then edit_content with only the replacement.'
+
+  return (
+    `[System] HTML edit sandbox-inspect nudge: stop using function_execute to print/inspect HTML lines${pathHint}. ` +
+    'Use read or grep on files/…/content instead. Do NOT call function_execute again for HTML inspection this turn. ' +
+    writeHint
+  )
 }
 
 function isHtmlEditBridgeNarration(text: string): boolean {
@@ -235,6 +457,7 @@ export function buildHtmlEditWriteNudgeMessage(options: {
   preferredPath?: string | null
   attempt: number
   maxAttempts: number
+  redesign?: boolean
 }): string {
   const pathHint = options.preferredPath?.trim() ? ` on ${options.preferredPath.trim()}` : ''
   const tokenHint =
@@ -242,16 +465,28 @@ export function buildHtmlEditWriteNudgeMessage(options: {
       ? `Reuse a short live substring involving: ${options.tokens
           .map((token) => JSON.stringify(token))
           .join(', ')}.`
-      : 'Copy a short unique live substring from your last grep/read (id, class, function name, or button label).'
+      : 'Copy a short unique live substring from your last grep/read (id, class, function name, or button label) — never from a Thinking-only draft.'
 
   const lastAttempt =
     options.attempt >= options.maxAttempts
-      ? ' This is the last forced write attempt — if you still cannot patch, stop and ask the user which label/function to change.'
+      ? options.redesign
+        ? ' This is the last forced write attempt — if you still cannot write, stop and ask whether to continue with a lean full rewrite or a specific section.'
+        : ' This is the last forced write attempt — if you still cannot patch, stop and ask the user which label/function to change.'
       : ''
+
+  if (options.redesign) {
+    return (
+      `[System] HTML redesign write nudge (${options.attempt}/${options.maxAttempts}): you already inspected the file enough${pathHint}. ` +
+      'Do NOT call read, grep, glob, function_execute, or load_copilot_artifact again this round. ' +
+      'For lean HTML under ~40KB prefer ONE workspace_file operation=update with the improved page; otherwise patch with a short unique live substring from the latest read/grep. ' +
+      'Do not invent CSS search strings from Thinking.' +
+      lastAttempt
+    )
+  }
 
   return (
     `[System] HTML edit write nudge (${options.attempt}/${options.maxAttempts}): you already inspected the file enough${pathHint}. ` +
-    'Do NOT call read, grep, glob, or load_copilot_artifact again this round. ' +
+    'Do NOT call read, grep, glob, function_execute, or load_copilot_artifact again this round. ' +
     `Call workspace_file operation=patch with search_replace NOW (${tokenHint}), then edit_content with only the replacement. ` +
     'One targeted patch for the user ask (e.g. stepper clickability OR validation) — not a full rewrite.' +
     lastAttempt
@@ -267,6 +502,13 @@ export function buildHtmlEditWriteGiveUpMessage(options: {
   userMessage: string
 }): string {
   const pathHint = options.preferredPath?.trim() ? ` in ${options.preferredPath.trim()}` : ''
+  if (looksLikeHtmlRedesignIntent(options.userMessage)) {
+    return (
+      `I inspected the HTML${pathHint} but did not finish the redesign. ` +
+      'The file was left unchanged — say whether to continue with a lean full rewrite ' +
+      '(`workspace_file` operation=update if under ~40KB), or name a specific section to change.'
+    )
+  }
   const focus =
     options.tokens.length > 0
       ? options.tokens.slice(0, 3).join(', ')
@@ -275,6 +517,27 @@ export function buildHtmlEditWriteGiveUpMessage(options: {
     `I inspected the HTML${pathHint} but did not finish applying the edit for: ${focus}. ` +
     'The file was left unchanged — reply with the exact button label, heading, or function name to patch ' +
     '(for example `go` / stepper tabs / Next button), or ask me to apply only one of those fixes.'
+  )
+}
+
+/**
+ * User-facing closer when patch/tool stagnation hits during an HTML redesign.
+ */
+export function buildHtmlRedesignStagnationUserMessage(options: {
+  hadSuccessfulMutation: boolean
+  count: number
+}): string {
+  if (options.hadSuccessfulMutation) {
+    return (
+      `I applied a partial theme update but stalled after ${options.count} similar patch attempts. ` +
+      'Say whether to continue with a lean full rewrite (`workspace_file` operation=update if under ~40KB), ' +
+      'or tell me the next specific section to change.'
+    )
+  }
+  return (
+    `I kept retrying HTML patches (${options.count} similar attempts) without finishing the redesign. ` +
+    'Say whether to try a lean full rewrite (`workspace_file` operation=update if under ~40KB), ' +
+    'or name a specific section/heading to change.'
   )
 }
 

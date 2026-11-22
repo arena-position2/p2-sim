@@ -32,6 +32,23 @@ export const MAX_WORKFLOW_BUILD_CONTINUATION_ROUNDS = 2
 export const MAX_FILE_EDIT_CONTINUATION_ROUNDS = 3
 
 /**
+ * When an HTML improve/redesign turn starts with list_file_folders or uploads/
+ * discovery instead of preferredPath/files content, force at most one redirect.
+ */
+export const MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS = 1
+
+/**
+ * When an HTML edit turn uses function_execute to dump HTML lines instead of
+ * read/grep + write, force at most one redirect away from the sandbox.
+ */
+export const MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS = 1
+
+/**
+ * Successful function_execute HTML inspections before the sandbox-inspect nudge.
+ */
+export const HTML_SANDBOX_INSPECTS_BEFORE_NUDGE = 2
+
+/**
  * When an HTML edit follow-up only `read`s (no grep yet), force at most one
  * round that steers toward grep(user tokens) → patch instead of offset paging.
  */

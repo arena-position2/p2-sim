@@ -24,7 +24,7 @@ import {
   toError,
 } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import {
   checkStorageQuotaForBillingContext,
   incrementStorageUsageForBillingContextInTx,
@@ -49,6 +49,7 @@ import { findWorkspaceFileFolderIdByPath } from '@/lib/uploads/contexts/workspac
 import {
   allocateUniqueWorkspaceFileName,
   fetchWorkspaceFileBuffer,
+  getWorkspaceFileByName,
 } from '@/lib/uploads/contexts/workspace/workspace-file-manager'
 import { getBoundWorkspaceFileSecretProvenance } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
 import { hasCloudStorage, headObject } from '@/lib/uploads/core/storage-service'
@@ -108,6 +109,78 @@ async function ensureWorkspaceWriteAccess(workspaceId: string, userId: string): 
   }
 }
 
+/**
+ * Resolve a workspace `files/` row when rematerialize is called after the upload
+ * was already promoted (chat-scoped row gone).
+ */
+async function findAlreadyMaterializedFile(
+  workspaceId: string,
+  fileName: string
+): Promise<{ id: string; name: string; path: string } | null> {
+  const leaf = fileName
+    .trim()
+    .replace(/^uploads\//i, '')
+    .replace(/\/content$/i, '')
+  if (!leaf) return null
+
+  const byName = await getWorkspaceFileByName(workspaceId, leaf, { folderId: null })
+  if (byName) {
+    const path = canonicalWorkspaceFilePath({
+      folderPath: byName.folderPath ?? null,
+      name: byName.name,
+    })
+    return { id: byName.id, name: byName.name, path }
+  }
+
+  // Display names can differ slightly from originalName after allocateUnique.
+  const rows = await db
+    .select({
+      id: workspaceFiles.id,
+      originalName: workspaceFiles.originalName,
+      displayName: workspaceFiles.displayName,
+    })
+    .from(workspaceFiles)
+    .where(
+      and(
+        eq(workspaceFiles.workspaceId, workspaceId),
+        eq(workspaceFiles.context, 'workspace'),
+        isNull(workspaceFiles.folderId),
+        isNull(workspaceFiles.deletedAt),
+        or(eq(workspaceFiles.originalName, leaf), eq(workspaceFiles.displayName, leaf))
+      )
+    )
+    .limit(1)
+
+  const row = rows[0]
+  if (!row) return null
+  const name = row.displayName ?? row.originalName
+  return {
+    id: row.id,
+    name,
+    path: canonicalWorkspaceFilePath({ folderPath: null, name }),
+  }
+}
+
+function alreadyMaterializedResult(file: {
+  id: string
+  name: string
+  path: string
+}): ToolExecutionResult {
+  const contentPath = `${file.path}/content`
+  return {
+    success: true,
+    output: {
+      message: `File "${file.name}" is already materialized at ${file.path}. Use ${contentPath} for read/grep/patch — do not rematerialize or retry uploads/.`,
+      fileId: file.id,
+      path: file.path,
+      vfsPath: file.path,
+      alreadyMaterialized: true,
+      followUpHint: `Already at ${file.path}. Use ${contentPath} — never retry uploads/ or materialize_file for this file.`,
+    },
+    resources: [{ type: 'file', id: file.id, title: file.name }],
+  }
+}
+
 async function executeSave(
   fileName: string,
   chatId: string,
@@ -116,9 +189,13 @@ async function executeSave(
 ): Promise<ToolExecutionResult> {
   const row = await findChatUploadRowByName(chatId, fileName)
   if (!row) {
+    const existing = await findAlreadyMaterializedFile(workspaceId, fileName)
+    if (existing) {
+      return alreadyMaterializedResult(existing)
+    }
     return {
       success: false,
-      error: `Upload not found: "${fileName}". Use glob("uploads/*") to list available uploads.`,
+      error: `Upload not found: "${fileName}". If it was already saved, use glob("files/**${fileName.replace(/^uploads\//i, '').replace(/\/content$/i, '')}*") or preferredPath — do not retry uploads/. Otherwise use glob("uploads/*") to list available uploads.`,
     }
   }
   if (!uploadBelongsToWorkspace(row, workspaceId)) {
@@ -245,12 +322,16 @@ async function executeSave(
     name: updated.originalName,
   })
 
+  const previousUploadPath = `uploads/${updated.originalName}`
   return {
     success: true,
     output: {
-      message: `File "${updated.originalName}" materialized. It is now available at ${canonicalPath} and will persist independently of this chat.`,
+      message: `File "${updated.originalName}" materialized. It is now available at ${canonicalPath} and will persist independently of this chat. The chat-scoped path ${previousUploadPath} no longer resolves — use ${canonicalPath} (or ${canonicalPath}/content) from now on; never retry uploads/.`,
       fileId: updated.id,
       path: canonicalPath,
+      vfsPath: canonicalPath,
+      previousUploadPath,
+      followUpHint: `Upload was materialized. Use ${canonicalPath}/content for read/grep/patch — do not call uploads/ again for this file.`,
     },
     resources: [{ type: 'file', id: updated.id, title: updated.originalName }],
   }
@@ -630,9 +711,32 @@ export async function executeMaterializeFile(
     return { success: false, error: getErrorMessage(error, 'Workspace write access required') }
   }
 
+  // Single-file save keeps the rich path/followUpHint payload the model needs.
+  // Multi-file keeps the aggregated { succeeded, failed } shape.
+  if (fileNames.length === 1 && operation === 'save') {
+    const fileName = fileNames[0] ?? ''
+    try {
+      return await executeSave(fileName, context.chatId, context.workspaceId, principal)
+    } catch (err) {
+      logger.error('save_upload failed', {
+        fileName,
+        operation,
+        chatId: context.chatId,
+        error: toError(err).message,
+        postgresCode: getPostgresErrorCode(err),
+        postgresConstraint: getPostgresConstraintName(err),
+      })
+      return {
+        success: false,
+        error: getErrorMessage(err, 'Failed to materialize file'),
+      }
+    }
+  }
+
   const succeeded: string[] = []
   const failed: Array<{ fileName: string; error: string }> = []
   const resources: NonNullable<ToolExecutionResult['resources']> = []
+  let firstSaveOutput: Record<string, unknown> | null = null
 
   for (const fileName of fileNames) {
     try {
@@ -652,6 +756,15 @@ export async function executeMaterializeFile(
             : undefined
         succeeded.push(materializedName ?? fileName)
         if (result.resources) resources.push(...result.resources)
+        if (
+          operation === 'save' &&
+          !firstSaveOutput &&
+          result.output &&
+          typeof result.output === 'object' &&
+          !Array.isArray(result.output)
+        ) {
+          firstSaveOutput = result.output as Record<string, unknown>
+        }
       } else {
         failed.push({ fileName, error: result.error ?? 'Failed to materialize file' })
       }
@@ -673,7 +786,18 @@ export async function executeMaterializeFile(
 
   return {
     success: succeeded.length > 0,
-    output: { succeeded, failed },
+    output: {
+      succeeded,
+      failed,
+      ...(firstSaveOutput
+        ? {
+            path: firstSaveOutput.path,
+            vfsPath: firstSaveOutput.vfsPath,
+            followUpHint: firstSaveOutput.followUpHint,
+            alreadyMaterialized: firstSaveOutput.alreadyMaterialized,
+          }
+        : {}),
+    },
     error:
       failed.length > 0
         ? `Failed to materialize: ${failed.map((f) => f.fileName).join(', ')}`

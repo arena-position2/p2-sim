@@ -244,15 +244,33 @@ async function executeLocalVfsRead(
   const reference = stripContentSuffix(path)
   const delegation = toCopilotServerToolContext(ctx)
 
-  const { text, truncated } = await withLocalWorkspaceFileDeliveryObservation(ctx, () =>
-    executeCopilotFileUseCase(delegation, readWorkspaceFileText, {
-      workspaceId: ctx.workspaceId,
-      reference,
-      chatId: ctx.chatId,
-      allowPlainText: true,
-      maxBytes: MAX_TEXT_READ_BYTES,
-    })
-  )
+  let text: string
+  let truncated: boolean
+  try {
+    const readResult = await withLocalWorkspaceFileDeliveryObservation(ctx, () =>
+      executeCopilotFileUseCase(delegation, readWorkspaceFileText, {
+        workspaceId: ctx.workspaceId,
+        reference,
+        chatId: ctx.chatId,
+        allowPlainText: true,
+        maxBytes: MAX_TEXT_READ_BYTES,
+      })
+    )
+    text = readResult.text
+    truncated = readResult.truncated
+  } catch (error) {
+    if (reference.startsWith('uploads/')) {
+      const materializedHint = await findMaterializedFilesHintForUpload(ctx, reference)
+      if (materializedHint) {
+        return {
+          success: false,
+          error: materializedHint.error,
+          output: materializedHint.output,
+        }
+      }
+    }
+    throw error
+  }
 
   const raw = {
     content: text,
@@ -269,7 +287,95 @@ async function executeLocalVfsRead(
     }
   }
 
+  // Soft nudge: high-offset uploads/ reads are a common HTML-improve dead end.
+  if (reference.startsWith('uploads/') && typeof offset === 'number' && offset >= 50) {
+    return {
+      success: true,
+      output: {
+        ...clamped,
+        followUpHint:
+          'You started mid-file on an uploads/ path. For HTML improve/redesign, prefer preferredPath or files/<name>/content at offset 0 (or grep). After materialize, never retry uploads/.',
+      },
+    }
+  }
+
   return { success: true, output: clamped }
+}
+
+/**
+ * When read(uploads/X) misses because the upload was materialized, point at files/X.
+ */
+async function findMaterializedFilesHintForUpload(
+  ctx: ToolExecutionContext,
+  uploadReference: string
+): Promise<{ error: string; output: Record<string, unknown> } | null> {
+  const leaf = uploadReference.slice('uploads/'.length)
+  if (!leaf || leaf.includes('/')) return null
+
+  let decodedLeaf = leaf
+  try {
+    decodedLeaf = decodeURIComponent(leaf)
+  } catch {
+    // keep raw leaf
+  }
+
+  const pathMap = await buildWorkspaceFilesPathMap(ctx)
+  const candidates = [
+    `files/${decodedLeaf}`,
+    `files/${leaf}`,
+    ...[...pathMap.keys()].filter((path) => {
+      const name = path.split('/').pop() ?? ''
+      try {
+        return decodeURIComponent(name) === decodedLeaf || name === leaf || name === decodedLeaf
+      } catch {
+        return name === leaf || name === decodedLeaf
+      }
+    }),
+  ]
+
+  const match =
+    candidates.find((path) => pathMap.has(path)) ??
+    candidates.find((path) =>
+      [...pathMap.keys()].some((known) => known === path || known.endsWith(`/${decodedLeaf}`))
+    )
+
+  if (!match) {
+    // Same leaf under a folder also counts.
+    const folderMatch = [...pathMap.keys()].find((path) => {
+      const name = path.split('/').pop() ?? ''
+      try {
+        return decodeURIComponent(name) === decodedLeaf
+      } catch {
+        return name === decodedLeaf
+      }
+    })
+    if (!folderMatch) return null
+    const contentPath = `${folderMatch}/content`
+    return {
+      error: `Upload was materialized; use ${contentPath}`,
+      output: {
+        success: false,
+        errorType: 'upload_materialized',
+        previousUploadPath: uploadReference,
+        vfsPath: folderMatch,
+        suggestedPath: contentPath,
+        followUpHint: `Upload was materialized; use ${contentPath}. Do not retry uploads/. Prefer preferredPath / workspaceFiles / glob("files/**${decodedLeaf}*").`,
+      },
+    }
+  }
+
+  const contentPath = `${match}/content`
+  return {
+    error: `Upload was materialized; use ${contentPath}`,
+    output: {
+      success: false,
+      errorType: 'upload_materialized',
+      previousUploadPath: uploadReference,
+      vfsPath: match,
+      suggestedPath: contentPath,
+      followUpHint: `Upload was materialized; use ${contentPath}. Do not retry uploads/. Prefer preferredPath / workspaceFiles / glob("files/**${decodedLeaf}*").`,
+    },
+  }
 }
 
 async function buildWorkspaceFilesPathMap(ctx: ToolExecutionContext): Promise<Map<string, string>> {

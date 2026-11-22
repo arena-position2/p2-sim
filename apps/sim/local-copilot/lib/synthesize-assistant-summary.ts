@@ -12,6 +12,8 @@ export interface ToolTurnRecord {
   result: unknown
   /** Top-level tool error message when the call failed. */
   error?: string
+  /** Raw tool arguments when known (used for HTML first-call soft guards). */
+  args?: Record<string, unknown>
 }
 
 const FAILURE_EVIDENCE_MAX_CHARS = 220
