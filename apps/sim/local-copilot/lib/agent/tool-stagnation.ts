@@ -123,6 +123,12 @@ export function createToolStagnationTracker(threshold = TOOL_STAGNATION_THRESHOL
 
   return {
     record(toolName, argsJson, success, result) {
+      // Successful writes start a new phase — identical post-write reads must
+      // not inherit pre-write fingerprint counts (false "couldn't finish" stops).
+      if (FILE_EXPLORE_MUTATION_TOOLS.has(toolName) && success) {
+        counts.clear()
+        return null
+      }
       if (STAGNATION_EXEMPT_TOOLS.has(toolName)) {
         return null
       }
@@ -150,6 +156,22 @@ export function createToolStagnationTracker(threshold = TOOL_STAGNATION_THRESHOL
       counts.clear()
     },
   }
+}
+
+/**
+ * True when a successful inspection tool should not hard-stop the turn after
+ * a write already landed (verification re-reads are not a failed loop).
+ */
+export function shouldSuppressInspectionStagnationAfterMutation(options: {
+  toolName: string
+  success: boolean
+  hadSuccessfulMutation: boolean
+}): boolean {
+  return (
+    options.hadSuccessfulMutation &&
+    options.success &&
+    FILE_EXPLORE_INSPECTION_TOOLS.has(options.toolName)
+  )
 }
 
 export interface FileExploreStopHit {
@@ -311,6 +333,28 @@ export function buildStagnationUserMessage(_toolName: string, count: number): st
   return (
     `I kept retrying the same action (${count} similar attempts) without making progress. ` +
     'Stopping that loop — tell me what to change, or confirm a different approach.'
+  )
+}
+
+/**
+ * Closer when a write already succeeded but a later tool loop stalled.
+ * Must not imply the file was left unchanged.
+ */
+export function buildPostMutationStagnationUserMessage(count: number): string {
+  return (
+    `I already applied file changes this turn, then stalled after ${count} similar follow-up attempts. ` +
+    'Tell me what else to change, or confirm the current result is enough.'
+  )
+}
+
+/**
+ * Soft system nudge when identical successful reads follow a write — do not
+ * hard-stop; steer the model to summarize instead of paging again.
+ */
+export function buildPostMutationInspectionNudgeMessage(toolName: string): string {
+  return (
+    `[System] Identical successful ${toolName} calls after a file write are not progress. ` +
+    'Do not call read/grep/glob again with the same arguments. Stop tool use and briefly summarize the changes already applied this turn.'
   )
 }
 

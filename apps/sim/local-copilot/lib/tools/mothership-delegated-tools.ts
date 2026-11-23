@@ -28,6 +28,7 @@ import {
   type MothershipDelegatedToolName,
   WORKFLOW_SCOPED_DELEGATED_TOOLS,
 } from '@/local-copilot/lib/tools/mothership-delegated-tool-defs'
+import { rejectHtmlInspectViaSandbox } from '@/local-copilot/lib/tools/reject-html-inspect-via-sandbox'
 import { rejectOfficeFileViaSandbox } from '@/local-copilot/lib/tools/reject-office-via-sandbox'
 import {
   ARENA_ALIASED_SERVER_TOOL_NAMES,
@@ -406,6 +407,9 @@ export async function executeMothershipDelegatedTool(
 
   const officeSandboxError = rejectOfficeFileViaSandbox(toolName, enrichedArgs)
   if (officeSandboxError) return officeSandboxError
+
+  const htmlInspectSandboxError = rejectHtmlInspectViaSandbox(toolName, enrichedArgs)
+  if (htmlInspectSandboxError) return htmlInspectSandboxError
 
   if (!workflowId && ctx.workspaceId) {
     workflowId = await resolveWorkflowIdFromDatabase(ctx.workspaceId, enrichedArgs)

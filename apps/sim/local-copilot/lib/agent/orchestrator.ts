@@ -52,9 +52,12 @@ import {
 } from '@/local-copilot/lib/agent/thinking-live-status'
 import {
   buildFileExploreSystemMessage,
+  buildPostMutationInspectionNudgeMessage,
+  buildPostMutationStagnationUserMessage,
   createFileExploreTracker,
   createToolStagnationTracker,
   resolveStagnationAction,
+  shouldSuppressInspectionStagnationAfterMutation,
 } from '@/local-copilot/lib/agent/tool-stagnation'
 import { formatUxPhaseStatus, type LocalUxPhase } from '@/local-copilot/lib/agent/ux-phase'
 import { logCopilotAction } from '@/local-copilot/lib/audit/logger'
@@ -1109,28 +1112,51 @@ export async function* runLocalCopilotAgent(
     if (!stagnationHit) {
       return { stop: false, skipModelRound: false, systemMessage: null, userMessage: null }
     }
+
+    const hadSuccessfulMutation = turnHasFileMutationTools(turnToolRecords)
+    if (
+      shouldSuppressInspectionStagnationAfterMutation({
+        toolName,
+        success,
+        hadSuccessfulMutation,
+      })
+    ) {
+      return {
+        stop: false,
+        skipModelRound: false,
+        systemMessage: buildPostMutationInspectionNudgeMessage(toolName),
+        userMessage: null,
+      }
+    }
+
     const action = resolveStagnationAction(
       stagnationHit,
       pendingFollowUps.map((item) => item.id)
     )
+    const htmlContext = hasHtmlEditContext({
+      userMessage: userTurnText,
+      preferredPath: activeEditTarget.preferredPath,
+      candidatePaths: activeEditTarget.candidates,
+    })
     const redesignStopMessage =
-      action.stop &&
-      looksLikeHtmlRedesignIntent(userTurnText) &&
-      hasHtmlEditContext({
-        userMessage: userTurnText,
-        preferredPath: activeEditTarget.preferredPath,
-        candidatePaths: activeEditTarget.candidates,
-      })
+      action.stop && looksLikeHtmlRedesignIntent(userTurnText) && htmlContext
         ? buildHtmlRedesignStagnationUserMessage({
-            hadSuccessfulMutation: turnHasFileMutationTools(turnToolRecords),
+            hadSuccessfulMutation,
             count: stagnationHit.count,
           })
         : null
+    // Never claim "left unchanged" / generic no-progress when a write already landed.
+    const stopUserMessage = action.stop
+      ? (redesignStopMessage ??
+        (hadSuccessfulMutation
+          ? buildPostMutationStagnationUserMessage(stagnationHit.count)
+          : stagnationHit.message))
+      : null
     return {
       stop: action.stop,
       skipModelRound: false,
       systemMessage: action.systemMessage,
-      userMessage: action.stop ? (redesignStopMessage ?? stagnationHit.message) : null,
+      userMessage: stopUserMessage,
     }
   }
 

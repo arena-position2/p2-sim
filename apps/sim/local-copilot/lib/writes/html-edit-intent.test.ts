@@ -52,6 +52,15 @@ describe('looksLikeHtmlEditIntent / analysis-only', () => {
     expect(looksLikeHtmlEditIntent('Improve the UI of this HTML')).toBe(true)
     expect(looksLikeHtmlRedesignIntent('Change the Generate Ad button color')).toBe(false)
   })
+
+  it('treats soft UI complaints and spacing follow-ups as redesign/edit', () => {
+    const soft =
+      'Still I feel that UI is not good. Can you please take a look at these changes as well'
+    expect(looksLikeHtmlEditIntent(soft)).toBe(true)
+    expect(looksLikeHtmlRedesignIntent(soft)).toBe(true)
+    expect(looksLikeHtmlEditIntent('The padding and spacing still look off')).toBe(true)
+    expect(looksLikeHtmlRedesignIntent('The padding and spacing still look off')).toBe(true)
+  })
 })
 
 describe('extractHtmlEditGrepTokens', () => {
@@ -269,6 +278,25 @@ describe('HTML sandbox inspect nudge', () => {
         hasHtmlContext: true,
         hasFileMutationTools: false,
         streamedUserFacingText: '',
+        roundDisplayText: '',
+      })
+    ).toBe(true)
+  })
+
+  it('nudges even when the model already wrote a short plan', () => {
+    expect(
+      shouldForceHtmlSandboxInspectNudge({
+        postBuildToolMode: 'all',
+        forcedHtmlSandboxInspectNudges: 0,
+        maxForcedHtmlSandboxInspectNudges: MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
+        sandboxInspectsBeforeNudge: HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
+        sandboxInspectCount: HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
+        round: 2,
+        maxToolRounds: 20,
+        userMessage: 'Still I feel that UI is not good',
+        hasHtmlContext: true,
+        hasFileMutationTools: false,
+        streamedUserFacingText: 'I will tighten spacing and typography next.',
         roundDisplayText: '',
       })
     ).toBe(true)

@@ -39,14 +39,15 @@ export const MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS = 1
 
 /**
  * When an HTML edit turn uses function_execute to dump HTML lines instead of
- * read/grep + write, force at most one redirect away from the sandbox.
+ * read/grep + write, force at most two redirects away from the sandbox.
+ * Hard rejection in the tool path also blocks further HTML inspect dumps.
  */
-export const MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS = 1
+export const MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS = 2
 
 /**
  * Successful function_execute HTML inspections before the sandbox-inspect nudge.
  */
-export const HTML_SANDBOX_INSPECTS_BEFORE_NUDGE = 2
+export const HTML_SANDBOX_INSPECTS_BEFORE_NUDGE = 1
 
 /**
  * When an HTML edit follow-up only `read`s (no grep yet), force at most one

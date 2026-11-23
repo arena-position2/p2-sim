@@ -7,11 +7,14 @@ import {
   MAX_FILE_EXPLORE_WITHOUT_MUTATION,
 } from '@/local-copilot/lib/agent/limits'
 import {
+  buildPostMutationStagnationUserMessage,
   createFileExploreTracker,
   createToolStagnationTracker,
   extractFileExplorePathKey,
   fingerprintToolCall,
   resolveStagnationAction,
+  shouldSuppressInspectionStagnationAfterMutation,
+  TOOL_STAGNATION_THRESHOLD,
 } from '@/local-copilot/lib/agent/tool-stagnation'
 
 const path = 'files/ad-generator (10).html'
@@ -91,6 +94,51 @@ describe('workspace_file patch stagnation', () => {
     const action = resolveStagnationAction(hit!, ['create_workflow:populate'])
     expect(action.stop).toBe(false)
     expect(action.systemMessage).toMatch(/still pending/i)
+  })
+})
+
+describe('post-mutation inspection stagnation', () => {
+  const contentArgs = JSON.stringify({
+    path: 'files/Final Todo.html/content',
+    offset: 0,
+    limit: 80,
+  })
+
+  it('resets fingerprint counts after a successful file mutation', () => {
+    const tracker = createToolStagnationTracker()
+    for (let i = 0; i < TOOL_STAGNATION_THRESHOLD - 1; i += 1) {
+      expect(tracker.record('read', contentArgs, true, { content: 'x' })).toBeNull()
+    }
+    expect(
+      tracker.record(
+        'workspace_file',
+        JSON.stringify({ operation: 'update', target: { path: 'files/Final Todo.html' } }),
+        true,
+        { success: true }
+      )
+    ).toBeNull()
+    for (let i = 0; i < TOOL_STAGNATION_THRESHOLD - 1; i += 1) {
+      expect(tracker.record('read', contentArgs, true, { content: 'x' })).toBeNull()
+    }
+  })
+
+  it('suppresses hard-stop for successful inspections after a write', () => {
+    expect(
+      shouldSuppressInspectionStagnationAfterMutation({
+        toolName: 'read',
+        success: true,
+        hadSuccessfulMutation: true,
+      })
+    ).toBe(true)
+    expect(
+      shouldSuppressInspectionStagnationAfterMutation({
+        toolName: 'workspace_file',
+        success: false,
+        hadSuccessfulMutation: true,
+      })
+    ).toBe(false)
+    expect(buildPostMutationStagnationUserMessage(3)).toMatch(/already applied/i)
+    expect(buildPostMutationStagnationUserMessage(3)).not.toMatch(/left unchanged/i)
   })
 })
 

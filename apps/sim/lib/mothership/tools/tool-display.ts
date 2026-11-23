@@ -616,6 +616,7 @@ const TOOL_TITLES: Record<string, string> = {
   diff_workflows: 'Comparing workflows',
 
   run_function: 'Running code',
+  function_execute: 'Running code',
   generate_api_key: 'Generating API key',
   // Retired in favor of the account/ and organization/ VFS namespaces. Kept so
   // a replayed transcript from before the switch still renders its rows.
@@ -1494,7 +1495,8 @@ export function getToolDisplayTitle(name: string, args?: Record<string, unknown>
       break
     }
     case 'prepare_file_edit':
-    case 'run_function': {
+    case 'run_function':
+    case 'function_execute': {
       const title =
         name === 'prepare_file_edit' ? workspaceFileTitle(args) : stringArg(args, 'title')
       if (title) return title

@@ -14,16 +14,23 @@ const HTML_ANALYSIS_ONLY_PATTERN =
 
 /** Clear edit / implement signals (including "3rd point" follow-ups). */
 const HTML_EDIT_SIGNAL_PATTERN =
-  /\b(apply|change|update|fix|edit|implement|improve|enhance|rewrite|patch|modify|adjust|tweak|make (it|the|this)|let'?s (do|move|apply|implement|go)|go ahead|move to (the )?(point|\d)|do (the )?(point|\d|third|3rd|second|2nd|first|1st)|point\s*[#]?\s*\d+|suggestion\s*[#]?\s*\d+)\b/i
+  /\b(apply|change|update|fix|edit|implement|improve|enhance|rewrite|patch|modify|adjust|tweak|make (it|the|this)|let'?s (do|move|apply|implement|go)|go ahead|move to (the )?(point|\d)|do (the )?(point|\d|third|3rd|second|2nd|first|1st)|point\s*[#]?\s*\d+|suggestion\s*[#]?\s*\d+|take a look|look at (these|the) changes|these changes)\b/i
 
 const HTML_MAKE_BETTER_PATTERN =
   /\bmake\b[\s\S]{0,40}\b(better|stronger|bigger|green|bold|clearer|more|prominent)\b/i
 
+/**
+ * Soft UI dissatisfaction / spacing follow-ups that still mean "edit the page"
+ * even without an explicit improve/redesign verb ("UI is not good", padding).
+ */
+const HTML_UI_COMPLAINT_PATTERN =
+  /\b(ui|ux|design|layout|look(s)?|visuals?|theme)\b[\s\S]{0,60}\b(not good|no good|bad|ugly|off|wrong|broken|poor|messy|cluttered|cramped|tight)|(\b(not good|no good|bad|ugly|poor)\b[\s\S]{0,40}\b(ui|ux|design|layout|look))|\b(spacing|padding|margin|gap|typography|whitespace|cards?)\b[\s\S]{0,40}\b(fix|improve|adjust|tweak|change|wrong|off|bad|tight|cramped)|(\b(fix|improve|adjust|tweak|change)\b[\s\S]{0,40}\b(spacing|padding|margin|gap|typography|whitespace|cards?))\b/i
+
 /** Whole-UI polish (vs a single label/section micro-edit). */
 const HTML_REDESIGN_PATTERN =
-  /\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b[\s\S]{0,80}\b(ui|ux|html|page|design|theme|look|layout|style|stylesheet|css)\b|\b(ui|ux|page|html|theme|look|layout)\b[\s\S]{0,40}\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b|\bmake\b[\s\S]{0,40}\b(ui|page|html|design)\b[\s\S]{0,40}\b(better|modern|cleaner|prettier|nicer)\b/i
+  /\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b[\s\S]{0,80}\b(ui|ux|html|page|design|theme|look|layout|style|stylesheet|css)\b|\b(ui|ux|page|html|theme|look|layout)\b[\s\S]{0,40}\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b|\bmake\b[\s\S]{0,40}\b(ui|page|html|design)\b[\s\S]{0,40}\b(better|modern|cleaner|prettier|nicer)\b|\b(ui|ux)\b[\s\S]{0,40}\b(not good|no good|bad|better)\b|\b(spacing|padding|layout|design system|cards?)\b[\s\S]{0,50}\b(fix|improve|adjust|tweak|change|wrong|off)\b/i
 
-const HTML_MENTION_PATTERN = /\b(\.html?\b|html\b|the page|this page|the file)\b/i
+const HTML_MENTION_PATTERN = /\b(\.html?\b|html\b|the page|this page|the file|the ui|this ui)\b/i
 
 const TOKEN_STOPWORDS = new Set([
   'the',
@@ -55,7 +62,7 @@ export function looksLikeHtmlEditIntent(message: string): boolean {
   const text = message.trim()
   if (!text) return false
   if (HTML_EDIT_SIGNAL_PATTERN.test(text) || HTML_MAKE_BETTER_PATTERN.test(text)) return true
-  if (HTML_REDESIGN_PATTERN.test(text)) return true
+  if (HTML_UI_COMPLAINT_PATTERN.test(text) || HTML_REDESIGN_PATTERN.test(text)) return true
   return false
 }
 
@@ -66,7 +73,7 @@ export function looksLikeHtmlRedesignIntent(message: string): boolean {
   const text = message.trim()
   if (!text) return false
   if (looksLikeHtmlAnalysisOnly(text)) return false
-  return HTML_REDESIGN_PATTERN.test(text)
+  return HTML_REDESIGN_PATTERN.test(text) || HTML_UI_COMPLAINT_PATTERN.test(text)
 }
 
 /**
@@ -330,11 +337,8 @@ export function shouldForceHtmlSandboxInspectNudge(options: {
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (options.sandboxInspectCount < options.sandboxInspectsBeforeNudge) return false
 
-  const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
-  const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
-
+  // Sandbox HTML dumps are never the edit path — nudge even when the model
+  // already wrote a short plan (bridge gate used to block the redirect).
   return true
 }
 
