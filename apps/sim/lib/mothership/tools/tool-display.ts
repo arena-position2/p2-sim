@@ -636,6 +636,7 @@ const TOOL_TITLES: Record<string, string> = {
   list_workspace_mcp_servers: 'Listing MCP servers',
   load_deployment: 'Loading deployment',
   save_upload: 'Saving upload',
+  materialize_file: 'Saving upload',
   connect_slack_bot: 'Connecting Slack bot',
   manage_sandbox: 'Managing sandbox',
   move_file: 'Moving file',
@@ -1045,6 +1046,7 @@ export function getToolDisplayTitle(name: string, args?: Record<string, unknown>
     case 'user_table':
       return userTableTitle(args)
     case 'save_upload':
+    case 'materialize_file':
       return materializeFileTitle(args)
     case 'open_resource':
       return openResourceTitle(args)

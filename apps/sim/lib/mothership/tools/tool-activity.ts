@@ -87,6 +87,17 @@ const DEPLOYMENT_ACTIVITY: OperationActivity = {
   operations: { deploy: 'deployed workflows', undeploy: 'undeployed workflows' },
 }
 
+const SAVE_UPLOAD_ACTIVITY: OperationActivity = {
+  label: 'used uploaded files',
+  parameter: 'operation',
+  defaultOperation: 'save',
+  operations: {
+    save: 'saved files',
+    import: 'imported workflows',
+    extract: 'extracted files',
+  },
+}
+
 const QUERY_USER_TABLE_OPERATIONS = {
   get: 'read tables',
   get_schema: 'read tables',
@@ -357,18 +368,11 @@ export const TOOL_ACTIVITIES: Readonly<Record<string, ActivityPhrase | Operation
   run_enrichment: 'ran enrichments',
   run_from_block: 'ran workflows',
   run_function: 'ran code',
+  function_execute: 'ran code',
   run_workflow: 'ran workflows',
   run_workflow_until_block: 'ran workflows',
-  save_upload: {
-    label: 'used uploaded files',
-    parameter: 'operation',
-    defaultOperation: 'save',
-    operations: {
-      save: 'saved files',
-      import: 'imported workflows',
-      extract: 'extracted files',
-    },
-  },
+  save_upload: SAVE_UPLOAD_ACTIVITY,
+  materialize_file: SAVE_UPLOAD_ACTIVITY,
   search_docs: 'read documentation',
   search_integration_tools: 'found integrations',
   search_knowledge_base: {
