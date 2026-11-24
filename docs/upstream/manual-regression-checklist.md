@@ -16,6 +16,8 @@ Updated 2026-11-09: Circleback, Cloudflare, and Tailscale output type changes ar
 
 Updated 2026-11-18: [sync-2026-11-18.md](./sync-2026-11-18.md). OAuth refresh moved to `refresh.server.ts`; Arena tool requests go through `outboundFetch`; Arena block mappers read the operation from the tool-call context.
 
+Updated 2026-11-24: [sync-2026-11-24.md](./sync-2026-11-24.md). Upstream removed whitelabeling (Arena kept); Redis required; mothership go→worker; workflows-as-code / Pierre editor; migrations `0460`–`0469`.
+
 | Field | Value |
 | --- | --- |
 | Date | |
@@ -66,6 +68,15 @@ From [sync-2026-11-18.md](./sync-2026-11-18.md):
 - [ ] Zoom: a normal workspace hides account-recording operations and Delete Recording; a Zoom-admin workspace shows account recordings.
 - [ ] Google Drive search by prompt still reranks content; setting a shared drive narrows results.
 - [ ] A workflow using SAP S/4HANA, incident.io escalation paths, Pipedrive pipelines, Mistral parse images, Resend `replyTo`, or Hex outputs, if any exists, still resolves its references.
+
+From [sync-2026-11-24.md](./sync-2026-11-24.md):
+
+- [ ] Redis is up for sim and realtime; the app does not start without `REDIS_URL`.
+- [ ] Organization → Whitelabeling still loads, saves brand colors/logo, and applies on workspace chrome. Intake logos and P2 Agents Docs title still show.
+- [ ] `/workspace/arena-general-settings` remains full width with `hideProfile` and `?theme=`. Account settings includes the new Desktop section without dropping Arena skill-share / Docs.
+- [ ] Local Copilot “Fork in new chat” still works when the worker has no conversation (`fetchWorker` path).
+- [ ] Workflow Code / Pierre editor opens for a workspace with the feature on; an existing canvas workflow still runs.
+- [ ] A workflow using Tavily map `results.url`, or Arxiv/Ketch typed outputs, if any exists, still resolves its references (or confirm none).
 
 ---
 
