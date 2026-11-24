@@ -2,7 +2,7 @@ import type { ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
 import { isHtmlSandboxInspectCall } from '@/local-copilot/lib/writes/html-edit-intent'
 
 export const HTML_INSPECT_VIA_SANDBOX_ERROR =
-  'Do not use function_execute to open/print/inspect HTML. Use read or grep on files/…/content, then workspace_file (patch or update) + edit_content to change it.'
+  'Do not use function_execute to open/print/inspect HTML. Use read or grep on files/…/content, then workspace_file (patch or update) + edit_content to change it. Do not retry function_execute for HTML inspection.'
 
 /**
  * Blocks sandbox line-dumps of workspace HTML. Models thrash on

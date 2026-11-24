@@ -3,11 +3,6 @@
  * so the orchestrator can soft-nudge read-paging turns toward grep → patch.
  */
 
-import {
-  isBridgingAssistantNarration,
-  isFileInspectionBridgeNarration,
-} from '@/local-copilot/lib/user-facing-text'
-
 /** Analysis-only asks should not force a write path. */
 const HTML_ANALYSIS_ONLY_PATTERN =
   /\b((give|provide|share|list|what are|any)\b[\s\S]{0,60}\b(suggestion|suggestions|feedback|ideas|improvements|review)\b|\bux suggestions?\b|\bread\b[\s\S]{0,40}\bcarefully\b|\banaly[sz]e\b|\bcritique\b|\bwhat do you think\b|\bhow (does|do|is|would)\b)/i
@@ -30,7 +25,8 @@ const HTML_UI_COMPLAINT_PATTERN =
 const HTML_REDESIGN_PATTERN =
   /\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b[\s\S]{0,80}\b(ui|ux|html|page|design|theme|look|layout|style|stylesheet|css)\b|\b(ui|ux|page|html|theme|look|layout)\b[\s\S]{0,40}\b(improve|redesign|enhance|modernize|restyle|overhaul|revamp)\b|\bmake\b[\s\S]{0,40}\b(ui|page|html|design)\b[\s\S]{0,40}\b(better|modern|cleaner|prettier|nicer)\b|\b(ui|ux)\b[\s\S]{0,40}\b(not good|no good|bad|better)\b|\b(spacing|padding|layout|design system|cards?)\b[\s\S]{0,50}\b(fix|improve|adjust|tweak|change|wrong|off)\b/i
 
-const HTML_MENTION_PATTERN = /\b(\.html?\b|html\b|the page|this page|the file|the ui|this ui)\b/i
+const HTML_MENTION_PATTERN =
+  /\b(\.html?|html|the page|this page|the file|the ui|this ui|highlighted ui)\b/i
 
 const TOKEN_STOPWORDS = new Set([
   'the',
@@ -200,6 +196,126 @@ export function countHtmlSandboxInspects(
   return records.filter((record) => record.success && isHtmlSandboxInspectCall(record)).length
 }
 
+/**
+ * Counts HTML sandbox inspect attempts (success or reject) this turn.
+ * Rejects must still steer the model onto read/grep + write.
+ */
+export function countHtmlSandboxInspectAttempts(
+  records: ReadonlyArray<{ name: string; args?: Record<string, unknown> }>
+): number {
+  return records.filter((record) => isHtmlSandboxInspectCall(record)).length
+}
+
+/**
+ * True when a VFS path is a leaf `.html` / `.htm` without the `/content` suffix.
+ */
+export function isHtmlLeafPathWithoutContent(path: string): boolean {
+  const trimmed = path.trim()
+  if (!trimmed) return false
+  let decoded = trimmed
+  try {
+    decoded = decodeURIComponent(trimmed)
+  } catch {
+    // keep raw
+  }
+  if (/\/content$/i.test(decoded)) return false
+  return /\.html?$/i.test(decoded)
+}
+
+/**
+ * Content path for a leaf HTML file (idempotent if `/content` already present).
+ */
+export function toHtmlContentPath(path: string): string {
+  const trimmed = path.trim().replace(/\/+$/, '')
+  if (!trimmed) return trimmed
+  if (/\/content$/i.test(trimmed)) return trimmed
+  return `${trimmed}/content`
+}
+
+/**
+ * True when a successful grep returned no useful hits (empty matches, leaf
+ * metadata path, or a vacuous pattern).
+ */
+export function isEmptyOrUselessHtmlGrep(record: {
+  name: string
+  success: boolean
+  args?: Record<string, unknown>
+  result?: unknown
+}): boolean {
+  if (record.name !== 'grep' || !record.success) return false
+  const path = typeof record.args?.path === 'string' ? record.args.path : ''
+  if (path && isHtmlLeafPathWithoutContent(path)) return true
+  const pattern = typeof record.args?.pattern === 'string' ? record.args.pattern.trim() : ''
+  if (pattern === '.*' || pattern === '.' || pattern === '<' || /^html$/i.test(pattern)) {
+    return true
+  }
+  return grepResultHasNoMatches(record.result)
+}
+
+/**
+ * Counts empty/useless greps this turn for preferred-path write redirects.
+ */
+export function countEmptyOrUselessHtmlGreps(
+  records: ReadonlyArray<{
+    name: string
+    success: boolean
+    args?: Record<string, unknown>
+    result?: unknown
+  }>
+): number {
+  return records.filter((record) => isEmptyOrUselessHtmlGrep(record)).length
+}
+
+function grepResultHasNoMatches(result: unknown): boolean {
+  if (result == null) return true
+  if (typeof result !== 'object') return false
+  const record = result as Record<string, unknown>
+  if (Array.isArray(record.matches)) return record.matches.length === 0
+  if (Array.isArray(record.files)) return record.files.length === 0
+  if (Array.isArray(record.counts)) return record.counts.length === 0
+  if (record.output && typeof record.output === 'object') {
+    return grepResultHasNoMatches(record.output)
+  }
+  if (record.data && typeof record.data === 'object') {
+    return grepResultHasNoMatches(record.data)
+  }
+  return false
+}
+
+/**
+ * True when the turn already successfully read preferredPath/content.
+ */
+export function hasSuccessfulPreferredHtmlContentRead(
+  records: ReadonlyArray<{
+    name: string
+    success: boolean
+    args?: Record<string, unknown>
+  }>,
+  preferredPath: string | null | undefined
+): boolean {
+  const preferred = preferredPath?.trim()
+  if (!preferred) return false
+  const contentPath = toHtmlContentPath(preferred).toLowerCase()
+  const leafPath = preferred.replace(/\/content$/i, '').toLowerCase()
+  return records.some((record) => {
+    if (record.name !== 'read' || !record.success) return false
+    const path = typeof record.args?.path === 'string' ? record.args.path.trim() : ''
+    if (!path) return false
+    let decoded = path
+    try {
+      decoded = decodeURIComponent(path)
+    } catch {
+      // keep raw
+    }
+    const normalized = decoded.toLowerCase()
+    return (
+      normalized === contentPath ||
+      normalized === `${leafPath}/content` ||
+      (normalized.endsWith('/content') && normalized.replace(/\/content$/i, '') === leafPath)
+    )
+  })
+}
+
 function sandboxInputsMountHtml(inputs: unknown): boolean {
   if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return false
   const files = (inputs as Record<string, unknown>).files
@@ -281,11 +397,7 @@ export function shouldForceHtmlImproveFirstCallNudge(options: {
   })
   if (!usedBadFirstTool) return false
 
-  const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
-  const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
-
+  // Do not gate on assistant narration — thinking-style prose used to block this.
   return true
 }
 
@@ -361,8 +473,26 @@ export function buildHtmlSandboxInspectNudgeMessage(options: {
   )
 }
 
-function isHtmlEditBridgeNarration(text: string): boolean {
-  return isFileInspectionBridgeNarration(text) || isBridgingAssistantNarration(text)
+/**
+ * Immediate system nudge after a rejected HTML sandbox inspect — steer to write.
+ */
+export function buildHtmlSandboxInspectRejectNudgeMessage(options: {
+  preferredPath?: string | null
+  redesign: boolean
+}): string {
+  const preferred = options.preferredPath?.trim()
+  const contentHint = preferred
+    ? `read("${toHtmlContentPath(preferred)}", offset: 0)`
+    : 'read("files/<name>/content", offset: 0)'
+  const writeHint = options.redesign
+    ? 'Then ONE workspace_file operation=update with the fixed page (lean HTML under ~40KB) or patch if larger.'
+    : 'Then workspace_file operation=patch with a short unique live substring, then edit_content with only the replacement.'
+
+  return (
+    `[System] HTML sandbox inspect was rejected. Do NOT retry function_execute for HTML. ` +
+    `Next tools MUST be ${contentHint}, then a write. ${writeHint} ` +
+    'Do not dump HTML into chat.'
+  )
 }
 
 /**
@@ -390,11 +520,6 @@ export function shouldForceHtmlEditGrepNudge(options: {
   if (!looksLikeHtmlEditIntent(options.userMessage)) return false
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (!options.hasSuccessfulRead || options.hasSuccessfulGrep) return false
-
-  const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
-  const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
 
   return true
 }
@@ -425,12 +550,102 @@ export function shouldForceHtmlEditWriteNudge(options: {
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (options.inspectionCount < options.inspectionsBeforeWriteNudge) return false
 
-  const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
-  const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
-
   return true
+}
+
+/**
+ * Soft redirect when the model greps/reads a leaf `.html` without `/content`.
+ */
+export function shouldForceHtmlContentPathRedirect(options: {
+  postBuildToolMode: string
+  forcedHtmlContentPathRedirects: number
+  maxForcedHtmlContentPathRedirects: number
+  round: number
+  maxToolRounds: number
+  userMessage: string
+  hasHtmlContext: boolean
+  hasFileMutationTools: boolean
+  lastToolName: string | null
+  lastToolPath: string | null
+  lastToolSuccess: boolean
+}): boolean {
+  if (options.postBuildToolMode !== 'all') return false
+  if (options.forcedHtmlContentPathRedirects >= options.maxForcedHtmlContentPathRedirects) {
+    return false
+  }
+  if (options.round >= options.maxToolRounds - 1) return false
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (!options.lastToolSuccess) return false
+  if (options.lastToolName !== 'grep' && options.lastToolName !== 'read') return false
+  if (!options.lastToolPath || !isHtmlLeafPathWithoutContent(options.lastToolPath)) return false
+  return true
+}
+
+/**
+ * System nudge: use `/content` instead of the leaf HTML metadata path.
+ */
+export function buildHtmlContentPathRedirectMessage(leafPath: string): string {
+  const contentPath = toHtmlContentPath(leafPath)
+  return (
+    `[System] HTML path redirect: "${leafPath.trim()}" is the leaf/metadata path. ` +
+    `Next read/grep MUST use "${contentPath}". Then call workspace_file + edit_content. ` +
+    'Do not grep the leaf path again.'
+  )
+}
+
+/**
+ * After empty/useless greps with a known preferredPath, force read → write.
+ */
+export function shouldForceHtmlPreferredPathWriteNudge(options: {
+  postBuildToolMode: string
+  forcedHtmlPreferredPathWriteNudges: number
+  maxForcedHtmlPreferredPathWriteNudges: number
+  emptyGrepsBeforeNudge: number
+  emptyGrepCount: number
+  round: number
+  maxToolRounds: number
+  userMessage: string
+  hasHtmlContext: boolean
+  preferredPath?: string | null
+  hasFileMutationTools: boolean
+}): boolean {
+  if (options.postBuildToolMode !== 'all') return false
+  if (options.forcedHtmlPreferredPathWriteNudges >= options.maxForcedHtmlPreferredPathWriteNudges) {
+    return false
+  }
+  if (options.round >= options.maxToolRounds - 1) return false
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!options.preferredPath?.trim()) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (options.emptyGrepCount < options.emptyGrepsBeforeNudge) return false
+  return true
+}
+
+/**
+ * System nudge: stop empty greps; read preferredPath/content then write.
+ */
+export function buildHtmlPreferredPathWriteNudgeMessage(options: {
+  preferredPath: string
+  redesign: boolean
+  hasPreferredContentRead: boolean
+}): string {
+  const contentPath = toHtmlContentPath(options.preferredPath)
+  const readHint = options.hasPreferredContentRead
+    ? `You already read ${contentPath} — do NOT grep again.`
+    : `Next tool MUST be read("${contentPath}", offset: 0) (or a tight grep on that content path).`
+  const writeHint = options.redesign
+    ? 'Then ONE workspace_file operation=update with the fixed/improved page (lean HTML under ~40KB) or patch if larger.'
+    : 'Then workspace_file operation=patch with a short unique live substring, then edit_content with only the replacement.'
+
+  return (
+    `[System] HTML edit preferred-path write nudge: empty/useless greps are not progress. ${readHint} ` +
+    `${writeHint} Do not call function_execute. Do not dump HTML into chat.`
+  )
 }
 
 /**

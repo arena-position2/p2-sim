@@ -10,13 +10,16 @@ import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE,
   HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
   MAX_FORCED_FOLLOW_UP_ROUNDS,
+  MAX_HTML_CONTENT_PATH_REDIRECT_ROUNDS,
   MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
   MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
   MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS,
+  MAX_HTML_PREFERRED_PATH_WRITE_NUDGE_ROUNDS,
   MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
   MAX_INCOMPLETE_WORKFLOW_POPULATE_CONTINUATION_ROUNDS,
   MAX_INTENT_CONTINUATION_ROUNDS,
@@ -269,20 +272,29 @@ import { mutationRequiresVerification } from '@/local-copilot/lib/verification/p
 import { runPostMutationVerification } from '@/local-copilot/lib/verification/run-verification'
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
 import {
+  buildHtmlContentPathRedirectMessage,
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
   buildHtmlImproveFirstCallNudgeMessage,
+  buildHtmlPreferredPathWriteNudgeMessage,
   buildHtmlRedesignStagnationUserMessage,
   buildHtmlSandboxInspectNudgeMessage,
-  countHtmlSandboxInspects,
+  buildHtmlSandboxInspectRejectNudgeMessage,
+  countEmptyOrUselessHtmlGreps,
+  countHtmlSandboxInspectAttempts,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
   hasHtmlEditContext,
+  hasSuccessfulPreferredHtmlContentRead,
+  isHtmlSandboxInspectCall,
+  looksLikeHtmlEditIntent,
   looksLikeHtmlRedesignIntent,
+  shouldForceHtmlContentPathRedirect,
   shouldForceHtmlEditGrepNudge,
   shouldForceHtmlEditWriteNudge,
   shouldForceHtmlImproveFirstCallNudge,
+  shouldForceHtmlPreferredPathWriteNudge,
   shouldForceHtmlSandboxInspectNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
@@ -1069,7 +1081,33 @@ export async function* runLocalCopilotAgent(
   let forcedHtmlEditWriteNudges = 0
   let forcedHtmlImproveFirstCallNudges = 0
   let forcedHtmlSandboxInspectNudges = 0
+  let forcedHtmlContentPathRedirects = 0
+  let forcedHtmlPreferredPathWriteNudges = 0
+  let htmlSandboxRejectNudgeSent = false
   let forcedResearchSearchContinuations = 0
+
+  const pushHtmlSandboxRejectNudge = (
+    toolName: string,
+    args: Record<string, unknown>,
+    success: boolean,
+    deferred: Array<{ role: 'system'; content: string }>
+  ) => {
+    if (htmlSandboxRejectNudgeSent || success) return
+    if (!isHtmlSandboxInspectCall({ name: toolName, args })) return
+    htmlSandboxRejectNudgeSent = true
+    deferred.push({
+      role: 'system',
+      content: buildHtmlSandboxInspectRejectNudgeMessage({
+        preferredPath: activeEditTarget.preferredPath,
+        redesign: looksLikeHtmlRedesignIntent(userTurnText),
+      }),
+    })
+    logger.info('Arena Copilot HTML sandbox-inspect reject nudge', {
+      toolName,
+      preferredPath: activeEditTarget.preferredPath,
+    })
+  }
+
   /** Successful get_blocks_metadata calls after create and before the first populate edit. */
   let prePopulateDiscoveryCalls = 0
   let refundedPrePopulateDiscoveryRounds = 0
@@ -1100,11 +1138,24 @@ export async function* runLocalCopilotAgent(
   } => {
     const exploreHit = fileExploreTracker.record(toolName, argsJson, success)
     if (exploreHit) {
+      const htmlContext = hasHtmlEditContext({
+        userMessage: userTurnText,
+        preferredPath: activeEditTarget.preferredPath,
+        candidatePaths: activeEditTarget.candidates,
+      })
+      const htmlExploreCloser =
+        looksLikeHtmlEditIntent(userTurnText) && htmlContext
+          ? buildHtmlEditWriteGiveUpMessage({
+              tokens: extractHtmlEditGrepTokens(userTurnText),
+              preferredPath: activeEditTarget.preferredPath,
+              userMessage: userTurnText,
+            })
+          : exploreHit.message
       return {
         stop: true,
         skipModelRound: true,
         systemMessage: buildFileExploreSystemMessage(exploreHit),
-        userMessage: exploreHit.message,
+        userMessage: htmlExploreCloser,
       }
     }
 
@@ -1718,10 +1769,18 @@ export async function* runLocalCopilotAgent(
         candidatePaths: activeEditTarget.candidates,
       })
       const fileInspectionCount = countSuccessfulFileInspections(turnToolRecords)
-      const htmlSandboxInspectCount = countHtmlSandboxInspects(turnToolRecords)
+      const htmlSandboxInspectCount = countHtmlSandboxInspectAttempts(turnToolRecords)
+      const emptyHtmlGrepCount = countEmptyOrUselessHtmlGreps(turnToolRecords)
       const hasFileMutations = turnHasFileMutationTools(turnToolRecords)
       const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
       const htmlRedesignIntent = looksLikeHtmlRedesignIntent(userTurnText)
+      const lastToolRecord = turnToolRecords[turnToolRecords.length - 1]
+      const lastToolPath =
+        typeof lastToolRecord?.args?.path === 'string' ? lastToolRecord.args.path : null
+      const hasPreferredContentRead = hasSuccessfulPreferredHtmlContentRead(
+        turnToolRecords,
+        activeEditTarget.preferredPath
+      )
 
       const canForceHtmlImproveFirstCall = shouldForceHtmlImproveFirstCallNudge({
         postBuildToolMode,
@@ -1758,6 +1817,38 @@ export async function* runLocalCopilotAgent(
         continue
       }
 
+      const canForceHtmlContentPathRedirect = shouldForceHtmlContentPathRedirect({
+        postBuildToolMode,
+        forcedHtmlContentPathRedirects,
+        maxForcedHtmlContentPathRedirects: MAX_HTML_CONTENT_PATH_REDIRECT_ROUNDS,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasFileMutationTools: hasFileMutations,
+        lastToolName: lastToolRecord?.name ?? null,
+        lastToolPath,
+        lastToolSuccess: lastToolRecord?.success ?? false,
+      })
+
+      if (canForceHtmlContentPathRedirect && lastToolPath) {
+        forcedHtmlContentPathRedirects += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildHtmlContentPathRedirectMessage(lastToolPath),
+        })
+        logger.info('Arena Copilot forcing HTML content-path redirect', {
+          round,
+          forcedHtmlContentPathRedirects,
+          leafPath: lastToolPath,
+        })
+        continue
+      }
+
       const canForceHtmlSandboxInspect = shouldForceHtmlSandboxInspectNudge({
         postBuildToolMode,
         forcedHtmlSandboxInspectNudges,
@@ -1790,6 +1881,43 @@ export async function* runLocalCopilotAgent(
           round,
           forcedHtmlSandboxInspectNudges,
           htmlSandboxInspectCount,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
+      const canForceHtmlPreferredPathWrite = shouldForceHtmlPreferredPathWriteNudge({
+        postBuildToolMode,
+        forcedHtmlPreferredPathWriteNudges,
+        maxForcedHtmlPreferredPathWriteNudges: MAX_HTML_PREFERRED_PATH_WRITE_NUDGE_ROUNDS,
+        emptyGrepsBeforeNudge: HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE,
+        emptyGrepCount: emptyHtmlGrepCount,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        preferredPath: activeEditTarget.preferredPath,
+        hasFileMutationTools: hasFileMutations,
+      })
+
+      if (canForceHtmlPreferredPathWrite && activeEditTarget.preferredPath) {
+        forcedHtmlPreferredPathWriteNudges += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildHtmlPreferredPathWriteNudgeMessage({
+            preferredPath: activeEditTarget.preferredPath,
+            redesign: htmlRedesignIntent,
+            hasPreferredContentRead,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML preferred-path write nudge', {
+          round,
+          forcedHtmlPreferredPathWriteNudges,
+          emptyHtmlGrepCount,
           preferredPath: activeEditTarget.preferredPath,
         })
         continue
@@ -2319,6 +2447,12 @@ export async function* runLocalCopilotAgent(
               args: parallelArgs,
               ...(toolResult.error ? { error: toolResult.error } : {}),
             })
+            pushHtmlSandboxRejectNudge(
+              parallelCall.name,
+              parallelArgs,
+              toolResult.success,
+              deferredSystemMessages
+            )
 
             turnCost.addToolBilling({
               toolName: parallelCall.name,
@@ -2687,6 +2821,7 @@ export async function* runLocalCopilotAgent(
         args: parsedArgs,
         ...(toolResult.error ? { error: toolResult.error } : {}),
       })
+      pushHtmlSandboxRejectNudge(call.name, parsedArgs, toolResult.success, deferredSystemMessages)
       if (isWorkflowRunToolName(call.name)) {
         streamedCharsAtLastRunTool = streamedUserFacingText.length
       }

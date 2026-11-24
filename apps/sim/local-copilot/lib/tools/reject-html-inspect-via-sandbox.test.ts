@@ -24,6 +24,8 @@ describe('rejectHtmlInspectViaSandbox', () => {
     })
     expect(result?.success).toBe(false)
     expect(result?.error).toBe(HTML_INSPECT_VIA_SANDBOX_ERROR)
+    expect(result?.error).toMatch(/workspace_file/i)
+    expect(result?.error).toMatch(/Do not retry function_execute/i)
   })
 
   it('allows real compute that is not an HTML inspect dump', () => {

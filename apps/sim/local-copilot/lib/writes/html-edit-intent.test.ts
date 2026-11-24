@@ -4,32 +4,46 @@
 import { describe, expect, it } from 'vitest'
 import {
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE,
   HTML_SANDBOX_INSPECTS_BEFORE_NUDGE,
+  MAX_HTML_CONTENT_PATH_REDIRECT_ROUNDS,
   MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
   MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
   MAX_HTML_IMPROVE_FIRST_CALL_NUDGE_ROUNDS,
+  MAX_HTML_PREFERRED_PATH_WRITE_NUDGE_ROUNDS,
   MAX_HTML_SANDBOX_INSPECT_NUDGE_ROUNDS,
 } from '@/local-copilot/lib/agent/limits'
 import {
+  buildHtmlContentPathRedirectMessage,
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
   buildHtmlImproveFirstCallNudgeMessage,
+  buildHtmlPreferredPathWriteNudgeMessage,
   buildHtmlRedesignStagnationUserMessage,
   buildHtmlSandboxInspectNudgeMessage,
+  buildHtmlSandboxInspectRejectNudgeMessage,
+  countEmptyOrUselessHtmlGreps,
+  countHtmlSandboxInspectAttempts,
   countHtmlSandboxInspects,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
   hasHtmlEditContext,
+  hasSuccessfulPreferredHtmlContentRead,
+  isEmptyOrUselessHtmlGrep,
+  isHtmlLeafPathWithoutContent,
   isHtmlSandboxInspectCall,
   looksLikeHtmlAnalysisOnly,
   looksLikeHtmlEditIntent,
   looksLikeHtmlRedesignIntent,
+  shouldForceHtmlContentPathRedirect,
   shouldForceHtmlEditGrepNudge,
   shouldForceHtmlEditWriteNudge,
   shouldForceHtmlImproveFirstCallNudge,
+  shouldForceHtmlPreferredPathWriteNudge,
   shouldForceHtmlSandboxInspectNudge,
   shouldStopHtmlEditWithoutWrite,
+  toHtmlContentPath,
 } from '@/local-copilot/lib/writes/html-edit-intent'
 
 describe('looksLikeHtmlEditIntent / analysis-only', () => {
@@ -353,6 +367,15 @@ describe('HTML edit write nudge', () => {
     expect(shouldForceHtmlEditWriteNudge(writeBase)).toBe(true)
   })
 
+  it('forces a write nudge even with non-bridge thinking prose', () => {
+    expect(
+      shouldForceHtmlEditWriteNudge({
+        ...writeBase,
+        streamedUserFacingText: 'Finding actionable items\n\nI am focusing on the Add task card.',
+      })
+    ).toBe(true)
+  })
+
   it('does not force before the inspection threshold', () => {
     expect(
       shouldForceHtmlEditWriteNudge({
@@ -420,5 +443,127 @@ describe('HTML edit write nudge', () => {
     })
     expect(redesignWrite).toMatch(/operation=update/i)
     expect(redesignWrite).toMatch(/function_execute/i)
+  })
+})
+
+describe('HTML leaf path + empty grep redirects', () => {
+  it('detects leaf HTML paths without /content', () => {
+    expect(isHtmlLeafPathWithoutContent('files/Final Todo.html')).toBe(true)
+    expect(isHtmlLeafPathWithoutContent('files/Final%20Todo.html')).toBe(true)
+    expect(isHtmlLeafPathWithoutContent('files/Final Todo.html/content')).toBe(false)
+    expect(toHtmlContentPath('files/Final Todo.html')).toBe('files/Final Todo.html/content')
+  })
+
+  it('treats empty matches and leaf greps as useless', () => {
+    expect(
+      isEmptyOrUselessHtmlGrep({
+        name: 'grep',
+        success: true,
+        args: { path: 'files/Final Todo.html/content', pattern: 'ASSIGN TO' },
+        result: { matches: [] },
+      })
+    ).toBe(true)
+    expect(
+      isEmptyOrUselessHtmlGrep({
+        name: 'grep',
+        success: true,
+        args: { path: 'files/Final Todo.html', pattern: 'PRIORITY' },
+        result: { matches: [{ path: 'x', line: 1, content: 'meta' }] },
+      })
+    ).toBe(true)
+    expect(
+      isEmptyOrUselessHtmlGrep({
+        name: 'grep',
+        success: true,
+        args: { path: 'files/Final Todo.html/content', pattern: 'form' },
+        result: { matches: [{ path: 'x', line: 1, content: '<form' }] },
+      })
+    ).toBe(false)
+  })
+
+  it('counts sandbox inspect attempts including rejects', () => {
+    const sandboxArgs = {
+      title: 'Inspect',
+      code: 'open("Final Todo.html"); print(lines)',
+      inputs: { files: [{ path: 'files/Final Todo.html' }] },
+    }
+    expect(
+      countHtmlSandboxInspectAttempts([
+        { name: 'function_execute', args: sandboxArgs },
+        { name: 'function_execute', args: sandboxArgs },
+        { name: 'read', args: { path: 'files/Final Todo.html/content' } },
+      ])
+    ).toBe(2)
+    expect(
+      countHtmlSandboxInspects([
+        { name: 'function_execute', success: false, args: sandboxArgs },
+        { name: 'function_execute', success: true, args: sandboxArgs },
+      ])
+    ).toBe(1)
+  })
+
+  it('redirects leaf HTML grep/read to /content', () => {
+    expect(
+      shouldForceHtmlContentPathRedirect({
+        postBuildToolMode: 'all',
+        forcedHtmlContentPathRedirects: 0,
+        maxForcedHtmlContentPathRedirects: MAX_HTML_CONTENT_PATH_REDIRECT_ROUNDS,
+        round: 2,
+        maxToolRounds: 20,
+        userMessage: 'Here can you fix the highlighted UI, looks like UI is broken.',
+        hasHtmlContext: true,
+        hasFileMutationTools: false,
+        lastToolName: 'grep',
+        lastToolPath: 'files/Final%20Todo.html',
+        lastToolSuccess: true,
+      })
+    ).toBe(true)
+    expect(buildHtmlContentPathRedirectMessage('files/Final Todo.html')).toMatch(
+      /Final Todo\.html\/content/
+    )
+  })
+
+  it('forces preferred-path write after enough empty greps', () => {
+    const greps = Array.from({ length: HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE }, () => ({
+      name: 'grep',
+      success: true,
+      args: { path: 'files/Final Todo.html/content', pattern: 'ASSIGN TO' },
+      result: { matches: [] },
+    }))
+    expect(countEmptyOrUselessHtmlGreps(greps)).toBe(HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE)
+    expect(
+      shouldForceHtmlPreferredPathWriteNudge({
+        postBuildToolMode: 'all',
+        forcedHtmlPreferredPathWriteNudges: 0,
+        maxForcedHtmlPreferredPathWriteNudges: MAX_HTML_PREFERRED_PATH_WRITE_NUDGE_ROUNDS,
+        emptyGrepsBeforeNudge: HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE,
+        emptyGrepCount: HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE,
+        round: 4,
+        maxToolRounds: 20,
+        userMessage: 'Here can you fix the highlighted UI, looks like UI is broken.',
+        hasHtmlContext: true,
+        preferredPath: 'files/Final Todo.html',
+        hasFileMutationTools: false,
+      })
+    ).toBe(true)
+    expect(
+      hasSuccessfulPreferredHtmlContentRead(
+        [{ name: 'read', success: true, args: { path: 'files/Final Todo.html/content' } }],
+        'files/Final Todo.html'
+      )
+    ).toBe(true)
+    expect(
+      buildHtmlPreferredPathWriteNudgeMessage({
+        preferredPath: 'files/Final Todo.html',
+        redesign: true,
+        hasPreferredContentRead: false,
+      })
+    ).toMatch(/Final Todo\.html\/content/)
+    expect(
+      buildHtmlSandboxInspectRejectNudgeMessage({
+        preferredPath: 'files/Final Todo.html',
+        redesign: true,
+      })
+    ).toMatch(/workspace_file operation=update/i)
   })
 })

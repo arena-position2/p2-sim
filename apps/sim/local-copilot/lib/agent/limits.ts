@@ -56,6 +56,22 @@ export const HTML_SANDBOX_INSPECTS_BEFORE_NUDGE = 1
 export const MAX_HTML_EDIT_GREP_NUDGE_ROUNDS = 1
 
 /**
+ * Empty / leaf-metadata greps on an HTML edit turn before forcing
+ * read(preferredPath/content) → workspace_file.
+ */
+export const HTML_EMPTY_GREPS_BEFORE_PREFERRED_WRITE_NUDGE = 3
+
+/**
+ * Preferred-path write redirects after empty greps (at most one).
+ */
+export const MAX_HTML_PREFERRED_PATH_WRITE_NUDGE_ROUNDS = 1
+
+/**
+ * Soft redirects when grep/read hits a leaf `.html` path without `/content`.
+ */
+export const MAX_HTML_CONTENT_PATH_REDIRECT_ROUNDS = 2
+
+/**
  * Successful file inspections (read/grep/glob/artifact) before an HTML edit
  * turn is forced to call workspace_file instead of paging further.
  */
