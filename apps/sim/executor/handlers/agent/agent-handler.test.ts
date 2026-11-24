@@ -44,7 +44,7 @@ import {
   setEncryptedConversationMessage,
 } from '@/providers/conversation-metadata'
 import { installStreamingCostPolicy } from '@/providers/cost-policy'
-import { getModelCapabilities, SIM_AUTO_MODEL_ID } from '@/providers/models'
+import { ARENA_AUTO_MODEL_ID, getModelCapabilities } from '@/providers/models'
 import {
   getProviderToolInputProvenance,
   getProviderToolModelInputRegistry,
@@ -1207,7 +1207,7 @@ describe('AgentBlockHandler', () => {
       })
 
       const result = (await handler.execute(mockContext, mockBlock, {
-        model: SIM_AUTO_MODEL_ID,
+        model: ARENA_AUTO_MODEL_ID,
         userPrompt: 'Hello!',
       })) as {
         model: string
@@ -1216,8 +1216,8 @@ describe('AgentBlockHandler', () => {
         providerTiming: { timeSegments: Array<{ name?: string; provider?: string }> }
       }
 
-      expect(result.model).toBe(SIM_AUTO_MODEL_ID)
-      expect(result.providerTiming.timeSegments[0].name).toBe(SIM_AUTO_MODEL_ID)
+      expect(result.model).toBe(ARENA_AUTO_MODEL_ID)
+      expect(result.providerTiming.timeSegments[0].name).toBe(ARENA_AUTO_MODEL_ID)
       expect(result.providerTiming.timeSegments[0].provider).toBeUndefined()
       // Only the label changes: tokens and the already-priced cost are untouched.
       expect(result.tokens).toEqual({ input: 10, output: 20, total: 30 })

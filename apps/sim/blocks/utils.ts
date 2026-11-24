@@ -8,6 +8,7 @@ import { getScopesForService } from '@/lib/oauth/utils'
 import { containsReference } from '@/lib/workflows/sanitization/references'
 import type { SubBlockConfig } from '@/blocks/types'
 import {
+  ARENA_AUTO_MODEL_ID,
   findProviderFromModel,
   getBaseModelProviders,
   getHostedModels,
@@ -18,7 +19,6 @@ import {
   isCustomModelId,
   isEvaluationModel,
   orderModelIdsByReleaseDate,
-  SIM_AUTO_MODEL_ID,
 } from '@/providers/models'
 import { isPiSupportedModel } from '@/providers/pi-providers'
 import type { ProviderId } from '@/providers/types'
@@ -123,10 +123,10 @@ function buildModelOptions(includeEvaluation: boolean) {
   // Hosted-only automatic model. Deliberately LAST in the list (limited
   // visibility for the initial release): available to anyone who scrolls or
   // searches for it, but never the first thing the dropdown offers.
-  // Arena: AgentIcon (inline SVG sparkles) — not SimAutoIcon / remote PNG.
-  // Auto resolves via `@/lib/model-router/arena-resolve`, not mothership resolve.
+  // Arena: store `arena-auto` (not `sim-auto`) so inputs/logs show our id.
+  // Agent resolves via `@/lib/model-router/arena-resolve`.
   if (getDeploymentShape().hosted) {
-    options.push({ label: 'Auto', id: SIM_AUTO_MODEL_ID, icon: AgentIcon })
+    options.push({ label: 'Auto', id: ARENA_AUTO_MODEL_ID, icon: AgentIcon })
   }
 
   return options

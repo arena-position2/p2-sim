@@ -6420,16 +6420,22 @@ export function suggestModelIdsForUnknownModel(_modelId: string, limit = 5): str
 }
 
 /**
- * Pseudo-model id for the agent block's automatic model. Not a real catalog
- * entry: at execution time the resolver (lib/model-router) classifies the task
- * via mothership and swaps in a concrete model from the hosted Fireworks pool
- * before any provider/pricing lookup runs. Hosted Sim only.
+ * Upstream Sim pseudo-model id for automatic routing. Kept for imported
+ * workflows and mothership Evaluator/Router paths.
  */
 export const SIM_AUTO_MODEL_ID = 'sim-auto'
 
-/** True when the configured model is the sim-auto pseudo-model. */
+/**
+ * Arena Auto pseudo-model id. Not a real catalog entry: Agent execution
+ * resolves it via `@/lib/model-router/arena-resolve` (DB pool). Shown in
+ * block inputs, outputs, and logs instead of `sim-auto`.
+ */
+export const ARENA_AUTO_MODEL_ID = 'arena-auto'
+
+/** True when the configured model is Arena Auto or legacy Sim Auto. */
 export function isAutoModel(model: string): boolean {
-  return model.trim().toLowerCase() === SIM_AUTO_MODEL_ID
+  const id = model.trim().toLowerCase()
+  return id === ARENA_AUTO_MODEL_ID || id === SIM_AUTO_MODEL_ID
 }
 
 export function getBaseModelProviders(): Record<string, ProviderId> {

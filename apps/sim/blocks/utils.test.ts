@@ -48,8 +48,12 @@ vi.mock('@/providers/models', async (importOriginal) => ({
   getProviderModels: mockGetProviderModels,
   getProviderIcon: mockGetProviderIcon,
   getBaseModelProviders: mockGetBaseModelProviders,
+  ARENA_AUTO_MODEL_ID: 'arena-auto',
   SIM_AUTO_MODEL_ID: 'sim-auto',
-  isAutoModel: (model: string) => model.trim().toLowerCase() === 'sim-auto',
+  isAutoModel: (model: string) => {
+    const id = model.trim().toLowerCase()
+    return id === 'arena-auto' || id === 'sim-auto'
+  },
 }))
 
 vi.mock('@/providers/utils', () => providersUtilsMock)

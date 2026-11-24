@@ -126,7 +126,7 @@ import {
   canUseProviderLargeFilePath,
   getInlineHydrationMaxBytes,
 } from '@/providers/file-attachments.server'
-import { isAutoModel, isEvaluationModel, SIM_AUTO_MODEL_ID } from '@/providers/models'
+import { ARENA_AUTO_MODEL_ID, isAutoModel, isEvaluationModel } from '@/providers/models'
 import {
   type ProviderToolInputProvenance,
   registerProviderToolInputProvenance,
@@ -453,6 +453,10 @@ export class AgentBlockHandler implements BlockHandler {
       let model = configuredModel
       let autoRouting: AutoRoutingResult | null = null
       if (isAutoModel(configuredModel)) {
+        // Normalize legacy `sim-auto` so execution inputs/logs show `arena-auto`.
+        filteredInputs.model = ARENA_AUTO_MODEL_ID
+        modelInputs.model = ARENA_AUTO_MODEL_ID
+
         // Arena Auto: classify (LLM or heuristic) → pick from auto_routing_pool.
         // productSurface 'agent' excludes arena_copilot-only rows.
         autoRouting = await resolveAutoModel({
@@ -635,7 +639,7 @@ export class AgentBlockHandler implements BlockHandler {
           model,
           apiKey: modelInputs.apiKey,
           isPrimary: true,
-          ...(autoRouting ? { traceName: SIM_AUTO_MODEL_ID } : {}),
+          ...(autoRouting ? { traceName: ARENA_AUTO_MODEL_ID } : {}),
         },
         ...fallbackCandidates.map((candidate) => ({ ...candidate, isPrimary: false })),
       ]
@@ -648,7 +652,7 @@ export class AgentBlockHandler implements BlockHandler {
         retryPrimaryOnStreamStart:
           fallbacksHeld && configuredFallbacks.length > 0 && !modelInputs.previousInteractionId,
         primaryModel: model,
-        configuredModel: autoRouting ? SIM_AUTO_MODEL_ID : model,
+        configuredModel: autoRouting ? ARENA_AUTO_MODEL_ID : model,
         primaryProviderId: providerId,
         messages: messagesWithInputFiles,
         hydratedByProvider,
@@ -793,7 +797,7 @@ export class AgentBlockHandler implements BlockHandler {
   }
 
   /**
-   * Reports a completed auto run under the `sim-auto` identity everywhere the
+   * Reports a completed Auto run under the `arena-auto` identity everywhere the
    * run is observed — the block output, the trace span, and the usage-ledger
    * row keyed on the model name — so the pool model that served the request
    * stays an implementation detail (matching the block's configured model and
@@ -818,7 +822,7 @@ export class AgentBlockHandler implements BlockHandler {
         timeSegments?: Array<{ type?: string; name?: string; provider?: string }>
       }
     }
-    target.model = SIM_AUTO_MODEL_ID
+    target.model = ARENA_AUTO_MODEL_ID
 
     // Model segments name themselves after the model (every provider does) and
     // carry the serving provider, which the log detail renders as that
@@ -826,7 +830,7 @@ export class AgentBlockHandler implements BlockHandler {
     for (const segment of target.providerTiming?.timeSegments ?? []) {
       if (segment.type !== 'model') continue
       if (segment.name?.toLowerCase() === resolvedModel.toLowerCase()) {
-        segment.name = SIM_AUTO_MODEL_ID
+        segment.name = ARENA_AUTO_MODEL_ID
       }
       segment.provider = undefined
     }
