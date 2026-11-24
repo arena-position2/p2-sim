@@ -1,5 +1,6 @@
 import { toError } from '@sim/utils/errors'
-import { SimAutoIcon } from '@/components/icons'
+// Arena: Auto dropdown uses AgentIcon (not upstream SimAutoIcon).
+import { AgentIcon } from '@/components/icons'
 import { getDeploymentShape } from '@/lib/core/config/deployment-shape'
 import { getEnv, isTruthy } from '@/lib/core/config/env'
 import { isOllamaConfigured } from '@/lib/core/config/env-flags'
@@ -122,8 +123,10 @@ function buildModelOptions(includeEvaluation: boolean) {
   // Hosted-only automatic model. Deliberately LAST in the list (limited
   // visibility for the initial release): available to anyone who scrolls or
   // searches for it, but never the first thing the dropdown offers.
+  // Arena: AgentIcon (inline SVG sparkles) — not SimAutoIcon / remote PNG.
+  // Auto resolves via `@/lib/model-router/arena-resolve`, not mothership resolve.
   if (getDeploymentShape().hosted) {
-    options.push({ label: 'Auto', id: SIM_AUTO_MODEL_ID, icon: SimAutoIcon })
+    options.push({ label: 'Auto', id: SIM_AUTO_MODEL_ID, icon: AgentIcon })
   }
 
   return options

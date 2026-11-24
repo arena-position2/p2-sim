@@ -168,28 +168,46 @@ export function Spinner() {
 }
 
 /**
- * Arena Agent glyph — vimi sparkle PNG on the purple→teal gradient.
- * Rendered via next/image so tiled surfaces that opt in with `[&_img]:size-full`
- * get the same full-bleed presence as Image Generator's colored tile.
+ * Arena Agent glyph — white sparkles on the purple→teal gradient.
+ * Inline SVG so canvas, toolbar, model dropdown, and chat never depend on a
+ * remote asset (the S3 `vimi-sparkle.png` 403s and left only the gradient fill,
+ * and `next/image` + `size-full` also blew up the Auto model chip).
  */
-export function AgentIcon({
-  className,
-  style,
-  ...props
-}: Omit<ImageProps, 'src' | 'alt' | 'fill'>) {
+export function AgentIcon({ className, style, ...props }: SVGProps<SVGSVGElement>) {
+  const gradientId = useId()
   return (
-    <Image
-      src='https://arenav2image.s3.us-west-1.amazonaws.com/vimi-sparkle.png'
-      alt='Agent'
-      width={14}
-      height={14}
+    <svg
+      viewBox='0 0 24 24'
+      fill='none'
+      role='img'
+      aria-label='Agent'
+      xmlns='http://www.w3.org/2000/svg'
+      className={cn('box-border size-full rounded-[4px]', className)}
+      style={style}
       {...props}
-      style={{
-        backgroundImage: 'linear-gradient(179.65deg, #7B4796 -0.59%, #017496 102.42%)',
-        ...style,
-      }}
-      className={cn('box-border size-full rounded-[4px] object-contain p-[20%]', className)}
-    />
+    >
+      <defs>
+        <linearGradient id={gradientId} x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0%' stopColor='#7B4796' />
+          <stop offset='100%' stopColor='#017496' />
+        </linearGradient>
+      </defs>
+      <rect width='24' height='24' rx='4' fill={`url(#${gradientId})`} />
+      <path
+        d='M12 5.5l1.15 2.75 2.75 1.15-2.75 1.15L12 13.3l-1.15-2.75L8.1 9.4l2.75-1.15L12 5.5z'
+        fill='white'
+      />
+      <path
+        d='M17.2 13.2l.7 1.65 1.65.7-1.65.7-.7 1.65-.7-1.65-1.65-.7 1.65-.7.7-1.65z'
+        fill='white'
+        opacity='0.9'
+      />
+      <path
+        d='M6.8 13.6l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5.5-1.2z'
+        fill='white'
+        opacity='0.85'
+      />
+    </svg>
   )
 }
 

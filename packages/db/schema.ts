@@ -9289,3 +9289,72 @@ export const copilotServiceUsage = pgTable(
     index('copilot_service_usage_pending_idx').on(t.nextAttemptAt).where(sql`delivered_at IS NULL`),
   ]
 )
+
+/**
+ * Arena Auto — tier catalog the local classifier may choose
+ * (`fast` | `workhorse` | `coding` | `reasoning` | `creative` | `research` | `search`).
+ *
+ * Consumed only by `@/lib/model-router/arena-resolve` (Agent). Upstream Sim Auto
+ * still uses mothership `/api/model-router` via `@/lib/model-router/resolve`.
+ * Seed / maintain rows with the manual SQL script
+ * `packages/db/migrations/auto-routing-pool-schema.sql` (not a Drizzle journal
+ * migration). Turning `is_active` off here does not cascade to pool rows —
+ * runtime must join and filter both tables.
+ */
+export const autoRouteTier = pgTable('auto_route_tier', {
+  tierCode: text('tier_code').primaryKey(),
+  displayName: text('display_name').notNull(),
+  description: text('description').notNull(),
+  sortOrder: integer('sort_order').notNull().unique(),
+  isActive: boolean('is_active').notNull().default(true),
+})
+
+/**
+ * Arena Auto — concrete model slots: media × tier × product × rank → model_id.
+ *
+ * Lookup path: Agent `sim-auto` → `arena-resolve.resolveAutoModel` → classifier
+ * picks a tier + complexity_score → this table supplies the catalog model.
+ * `product_surface` is `agent` | `arena_copilot` | `both`. Prefer exact
+ * `complexity_score`, then nearest; `selection_rank` 1 is primary.
+ * Seeded by `packages/db/migrations/auto-routing-pool-schema.sql`.
+ */
+export const autoRoutingPool = pgTable(
+  'auto_routing_pool',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedByDefaultAsIdentity(),
+    /** `text` | `image` | `file` | `live_data` — mapped from Agent attachments + live hints. */
+    mediaKind: text('media_kind').notNull(),
+    routeTier: text('route_tier')
+      .notNull()
+      .references(() => autoRouteTier.tierCode),
+    /** Typical band for this slot (classifier score 1–5); runtime prefers an exact match. */
+    complexityScore: integer('complexity_score').notNull().default(3),
+    modelId: text('model_id').notNull(),
+    /** 1 = primary candidate, then fallbacks in ascending order. */
+    selectionRank: integer('selection_rank').notNull(),
+    /** `agent` | `arena_copilot` | `both` — Agent Auto queries agent+both. */
+    productSurface: text('product_surface').notNull(),
+    bestFor: text('best_for'),
+    notes: text('notes'),
+    requiresTools: boolean('requires_tools'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    uniqueSlot: unique('auto_routing_pool_unique_slot').on(
+      table.mediaKind,
+      table.routeTier,
+      table.productSurface,
+      table.selectionRank
+    ),
+    lookupIdx: index('idx_auto_routing_pool_lookup').on(
+      table.mediaKind,
+      table.routeTier,
+      table.productSurface,
+      table.isActive,
+      table.selectionRank
+    ),
+    modelIdx: index('idx_auto_routing_pool_model').on(table.modelId),
+  })
+)

@@ -24,13 +24,17 @@ import { createMcpToolId } from '@/lib/mcp/utils'
 import { type AgentTurnSession, openAgentTurnSession } from '@/lib/memory/agent-turn-session'
 import { MEMORY } from '@/lib/memory/constants'
 import { createAgentMemoryRetrievalTool } from '@/lib/memory/retrieval-tool'
+// Arena Auto (Agent-only): local classifier + Postgres pool tables.
+// Import from arena-resolve — NOT `@/lib/model-router/resolve` (Sim mothership /
+// Copilot credits). Evaluator + Router still use resolve.ts on purpose.
 import {
   type AutoMediaKind,
   type AutoRoutingResult,
   type AutoRoutingSignals,
+  formatAutoRoutingRecentHistory,
   resolveAutoModel,
   SIM_AUTO_SYSTEM_PREAMBLE,
-} from '@/lib/model-router/resolve'
+} from '@/lib/model-router/arena-resolve'
 import { importWorkspaceFileSecretProvenanceForModelView } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
 import {
   getFileExtension,
@@ -170,11 +174,11 @@ interface IndexedToolInput {
 }
 
 /**
- * Removes the sim-auto identity preamble from the system messages built for a
- * routed primary. A fallback the builder named is not a pool model, so it must
- * not be told to hide which model it is. Messages are built once per block run
- * (building them appends to memory), which is why this strips rather than
- * rebuilds.
+ * Removes the Arena Auto identity preamble from system messages built for a
+ * routed primary. A named fallback is not a pool model, so it must not be told
+ * to hide which model it is. Messages are built once per block run (building
+ * them appends to memory), which is why this strips rather than rebuilds.
+ * Preamble text comes from `@/lib/model-router/arena-resolve`.
  */
 function stripAutoPreamble(messages: Message[] | undefined): Message[] | undefined {
   if (!messages) return messages
@@ -449,6 +453,8 @@ export class AgentBlockHandler implements BlockHandler {
       let model = configuredModel
       let autoRouting: AutoRoutingResult | null = null
       if (isAutoModel(configuredModel)) {
+        // Arena Auto: classify (LLM or heuristic) → pick from auto_routing_pool.
+        // productSurface 'agent' excludes arena_copilot-only rows.
         autoRouting = await resolveAutoModel({
           ctx,
           blockId: block.id,
@@ -463,29 +469,36 @@ export class AgentBlockHandler implements BlockHandler {
             responseFormat
           ),
           fallbackModel: AGENT.DEFAULT_MODEL,
+          productSurface: 'agent',
         })
         model = autoRouting.model
         logger.info(
-          'Resolved sim-auto model',
+          'Resolved Arena Auto model',
           projectAgentDiagnosticMetadata(
             ctx,
             {
               blockId: block.id,
               model,
               tier: autoRouting.tier,
+              complexityScore: autoRouting.complexityScore,
+              poolComplexityScore: autoRouting.poolComplexityScore,
+              selectionRank: autoRouting.selectionRank,
               decidedBy: autoRouting.decidedBy,
             },
             {
               blockId: block.id,
               tier: autoRouting.tier,
+              complexityScore: autoRouting.complexityScore,
+              poolComplexityScore: autoRouting.poolComplexityScore,
+              selectionRank: autoRouting.selectionRank,
               decidedBy: autoRouting.decidedBy,
             }
           )
         )
-        // Hidden identity preamble for every auto execution (fallback included):
-        // keeps pool models in English by default and off the topic of which
-        // underlying model they are. Applied after signal building so the
-        // preamble never influences classification.
+        // Arena Auto identity preamble (from arena-resolve). Applied AFTER
+        // signal building so the preamble never influences classification.
+        // Also applied on fallback so the user still sees "Arena Auto", not
+        // the concrete catalog model name.
         modelInputs.systemPrompt = [SIM_AUTO_SYSTEM_PREAMBLE, modelInputs.systemPrompt]
           .filter(Boolean)
           .join('\n\n')
@@ -714,9 +727,9 @@ export class AgentBlockHandler implements BlockHandler {
   }
 
   /**
-   * Derives the compact routing signals for sim-auto resolution from the
-   * block's resolved inputs. Excerpts only — the resolver truncates further
-   * and mothership re-clamps server-side.
+   * Derives compact Arena Auto routing signals from the block's resolved inputs.
+   * Includes a truncated prior-turn snippet (`recentHistory`) so follow-ups keep
+   * scenario context for tier selection — still excerpts only, not full chat.
    */
   private buildAutoRoutingSignals(inputs: AgentInputs, responseFormat: any): AutoRoutingSignals {
     const lastMessage =
@@ -724,17 +737,28 @@ export class AgentBlockHandler implements BlockHandler {
         ? inputs.userPrompt
         : inputs.userPrompt != null
           ? stringifyJSON(inputs.userPrompt)
-          : (inputs.messages?.at(-1)?.content ?? '')
+          : typeof inputs.messages?.at(-1)?.content === 'string'
+            ? (inputs.messages.at(-1)?.content as string)
+            : inputs.messages?.at(-1)?.content != null
+              ? stringifyJSON(inputs.messages.at(-1)?.content)
+              : ''
     const systemPrompt = inputs.systemPrompt ?? ''
+    // Prior turns for the classifier (capped). Excludes the current lastMessage
+    // when it is already the trailing chat message so we do not double-send it.
+    const recentHistory = formatAutoRoutingRecentHistory(inputs.messages, {
+      excludeTrailingContent: lastMessage,
+    })
     const normalizedFiles = normalizeFileInput(inputs.files)
     const approxChars =
       systemPrompt.length +
       lastMessage.length +
+      (recentHistory?.length ?? 0) +
       (inputs.messages ? stringifyJSON(inputs.messages).length : 0)
 
     return {
       systemPrompt,
       lastMessage,
+      recentHistory,
       messageCount: (inputs.messages?.length ?? 0) + (inputs.userPrompt ? 1 : 0),
       toolNames: (inputs.tools ?? []).map((t) => t.title || t.type || 'tool'),
       mediaKind: this.resolveMediaKind(inputs, normalizedFiles),
