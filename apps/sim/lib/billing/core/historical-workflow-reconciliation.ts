@@ -6,6 +6,7 @@ import {
   workflowExecutionSnapshots,
 } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
+import { mapWithConcurrency } from '@sim/utils/concurrency'
 import {
   type DescribedError,
   describeError,
@@ -43,7 +44,6 @@ import {
   describeRetryableInfrastructureError,
   withInfrastructureRetry,
 } from '@/lib/core/errors/retryable-infrastructure'
-import { mapWithConcurrency } from '@/lib/core/utils/concurrency'
 import { isLargeValueRef } from '@/lib/execution/payloads/large-value-ref'
 import { reconcileImageProviderAndModel } from '@/lib/image-generation/block-model-config'
 import {

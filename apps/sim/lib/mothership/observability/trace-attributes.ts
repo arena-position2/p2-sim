@@ -132,6 +132,7 @@ export const TraceAttr = {
   CopilotTransport: 'copilot.transport',
   CopilotUserMessagePreview: 'copilot.user.message_preview',
   CopilotValidateOutcome: 'copilot.validate.outcome',
+  CopilotVfsReadOutcome: 'copilot.vfs.read.outcome',
   DbOperation: 'db.operation',
   DbSqlTable: 'db.sql.table',
   DbSystem: 'db.system',

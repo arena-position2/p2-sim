@@ -5,13 +5,7 @@ import { isExecutionCancelled } from '@/lib/execution/cancellation'
 import { executeInIsolatedVM } from '@/lib/execution/isolated-vm'
 import { compactSubflowResults } from '@/lib/execution/payloads/serializer'
 import { isLikelyReferenceSegment } from '@/lib/workflows/sanitization/references'
-import {
-  buildLoopIndexCondition,
-  CONTROL_BACK_EDGE_HANDLES,
-  DEFAULTS,
-  EDGE,
-  PARALLEL,
-} from '@/executor/constants'
+import { CONTROL_BACK_EDGE_HANDLES, DEFAULTS, EDGE, PARALLEL } from '@/executor/constants'
 import type { DAG } from '@/executor/dag/builder'
 import type { EdgeManagerV2 } from '@/executor/execution/edge-manager-v2'
 import type { LoopScope } from '@/executor/execution/state'
@@ -55,6 +49,14 @@ async function replaceLoopConditionReferences(
     cursor = index + fullMatch.length
   }
   return result + condition.slice(cursor)
+}
+
+/** While loops, and Do While loops given a condition, stop only when their condition does. */
+function isConditionDriven(scope: LoopScope): boolean {
+  return (
+    scope.loopType === 'while' ||
+    (scope.loopType === 'doWhile' && scope.maxIterations === undefined)
+  )
 }
 
 export type LoopRoute = typeof EDGE.LOOP_CONTINUE | typeof EDGE.LOOP_EXIT
@@ -119,7 +121,6 @@ export class LoopOrchestratorV2 {
         scope.loopType = 'for'
         const requestedIterations = loopConfig.iterations || DEFAULTS.DEFAULT_LOOP_ITERATIONS
         scope.maxIterations = requestedIterations
-        scope.condition = buildLoopIndexCondition(scope.maxIterations)
         break
       }
 
@@ -139,7 +140,6 @@ export class LoopOrchestratorV2 {
           scope.items = []
           scope.maxIterations = 0
           scope.validationError = errorMessage
-          scope.condition = buildLoopIndexCondition(0)
           ctx.loopExecutions?.set(loopId, scope)
           throw new Error(errorMessage)
         }
@@ -180,7 +180,6 @@ export class LoopOrchestratorV2 {
           scope.items = []
           scope.maxIterations = 0
           scope.validationError = persistedErrorMessage
-          scope.condition = buildLoopIndexCondition(0)
           ctx.loopExecutions?.set(loopId, scope)
           throw new Error(persistedErrorMessage)
         }
@@ -193,7 +192,6 @@ export class LoopOrchestratorV2 {
         }
         scope.maxIterations = items.length
         scope.item = items[0]
-        scope.condition = buildLoopIndexCondition(scope.maxIterations)
         break
       }
 
@@ -209,7 +207,6 @@ export class LoopOrchestratorV2 {
         } else {
           const requestedIterations = loopConfig.iterations || DEFAULTS.DEFAULT_LOOP_ITERATIONS
           scope.maxIterations = requestedIterations
-          scope.condition = buildLoopIndexCondition(scope.maxIterations)
         }
         break
       }
@@ -384,6 +381,10 @@ export class LoopOrchestratorV2 {
     scope: LoopScope,
     iteration?: number
   ): Promise<boolean> {
+    if (!isConditionDriven(scope)) {
+      return (iteration ?? scope.iteration) < (scope.maxIterations ?? 0)
+    }
+
     if (!scope.condition) {
       logger.warn('No condition defined for loop')
       return false

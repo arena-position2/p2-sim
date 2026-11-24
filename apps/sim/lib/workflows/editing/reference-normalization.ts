@@ -1,10 +1,4 @@
-import {
-  buildReference,
-  isUuid,
-  normalizeName,
-  REFERENCE,
-  SPECIAL_REFERENCE_PREFIXES,
-} from '@/executor/constants'
+import { isUuid, normalizeName, REFERENCE, SPECIAL_REFERENCE_PREFIXES } from '@/executor/constants'
 import { createReferencePattern } from '@/executor/utils/reference-validation'
 
 interface ReferenceableBlock {
@@ -62,7 +56,7 @@ export function normalizeBlockReferencesInString(
   return value.replace(pattern, (full, inner: string) => {
     const normalized = normalizeReferenceContent(inner.trim(), idToName)
     if (normalized === inner.trim()) return full
-    return buildReference(normalized)
+    return `${REFERENCE.START}${normalized}${REFERENCE.END}`
   })
 }
 

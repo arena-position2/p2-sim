@@ -74,6 +74,7 @@ const ENTERPRISE_GATED_SECTION_LABELS: Record<OrganizationSettingsSection, strin
   security: 'session policies, organization session revocation, and outbound IP settings',
   'data-retention': 'data retention policies',
   'data-drains': 'data drains',
+  whitelabeling: 'whitelabel branding',
 }
 
 /**

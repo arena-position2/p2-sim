@@ -1,8 +1,9 @@
 /**
  * @vitest-environment node
  */
+
+import { getTimezoneOptions } from '@sim/utils/timezone'
 import { describe, expect, it } from 'vitest'
-import { getTimezoneOptions } from '@/lib/core/utils/timezone'
 import { mapArenaTimezone } from '@/lib/users/arena-timezone'
 
 function resolvedTimezone(timeZone: string): string {

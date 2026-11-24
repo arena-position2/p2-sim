@@ -1,6 +1,6 @@
+import type { SubBlockCondition } from '@sim/workflow-code/catalog/canonical-index'
 import { ZoomIcon } from '@/components/icons'
 import { getScopesForService } from '@/lib/oauth/utils'
-import type { SubBlockCondition } from '@/lib/workflows/subblocks/visibility'
 import { resolveWorkspaceIdForAdminCheck } from '@/lib/workspaces/is-admin-workspace'
 import { resolveZoomAdminAccessForUi } from '@/lib/workspaces/zoom-admin-access-cache'
 import type { BlockConfig, BlockMeta, SubBlockConfig } from '@/blocks/types'

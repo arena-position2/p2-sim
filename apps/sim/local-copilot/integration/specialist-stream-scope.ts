@@ -80,7 +80,7 @@ export function specialistSpanStartEvent(frame: SpecialistSpanFrame): StreamEven
       kind: MothershipStreamV1SpanPayloadKind.subagent,
       event: MothershipStreamV1SpanLifecycleEvent.start,
       agent: frame.toolName,
-      data: { tool_call_id: frame.toolCallId },
+      data: { name: frame.toolName },
     },
   }
 }
@@ -93,7 +93,7 @@ export function specialistSpanEndEvent(frame: SpecialistSpanFrame): StreamEvent 
       kind: MothershipStreamV1SpanPayloadKind.subagent,
       event: MothershipStreamV1SpanLifecycleEvent.end,
       agent: frame.toolName,
-      data: { tool_call_id: frame.toolCallId },
+      data: { name: frame.toolName },
     },
   }
 }

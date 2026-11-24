@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Modal, ModalBody, ModalContent, ModalHeader } from '@sim/emcn'
-import { ExternalLink } from 'lucide-react'
+import { Modal, ModalClose, ModalContent, ModalTitle } from '@sim/emcn'
+import { ExternalLink, X } from 'lucide-react'
 import type { KnowledgeResultChunk } from '@/app/(interfaces)/chat/components/message/message'
 
 interface KnowledgeResultsModalProps {
@@ -37,11 +37,11 @@ export function KnowledgeResultsModal({
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContent className='deployed-chat max-h-[85vh] max-w-2xl bg-[var(--color-ds-surface-raised)] text-[var(--color-ds-text-primary)]'>
-        <ModalHeader className='border-[var(--color-ds-border-default)] border-b pb-3'>
-          <div className='flex items-center justify-between gap-2'>
-            <h2 className='font-semibold text-[var(--color-ds-text-primary)] text-lg'>
-              {documentName}
-            </h2>
+        <div className='flex min-w-0 shrink-0 items-center justify-between gap-2 border-[var(--color-ds-border-default)] border-b px-4 pt-4 pb-3'>
+          <ModalTitle className='min-w-0 font-semibold text-[var(--color-ds-text-primary)] text-lg'>
+            {documentName}
+          </ModalTitle>
+          <div className='flex shrink-0 items-center gap-2'>
             {viewInKbUrl && (
               <a
                 href={viewInKbUrl}
@@ -53,9 +53,15 @@ export function KnowledgeResultsModal({
                 View in Knowledge Base
               </a>
             )}
+            <ModalClose
+              className='relative size-[16px] shrink-0 p-0 text-[var(--color-ds-text-secondary)] before:absolute before:inset-[-14px] before:content-[""]'
+              aria-label='Close'
+            >
+              <X className='size-[16px]' />
+            </ModalClose>
           </div>
-        </ModalHeader>
-        <ModalBody className='overflow-y-auto py-4'>
+        </div>
+        <div className='min-h-0 flex-1 overflow-y-auto px-4 py-4'>
           <div className='space-y-4'>
             {sortedChunks.map((chunk, index) => (
               <div
@@ -78,7 +84,7 @@ export function KnowledgeResultsModal({
               </div>
             ))}
           </div>
-        </ModalBody>
+        </div>
       </ModalContent>
     </Modal>
   )

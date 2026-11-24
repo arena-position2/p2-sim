@@ -1,5 +1,5 @@
-import type { TimezoneOption } from '@/lib/core/utils/timezone'
-import { getTimezoneOptions } from '@/lib/core/utils/timezone'
+import type { TimezoneOption } from '@sim/utils/timezone'
+import { getTimezoneOptions } from '@sim/utils/timezone'
 
 /**
  * Maps Arena timezone and country selections onto the IANA timezone stored on

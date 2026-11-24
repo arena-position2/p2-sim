@@ -193,6 +193,14 @@ export const ENTERPRISE_FEATURES = defineEnterpriseFeatures({
     hint: 'managed connected accounts',
     setupUnlock: false,
   },
+  /** On by default without billing: the gate was always open with billing off (Arena keeps custom branding). */
+  whitelabeling: {
+    envVar: 'WHITELABELING_ENABLED',
+    selfHostedDefault: true,
+    label: 'Whitelabeling',
+    hint: 'custom branding',
+    setupUnlock: true,
+  },
 })
 
 /** An enterprise feature's key, as it appears in the deployment shape. */

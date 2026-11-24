@@ -14,17 +14,17 @@ import {
   AvatarFallback,
   Badge,
   Button,
+  ChipConfirmModal,
+  ChipModal,
+  ChipModalBody,
+  ChipModalFooter,
+  ChipModalHeader,
   Combobox,
   cn,
   focusFirstTextInputIn,
   Input,
   Label,
-  Modal,
-  ModalBody,
-  ModalContent,
   ModalDescription,
-  ModalFooter,
-  ModalHeader,
   Skeleton,
   Textarea,
   Tooltip,
@@ -150,12 +150,12 @@ export function IntegrationsManager() {
   const [selectedDescriptionDraft, setSelectedDescriptionDraft] = useState('')
   const [selectedDisplayNameDraft, setSelectedDisplayNameDraft] = useState('')
   const [createStep, setCreateStep] = useState<1 | 2>(1)
-  const createModalContentRef = useRef<HTMLDivElement>(null)
+  const createModalBodyRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!showCreateModal || createStep !== 2) return
     const id = window.setTimeout(() => {
-      focusFirstTextInputIn(createModalContentRef.current)
+      focusFirstTextInputIn(createModalBodyRef.current)
     }, 0)
     return () => window.clearTimeout(id)
   }, [showCreateModal, createStep])
@@ -691,224 +691,226 @@ export function IntegrationsManager() {
     return oauthServiceOptions.filter((s) => s.label.toLowerCase().includes(q))
   }, [oauthServiceOptions, serviceSearch])
 
-  const createModalJsx = (
-    <Modal
-      open={showCreateModal}
-      onOpenChange={(open) => {
-        setShowCreateModal(open)
-        if (!open) resetCreateForm()
-      }}
-    >
-      <ModalContent size='md' ref={createModalContentRef}>
-        {createStep === 1 ? (
-          <>
-            <ModalHeader>Connect Integration</ModalHeader>
-            <ModalBody>
-              <ModalDescription className='sr-only'>
-                Select a service to connect an integration
-              </ModalDescription>
-              <div className='flex flex-col gap-3'>
-                <div className='flex items-center gap-2 rounded-[8px] border border-[var(--border)] bg-transparent px-2 py-[5px]'>
-                  <Search
-                    className='size-[14px] flex-shrink-0 text-[var(--text-tertiary)]'
-                    strokeWidth={2}
-                  />
-                  <Input
-                    placeholder='Search services...'
-                    value={serviceSearch}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      setServiceSearch(event.target.value)
-                    }
-                    className='h-auto flex-1 border-0 bg-transparent p-0 font-base leading-none placeholder:text-[var(--text-tertiary)] focus-visible:ring-0 focus-visible:ring-offset-0'
-                  />
-                </div>
-                <div className='flex max-h-[320px] flex-col overflow-y-auto'>
-                  {filteredServices.map((service) => {
-                    const config = getServiceConfigByProviderId(service.value)
-                    return (
-                      <Button
-                        key={service.value}
-                        type='button'
-                        variant='ghost'
-                        onClick={() => {
-                          if (config?.authType === 'service_account') {
-                            setShowCreateModal(false)
-                            openServiceAccountConnect(
-                              service.value,
-                              setCreateOAuthProviderId,
-                              setShowServiceAccountConnectModal
-                            )
-                            setServiceSearch('')
-                            return
-                          }
-                          setCreateOAuthProviderId(service.value)
-                          setCreateStep(2)
-                          setServiceSearch('')
-                        }}
-                        className='h-auto w-full justify-start gap-2.5 rounded-[6px] p-2 text-left hover-hover:bg-[var(--surface-5)]'
-                      >
-                        <div className='flex size-8 flex-shrink-0 items-center justify-center rounded-[6px] bg-[var(--surface-5)]'>
-                          {config ? (
-                            createElement(config.icon, { className: 'h-4 w-4' })
-                          ) : (
-                            <span className='font-medium text-[11px] text-[var(--text-tertiary)]'>
-                              {service.label.slice(0, 2)}
-                            </span>
-                          )}
-                        </div>
-                        <span className='font-medium text-[15px] text-[var(--text-primary)]'>
-                          {service.label}
-                        </span>
-                      </Button>
-                    )
-                  })}
-                  {filteredServices.length === 0 && (
-                    <div className='py-6 text-center text-[13px] text-[var(--text-muted)]'>
-                      No services found
-                    </div>
-                  )}
-                </div>
-              </div>
-            </ModalBody>
-            <ModalFooter>
-              <Button variant='default' onClick={() => setShowCreateModal(false)}>
-                Cancel
-              </Button>
-            </ModalFooter>
-          </>
-        ) : (
-          <>
-            <ModalHeader>
-              <div className='flex items-center gap-2.5'>
-                <Button
-                  type='button'
-                  variant='ghost'
-                  onClick={() => {
-                    setCreateStep(1)
-                    setCreateError(null)
-                  }}
-                  className='size-6 rounded-[4px] p-0 text-[var(--text-muted)] hover-hover:bg-[var(--surface-5)] hover-hover:text-[var(--text-primary)]'
-                  aria-label='Back'
-                >
-                  ←
-                </Button>
-                <span>
-                  Connect{' '}
-                  {selectedOAuthService?.name || resolveProviderLabel(createOAuthProviderId)}
-                </span>
-              </div>
-            </ModalHeader>
-            <ModalBody>
-              <ModalDescription className='sr-only'>
-                Connect your OAuth account for this integration
-              </ModalDescription>
-              {(createError || existingOAuthDisplayName) && (
-                <div className='mb-3 flex flex-col gap-2'>
-                  {createError && (
-                    <Badge variant='red' size='lg' dot className='max-w-full'>
-                      {createError}
-                    </Badge>
-                  )}
-                  {existingOAuthDisplayName && (
-                    <Badge variant='red' size='lg' dot className='max-w-full'>
-                      An integration named "{existingOAuthDisplayName.displayName}" already exists.
-                    </Badge>
-                  )}
-                </div>
-              )}
-              <div className='flex flex-col gap-4'>
-                <div className='flex items-center gap-3'>
-                  <div className='flex size-[40px] flex-shrink-0 items-center justify-center rounded-[8px] bg-[var(--surface-5)]'>
-                    {selectedOAuthService &&
-                      createElement(selectedOAuthService.icon, { className: 'h-[18px] w-[18px]' })}
-                  </div>
-                  <div>
-                    <p className='font-medium text-[13px] text-[var(--text-primary)]'>
-                      Connect your {selectedOAuthService?.name} account
-                    </p>
-                    <p className='text-[12px] text-[var(--text-tertiary)]'>
-                      Grant access to use {selectedOAuthService?.name} in your workflows
-                    </p>
-                  </div>
-                </div>
+  const handleCreateModalOpenChange = (open: boolean) => {
+    setShowCreateModal(open)
+    if (!open) resetCreateForm()
+  }
 
-                {createDisplayScopes.length > 0 && (
-                  <div className='rounded-[8px] border border-[var(--border-1)] bg-[var(--surface-5)]'>
-                    <div className='border-[var(--border-1)] border-b px-3.5 py-2.5'>
-                      <h4 className='font-medium text-[12px] text-[var(--text-primary)]'>
-                        Permissions requested
-                      </h4>
-                    </div>
-                    <ul className='max-h-[200px] space-y-2.5 overflow-y-auto px-3.5 py-3'>
-                      {createDisplayScopes.map((scope) => (
-                        <li key={scope} className='flex items-start gap-2.5'>
-                          <div className='mt-0.5 flex size-[16px] flex-shrink-0 items-center justify-center'>
-                            <Check className='size-[10px] text-[var(--text-primary)]' />
-                          </div>
-                          <span className='text-[12px] text-[var(--text-primary)]'>
-                            {getScopeDescription(scope)}
+  const createModalJsx = (
+    <ChipModal
+      open={showCreateModal}
+      onOpenChange={handleCreateModalOpenChange}
+      srTitle={
+        createStep === 1
+          ? 'Connect Integration'
+          : `Connect ${selectedOAuthService?.name || resolveProviderLabel(createOAuthProviderId)}`
+      }
+      focusOnOpen={false}
+    >
+      {createStep === 1 ? (
+        <>
+          <ChipModalHeader onClose={() => handleCreateModalOpenChange(false)}>
+            Connect Integration
+          </ChipModalHeader>
+          <ChipModalBody ref={createModalBodyRef}>
+            <ModalDescription className='sr-only'>
+              Select a service to connect an integration
+            </ModalDescription>
+            <div className='flex flex-col gap-3'>
+              <div className='flex items-center gap-2 rounded-[8px] border border-[var(--border)] bg-transparent px-2 py-[5px]'>
+                <Search
+                  className='size-[14px] flex-shrink-0 text-[var(--text-tertiary)]'
+                  strokeWidth={2}
+                />
+                <Input
+                  placeholder='Search services...'
+                  value={serviceSearch}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setServiceSearch(event.target.value)
+                  }
+                  className='h-auto flex-1 border-0 bg-transparent p-0 font-base leading-none placeholder:text-[var(--text-tertiary)] focus-visible:ring-0 focus-visible:ring-offset-0'
+                />
+              </div>
+              <div className='flex max-h-[320px] flex-col overflow-y-auto'>
+                {filteredServices.map((service) => {
+                  const config = getServiceConfigByProviderId(service.value)
+                  return (
+                    <Button
+                      key={service.value}
+                      type='button'
+                      variant='ghost'
+                      onClick={() => {
+                        if (config?.authType === 'service_account') {
+                          setShowCreateModal(false)
+                          openServiceAccountConnect(
+                            service.value,
+                            setCreateOAuthProviderId,
+                            setShowServiceAccountConnectModal
+                          )
+                          setServiceSearch('')
+                          return
+                        }
+                        setCreateOAuthProviderId(service.value)
+                        setCreateStep(2)
+                        setServiceSearch('')
+                      }}
+                      className='h-auto w-full justify-start gap-2.5 rounded-[6px] p-2 text-left hover-hover:bg-[var(--surface-5)]'
+                    >
+                      <div className='flex size-8 flex-shrink-0 items-center justify-center rounded-[6px] bg-[var(--surface-5)]'>
+                        {config ? (
+                          createElement(config.icon, { className: 'h-4 w-4' })
+                        ) : (
+                          <span className='font-medium text-[11px] text-[var(--text-tertiary)]'>
+                            {service.label.slice(0, 2)}
                           </span>
-                        </li>
-                      ))}
-                    </ul>
+                        )}
+                      </div>
+                      <span className='font-medium text-[15px] text-[var(--text-primary)]'>
+                        {service.label}
+                      </span>
+                    </Button>
+                  )
+                })}
+                {filteredServices.length === 0 && (
+                  <div className='py-6 text-center text-[13px] text-[var(--text-muted)]'>
+                    No services found
                   </div>
                 )}
-
-                <div>
-                  <Label>
-                    Display name<span className='ml-1'>*</span>
-                  </Label>
-                  <Input
-                    value={createDisplayName}
-                    onChange={(event) => setCreateDisplayName(event.target.value)}
-                    placeholder='Integration name'
-                    autoComplete='off'
-                    data-lpignore='true'
-                    className='mt-1.5'
-                  />
-                </div>
-                <div>
-                  <Label>Description</Label>
-                  <Textarea
-                    value={createDescription}
-                    onChange={(event) => setCreateDescription(event.target.value)}
-                    placeholder='Optional description'
-                    maxLength={500}
-                    autoComplete='off'
-                    data-lpignore='true'
-                    className='mt-1.5 min-h-[80px] resize-none'
-                  />
-                </div>
               </div>
-            </ModalBody>
-            <ModalFooter>
+            </div>
+          </ChipModalBody>
+          <ChipModalFooter onCancel={() => setShowCreateModal(false)} defaultAction='dismiss' />
+        </>
+      ) : (
+        <>
+          <ChipModalHeader onClose={() => handleCreateModalOpenChange(false)}>
+            <div className='flex items-center gap-2.5'>
               <Button
-                variant='default'
+                type='button'
+                variant='ghost'
                 onClick={() => {
                   setCreateStep(1)
                   setCreateError(null)
                 }}
+                className='size-6 rounded-[4px] p-0 text-[var(--text-muted)] hover-hover:bg-[var(--surface-5)] hover-hover:text-[var(--text-primary)]'
+                aria-label='Back'
               >
-                Back
+                ←
               </Button>
-              <Button
-                variant='primary'
-                onClick={handleConnectOAuthService}
-                disabled={
-                  !createOAuthProviderId ||
-                  !createDisplayName.trim() ||
-                  connectOAuthService.isPending ||
-                  Boolean(existingOAuthDisplayName) ||
-                  disconnectOAuthService.isPending
-                }
-              >
-                {connectOAuthService.isPending ? 'Connecting...' : 'Connect'}
-              </Button>
-            </ModalFooter>
-          </>
-        )}
-      </ModalContent>
-    </Modal>
+              <span>
+                Connect {selectedOAuthService?.name || resolveProviderLabel(createOAuthProviderId)}
+              </span>
+            </div>
+          </ChipModalHeader>
+          <ChipModalBody ref={createModalBodyRef}>
+            <ModalDescription className='sr-only'>
+              Connect your OAuth account for this integration
+            </ModalDescription>
+            {(createError || existingOAuthDisplayName) && (
+              <div className='mb-3 flex flex-col gap-2'>
+                {createError && (
+                  <Badge variant='red' size='lg' dot className='max-w-full'>
+                    {createError}
+                  </Badge>
+                )}
+                {existingOAuthDisplayName && (
+                  <Badge variant='red' size='lg' dot className='max-w-full'>
+                    An integration named "{existingOAuthDisplayName.displayName}" already exists.
+                  </Badge>
+                )}
+              </div>
+            )}
+            <div className='flex flex-col gap-4'>
+              <div className='flex items-center gap-3'>
+                <div className='flex size-[40px] flex-shrink-0 items-center justify-center rounded-[8px] bg-[var(--surface-5)]'>
+                  {selectedOAuthService &&
+                    createElement(selectedOAuthService.icon, { className: 'h-[18px] w-[18px]' })}
+                </div>
+                <div>
+                  <p className='font-medium text-[13px] text-[var(--text-primary)]'>
+                    Connect your {selectedOAuthService?.name} account
+                  </p>
+                  <p className='text-[12px] text-[var(--text-tertiary)]'>
+                    Grant access to use {selectedOAuthService?.name} in your workflows
+                  </p>
+                </div>
+              </div>
+
+              {createDisplayScopes.length > 0 && (
+                <div className='rounded-[8px] border border-[var(--border-1)] bg-[var(--surface-5)]'>
+                  <div className='border-[var(--border-1)] border-b px-3.5 py-2.5'>
+                    <h4 className='font-medium text-[12px] text-[var(--text-primary)]'>
+                      Permissions requested
+                    </h4>
+                  </div>
+                  <ul className='max-h-[200px] space-y-2.5 overflow-y-auto px-3.5 py-3'>
+                    {createDisplayScopes.map((scope) => (
+                      <li key={scope} className='flex items-start gap-2.5'>
+                        <div className='mt-0.5 flex size-[16px] flex-shrink-0 items-center justify-center'>
+                          <Check className='size-[10px] text-[var(--text-primary)]' />
+                        </div>
+                        <span className='text-[12px] text-[var(--text-primary)]'>
+                          {getScopeDescription(scope)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <Label>
+                  Display name<span className='ml-1'>*</span>
+                </Label>
+                <Input
+                  value={createDisplayName}
+                  onChange={(event) => setCreateDisplayName(event.target.value)}
+                  placeholder='Integration name'
+                  autoComplete='off'
+                  data-lpignore='true'
+                  className='mt-1.5'
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={createDescription}
+                  onChange={(event) => setCreateDescription(event.target.value)}
+                  placeholder='Optional description'
+                  maxLength={500}
+                  autoComplete='off'
+                  data-lpignore='true'
+                  className='mt-1.5 min-h-[80px] resize-none'
+                />
+              </div>
+            </div>
+          </ChipModalBody>
+          <ChipModalFooter
+            onCancel={() => handleCreateModalOpenChange(false)}
+            cancelLabel='Cancel'
+            secondaryActions={[
+              {
+                label: 'Back',
+                onClick: () => {
+                  setCreateStep(1)
+                  setCreateError(null)
+                },
+              },
+            ]}
+            primaryAction={{
+              label: connectOAuthService.isPending ? 'Connecting...' : 'Connect',
+              onClick: handleConnectOAuthService,
+              disabled:
+                !createOAuthProviderId ||
+                !createDisplayName.trim() ||
+                connectOAuthService.isPending ||
+                Boolean(existingOAuthDisplayName) ||
+                disconnectOAuthService.isPending,
+            }}
+          />
+        </>
+      )}
+    </ChipModal>
   )
 
   const serviceAccountConnectModalJsx =
@@ -935,66 +937,42 @@ export function IntegrationsManager() {
   }
 
   const deleteConfirmDialogJsx = (
-    <Modal
+    <ChipConfirmModal
       open={showDeleteConfirmDialog}
       onOpenChange={(open) => !open && handleCloseDeleteDialog()}
+      title='Disconnect Integration'
+      text={[
+        'Are you sure you want to disconnect ',
+        { text: credentialToDelete?.displayName ?? 'this integration', bold: true },
+        '? This action cannot be undone.',
+      ]}
+      confirm={{
+        label: 'Disconnect',
+        pendingLabel: 'Disconnecting...',
+        pending: disconnectOAuthService.isPending || deleteCredential.isPending,
+        onClick: handleConfirmDelete,
+      }}
     >
-      <ModalContent size='sm'>
-        <ModalHeader>Disconnect Integration</ModalHeader>
-        <ModalBody>
-          <ModalDescription className='text-[var(--text-secondary)]'>
-            Are you sure you want to disconnect{' '}
-            <span className='font-medium text-[var(--text-primary)]'>
-              {credentialToDelete?.displayName}
-            </span>
-            ? This action cannot be undone.
-          </ModalDescription>
-          {deleteError && (
-            <div className='mt-3 rounded-lg border border-[color-mix(in_srgb,var(--text-error)_40%,transparent)] bg-[color-mix(in_srgb,var(--text-error)_10%,transparent)] p-3'>
-              <div className='flex items-start gap-2.5'>
-                <AlertTriangle className='mt-[1px] size-4 flex-shrink-0 text-[var(--text-error)]' />
-                <p className='text-[var(--text-error)] text-small'>{deleteError}</p>
-              </div>
-            </div>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button variant='default' onClick={handleCloseDeleteDialog}>
-            Cancel
-          </Button>
-          <Button
-            variant='destructive'
-            onClick={handleConfirmDelete}
-            disabled={disconnectOAuthService.isPending || deleteCredential.isPending}
-          >
-            {disconnectOAuthService.isPending || deleteCredential.isPending
-              ? 'Disconnecting...'
-              : 'Disconnect'}
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+      {deleteError && (
+        <div className='mx-2 rounded-lg border border-[color-mix(in_srgb,var(--text-error)_40%,transparent)] bg-[color-mix(in_srgb,var(--text-error)_10%,transparent)] p-3'>
+          <div className='flex items-start gap-2.5'>
+            <AlertTriangle className='mt-[1px] size-4 flex-shrink-0 text-[var(--text-error)]' />
+            <p className='text-[var(--text-error)] text-small'>{deleteError}</p>
+          </div>
+        </div>
+      )}
+    </ChipConfirmModal>
   )
 
   const unsavedChangesAlertJsx = (
-    <Modal open={showUnsavedChangesAlert} onOpenChange={setShowUnsavedChangesAlert}>
-      <ModalContent size='sm'>
-        <ModalHeader>Unsaved Changes</ModalHeader>
-        <ModalBody>
-          <ModalDescription className='text-[var(--text-secondary)]'>
-            You have unsaved changes. Are you sure you want to discard them?
-          </ModalDescription>
-        </ModalBody>
-        <ModalFooter>
-          <Button variant='default' onClick={() => setShowUnsavedChangesAlert(false)}>
-            Keep Editing
-          </Button>
-          <Button variant='destructive' onClick={handleDiscardChanges}>
-            Discard Changes
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+    <ChipConfirmModal
+      open={showUnsavedChangesAlert}
+      onOpenChange={setShowUnsavedChangesAlert}
+      title='Unsaved Changes'
+      text='You have unsaved changes. Are you sure you want to discard them?'
+      dismissLabel='Keep Editing'
+      confirm={{ label: 'Discard Changes', onClick: handleDiscardChanges }}
+    />
   )
 
   if (selectedCredential) {

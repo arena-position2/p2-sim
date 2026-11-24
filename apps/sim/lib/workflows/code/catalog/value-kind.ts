@@ -86,6 +86,15 @@ const TYPE_RULES: Record<SubBlockType, TypeRule> = {
   text: { valueKind: 'none' },
   'model-fallback-list': { valueKind: 'array' },
   modal: { valueKind: 'none' },
+  'mention-input': { valueKind: 'string', neverDecoded: true },
+  'arena-project-selector': { valueKind: 'picked' },
+  'arena-group-selector': { valueKind: 'picked' },
+  'arena-assignee-selector': { valueKind: 'picked' },
+  'arena-task-selector': { valueKind: 'picked' },
+  'arena-states-selector': { valueKind: 'picked' },
+  'arena-client-selector': { valueKind: 'picked' },
+  'slack-client-selector': { valueKind: 'picked' },
+  'slack-channel-selector': { valueKind: 'picked' },
 }
 
 /**

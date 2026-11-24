@@ -5,6 +5,8 @@
 
 export const Metric = {
   CopilotDegradedCount: 'copilot.degraded.count',
+  CopilotFileReadDuration: 'copilot.file.read.duration',
+  CopilotFileReadSize: 'copilot.file.read.size',
   CopilotToolCalls: 'copilot.tool.calls',
   CopilotToolDuration: 'copilot.tool.duration',
 } as const

@@ -21,10 +21,15 @@ const LATENCY_BUCKETS_MS = [
   50, 100, 250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000, 120000, 300000,
 ]
 
+// File sizes span KB→tens of MB; a bytes-appropriate bucket set (not latency).
+const BYTE_BUCKETS = [1024, 8192, 65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456]
+
 interface CopilotMeterInstruments {
   toolDuration: Histogram
   toolCalls: Counter
   degradedCount: Counter
+  fileReadDuration: Histogram
+  fileReadBytes: Histogram
 }
 
 let cached: CopilotMeterInstruments | undefined
@@ -42,6 +47,14 @@ function instruments(): CopilotMeterInstruments {
     }),
     toolCalls: meter.createCounter(Metric.CopilotToolCalls),
     degradedCount: meter.createCounter(Metric.CopilotDegradedCount),
+    fileReadDuration: meter.createHistogram(Metric.CopilotFileReadDuration, {
+      unit: 'ms',
+      advice: { explicitBucketBoundaries: LATENCY_BUCKETS_MS },
+    }),
+    fileReadBytes: meter.createHistogram(Metric.CopilotFileReadSize, {
+      unit: 'By',
+      advice: { explicitBucketBoundaries: BYTE_BUCKETS },
+    }),
   }
   return cached
 }
@@ -91,4 +104,12 @@ export function recordDegraded(reason: CopilotDegradedReasonValue): void {
   instruments().degradedCount.add(1, {
     [TraceAttr.CopilotDegradedReason]: reason,
   })
+}
+
+// recordFileRead records server-side file-read duration + size by outcome.
+export function recordFileRead(outcome: string, durationMs: number, bytes: number): void {
+  const { fileReadDuration, fileReadBytes } = instruments()
+  const attrs = { [TraceAttr.CopilotVfsReadOutcome]: outcome }
+  if (durationMs >= 0) fileReadDuration.record(durationMs, attrs)
+  if (bytes >= 0) fileReadBytes.record(bytes, attrs)
 }

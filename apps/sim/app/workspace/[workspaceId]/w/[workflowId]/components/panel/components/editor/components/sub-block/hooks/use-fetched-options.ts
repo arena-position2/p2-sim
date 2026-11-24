@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getErrorMessage } from '@sim/utils/errors'
 import { getSelectorManifestEntry, type SelectorKey } from '@/lib/selectors/manifest'
 import { buildSelectorContextFromBlock } from '@/lib/workflows/subblocks/context'
-import { buildCanonicalIndex, resolveDependencyValue } from '@/lib/workflows/subblocks/visibility'
+import {
+  buildCanonicalIndexForSurface,
+  resolveDependencyValue,
+} from '@/lib/workflows/subblocks/visibility'
 import { getBlock } from '@/blocks/registry'
 import {
   type SelectorClientContext,
@@ -89,9 +92,10 @@ export function useFetchedOptions({
   )
   const blockConfig = block?.type ? getBlock(block.type) : null
   const canonicalModeOverrides = block?.data?.canonicalModes
+  const triggerSurface = block?.triggerMode === true
   const canonicalIndex = useMemo(
-    () => buildCanonicalIndex(blockConfig?.subBlocks || []),
-    [blockConfig?.subBlocks]
+    () => buildCanonicalIndexForSurface(blockConfig?.subBlocks || [], triggerSurface),
+    [blockConfig?.subBlocks, triggerSurface]
   )
   const dependencyValues = useMemo(() => {
     if (dependsOnFields.length === 0 || !liveValues) return []

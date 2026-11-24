@@ -46,6 +46,7 @@ export function createMockDeploymentShape(
       sessionPolicies: true,
       sso: false,
       usageMonitoring: false,
+      whitelabeling: true,
       ...features,
     },
   }

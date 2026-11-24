@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Input, Label, Modal, ModalContent, ModalFooter, ModalHeader } from '@sim/emcn'
+import { ChipModal, ChipModalBody, ChipModalFooter, ChipModalHeader, Input, Label } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { getCustomInputFields } from '@/lib/workflows/input-format-utils'
 import type { InputFormatField } from '@/lib/workflows/types'
@@ -264,224 +264,219 @@ export function StartBlockInputModal({
   }
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange}>
-      <ModalContent className='max-w-[500px]' showClose={true}>
-        <ModalHeader>Workflow Inputs</ModalHeader>
+    <ChipModal
+      open={open}
+      onOpenChange={onOpenChange}
+      srTitle='Workflow Inputs'
+      focusOnOpen={false}
+    >
+      <ChipModalHeader onClose={handleClose}>Workflow Inputs</ChipModalHeader>
+      <ChipModalBody
+        ref={modalBodyRef}
+        className='max-h-[60vh]'
+        onPointerDownCapture={handlePointerDownCapture}
+      >
+        {customFields.map((field, index) => {
+          const fieldName = field.name?.trim()
+          if (!fieldName) return null
 
-        <div
-          ref={modalBodyRef}
-          className='flex max-h-[60vh] flex-col gap-4 overflow-y-auto px-4 py-2'
-          onPointerDownCapture={handlePointerDownCapture}
-        >
-          {customFields.map((field, index) => {
-            const fieldName = field.name?.trim()
-            if (!fieldName) return null
+          const fieldType = field.type || 'string'
+          const displayName = formatFieldName(fieldName)
+          const isFirstField = index === 0
+          // Safely get value, ensuring it's never undefined/null/object
+          // Browser autofill can sometimes set values as objects or other unexpected types
+          const rawValue = formValues[fieldName]
+          let value: unknown = rawValue
 
-            const fieldType = field.type || 'string'
-            const displayName = formatFieldName(fieldName)
-            const isFirstField = index === 0
-            // Safely get value, ensuring it's never undefined/null/object
-            // Browser autofill can sometimes set values as objects or other unexpected types
-            const rawValue = formValues[fieldName]
-            let value: unknown = rawValue
+          // Defensive normalization - ensure value is always a safe type
+          if (value === undefined || value === null) {
+            value = ''
+          } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            // Browser autofill might set an object - convert to string safely
+            logger.warn('Detected object value in form field, normalizing', { fieldName, value })
+            value = String(value)
+          } else if (Array.isArray(value)) {
+            // If it's an array, take the first element or empty string
+            value = value.length > 0 ? value[0] : ''
+          }
 
-            // Defensive normalization - ensure value is always a safe type
-            if (value === undefined || value === null) {
-              value = ''
-            } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-              // Browser autofill might set an object - convert to string safely
-              logger.warn('Detected object value in form field, normalizing', { fieldName, value })
-              value = String(value)
-            } else if (Array.isArray(value)) {
-              // If it's an array, take the first element or empty string
-              value = value.length > 0 ? value[0] : ''
-            }
-
-            return (
-              <div key={fieldName} className='flex flex-col gap-2'>
-                <Label htmlFor={fieldName} className='font-medium text-[12px]'>
-                  {displayName}
-                  {fieldType !== 'string' && (
-                    <span className='ml-1 font-normal text-[var(--text-tertiary)]'>
-                      ({fieldType})
-                    </span>
-                  )}
-                </Label>
-                {fieldType === 'boolean' ? (
-                  <div className='flex items-center gap-2'>
-                    <input
-                      ref={
-                        isFirstField
-                          ? (el) => {
-                              firstInputRef.current = el
-                            }
-                          : undefined
-                      }
-                      type='checkbox'
-                      id={fieldName}
-                      checked={value === true || value === 'true'}
-                      onChange={(e) => handleFieldChange(fieldName, e.target.checked)}
-                      className='h-4 w-4 rounded border-[var(--border)]'
-                    />
-                    <label htmlFor={fieldName} className='text-[12px]'>
-                      {value === true || value === 'true' ? 'Yes' : 'No'}
-                    </label>
-                  </div>
-                ) : fieldType === 'number' ? (
-                  <Input
-                    ref={
-                      isFirstField
-                        ? (el) => {
-                            firstInputRef.current = el
-                          }
-                        : undefined
-                    }
-                    id={fieldName}
-                    type='number'
-                    value={
-                      typeof value === 'number'
-                        ? value
-                        : value === '' || value === null || value === undefined
-                          ? ''
-                          : typeof value === 'string' && value.trim() === ''
-                            ? ''
-                            : Number(value) || ''
-                    }
-                    onChange={(e) => {
-                      const inputValue = e.target.value
-                      if (inputValue === '') {
-                        handleFieldChange(fieldName, '')
-                      } else {
-                        const numValue = Number(inputValue)
-                        handleFieldChange(
-                          fieldName,
-                          Number.isNaN(numValue)
-                            ? typeof value === 'number'
-                              ? value
-                              : ''
-                            : numValue
-                        )
-                      }
-                    }}
-                    onKeyDown={(e) => handleKeyDown(e, fieldType)}
-                    onBlur={(e) => {
-                      // Additional safety check on blur
-                      const inputValue = e.target.value
-                      const currentValue = formValues[fieldName]
-                      // Normalize if needed
-                      if (inputValue === '') {
-                        handleFieldChange(fieldName, '')
-                      } else if (
-                        typeof currentValue !== 'number' &&
-                        typeof currentValue !== 'string'
-                      ) {
-                        const numValue = Number(inputValue)
-                        handleFieldChange(fieldName, Number.isNaN(numValue) ? '' : numValue)
-                      }
-                    }}
-                    placeholder={`Enter ${displayName}`}
-                    className='text-[12px]'
-                  />
-                ) : fieldType === 'object' || fieldType === 'array' ? (
-                  <textarea
-                    ref={
-                      isFirstField
-                        ? (el) => {
-                            firstInputRef.current = el
-                          }
-                        : undefined
-                    }
-                    id={fieldName}
-                    value={
-                      typeof value === 'string'
-                        ? value
-                        : value === null || value === undefined
-                          ? ''
-                          : JSON.stringify(value, null, 2)
-                    }
-                    onChange={(e) => {
-                      const inputValue = e.target.value
-                      if (inputValue === '') {
-                        handleFieldChange(fieldName, '')
-                      } else {
-                        try {
-                          const parsed = JSON.parse(inputValue)
-                          handleFieldChange(fieldName, parsed)
-                        } catch {
-                          handleFieldChange(fieldName, inputValue)
-                        }
-                      }
-                    }}
-                    onKeyDown={(e) => handleKeyDown(e, fieldType)}
-                    placeholder={`Enter ${displayName} as JSON (Ctrl+Enter or Shift+Enter to submit)`}
-                    className='min-h-[80px] w-full rounded-[4px] border border-[var(--border)] bg-[var(--surface-9)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-[var(--brand-primary)]'
-                  />
-                ) : (
-                  <Input
-                    ref={
-                      isFirstField
-                        ? (el) => {
-                            firstInputRef.current = el
-                          }
-                        : undefined
-                    }
-                    id={fieldName}
-                    type='text'
-                    value={(() => {
-                      try {
-                        return normalizeValueForInput(value, fieldType)
-                      } catch (error) {
-                        logger.error('Error normalizing value for input', {
-                          fieldName,
-                          value,
-                          error,
-                        })
-                        return ''
-                      }
-                    })()}
-                    onChange={(e) => {
-                      try {
-                        const inputValue = e.target.value
-                        // Always pass the string value directly
-                        handleFieldChange(fieldName, inputValue)
-                      } catch (error) {
-                        logger.error('Error handling input change', { fieldName, error })
-                        // Fallback: set to empty string
-                        handleFieldChange(fieldName, '')
-                      }
-                    }}
-                    onKeyDown={(e) => handleKeyDown(e, fieldType)}
-                    onBlur={(e) => {
-                      try {
-                        // Additional safety check on blur - normalize the value again
-                        const inputValue = e.target.value || ''
-                        const currentValue = formValues[fieldName]
-                        // If the value changed or is invalid, normalize it
-                        if (typeof currentValue !== 'string' || currentValue !== inputValue) {
-                          handleFieldChange(fieldName, inputValue)
-                        }
-                      } catch (error) {
-                        logger.error('Error handling input blur', { fieldName, error })
-                      }
-                    }}
-                    placeholder={`Enter ${displayName}`}
-                    className='text-[12px]'
-                  />
+          return (
+            <div key={fieldName} className='flex flex-col gap-2'>
+              <Label htmlFor={fieldName} className='font-medium text-[12px]'>
+                {displayName}
+                {fieldType !== 'string' && (
+                  <span className='ml-1 font-normal text-[var(--text-tertiary)]'>
+                    ({fieldType})
+                  </span>
                 )}
-              </div>
-            )
-          })}
-        </div>
-
-        <ModalFooter>
-          <Button variant='ghost' onClick={handleClose} className='text-[12px]'>
-            Close
-          </Button>
-          <Button onClick={handleSubmit} className='text-[12px]'>
-            Submit
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+              </Label>
+              {fieldType === 'boolean' ? (
+                <div className='flex items-center gap-2'>
+                  <input
+                    ref={
+                      isFirstField
+                        ? (el) => {
+                            firstInputRef.current = el
+                          }
+                        : undefined
+                    }
+                    type='checkbox'
+                    id={fieldName}
+                    checked={value === true || value === 'true'}
+                    onChange={(e) => handleFieldChange(fieldName, e.target.checked)}
+                    className='h-4 w-4 rounded border-[var(--border)]'
+                  />
+                  <label htmlFor={fieldName} className='text-[12px]'>
+                    {value === true || value === 'true' ? 'Yes' : 'No'}
+                  </label>
+                </div>
+              ) : fieldType === 'number' ? (
+                <Input
+                  ref={
+                    isFirstField
+                      ? (el) => {
+                          firstInputRef.current = el
+                        }
+                      : undefined
+                  }
+                  id={fieldName}
+                  type='number'
+                  value={
+                    typeof value === 'number'
+                      ? value
+                      : value === '' || value === null || value === undefined
+                        ? ''
+                        : typeof value === 'string' && value.trim() === ''
+                          ? ''
+                          : Number(value) || ''
+                  }
+                  onChange={(e) => {
+                    const inputValue = e.target.value
+                    if (inputValue === '') {
+                      handleFieldChange(fieldName, '')
+                    } else {
+                      const numValue = Number(inputValue)
+                      handleFieldChange(
+                        fieldName,
+                        Number.isNaN(numValue) ? (typeof value === 'number' ? value : '') : numValue
+                      )
+                    }
+                  }}
+                  onKeyDown={(e) => handleKeyDown(e, fieldType)}
+                  onBlur={(e) => {
+                    // Additional safety check on blur
+                    const inputValue = e.target.value
+                    const currentValue = formValues[fieldName]
+                    // Normalize if needed
+                    if (inputValue === '') {
+                      handleFieldChange(fieldName, '')
+                    } else if (
+                      typeof currentValue !== 'number' &&
+                      typeof currentValue !== 'string'
+                    ) {
+                      const numValue = Number(inputValue)
+                      handleFieldChange(fieldName, Number.isNaN(numValue) ? '' : numValue)
+                    }
+                  }}
+                  placeholder={`Enter ${displayName}`}
+                  className='text-[12px]'
+                />
+              ) : fieldType === 'object' || fieldType === 'array' ? (
+                <textarea
+                  ref={
+                    isFirstField
+                      ? (el) => {
+                          firstInputRef.current = el
+                        }
+                      : undefined
+                  }
+                  id={fieldName}
+                  value={
+                    typeof value === 'string'
+                      ? value
+                      : value === null || value === undefined
+                        ? ''
+                        : JSON.stringify(value, null, 2)
+                  }
+                  onChange={(e) => {
+                    const inputValue = e.target.value
+                    if (inputValue === '') {
+                      handleFieldChange(fieldName, '')
+                    } else {
+                      try {
+                        const parsed = JSON.parse(inputValue)
+                        handleFieldChange(fieldName, parsed)
+                      } catch {
+                        handleFieldChange(fieldName, inputValue)
+                      }
+                    }
+                  }}
+                  onKeyDown={(e) => handleKeyDown(e, fieldType)}
+                  placeholder={`Enter ${displayName} as JSON (Ctrl+Enter or Shift+Enter to submit)`}
+                  className='min-h-[80px] w-full rounded-[4px] border border-[var(--border)] bg-[var(--surface-9)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-[var(--brand-primary)]'
+                />
+              ) : (
+                <Input
+                  ref={
+                    isFirstField
+                      ? (el) => {
+                          firstInputRef.current = el
+                        }
+                      : undefined
+                  }
+                  id={fieldName}
+                  type='text'
+                  value={(() => {
+                    try {
+                      return normalizeValueForInput(value, fieldType)
+                    } catch (error) {
+                      logger.error('Error normalizing value for input', {
+                        fieldName,
+                        value,
+                        error,
+                      })
+                      return ''
+                    }
+                  })()}
+                  onChange={(e) => {
+                    try {
+                      const inputValue = e.target.value
+                      // Always pass the string value directly
+                      handleFieldChange(fieldName, inputValue)
+                    } catch (error) {
+                      logger.error('Error handling input change', { fieldName, error })
+                      // Fallback: set to empty string
+                      handleFieldChange(fieldName, '')
+                    }
+                  }}
+                  onKeyDown={(e) => handleKeyDown(e, fieldType)}
+                  onBlur={(e) => {
+                    try {
+                      // Additional safety check on blur - normalize the value again
+                      const inputValue = e.target.value || ''
+                      const currentValue = formValues[fieldName]
+                      // If the value changed or is invalid, normalize it
+                      if (typeof currentValue !== 'string' || currentValue !== inputValue) {
+                        handleFieldChange(fieldName, inputValue)
+                      }
+                    } catch (error) {
+                      logger.error('Error handling input blur', { fieldName, error })
+                    }
+                  }}
+                  placeholder={`Enter ${displayName}`}
+                  className='text-[12px]'
+                />
+              )}
+            </div>
+          )
+        })}
+      </ChipModalBody>
+      <ChipModalFooter
+        cancelLabel='Close'
+        onCancel={handleClose}
+        defaultAction='none'
+        primaryAction={{ label: 'Submit', onClick: handleSubmit }}
+      />
+    </ChipModal>
   )
 }

@@ -763,6 +763,7 @@ export const env = createEnv({
     ENTERPRISE_ENABLED:                    z.boolean().optional(),                 // Enable the whole enterprise suite on self-hosted; individual flags below override it per feature
 
     // Enterprise Feature Overrides - for self-hosted deployments
+    WHITELABELING_ENABLED:                 z.boolean().optional(),                 // Enable whitelabeling on self-hosted (bypasses hosted requirements)
     AUDIT_LOGS_ENABLED:                    z.boolean().optional(),                 // Enable audit logs on self-hosted (bypasses hosted requirements)
     CUSTOM_BLOCKS_ENABLED:                 z.boolean().optional(),                 // Enable custom blocks on self-hosted (bypasses hosted requirements)
     DATA_RETENTION_ENABLED:               z.boolean().optional(),                 // Enable data retention settings and retention deletion on self-hosted (bypasses hosted requirements)
@@ -869,6 +870,9 @@ export const env = createEnv({
     NEXT_PUBLIC_SKYVERN_CONFIGURED:        z.string().optional(),              // Hide Skyvern credential fields when SKYVERN_API_KEY is set server-side (client cannot read the secret)
     NEXT_PUBLIC_VISION_SERVER_KEYS_CONFIGURED: z.string().optional(),          // Hide Vision block API key when provider keys are set server-side (OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY)
     NEXT_PUBLIC_COHERE_CONFIGURED:         z.string().optional(),              // Hide Cohere API key field on Knowledge block when COHERE_API_KEY is pre-configured server-side
+    NEXT_PUBLIC_BRAND_LOGO_URL:            z.string().url().optional(),            // Custom logo URL (Arena branding; CSP + next/image remote pattern)
+    NEXT_PUBLIC_TERMS_URL:                 z.string().url().optional(),            // Custom terms of service URL
+    NEXT_PUBLIC_PRIVACY_URL:               z.string().url().optional(),            // Custom privacy policy URL
 
     // Feature Flags
     NEXT_PUBLIC_SLACK_EXTENDED_SCOPES:     z.boolean().optional(),                   // Client twin of SLACK_EXTENDED_SCOPES — set both together
@@ -917,6 +921,9 @@ export const env = createEnv({
     NEXT_PUBLIC_SKYVERN_CONFIGURED: process.env.NEXT_PUBLIC_SKYVERN_CONFIGURED,
     NEXT_PUBLIC_VISION_SERVER_KEYS_CONFIGURED: process.env.NEXT_PUBLIC_VISION_SERVER_KEYS_CONFIGURED,
     NEXT_PUBLIC_COHERE_CONFIGURED: process.env.NEXT_PUBLIC_COHERE_CONFIGURED,
+    NEXT_PUBLIC_BRAND_LOGO_URL: process.env.NEXT_PUBLIC_BRAND_LOGO_URL,
+    NEXT_PUBLIC_TERMS_URL: process.env.NEXT_PUBLIC_TERMS_URL,
+    NEXT_PUBLIC_PRIVACY_URL: process.env.NEXT_PUBLIC_PRIVACY_URL,
     NEXT_PUBLIC_POSTHOG_ENABLED: process.env.NEXT_PUBLIC_POSTHOG_ENABLED,
     NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY,
     NODE_ENV: process.env.NODE_ENV,

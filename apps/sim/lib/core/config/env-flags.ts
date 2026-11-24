@@ -469,6 +469,11 @@ export const isCredentialGroupsEnabled = enterpriseFeatures.credentialGroups
 export const isForkingEnabled = enterpriseFeatures.forking
 
 /**
+ * Is whitelabeling enabled
+ */
+export const isWhitelabelingEnabled = enterpriseFeatures.whitelabeling
+
+/**
  * The selected remote sandbox provider (`SANDBOX_PROVIDER`), defaulting to E2B.
  * Availability below is derived from THIS provider's credentials, so a
  * Daytona-only deployment (E2B unset) still enables remote execution.

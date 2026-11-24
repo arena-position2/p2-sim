@@ -439,10 +439,16 @@ describe('raw requests', () => {
     await billed.request('/api/v2/workflows', { method: 'GET' })
     await billed.request('/api/v2/tables', { method: 'GET' })
 
-    const headerAt = (call: number) => fetch.mock.calls[call][1].headers['x-sim-email']
-    expect(headerAt(0)).toBe('payer@example.com')
-    expect(headerAt(1)).toBe('payer@example.com')
-    expect(headerAt(2)).toBeUndefined()
+    const requestInits = (fetch.mock.calls as unknown as Array<[unknown, RequestInit]>).map(
+      ([, init]) => init
+    )
+    expect((requestInits[0]?.headers as Record<string, string>)['x-sim-email']).toBe(
+      'payer@example.com'
+    )
+    expect((requestInits[1]?.headers as Record<string, string>)['x-sim-email']).toBe(
+      'payer@example.com'
+    )
+    expect((requestInits[2]?.headers as Record<string, string>)['x-sim-email']).toBeUndefined()
   })
 
   it('keeps authentication required by default for every other command', async () => {

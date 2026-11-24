@@ -132,6 +132,15 @@ export function mapSubBlock(subBlock: CatalogSubBlock): MappedType | null {
     case 'document-selector':
     case 'column-selector':
     case 'mcp-tool-selector':
+    case 'mention-input':
+    case 'arena-project-selector':
+    case 'arena-group-selector':
+    case 'arena-assignee-selector':
+    case 'arena-task-selector':
+    case 'arena-states-selector':
+    case 'arena-client-selector':
+    case 'slack-client-selector':
+    case 'slack-channel-selector':
       return { type: 'string', doc: [...doc, ...selectorDoc(subBlock)] }
     case 'folder-selector':
       return subBlock.resourceKind === 'file-folder'

@@ -1,7 +1,7 @@
 // file: utils/isBase64.ts
 
 import { type SyntheticEvent, useCallback, useEffect, useState } from 'react'
-import { Button, Modal, ModalBody, ModalContent, ModalHeader } from '@sim/emcn'
+import { Button, Modal, ModalClose, ModalContent } from '@sim/emcn'
 import { createLogger } from '@sim/logger'
 import { AlertTriangle, Check, Download, Expand, X } from 'lucide-react'
 import {
@@ -431,10 +431,16 @@ export function ImageWithViewFullOverlay({
       <Modal open={modalOpen} onOpenChange={setModalOpen}>
         <ModalContent
           size='full'
+          srTitle='Generated image'
           className='flex max-h-[min(92vh,960px)] w-[min(92vw,calc(100vw-1.5rem))] max-w-[min(92vw,1200px)] flex-col overflow-hidden'
         >
-          <ModalHeader className='w-full min-w-0 shrink-0' />
-          <ModalBody className='flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto border-t-0 p-4 pb-6'>
+          <div className='flex w-full min-w-0 shrink-0 items-center justify-end px-4 pt-4 pb-2'>
+            <ModalClose className='relative size-[16px] shrink-0 p-0 before:absolute before:inset-[-14px] before:content-[""]'>
+              <X className='size-[16px]' />
+              <span className='sr-only'>Close</span>
+            </ModalClose>
+          </div>
+          <div className='flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-4 pb-6'>
             {isModalImageLoading ? (
               <div className='flex min-h-[180px] min-w-[240px] items-center justify-center text-muted-foreground text-sm'>
                 Loading image...
@@ -449,7 +455,7 @@ export function ImageWithViewFullOverlay({
               onLoad={handleModalImageLoad}
               onError={() => setIsModalImageLoading(false)}
             />
-          </ModalBody>
+          </div>
         </ModalContent>
       </Modal>
     </>
