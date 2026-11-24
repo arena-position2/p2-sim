@@ -17,6 +17,7 @@ import {
 import { generateId } from '@sim/utils/id'
 import { filterUndefined, isRecordLike } from '@sim/utils/object'
 import { and, eq, inArray, sql } from 'drizzle-orm'
+import { markFinishedRunsDirty } from '@/lib/billing/activity-rollup/marks'
 import { checkUsageStatus as checkResolvedUsageStatus } from '@/lib/billing/calculations/usage-monitor'
 import { type BillingAttributionSnapshot, toBillingContext } from '@/lib/billing/core/attribution'
 import { readSoftGateUsageCost } from '@/lib/billing/core/reporting-usage-cache'
@@ -1374,6 +1375,7 @@ export class ExecutionLogger {
         },
         completedExecutionLargeValueKeys
       )
+      await markFinishedRunsDirty(tx, [log])
 
       return { updatedLog: log, completionPersisted: true }
     })
@@ -1824,7 +1826,7 @@ export class ExecutionLogger {
             // construction: under the lock no delta collides, so the new sum is
             // the prior workflow-source sum plus the deltas just inserted. This
             // supersedes the main-transaction GREATEST baseline except when the
-            // display total contains Mothership cost owned by Go update-cost.
+            // display total contains Mothership cost owned by the worker's update-cost callback.
             //
             // Gated on billable deltas: a boundary that only wrote zero-cost
             // unbilled rows has changed no cost, and must not restate cost_total.

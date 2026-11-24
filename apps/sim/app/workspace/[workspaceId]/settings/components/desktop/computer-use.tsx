@@ -1,14 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ComputerUseAppPermission } from '@sim/desktop-bridge'
+import {
+  COMPUTER_USE_PERMISSIONS,
+  type ComputerUseAppPermission,
+  type ComputerUsePermission,
+} from '@sim/desktop-bridge'
 import { Chip, ChipSwitch, Label, toast } from '@sim/emcn'
 import { useParams } from 'next/navigation'
 import { ComputerUseActivity } from '@/components/computer-use/activity'
 import { getDesktopBridge } from '@/lib/desktop'
-import { CAPABILITY_RULES } from '@/lib/permission-groups/capabilities'
 import { SettingsSection } from '@/app/workspace/[workspaceId]/settings/components/settings-section/settings-section'
-import { useUserPermissionConfig } from '@/ee/access-control/hooks/permission-groups'
+import { type ComputerUseOwner, useComputerUseAvailability } from '@/hooks/queries/computer-use'
 import { useComputerUseStatus } from '@/hooks/use-computer-use-status'
 
 const ON_OFF_OPTIONS = [
@@ -17,13 +20,26 @@ const ON_OFF_OPTIONS = [
 ]
 
 /** The activity stays visible so an in-flight action can be stopped; the device controls need the permission group's consent. */
+/** Shells without app commands report no app-data permissions, so their rows stay hidden. */
+const PERMISSION_LABELS: Record<ComputerUsePermission, string> = {
+  accessibility: 'Accessibility',
+  screenCapture: 'Screen Recording',
+  reminders: 'Reminders',
+  calendars: 'Calendar',
+  contacts: 'Contacts',
+}
+
 export function ComputerUseSettings() {
-  const { workspaceId } = useParams<{ workspaceId: string }>()
-  const permission = useUserPermissionConfig(workspaceId)
-  const allowed =
-    permission.isSuccess &&
-    (permission.data.config === null ||
-      !CAPABILITY_RULES['computer_use.use'].deniedBy(permission.data.config))
+  const { workspaceId, organizationId } = useParams<{
+    workspaceId?: string
+    organizationId?: string
+  }>()
+  const owner: ComputerUseOwner | null = workspaceId
+    ? { workspaceId }
+    : organizationId
+      ? { organizationId }
+      : null
+  const allowed = useComputerUseAvailability(owner).data === true
   return (
     <>
       <ComputerUseActivity />
@@ -99,8 +115,10 @@ function ComputerUseSettingsControls() {
         )}
         {status?.enabled && (
           <>
-            {(['accessibility', 'screenCapture'] as const).map((permission) => {
-              const label = permission === 'accessibility' ? 'Accessibility' : 'Screen Recording'
+            {COMPUTER_USE_PERMISSIONS.filter(
+              (permission) => status.permissions[permission] !== undefined
+            ).map((permission) => {
+              const label = PERMISSION_LABELS[permission]
               return (
                 <div className='flex items-center justify-between' key={permission}>
                   <Label>{label}</Label>
