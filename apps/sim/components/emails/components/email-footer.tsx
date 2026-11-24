@@ -7,7 +7,6 @@ import { getBrandConfig } from '@/ee/whitelabeling'
 
 interface EmailFooterProps {
   baseUrl?: string
-  messageId?: string
   /**
    * Whether to show unsubscribe link. Defaults to true.
    * Set to false for transactional emails where unsubscribe doesn't apply.
@@ -23,11 +22,7 @@ interface EmailFooterProps {
  * {{UNSUBSCRIBE_TOKEN}} and {{UNSUBSCRIBE_EMAIL}} which are replaced
  * by the mailer when sending.
  */
-export function EmailFooter({
-  baseUrl = getBaseUrl(),
-  messageId,
-  showUnsubscribe = true,
-}: EmailFooterProps) {
+export function EmailFooter({ baseUrl = getBaseUrl(), showUnsubscribe = true }: EmailFooterProps) {
   const brand = getBrandConfig()
   const isWhitelabeled = brand.isWhitelabeled
 
@@ -174,27 +169,6 @@ export function EmailFooter({
                 &nbsp;
               </td>
             </tr>
-
-            {messageId && (
-              <>
-                <tr>
-                  <td style={baseStyles.gutter} width={spacing.gutter}>
-                    &nbsp;
-                  </td>
-                  <td style={baseStyles.footerText}>
-                    Need to refer to this message? Use this ID: {messageId}
-                  </td>
-                  <td style={baseStyles.gutter} width={spacing.gutter}>
-                    &nbsp;
-                  </td>
-                </tr>
-                <tr>
-                  <td style={baseStyles.spacer} height={8}>
-                    &nbsp;
-                  </td>
-                </tr>
-              </>
-            )}
 
             <tr>
               <td style={baseStyles.gutter} width={spacing.gutter}>

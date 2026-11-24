@@ -37,6 +37,7 @@ export type SettingsPlane = 'account' | 'selfhost' | 'workspace'
 
 export type AccountSettingsSection =
   | 'general'
+  | 'desktop'
   | 'billing'
   | 'api-keys'
   | 'admin'
@@ -449,6 +450,8 @@ export const SETTINGS_SECTION_REGISTRY: readonly SettingsSectionRegistryEntry[] 
       order: 3,
       requiresDesktopSurface: 'settings',
     },
+    /** Device settings, not workspace data, so surfaces without a workspace host them too. */
+    planes: { account: { id: 'desktop', group: 'account', order: 2 } },
   },
   {
     label: 'Browser',

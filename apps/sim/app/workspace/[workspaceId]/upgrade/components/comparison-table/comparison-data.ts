@@ -94,6 +94,10 @@ export const COMPARISON_SECTIONS: ComparisonSection[] = [
           'Custom',
         ],
       },
+      {
+        label: 'Sim-hosted models & tools',
+        values: [false, true, true, true],
+      },
     ],
   },
   {

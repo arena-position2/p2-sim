@@ -7,9 +7,13 @@ import {
 } from '@sim/deployment-config/integration-docs'
 import integrationsJson from '@sim/deployment-config/integrations.json'
 import { createLogger } from '@sim/logger'
+import { mapWithConcurrency } from '@sim/utils/concurrency'
 import { getErrorMessage } from '@sim/utils/errors'
+import { SIM_SITE_URL } from '@sim/utils/site'
+import { load } from 'cheerio'
 import matter from 'gray-matter'
 import {
+  difyProfile,
   dustProfile,
   gumloopProfile,
   langflowProfile,
@@ -19,10 +23,10 @@ import {
   openClawProfile,
   type Prose,
   pipedreamProfile,
+  relevanceAiProfile,
   vellumProfile,
 } from '@/lib/compare/data'
 import { ContentFrontmatterSchema } from '@/lib/content/schema'
-import { mapWithConcurrency } from '@/lib/core/utils/concurrency'
 import { INTEGRATION_SEO } from '@/app/(landing)/integrations/data/seo-content'
 
 /**
@@ -33,6 +37,7 @@ import { INTEGRATION_SEO } from '@/app/(landing)/integrations/data/seo-content'
  * deployed origin to compare.
  *
  * Requires LANDING_SEO_E2E_BASE_URL and LANDING_SEO_E2E_REPORT_PATH.
+ * Pass --live to check only the sitemap and priority pages after production cutover.
  */
 const logger = createLogger('LandingSeoE2E')
 
@@ -42,6 +47,7 @@ function requiredEnvironment(name: string): string {
   return value
 }
 
+const live = process.argv.includes('--live')
 const baseUrl = new URL(requiredEnvironment('LANDING_SEO_E2E_BASE_URL'))
 const reportPath = resolve(requiredEnvironment('LANDING_SEO_E2E_REPORT_PATH'))
 assert.equal(baseUrl.pathname, '/', 'The base URL must be an origin without a path')
@@ -164,6 +170,40 @@ async function run() {
   await check('sitemap.xml is served', async () => {
     sitemap = await readSitemap()
   })
+  if (live) {
+    const priorityPaths = [
+      '/workflows',
+      '/comparisons/n8n',
+      '/library/best-ai-agent-marketplaces-template-libraries',
+      '/library/open-source-ai-agent-platforms',
+      '/library/best-self-hosted-ai-workflow-automation-platforms-2026',
+    ]
+
+    for (const path of priorityPaths) {
+      await check(`priority page ${path} is indexable and present in the sitemap`, async () => {
+        const { status, body, headers } = await get(path, 'text/html')
+        assert.equal(status, 200)
+        assert.match(headers.get('content-type') ?? '', /^text\/html/)
+        assert(sitemap.has(path), 'sitemap does not list the page')
+        assert(pageTitle(body).trim(), 'HTML has no title')
+        const canonicals = [...body.matchAll(/<link rel="canonical" href="([^"]+)"/g)]
+        assert.deepEqual(
+          canonicals.map((match) => match[1]),
+          [new URL(path, SIM_SITE_URL).href]
+        )
+        for (const directive of [...robotsDirectives(body), headers.get('x-robots-tag') ?? '']) {
+          assert.doesNotMatch(directive, /\b(?:noindex|none)\b/i)
+        }
+        const $ = load(body)
+        $('template').remove()
+        const headings = $('h1')
+        assert.equal(headings.length, 1, 'HTML does not have exactly one H1')
+        assert(headings.prop('innerText')?.trim(), 'H1 has no text')
+      })
+    }
+    return
+  }
+
   const sitemapPaths = [...sitemap.keys()]
   const firstPath = (pattern: RegExp) => {
     const path = sitemapPaths.find((candidate) => pattern.test(candidate))
@@ -456,6 +496,8 @@ async function run() {
       pipedreamProfile,
       openClawProfile,
       openaiAgentkitProfile,
+      difyProfile,
+      relevanceAiProfile,
     ]) {
       const { status, body } = await get(`/comparisons/${profile.id}`)
       if (status !== 200) {
@@ -463,9 +505,15 @@ async function run() {
         continue
       }
       const text = decodeHtml(body)
-      const lead = profile.leadAnswer?.map((part) => (typeof part === 'string' ? part : part.text))
-      const firstSection = text.indexOf('<h2')
-      const leadAt = lead ? text.indexOf(lead.join('')) : -1
+      const lead = profile.leadAnswer
+        ?.map((part) => (typeof part === 'string' ? part : part.text))
+        .join('')
+      const $ = load(body)
+      const blocks = $('p, h2').toArray()
+      const leadAt = lead
+        ? blocks.findIndex((el) => el.tagName === 'p' && $(el).text().includes(lead))
+        : -1
+      const firstSection = blocks.findIndex((el) => el.tagName === 'h2')
       if (leadAt < 0 || leadAt > firstSection) {
         failures.push(`${profile.id}: lead answer missing or below the first section`)
       }

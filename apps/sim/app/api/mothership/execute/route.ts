@@ -384,7 +384,7 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
         executionId,
         copilotBackend,
         simRequestId: requestId,
-        goRoute: '/api/mothership/execute',
+        workerRoute: '/api/mothership/execute',
         autoExecuteTools: true,
         mcpBlockId: delegation.mcpBlockId,
         executorDelegationOrigin: delegation,

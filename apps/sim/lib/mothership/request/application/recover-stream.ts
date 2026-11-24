@@ -287,7 +287,7 @@ async function recoverStreamRun(context: StreamRunContext, admission?: AbortSign
         runId: run.id,
         executionId: run.executionId,
         workflowId: run.workflowId ?? undefined,
-        goRoute: config.data.goRoute,
+        workerRoute: config.data.workerRoute,
         ...(config.data.copilotBackend ? { copilotBackend: config.data.copilotBackend } : {}),
         copilotResourceAdmission:
           config.data.resourceAuthoringVersion === RESOURCE_AUTHORING_VERSION

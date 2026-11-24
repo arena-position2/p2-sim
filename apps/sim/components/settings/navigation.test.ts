@@ -41,7 +41,6 @@ const SELF_HOSTED: DeploymentShape = {
     sessionPolicies: true,
     sso: false,
     usageMonitoring: false,
-    whitelabeling: true,
   },
 }
 

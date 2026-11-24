@@ -21,7 +21,7 @@ import {
   Trash,
   toast,
 } from '@sim/emcn'
-import { BubbleChatDelay, Download, Lock, Plus, Unlock, X } from '@sim/emcn/icons'
+import { BubbleChatDelay, Code as CodeIcon, Download, Lock, Plus, Unlock, X } from '@sim/emcn/icons'
 import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { useQueryClient } from '@tanstack/react-query'
@@ -49,12 +49,14 @@ import { useResourceRouter } from '@/app/workspace/[workspaceId]/components/reso
 import { MothershipChat } from '@/app/workspace/[workspaceId]/home/components/mothership-chat'
 import { getWorkflowCopilotUseChatOptions, useChat } from '@/app/workspace/[workspaceId]/home/hooks'
 import type { FileAttachmentForApi } from '@/app/workspace/[workspaceId]/home/types'
+import { useFeatureFlag } from '@/app/workspace/[workspaceId]/providers/feature-flags-provider'
 import { useRegisterGlobalCommands } from '@/app/workspace/[workspaceId]/providers/global-commands-provider'
 import { useWorkflowScope } from '@/app/workspace/[workspaceId]/providers/workflow-scope-provider'
 import { useWorkspaceHostContext } from '@/app/workspace/[workspaceId]/providers/workspace-host-provider'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
 import { createCommands } from '@/app/workspace/[workspaceId]/utils/commands'
 import {
+  Code,
   Deploy,
   Editor,
   Toolbar,
@@ -81,6 +83,7 @@ import {
 } from '@/hooks/queries/copilot-chats'
 import { useFolderMap } from '@/hooks/queries/folders'
 import { isWorkflowEffectivelyLocked } from '@/hooks/queries/utils/folder-tree'
+import { fetchWorkflowSourceText } from '@/hooks/queries/workflow-source'
 import { useDuplicateWorkflowMutation, useWorkflowMap } from '@/hooks/queries/workflows'
 import { useCollaborativeWorkflow } from '@/hooks/use-collaborative-workflow'
 import { usePermissionConfig } from '@/hooks/use-permission-config'
@@ -118,6 +121,17 @@ function copilotDraftKey(
 ): string | undefined {
   return workflowId ? `${workspaceId}:workflow-copilot:${workflowId}:${chatId ?? 'new'}` : undefined
 }
+
+/** Shared chrome for the panel's tab buttons: a border only while active or hovered. */
+function tabButtonClass(isActive: boolean): string {
+  return cn(
+    'h-[28px] rounded-md border py-[5px] text-[12.5px]',
+    isActive
+      ? 'border-[var(--border)]'
+      : 'border-transparent hover-hover:border-[var(--border)] hover-hover:bg-[var(--surface-5)]'
+  )
+}
+
 /**
  * Panel component with resizable width and tab navigation that persists across page refreshes.
  *
@@ -187,8 +201,13 @@ export const Panel = memo(function Panel() {
    * paint an empty panel — resolve it to the toolbar instead.
    */
   const isCopilotTabAvailable = chatEnabled && !permissionConfig.hideCopilot
+  /** A persisted `activeTab: 'code'` resolves to the toolbar while workflows as code is off. */
+  const isCodeTabAvailable = useFeatureFlag('workflow-code')
   const activeTab: PanelTab =
-    storedActiveTab === 'copilot' && !isCopilotTabAvailable ? 'toolbar' : storedActiveTab
+    (storedActiveTab === 'copilot' && !isCopilotTabAvailable) ||
+    (storedActiveTab === 'code' && !isCodeTabAvailable)
+      ? 'toolbar'
+      : storedActiveTab
   const duplicateWorkflowMutation = useDuplicateWorkflowMutation()
   const { data: workflows = {} } = useWorkflowMap(workspaceId)
   const { data: folders = {} } = useFolderMap(workspaceId)
@@ -592,6 +611,12 @@ export const Panel = memo(function Panel() {
    * Handles tab click events
    */
   const handleTabClick = (tab: PanelTab) => {
+    if (tab === 'code' && activeTab !== 'code' && scopedWorkflowId) {
+      captureEvent(posthogRef.current, 'code_tab_opened', {
+        workflow_id: scopedWorkflowId,
+        workspace_id: workspaceId,
+      })
+    }
     setActiveTab(tab)
   }
 
@@ -676,6 +701,24 @@ export const Panel = memo(function Panel() {
       setIsMenuOpen(false)
     }
   }, [currentWorkflow, activeWorkflowId, downloadFile])
+
+  /** Downloads the draft as the TypeScript the Code tab shows, with function code inline. */
+  const handleDownloadSource = useCallback(async () => {
+    if (!currentWorkflow || !activeWorkflowId) return
+
+    setIsExporting(true)
+    try {
+      const source = await fetchWorkflowSourceText(queryClient, activeWorkflowId)
+      const filename = `${currentWorkflow.name.replace(/[^a-z0-9]/gi, '-')}.ts`
+      downloadFile(source, filename, 'text/typescript')
+    } catch (error) {
+      logger.error('Failed to download workflow source', { error })
+      toast.error("Couldn't download the code")
+    } finally {
+      setIsExporting(false)
+      setIsMenuOpen(false)
+    }
+  }, [currentWorkflow, activeWorkflowId, queryClient, downloadFile])
 
   /**
    * Handles duplicating the current workflow
@@ -873,6 +916,15 @@ export const Panel = memo(function Panel() {
                     <Download />
                     Export workflow
                   </DropdownMenuItem>
+                  {isCodeTabAvailable && (
+                    <DropdownMenuItem
+                      onSelect={handleDownloadSource}
+                      disabled={isExporting || !currentWorkflow}
+                    >
+                      <CodeIcon />
+                      Download as code
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     onSelect={handleDuplicateWorkflow}
                     disabled={!userPermissions.canEdit || isDuplicating}
@@ -959,11 +1011,10 @@ export const Panel = memo(function Panel() {
             <div className='flex gap-1'>
               {isCopilotTabAvailable && (
                 <Button
-                  className={`h-[28px] truncate rounded-md border py-[5px] text-[12.5px] ${
-                    _hasHydrated && activeTab === 'copilot'
-                      ? 'border-[var(--border-1)]'
-                      : 'border-transparent hover-hover:border-[var(--border-1)] hover-hover:bg-[var(--surface-5)]'
-                  }`}
+                  className={cn(
+                    tabButtonClass(_hasHydrated && activeTab === 'copilot'),
+                    'truncate'
+                  )}
                   variant={_hasHydrated && activeTab === 'copilot' ? 'active' : 'ghost'}
                   onClick={() => handleTabClick('copilot')}
                   data-tab-button='copilot'
@@ -972,11 +1023,7 @@ export const Panel = memo(function Panel() {
                 </Button>
               )}
               <Button
-                className={`h-[28px] rounded-md border py-[5px] text-[12.5px] ${
-                  _hasHydrated && activeTab === 'toolbar'
-                    ? 'border-[var(--border-1)]'
-                    : 'border-transparent hover-hover:border-[var(--border-1)] hover-hover:bg-[var(--surface-5)]'
-                }`}
+                className={tabButtonClass(_hasHydrated && activeTab === 'toolbar')}
                 variant={_hasHydrated && activeTab === 'toolbar' ? 'active' : 'ghost'}
                 onClick={() => handleTabClick('toolbar')}
                 data-tab-button='toolbar'
@@ -984,17 +1031,23 @@ export const Panel = memo(function Panel() {
                 Toolbar
               </Button>
               <Button
-                className={`h-[28px] rounded-md border py-[5px] text-[12.5px] ${
-                  _hasHydrated && activeTab === 'editor'
-                    ? 'border-[var(--border-1)]'
-                    : 'border-transparent hover-hover:border-[var(--border-1)] hover-hover:bg-[var(--surface-5)]'
-                }`}
+                className={tabButtonClass(_hasHydrated && activeTab === 'editor')}
                 variant={_hasHydrated && activeTab === 'editor' ? 'active' : 'ghost'}
                 onClick={() => handleTabClick('editor')}
                 data-tab-button='editor'
               >
                 Editor
               </Button>
+              {isCodeTabAvailable && (
+                <Button
+                  className={tabButtonClass(_hasHydrated && activeTab === 'code')}
+                  variant={_hasHydrated && activeTab === 'code' ? 'active' : 'ghost'}
+                  onClick={() => handleTabClick('code')}
+                  data-tab-button='code'
+                >
+                  Code
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1133,6 +1186,17 @@ export const Panel = memo(function Panel() {
             >
               <Toolbar ref={toolbarRef} isActive={activeTab === 'toolbar'} />
             </div>
+            {isCodeTabAvailable && (
+              <div
+                className={_hasHydrated && activeTab === 'code' ? 'h-full' : 'hidden'}
+                data-tab-content='code'
+              >
+                <Code
+                  isActive={_hasHydrated && activeTab === 'code'}
+                  workflowName={currentWorkflow?.name}
+                />
+              </div>
+            )}
           </div>
         </div>
 

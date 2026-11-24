@@ -23,6 +23,22 @@ const enterprise: OrganizationSettingsFeatures = {
 const available = { connectedAccounts: true, search: true }
 
 describe('organization settings navigation', () => {
+  it('lists Desktop settings only inside the desktop app, where the page resolves', () => {
+    const ids = (desktopSettings: boolean) =>
+      organizationSurfaceSettingsNavigation(
+        false,
+        enterprise,
+        { connectedAccounts: false, search: true, desktopSettings },
+        false
+      ).map(({ id }) => id)
+    expect(ids(true)).toContain('desktop')
+    expect(ids(false)).not.toContain('desktop')
+    expect(resolveOrganizationSurfaceSection('/o/one/settings/desktop')).toEqual({
+      plane: 'account',
+      section: 'desktop',
+    })
+  })
+
   it('exposes MCP setup to an ordinary organization member and keeps the roster for admins', () => {
     expect(
       organizationSettingsNavigation(false, enterprise, available).map(({ id }) => id)

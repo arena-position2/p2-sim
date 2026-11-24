@@ -30,7 +30,11 @@ import { QueryProvider } from '@/app/_shell/providers/query-provider'
 import { SessionProvider } from '@/app/_shell/providers/session-provider'
 import { ThemeProvider } from '@/app/_shell/providers/theme-provider'
 import { TooltipProvider } from '@/app/_shell/providers/tooltip-provider'
-import { AppPublicEnvScript, publicEnvHtmlAttributes } from '@/app/_shell/public-env-script'
+import {
+  AppPublicEnvScript,
+  deploymentShapeHtmlAttributes,
+  publicEnvHtmlAttributes,
+} from '@/app/_shell/public-env-script'
 import { ResumePathSync } from '@/app/_shell/resume-path-sync'
 import { season } from '@/app/_styles/fonts/season/season'
 import { generateBrandedMetadata, generateThemeCSS } from '@/ee/whitelabeling'
@@ -83,6 +87,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       suppressHydrationWarning
       {...publicEnvHtmlAttributes()}
       {...creditsPerDollarHtmlAttributes(creditsPerDollar)}
+      {...deploymentShapeHtmlAttributes()}
     >
       <head>
         <Script
@@ -212,6 +217,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     // has 'copilot' persisted; without this the CSS hides every tab
                     // body and the panel paints empty.
                     if (activeTab === 'copilot' && !${isChatEnabled}) {
+                      activeTab = 'toolbar';
+                    }
+                    // The Code tab is flag-gated per workspace, which this script cannot
+                    // know; the toolbar paints first and React switches to Code if enabled.
+                    if (activeTab === 'code') {
                       activeTab = 'toolbar';
                     }
                     if (activeTab) {

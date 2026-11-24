@@ -74,9 +74,6 @@ const Usage = dynamic(() => SECTION_MODULES['arena-usage']().then((m) => m.Usage
 const Desktop = dynamic(() => SECTION_MODULES.desktop().then((m) => m.Desktop))
 const Browser = dynamic(() => SECTION_MODULES.browser().then((m) => m.Browser))
 const Terminal = dynamic(() => SECTION_MODULES.terminal().then((m) => m.Terminal))
-const WhitelabelingSettings = dynamic(() =>
-  SECTION_MODULES.whitelabeling().then((m) => m.WhitelabelingSettings)
-)
 
 interface SettingsPageProps {
   section: SettingsSection
@@ -198,9 +195,6 @@ function SettingsPageContent({ section }: SettingsPageProps) {
       )}
       {effectiveSection === 'security' && organizationId && (
         <OrganizationSecuritySettings organizationId={organizationId} />
-      )}
-      {effectiveSection === 'whitelabeling' && organizationId && (
-        <WhitelabelingSettings organizationId={organizationId} />
       )}
       {effectiveSection === 'byok' && <BYOK />}
       {effectiveSection === 'sandboxes' && <Sandboxes />}

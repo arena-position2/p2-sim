@@ -17,6 +17,7 @@ import {
   addConnectionsAsEdges,
   createValidatedEdge,
   normalizeBlockIdsInOperations,
+  storedEdgeKeys,
 } from './builders'
 import {
   handleAddOperation,
@@ -288,6 +289,7 @@ export function applyOperationsToWorkflowState(
     }
   }
 
+  const storedEdges = storedEdgeKeys(toArray(workflowState.edges))
   // Pass 2: Create all edges from deferred connections
   // All blocks exist at this point, so forward references resolve correctly
   if (ctx.deferredConnections.length > 0) {
@@ -314,7 +316,8 @@ export function applyOperationsToWorkflowState(
         connections,
         logger,
         skippedItems,
-        validationErrors
+        validationErrors,
+        storedEdges
       )
       const origin = deferredConnectionOrigins[connectionIndex]
       if (origin === undefined) continue
@@ -331,7 +334,7 @@ export function applyOperationsToWorkflowState(
   // forward-reference connections that were recorded (on block.data) when their
   // target didn't exist yet — possibly in an earlier edit_workflow call. Now
   // that this batch's blocks are all created, create the edges that resolve.
-  resolvePendingConnections(modifiedState, skippedItems)
+  resolvePendingConnections(modifiedState, skippedItems, storedEdges)
 
   // Remove edges that cross scope boundaries. This runs after all operations
   // and deferred connections are applied so that every block has its final
@@ -458,7 +461,11 @@ function applyAgentToolUsageControlModesAfterEdits(
  * persisted from earlier edit_workflow calls), creating any edges whose target
  * now exists and leaving still-unresolved entries pending.
  */
-function resolvePendingConnections(modifiedState: any, skippedItems: SkippedItem[]): void {
+function resolvePendingConnections(
+  modifiedState: any,
+  skippedItems: SkippedItem[],
+  storedEdges: ReadonlySet<string>
+): void {
   const blocks = modifiedState.blocks || {}
   for (const [sourceId, block] of Object.entries(blocks) as [string, any][]) {
     const pending = block?.data?.pendingConnections as
@@ -478,7 +485,8 @@ function resolvePendingConnections(modifiedState: any, skippedItems: SkippedItem
             targetHandle || 'target',
             'resolve_pending_connection',
             logger,
-            skippedItems
+            skippedItems,
+            storedEdges
           )
         } else {
           stillPending.push({ target, targetHandle })

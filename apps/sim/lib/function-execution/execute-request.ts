@@ -1,3 +1,4 @@
+import { type Node, type Program, VISITOR_KEYS } from '@babel/types'
 import type {
   DelegatedPrincipal,
   OrganizationDelegatedPrincipal,
@@ -39,6 +40,7 @@ import {
   mergeDurableSecretProvenance,
 } from '@/lib/execution/durable-secret-provenance'
 import { executeInIsolatedVM, type IsolatedVMBrokerHandler } from '@/lib/execution/isolated-vm'
+import { parseUserJavaScript } from '@/lib/execution/javascript-syntax'
 import { CodeLanguage, DEFAULT_CODE_LANGUAGE, isValidCodeLanguage } from '@/lib/execution/languages'
 import {
   inspectPrivateSecretProvenanceRequest,
@@ -389,108 +391,89 @@ const JS_RESERVED_WORDS = new Set([
   'public',
 ])
 
-type TypeScriptModule = typeof import('@typescript/typescript6')
-
-let typescriptModulePromise: Promise<TypeScriptModule> | null = null
-
-async function loadTypeScriptModule(): Promise<TypeScriptModule> {
-  if (!typescriptModulePromise) {
-    typescriptModulePromise = import('@typescript/typescript6').then(
-      (mod) => (mod?.default ?? mod) as TypeScriptModule,
-      (error) => {
-        typescriptModulePromise = null
-        throw error
-      }
-    )
-  }
-
-  return typescriptModulePromise
+function isSyntaxNode(value: unknown): value is Node {
+  return (
+    typeof value === 'object' && value !== null && typeof Reflect.get(value, 'type') === 'string'
+  )
 }
 
-async function extractJavaScriptImports(code: string): Promise<{
+function forEachSyntaxNode(root: Node, visit: (node: Node) => void): void {
+  const pending: Node[] = [root]
+  for (let node = pending.pop(); node; node = pending.pop()) {
+    visit(node)
+    for (const key of VISITOR_KEYS[node.type] ?? []) {
+      const child: unknown = Reflect.get(node, key)
+      /* One push per child: spreading a 100,000-element array literal exceeds Bun's argument limit. */
+      if (Array.isArray(child)) {
+        for (const item of child) if (isSyntaxNode(item)) pending.push(item)
+      } else if (isSyntaxNode(child)) pending.push(child)
+    }
+  }
+}
+
+/**
+ * Splits a function body's static imports from the rest of its code. Each import is
+ * blanked to its newlines in the remaining code, so the lines after it keep their numbers.
+ * Code that does not parse comes back whole, with no imports, and fails where it runs.
+ */
+function extractJavaScriptImports(code: string): {
   imports: string
   remainingCode: string
   hasRequireCalls: boolean
   identifierNames: ReadonlySet<string>
-}> {
+} {
+  let program: Program
   try {
-    const tsModule = await loadTypeScriptModule()
-
-    const sourceFile = tsModule.createSourceFile(
-      'user-code.js',
-      code,
-      tsModule.ScriptTarget.Latest,
-      true,
-      tsModule.ScriptKind.JS
-    )
-
-    const importSegments: Array<{ text: string; start: number; end: number }> = []
-    const identifierNames = new Set<string>()
-    let hasRequireCalls = false
-
-    const visit = (node: import('@typescript/typescript6').Node): void => {
-      if (tsModule.isIdentifier(node)) identifierNames.add(node.text)
-      if (
-        tsModule.isCallExpression(node) &&
-        tsModule.isIdentifier(node.expression) &&
-        node.expression.text === 'require'
-      ) {
-        hasRequireCalls = true
-      }
-      tsModule.forEachChild(node, visit)
-    }
-    visit(sourceFile)
-
-    sourceFile.statements.forEach((statement) => {
-      if (
-        tsModule.isImportDeclaration(statement) ||
-        tsModule.isImportEqualsDeclaration(statement)
-      ) {
-        importSegments.push({
-          text: statement.getFullText(sourceFile).trim(),
-          start: statement.getFullStart(),
-          end: statement.getEnd(),
-        })
-      }
-    })
-
-    if (importSegments.length === 0) {
-      return { imports: '', remainingCode: code, hasRequireCalls, identifierNames }
-    }
-
-    importSegments.sort((a, b) => a.start - b.start)
-
-    const imports = importSegments.map((segment) => segment.text).join('\n')
-
-    let cursor = 0
-    const parts: string[] = []
-    for (const segment of importSegments) {
-      if (segment.start > cursor) {
-        parts.push(code.slice(cursor, segment.start))
-      }
-
-      const removedSegment = code.slice(segment.start, segment.end)
-      const newlinePlaceholder = removedSegment.replace(/[^\n]/g, '')
-      parts.push(newlinePlaceholder)
-
-      cursor = segment.end
-    }
-
-    if (cursor < code.length) {
-      parts.push(code.slice(cursor))
-    }
-
-    const remainingCode = parts.join('')
-
-    return { imports, remainingCode, hasRequireCalls, identifierNames }
+    program = parseUserJavaScript(code).program
   } catch {
-    logger.error('Failed to extract JavaScript imports')
-    return {
-      imports: '',
-      remainingCode: code,
-      hasRequireCalls: false,
-      identifierNames: new Set(),
+    return { imports: '', remainingCode: code, hasRequireCalls: false, identifierNames: new Set() }
+  }
+
+  const identifierNames = new Set<string>()
+  let hasRequireCalls = false
+  forEachSyntaxNode(program, (node) => {
+    if (node.type === 'Identifier') identifierNames.add(node.name)
+    if (
+      (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') &&
+      node.callee.type === 'Identifier' &&
+      node.callee.name === 'require'
+    ) {
+      hasRequireCalls = true
     }
+  })
+
+  /* An import's text runs from the end of whatever precedes it, so the comments above it travel with it. */
+  const importSegments: Array<{ text: string; start: number; end: number }> = []
+  let previousEnd = program.directives.at(-1)?.end ?? program.interpreter?.end ?? 0
+  for (const statement of program.body) {
+    if (statement.type === 'ImportDeclaration' && statement.end != null) {
+      importSegments.push({
+        text: code.slice(previousEnd, statement.end).trim(),
+        start: previousEnd,
+        end: statement.end,
+      })
+    }
+    previousEnd = statement.end ?? previousEnd
+  }
+
+  if (importSegments.length === 0) {
+    return { imports: '', remainingCode: code, hasRequireCalls, identifierNames }
+  }
+
+  let cursor = 0
+  let remainingCode = ''
+  for (const segment of importSegments) {
+    remainingCode += code.slice(cursor, segment.start)
+    remainingCode += code.slice(segment.start, segment.end).replace(/[^\n]/g, '')
+    cursor = segment.end
+  }
+  remainingCode += code.slice(cursor)
+
+  return {
+    imports: importSegments.map((segment) => segment.text).join('\n'),
+    remainingCode,
+    hasRequireCalls,
+    identifierNames,
   }
 }
 
@@ -2434,6 +2417,7 @@ export async function executeFunctionRequest(
               ? { organizationId: admittedChatOwner.organizationId }
               : { workspaceId }),
             userId: auth.attributedUserId,
+            principal: auth.principal,
             signal: executionSignal,
           })
         : undefined
@@ -2641,7 +2625,7 @@ export async function executeFunctionRequest(
     let hasImports = false
 
     if (lang === CodeLanguage.JavaScript) {
-      const extractionResult = await extractJavaScriptImports(resolvedCode)
+      const extractionResult = extractJavaScriptImports(resolvedCode)
       jsImports = extractionResult.imports
       jsRemainingCode = extractionResult.remainingCode
       jsIdentifierNames = extractionResult.identifierNames

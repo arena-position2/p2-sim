@@ -121,8 +121,6 @@ export interface ProviderResponse {
     total: number
     pricing: ModelPricing
   }
-  /** Interaction ID returned by the Interactions API (used for multi-turn deep research) */
-  interactionId?: string
 }
 
 export type ToolUsageControl = 'auto' | 'force' | 'none'
@@ -279,8 +277,6 @@ export interface ProviderRequest {
    * require the billing attribution header (e.g. knowledge search) receive it.
    */
   billingAttribution?: BillingAttributionSnapshot
-  /** Previous interaction ID for multi-turn Interactions API requests (deep research follow-ups) */
-  previousInteractionId?: string
   abortSignal?: AbortSignal
 }
 

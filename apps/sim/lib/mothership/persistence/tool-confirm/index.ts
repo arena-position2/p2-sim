@@ -8,7 +8,6 @@ import {
   type AsyncCompletionEnvelope,
   type AsyncConfirmationState,
   isAsyncEphemeralConfirmationStatus,
-  isAsyncTerminalConfirmationStatus,
 } from '@/lib/mothership/async-runs/lifecycle'
 import {
   getAsyncToolCalls,
@@ -19,7 +18,7 @@ import { MothershipStreamV1ToolOutcome } from '@/lib/mothership/generated/mother
 
 const logger = createLogger('CopilotOrchestratorPersistence')
 const TOOL_CONFIRMATION_TTL_SECONDS = 60 * 10
-const TOOL_CONFIRMATION_POLL_MS = 500
+const DURABLE_CONFIRMATION_POLL_MS = 5_000
 const toolConfirmationKey = (toolCallId: string) => `copilot:tool-confirmation:${toolCallId}`
 
 type ToolConfirmGlobal = typeof globalThis & {
@@ -75,77 +74,39 @@ export async function getToolConfirmation(
   }
 }
 
-/**
- * Reads a confirmation envelope persisted by {@link publishToolConfirmation}.
- */
-async function getRedisToolConfirmation(
-  toolCallId: string
-): Promise<AsyncConfirmationState | null> {
-  const redis = getRedisClient()
-  if (!redis) return null
-  try {
-    const raw = await redis.get(toolConfirmationKey(toolCallId))
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as AsyncCompletionEnvelope
-    if (!parsed || parsed.toolCallId !== toolCallId || typeof parsed.status !== 'string') {
-      return null
-    }
-    return {
-      status: parsed.status,
-      ...(parsed.message !== undefined ? { message: parsed.message } : {}),
-      ...(parsed.data !== undefined ? { data: parsed.data } : {}),
-      ...(parsed.timestamp !== undefined ? { timestamp: parsed.timestamp } : {}),
-    }
-  } catch (error) {
-    logger.warn('Failed to read tool confirmation from Redis', {
-      toolCallId,
-      error: toError(error).message,
-    })
-    return null
-  }
-}
-
 export function publishToolConfirmation(event: AsyncCompletionEnvelope): void {
   logger.info('Publishing tool confirmation event', {
     toolCallId: event.toolCallId,
     status: event.status,
   })
-  const redis = getRedisClient()
-  if (redis) {
-    void redis
-      .set(
-        toolConfirmationKey(event.toolCallId),
-        JSON.stringify(event),
-        'EX',
-        TOOL_CONFIRMATION_TTL_SECONDS
-      )
-      .then(() => {
-        logger.info('Persisted tool confirmation in Redis', {
-          toolCallId: event.toolCallId,
-          status: event.status,
-          redisKey: toolConfirmationKey(event.toolCallId),
-        })
+  void getRedisClient()
+    .set(
+      toolConfirmationKey(event.toolCallId),
+      JSON.stringify(event),
+      'EX',
+      TOOL_CONFIRMATION_TTL_SECONDS
+    )
+    .then(() => {
+      logger.info('Persisted tool confirmation in Redis', {
+        toolCallId: event.toolCallId,
+        status: event.status,
+        redisKey: toolConfirmationKey(event.toolCallId),
       })
-      .catch((error) => {
-        logger.warn('Failed to persist tool confirmation in Redis', {
-          toolCallId: event.toolCallId,
-          error: toError(error).message,
-        })
-      })
-  } else {
-    logger.warn('Redis unavailable while publishing tool confirmation', {
-      toolCallId: event.toolCallId,
-      status: event.status,
     })
-  }
+    .catch((error) => {
+      logger.warn('Failed to persist tool confirmation in Redis', {
+        toolCallId: event.toolCallId,
+        error: toError(error).message,
+      })
+    })
   toolConfirmationChannel.publish(event)
 }
 
 /**
  * Wait for an async tool confirmation update.
  *
- * Terminal statuses settle from the pubsub envelope immediately. DB + Redis
- * keys are polled as a fallback when pubsub is delayed or missed.
+ * `background` still arrives as a request-local detach signal, so it is checked
+ * from pubsub before falling back to the durable async tool row.
  */
 export async function waitForToolConfirmation(
   toolCallId: string,
@@ -165,13 +126,15 @@ export async function waitForToolConfirmation(
   return new Promise((resolve) => {
     let settled = false
     let timeoutId: ReturnType<typeof setTimeout> | null = null
-    let pollTimer: ReturnType<typeof setTimeout> | null = null
+    let pollId: ReturnType<typeof setTimeout> | null = null
     let unsubscribe: (() => void) | null = null
+    let releaseReadyWait: (() => void) | null = null
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId)
-      if (pollTimer) clearTimeout(pollTimer)
+      if (pollId) clearTimeout(pollId)
       if (unsubscribe) unsubscribe()
+      if (releaseReadyWait) releaseReadyWait()
       abortSignal?.removeEventListener('abort', onAbort)
     }
 
@@ -184,19 +147,7 @@ export async function waitForToolConfirmation(
 
     const onAbort = () => settle(null)
 
-    const tryAccept = (latest: AsyncConfirmationState | null, source: string) => {
-      if (!latest || !acceptStatus(latest.status)) return false
-      logger.info('Resolved tool confirmation', {
-        toolCallId,
-        status: latest.status,
-        source,
-      })
-      settle(latest)
-      return true
-    }
-
-    const pollDurable = async () => {
-      if (settled) return
+    const checkDurableConfirmation = async (source: 'subscribe' | 'pubsub' | 'poll') => {
       if (options.executionScope) {
         try {
           await revokeExpiredSimToolExecutions({ ...options.executionScope, toolCallId })
@@ -205,16 +156,37 @@ export async function waitForToolConfirmation(
             toolCallId,
             error: toError(error).message,
           })
+          return false
         }
       }
-      const fromRedis = await getRedisToolConfirmation(toolCallId)
-      if (tryAccept(fromRedis, 'redis')) return
-      const fromDb = await getToolConfirmation(toolCallId)
-      if (tryAccept(fromDb, 'db-poll')) return
+      if (options.settleOverdue) {
+        try {
+          await options.settleOverdue()
+        } catch (error) {
+          logger.warn('Could not settle an overdue tool call; checking again on the next poll', {
+            toolCallId,
+            error: toError(error).message,
+          })
+        }
+      }
+      const latest = await getToolConfirmation(toolCallId)
+      if (!latest || !acceptStatus(latest.status)) return false
+      logger.info('Resolved tool confirmation from durable state', {
+        toolCallId,
+        status: latest.status,
+        source,
+      })
+      settle(latest)
+      return true
+    }
+
+    const scheduleDurablePoll = () => {
       if (settled) return
-      pollTimer = setTimeout(() => {
-        void pollDurable()
-      }, TOOL_CONFIRMATION_POLL_MS)
+      pollId = setTimeout(async () => {
+        pollId = null
+        await checkDurableConfirmation('poll')
+        scheduleDurablePoll()
+      }, DURABLE_CONFIRMATION_POLL_MS)
     }
 
     unsubscribe = toolConfirmationChannel.subscribe((event) => {
@@ -228,20 +200,7 @@ export async function waitForToolConfirmation(
         })
         return
       }
-      // Terminal confirmations (Approve/Reject) settle from the envelope so a
-      // slow DB read cannot drop the only pubsub wakeup.
-      if (isAsyncTerminalConfirmationStatus(event.status) && acceptStatus(event.status)) {
-        settle({
-          status: event.status,
-          ...(event.message !== undefined ? { message: event.message } : {}),
-          ...(event.data !== undefined ? { data: event.data } : {}),
-          ...(event.timestamp !== undefined ? { timestamp: event.timestamp } : {}),
-        })
-        return
-      }
-      void getToolConfirmation(toolCallId).then((latest) => {
-        tryAccept(latest, 'pubsub-db')
-      })
+      void checkDurableConfirmation('pubsub')
     })
 
     if (timeoutMs !== null) timeoutId = setTimeout(() => settle(null), timeoutMs)
@@ -251,6 +210,16 @@ export async function waitForToolConfirmation(
     }
     abortSignal?.addEventListener('abort', onAbort, { once: true })
 
-    void pollDurable()
+    // A publisher commits the row before it publishes. When this process is not subscribed yet, a
+    // signal sent before the subscription lands reaches no handler, so the row is read once more
+    // when it does.
+    const subscribedBeforeFirstRead = toolConfirmationChannel.isReady()
+    void checkDurableConfirmation('subscribe').then(scheduleDurablePoll)
+    if (!subscribedBeforeFirstRead && !settled) {
+      releaseReadyWait = toolConfirmationChannel.onReady(() => {
+        releaseReadyWait = null
+        if (!settled) void checkDurableConfirmation('subscribe')
+      })
+    }
   })
 }

@@ -22,6 +22,7 @@ export interface ExaFreshnessParams {
  * still honors, kept so workflows saved against the old dropdown keep running.
  */
 type ExaSearchType =
+  | 'lite'
   | 'instant'
   | 'fast'
   | 'auto'
@@ -240,5 +241,7 @@ export interface ExaAgentResponse extends ToolResponse {
     }[]
     /** API-reported cost when present (used by hosted-key billing). */
     __costDollars?: number | { total?: number }
+    /** Exa's `error.message` for a failed run; internal, stripped before the output is returned. */
+    __errorMessage?: string
   }
 }

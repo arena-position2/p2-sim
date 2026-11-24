@@ -4,6 +4,7 @@ import { generateId } from '@sim/utils/id'
 import { isRecordLike } from '@sim/utils/object'
 import type { Variable, WorkflowState } from '@sim/workflow-types/workflow'
 import { resolveBillingAttribution } from '@/lib/billing/core/attribution'
+import { DelegatedWorkspaceAuthorizationError } from '@/lib/core/application'
 import {
   inheritFailureMarks,
   markFailureKind,
@@ -191,6 +192,19 @@ type WorkflowTraceSpan = TraceSpan & {
 }
 
 /**
+ * A child workflow read refused because the run's delegation does not reach it, named for what
+ * that almost always means: the workflow block names a workflow of another workspace (a raw id
+ * copied across workspaces). Any other error is returned as it is.
+ */
+function childReadError(error: unknown, workflowId: string): unknown {
+  if (!(error instanceof DelegatedWorkspaceAuthorizationError)) return error
+  return new Error(
+    `Child workflow ${workflowId} is not in this workspace, or this run may no longer read it: a workflow block runs only workflows of its own workspace.`,
+    { cause: error }
+  )
+}
+
+/**
  * Handler for workflow blocks that execute other workflows inline.
  * Creates sub-execution contexts and manages data flow between parent and child workflows.
  */
@@ -372,7 +386,10 @@ export class WorkflowBlockHandler implements BlockHandler {
       // safe to cross the invocation boundary verbatim (it names no source
       // internals), so the catch forwards it instead of the generic failure.
       if (isCustomBlock) {
-        const deployed = await this.checkChildDeployment(workflowId, workflowReadDelegationOrigin)
+        const { deployed } = await this.readChildDeployment(
+          workflowId,
+          workflowReadDelegationOrigin
+        )
         if (!deployed) {
           throw new BoundarySafeError({
             errorType: 'not_deployed',
@@ -382,13 +399,12 @@ export class WorkflowBlockHandler implements BlockHandler {
       }
 
       if (useDeployed && !isCustomBlock) {
-        const hasActiveDeployment = await this.checkChildDeployment(
-          workflowId,
-          workflowReadDelegationOrigin
-        )
-        if (!hasActiveDeployment) {
+        const deployment = await this.readChildDeployment(workflowId, workflowReadDelegationOrigin)
+        if (!deployment.deployed) {
+          if (deployment.name) childWorkflowName = deployment.name
+          const child = deployment.name ? `"${deployment.name}" (${workflowId})` : workflowId
           throw new Error(
-            `Child workflow is not deployed. Please deploy the workflow before invoking it.`
+            `Child workflow ${child} is not deployed. A deployed run calls the deployed version of each child workflow: deploy ${child}, then run again.`
           )
         }
       }
@@ -507,15 +523,23 @@ export class WorkflowBlockHandler implements BlockHandler {
         childWorkflow.rawBlocks || {},
         ctx.selectedOutputs
       )
-      if (isCustomBlock && childOutputSelection.targetsChildWorkflow) {
-        throw new Error('Custom block child outputs cannot be selected for streaming')
+      if (childOutputSelection.ignored.length > 0) {
+        logger.warn('Ignoring output selectors the child workflow cannot serve', {
+          childWorkflowId: workflowId,
+          ignored: childOutputSelection.ignored,
+        })
       }
-      if (!withinSseChildDepth && childOutputSelection.targetsChildWorkflow) {
-        throw new Error(
-          `Selected stream output exceeds the maximum child workflow depth of ${DEFAULTS.MAX_SSE_CHILD_DEPTH}`
-        )
+      if (childOutputSelection.targetsChildWorkflow && (isCustomBlock || !withinSseChildDepth)) {
+        logger.warn('Ignoring child output selection the stream cannot carry', {
+          childWorkflowId: workflowId,
+          reason: isCustomBlock
+            ? 'custom block child outputs cannot be selected for streaming'
+            : 'selected output exceeds the maximum child workflow depth',
+          maxDepth: DEFAULTS.MAX_SSE_CHILD_DEPTH,
+        })
       }
-      const childSelectedOutputs = isCustomBlock ? [] : childOutputSelection.selectedOutputs
+      const childSelectedOutputs =
+        isCustomBlock || !withinSseChildDepth ? [] : childOutputSelection.selectedOutputs
       const shouldStreamChild =
         shouldPropagateCallbacks && Boolean(ctx.stream) && childSelectedOutputs.length > 0
 
@@ -1309,7 +1333,7 @@ export class WorkflowBlockHandler implements BlockHandler {
         logger.warn(`Child workflow ${workflowId} not found`)
         return null
       }
-      throw error
+      throw childReadError(error, workflowId)
     }
 
     const workflowData = definition.workflow
@@ -1356,23 +1380,30 @@ export class WorkflowBlockHandler implements BlockHandler {
     }
   }
 
-  private async checkChildDeployment(
+  /**
+   * Whether the child has an active deployment, and its name when the read found the workflow, so
+   * a refusal can say which child to deploy.
+   */
+  private async readChildDeployment(
     workflowId: string,
     origin: ExecutorDelegationOrigin
-  ): Promise<boolean> {
+  ): Promise<{ deployed: boolean; name?: string }> {
     try {
       const definition = await readWorkflowDefinitionAsExecutor({
         origin,
         workflowId,
         state: 'deployed',
       })
-      return definition.state !== null
+      return { deployed: definition.state !== null, name: definition.workflow.name || undefined }
     } catch (error) {
+      if (error instanceof DelegatedWorkspaceAuthorizationError) {
+        throw childReadError(error, workflowId)
+      }
       logger.error('Failed to check child deployment', {
         errorName: toError(error).name,
         hasWorkflowId: workflowId.length > 0,
       })
-      return false
+      return { deployed: false }
     }
   }
 
@@ -1388,7 +1419,7 @@ export class WorkflowBlockHandler implements BlockHandler {
       if (asOrchestrationError(error)?.code === 'not_found') {
         return null
       }
-      throw error
+      throw childReadError(error, workflowId)
     }
 
     const deployedState = definition.state

@@ -25,6 +25,7 @@ import {
   TypeNumber,
   Wrench,
 } from '@sim/emcn/icons'
+import { buildCanonicalIndex } from '@sim/workflow-code/catalog/canonical-index'
 import {
   BLOCK_DIMENSIONS,
   CanvasSentenceView,
@@ -80,7 +81,6 @@ import {
   resolveWorkflowSelectionLabel,
 } from '@/lib/workflows/subblocks/display'
 import {
-  buildCanonicalIndex,
   buildCanonicalIndexForSurface,
   hasAdvancedValues,
   resolveDependencyValue,

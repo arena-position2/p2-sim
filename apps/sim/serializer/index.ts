@@ -2,28 +2,31 @@ import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { generateId } from '@sim/utils/id'
 import {
+  buildCanonicalIndex,
+  type CanonicalModeOverrides,
+  getCanonicalValues,
+  isCanonicalPair,
+  isNonEmptyValue,
+  resolveCanonicalMode,
+} from '@sim/workflow-code/catalog/canonical-index'
+import {
   generateLoopBlocks,
   generateParallelBlocks,
 } from '@sim/workflow-persistence/subflow-helpers'
+import { CUSTOM_BLOCK_RESERVED_PARAMS, LEGACY_AGENT_FIELDS } from '@sim/workflow-types/blocks'
 import { resolveBlockRetryConfig } from '@sim/workflow-types/workflow'
 import type { Edge } from '@xyflow/react'
 import { migrateGreenhouseAgentInputs } from '@/lib/workflows/migrations/greenhouse-agent-inputs'
 import { migrateMcpOperationControls } from '@/lib/workflows/migrations/mcp-operation-controls'
-import type { CanonicalModeOverrides } from '@/lib/workflows/subblocks/visibility'
 import {
-  buildCanonicalIndex,
   buildSubBlockValues,
   evaluateSubBlockCondition,
-  getCanonicalValues,
-  isCanonicalPair,
-  isNonEmptyValue,
   isSubBlockHidden,
   isToolInputOnlySubBlock,
-  resolveCanonicalMode,
   withCanonicalModes,
 } from '@/lib/workflows/subblocks/visibility'
 import { getBlock } from '@/blocks'
-import { isCustomBlockType, RESERVED_PARAMS } from '@/blocks/custom/build-config'
+import { isCustomBlockType } from '@/blocks/custom/build-config'
 import type { SubBlockConfig } from '@/blocks/types'
 import { MissingRequiredFieldsError } from '@/serializer/errors'
 import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
@@ -560,7 +563,8 @@ export function extractBlockParams(block: BlockState, workspaceId?: string): Rec
   // no curated inputs) do we carry every stored field value forward blindly. A
   // declared input is any sub-block that isn't the block's own reserved wiring.
   const customBlockHasDeclaredInputs =
-    isCustomBlock && blockConfig.subBlocks.some((config) => !RESERVED_PARAMS.has(config.id))
+    isCustomBlock &&
+    blockConfig.subBlocks.some((config) => !CUSTOM_BLOCK_RESERVED_PARAMS.has(config.id))
   const isTriggerContext = block.triggerMode ?? false
   const isTriggerCategory = blockConfig.category === 'triggers'
   // The serializer filters BEFORE it resolves, which is why execution has always been correct
@@ -579,8 +583,7 @@ export function extractBlockParams(block: BlockState, workspaceId?: string): Rec
       Array.isArray(subBlock.value) &&
       subBlock.value.length > 0
 
-    const isLegacyAgentField =
-      isAgentBlock && ['systemPrompt', 'userPrompt', 'memories'].includes(id)
+    const isLegacyAgentField = isAgentBlock && LEGACY_AGENT_FIELDS.has(id)
 
     const shouldInclude =
       matchingConfigs.length === 0 ||
@@ -636,6 +639,7 @@ export function extractBlockParams(block: BlockState, workspaceId?: string): Rec
     if (
       params[id] == null &&
       subBlockConfig.value &&
+      subBlockConfig.valueScope !== 'viewer' &&
       shouldSerializeSubBlock(
         subBlockConfig,
         allValues,

@@ -14,12 +14,6 @@ import {
 } from '@/lib/mothership/generated/mothership-stream-v1'
 import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import {
-  createFilePreviewAdapterState,
-  type FilePreviewAdapterState,
-  processFilePreviewStreamEvent,
-} from '@/lib/mothership/request/go/file-preview-adapter'
-import { prepareStreamImages } from '@/lib/mothership/request/go/inline-images'
-import {
   handleSubagentRouting,
   sseHandlers,
   subAgentHandlers,
@@ -43,6 +37,12 @@ import type {
   StreamEvent,
   StreamingContext,
 } from '@/lib/mothership/request/types'
+import {
+  createFilePreviewAdapterState,
+  type FilePreviewAdapterState,
+  processFilePreviewStreamEvent,
+} from '@/lib/mothership/request/worker/file-preview-adapter'
+import { prepareStreamImages } from '@/lib/mothership/request/worker/inline-images'
 import { persistChatResources } from '@/lib/mothership/resources/persistence'
 import {
   extractLocalFileChatResources,
@@ -742,7 +742,8 @@ export async function runLocalCopilotMothershipLifecycle(
       }
     | undefined
   const isMothershipBlockExecute =
-    typeof options.goRoute === 'string' && options.goRoute.startsWith('/api/mothership/execute')
+    typeof options.workerRoute === 'string' &&
+    options.workerRoute.startsWith('/api/mothership/execute')
   /** Workflow owns block cost via `result.cost`; interactive Local chat writes the ledger. */
   const writeChatLedger = !isMothershipBlockExecute
   let blockExecuteCost: LocalTurnCostSummary | undefined

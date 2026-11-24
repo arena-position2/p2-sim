@@ -216,6 +216,15 @@ const getPreviewValue = (
   return subBlockValues[config.id]?.value ?? null
 }
 
+/** The text a text-valued field's `value()` thunk seeds; a switch or slider seeds no text. */
+const textDefault = (
+  config: SubBlockConfig,
+  values: Record<string, unknown> = {}
+): string | undefined => {
+  const seeded = typeof config.value === 'function' ? config.value(values) : undefined
+  return typeof seeded === 'string' ? seeded : undefined
+}
+
 /**
  * Renders the label with optional validation and description tooltips.
  *
@@ -746,14 +755,7 @@ function SubBlockComponent({
               blockId={blockId}
               subBlockId={config.id}
               options={config.options as { label: string; id: string }[]}
-              defaultValue={(() => {
-                const raw =
-                  typeof config.value === 'function'
-                    ? config.value(subBlockValues || {})
-                    : config.value
-                const v = Array.isArray(raw) ? ((raw[0] as string | undefined) ?? undefined) : raw
-                return v === null ? undefined : v
-              })()}
+              defaultValue={textDefault(config, subBlockValues || {})}
               placeholder={config.placeholder}
               isPreview={isPreview}
               previewValue={previewValue}
@@ -792,11 +794,7 @@ function SubBlockComponent({
               blockId={blockId}
               subBlockId={config.id}
               options={config.options as { label: string; id: string }[]}
-              defaultValue={
-                typeof config.value === 'function'
-                  ? config.value(subBlockValues || {})
-                  : config.value
-              }
+              defaultValue={textDefault(config, subBlockValues || {})}
               placeholder={config.placeholder}
               isPreview={isPreview}
               previewValue={previewValue as any}
@@ -851,9 +849,7 @@ function SubBlockComponent({
             password={config.password}
             language={config.language}
             generationType={config.generationType}
-            value={
-              typeof config.value === 'function' ? config.value(subBlockValues || {}) : undefined
-            }
+            value={textDefault(config, subBlockValues)}
             isPreview={isPreview}
             previewValue={previewValue as string | null | undefined}
             disabled={isDisabled}
@@ -1272,7 +1268,7 @@ function SubBlockComponent({
             subBlockId={config.id}
             content={
               typeof config.value === 'function'
-                ? (config.value(subBlockValues || {}) ?? '')
+                ? (textDefault(config, subBlockValues) ?? '')
                 : (config.defaultValue as string) || ''
             }
           />

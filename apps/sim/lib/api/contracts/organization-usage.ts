@@ -1,3 +1,4 @@
+import { isValidTimezone } from '@sim/utils/timezone'
 import { z } from 'zod'
 import { organizationParamsSchema } from '@/lib/api/contracts/organization'
 import { organizationIdSchema, workspaceIdSchema } from '@/lib/api/contracts/primitives'
@@ -9,7 +10,6 @@ import {
   workspaceUsagePeriodSchema,
 } from '@/lib/api/contracts/workspace-usage'
 import { BILLING_USAGE_LOG_SOURCES, INTERNAL_USAGE_LOG_SOURCES } from '@/lib/billing/usage-sources'
-import { isValidTimezone } from '@/lib/core/utils/timezone'
 
 export const organizationUsageAnalyticsQuerySchema = z.object({
   startTime: z.string().optional(),

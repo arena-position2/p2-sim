@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { resolvePrincipalSubjectUserId } from '@sim/auth/principal'
 import { createLogger } from '@sim/logger'
+import { mapWithConcurrency } from '@sim/utils/concurrency'
 import { isPlainRecord } from '@sim/utils/object'
 import { parseRetryAfter } from '@sim/utils/retry'
 import type { NextRequest } from 'next/server'
@@ -15,7 +16,6 @@ import type { WorkspaceKnowledgeSearchData } from '@/lib/api/contracts/mothershi
 import type { V2ApiKeyAuthContext } from '@/lib/api/server/routes/v2-api-key-auth'
 import { v2RateLimits } from '@/lib/api/server/routes/v2-json-route'
 import { afterResponse } from '@/lib/core/utils/after-response'
-import { mapWithConcurrency } from '@/lib/core/utils/concurrency'
 import { organizationSearchChatOperation } from '@/lib/knowledge/application/chat-operations'
 import { knowledgeOperations } from '@/lib/knowledge/application/operations'
 import {
@@ -28,7 +28,6 @@ import {
   type KnowledgeMcpToolRunner,
   projectResult,
 } from '@/lib/knowledge/mcp/tool-runner'
-import { liveCitationId } from '@/lib/knowledge/search/citation'
 import { toolError } from '@/lib/mcp/tool-result'
 import {
   LIVE_DATE_ORDER_MESSAGE,
@@ -144,11 +143,7 @@ function projectReadResult(result: Awaited<ReturnType<typeof readLiveDocument.ex
     sourceContainerName: _sourceContainerName,
     ...document
   } = result
-  return {
-    ...document,
-    citationId: liveCitationId(result.documentId),
-    ...sourceFacts(result),
-  }
+  return { ...document, ...sourceFacts(result) }
 }
 
 /** Characters of text a tool result hands the client. */
@@ -258,12 +253,12 @@ export function createKnowledgeMcpServer(context: KnowledgeMcpContext): McpServe
           {
             results: result.results.map((row) => ({
               documentId: row.documentId,
-              citationId: liveCitationId(row.documentId),
               ...sourceFacts(row),
               sourceContainerUrl: row.sourceContainerUrl,
+              ...(row.author ? { author: row.author } : {}),
               ...(row.queryIndexes ? { queryIndexes: row.queryIndexes } : {}),
               connectorType: row.connectorType,
-              content: row.content,
+              ...(row.content && row.content !== row.documentName ? { content: row.content } : {}),
             })),
             retrieval: projectRetrieval(result.retrieval),
             ...(result.live ? { live: projectLiveCoverage(result.live) } : {}),

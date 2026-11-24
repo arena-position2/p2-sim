@@ -12,6 +12,7 @@ import { encryptSecret } from '@/lib/core/security/encryption'
 import { checkNeedsRedeployment } from '@/lib/workflows/deployment-status'
 import {
   getWorkflowDeploymentSummary,
+  type PerformFullDeployParams,
   performFullDeploy,
 } from '@/lib/workflows/orchestration/deploy'
 
@@ -49,6 +50,8 @@ export interface ChatDeployPayload {
   captureDeploymentAnalytics?: false
   projectLegacyAudit?: boolean
   captureLegacyTelemetry?: boolean
+  /** Checks the draft a redeploy this chat write needs would publish (see `performFullDeploy`). */
+  admitDraft?: PerformFullDeployParams['admitDraft']
 }
 
 export interface PerformChatDeployResult {
@@ -215,6 +218,7 @@ export async function performChatDeploy(
       versionName: params.versionName,
       idempotencyKey: params.idempotencyKey,
       captureAnalytics: params.captureDeploymentAnalytics,
+      ...(params.admitDraft ? { admitDraft: params.admitDraft } : {}),
     })
     if (!deployResult.success) {
       return {

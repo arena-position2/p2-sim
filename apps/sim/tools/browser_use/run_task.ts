@@ -66,7 +66,7 @@ export const runTaskTool: InternalToolConfig<BrowserUseRunTaskParams, BrowserUse
       type: 'string',
       required: false,
       visibility: 'user-only',
-      description: 'Optional text appended to the agent system prompt (max 2000 chars)',
+      description: 'Optional text appended to the agent system prompt (max 10000 chars)',
     },
     structuredOutput: {
       type: 'string',
@@ -78,7 +78,7 @@ export const runTaskTool: InternalToolConfig<BrowserUseRunTaskParams, BrowserUse
       type: 'boolean',
       required: false,
       visibility: 'user-only',
-      description: 'Highlight interactive elements on the page (default true)',
+      description: 'Highlight interactive elements on the page (default false)',
     },
     metadata: {
       type: 'json',

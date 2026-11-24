@@ -137,7 +137,7 @@ import {
   registerProviderToolModelInputRegistry,
 } from '@/providers/tool-input-provenance'
 import type { ProviderToolConfig } from '@/providers/types'
-import { getProviderFromModel, isDeepResearchModel, transformBlockTool } from '@/providers/utils'
+import { getProviderFromModel, transformBlockTool } from '@/providers/utils'
 import type { SerializedBlock } from '@/serializer/types'
 import { buildJsonSchemaParamShapes, decodeToolParams } from '@/tools/param-shape'
 import { filterSchemaForLLM, type ToolSchema, ToolSchemaEnrichmentError } from '@/tools/params'
@@ -169,7 +169,6 @@ const AGENT_RAW_PROVIDER_ERROR_INPUT_PATHS: readonly ResolvedSecretInputPath[] =
   ['verbosity'],
   ['thinkingLevel'],
   ['promptCaching'],
-  ['previousInteractionId'],
   ['fallbackModels'],
 ]
 
@@ -523,9 +522,7 @@ export class AgentBlockHandler implements BlockHandler {
         filteredInputs.memoryType !== 'none' &&
         filteredInputs.conversationId &&
         nodeMetadata &&
-        nodeMetadata.executionOrder !== undefined &&
-        !modelInputs.previousInteractionId &&
-        !isDeepResearchModel(model)
+        nodeMetadata.executionOrder !== undefined
           ? await openAgentTurnSession({
               ctx,
               blockId: block.id,
@@ -583,10 +580,6 @@ export class AgentBlockHandler implements BlockHandler {
        * Retry on fail retries the selected model; the fallbacks join only on the
        * try after which the executor promises no other. Until then a failure of
        * the primary is left to escape, so the executor's policy can replay it.
-       *
-       * A follow-up turn of a deep-research interaction lives on the primary's
-       * provider; another model has none of that conversation, so a green answer
-       * from it would be built on a fresh context. Such a request never falls back.
        */
       const configuredFallbacks = getModelFallbacks(
         ctx,
@@ -599,11 +592,7 @@ export class AgentBlockHandler implements BlockHandler {
       }
       const retry = nodeMetadata?.retry
       const fallbacksHeld = areFallbacksHeld(retry)
-      if (configuredFallbacks.length > 0 && modelInputs.previousInteractionId) {
-        logger.info('Fallback models skipped for a deep-research follow-up turn', {
-          blockId: block.id,
-        })
-      } else if (configuredFallbacks.length > 0 && fallbacksHeld) {
+      if (configuredFallbacks.length > 0 && fallbacksHeld) {
         logger.info('Fallback models held for the final try', {
           blockId: block.id,
           attempt: retry?.attempt,
@@ -616,10 +605,9 @@ export class AgentBlockHandler implements BlockHandler {
         resultRegistry: servedRegistry,
       } = await this.executeAcrossModels(ctx, block, {
         primary: { model, ...(autoRouting ? { traceName: SIM_AUTO_MODEL_ID } : {}) },
-        fallbacks: modelInputs.previousInteractionId ? [] : configuredFallbacks,
+        fallbacks: configuredFallbacks,
         retry,
-        retryPrimaryOnStreamStart:
-          fallbacksHeld && configuredFallbacks.length > 0 && !modelInputs.previousInteractionId,
+        retryPrimaryOnStreamStart: fallbacksHeld && configuredFallbacks.length > 0,
         configuredModel: autoRouting ? SIM_AUTO_MODEL_ID : model,
         primaryProviderId: providerId,
         messages: messagesWithInputFiles,
@@ -2656,8 +2644,6 @@ export class AgentBlockHandler implements BlockHandler {
               blockId: block.id,
               logger,
             }),
-            /** A previous interaction id belongs to the primary's provider alone. */
-            previousInteractionId: undefined,
             ...(config.fallbackSystemPrompt !== undefined
               ? { systemPrompt: config.fallbackSystemPrompt }
               : {}),
@@ -2872,7 +2858,6 @@ export class AgentBlockHandler implements BlockHandler {
       verbosity: inputs.verbosity,
       thinkingLevel: inputs.thinkingLevel,
       promptCaching: inputs.promptCaching === true,
-      previousInteractionId: inputs.previousInteractionId,
       /** Agent-events remains the opt-in for exposing thinking and tool lifecycle events. */
       agentEvents: streaming && ctx.metadata?.agentEvents === true,
     }
@@ -2963,7 +2948,6 @@ export class AgentBlockHandler implements BlockHandler {
           promptCaching: providerRequest.promptCaching,
           // Stable per-block identity; providers use it to route cache lookups.
           blockId: block.id,
-          previousInteractionId: providerRequest.previousInteractionId,
           agentEvents: providerRequest.agentEvents,
           abortSignal: ctx.abortSignal,
         },
@@ -3220,7 +3204,6 @@ export class AgentBlockHandler implements BlockHandler {
       content: result.content,
       ...(result.answers && { answers: result.answers }),
       ...this.createResponseMetadata(result),
-      ...(result.interactionId && { interactionId: result.interactionId }),
     }
   }
 
