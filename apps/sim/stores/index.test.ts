@@ -14,7 +14,11 @@ vi.mock('@/stores/reset-all-stores', () => {
 })
 
 import { desktopToolSession } from '@/app/workspace/[workspaceId]/home/hooks/desktop-tool-lifetimes'
-import { clearUserData, RECENT_IMPERSONATIONS_STORAGE_KEY } from '@/stores'
+import {
+  AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY,
+  clearUserData,
+  RECENT_IMPERSONATIONS_STORAGE_KEY,
+} from '@/stores'
 import { useSettingsDirtyStore } from '@/stores/settings/dirty/store'
 
 expect(mockModuleLoaded).not.toHaveBeenCalled()
@@ -65,6 +69,7 @@ describe('clearUserData', () => {
     localStorage.setItem('next-favicon', 'favicon')
     localStorage.setItem('sim-theme', 'dark')
     localStorage.setItem('sim-landing-theme', 'dark')
+    localStorage.setItem(AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY, '1')
     localStorage.setItem(RECENT_IMPERSONATIONS_STORAGE_KEY, '["user-a"]')
     localStorage.setItem('private-cache', 'remove-me')
     sessionStorage.setItem('mothership-queue', 'private-queued-message')
@@ -76,6 +81,7 @@ describe('clearUserData', () => {
     expect(localStorage.getItem('next-favicon')).toBe('favicon')
     expect(localStorage.getItem('sim-theme')).toBe('dark')
     expect(localStorage.getItem('sim-landing-theme')).toBe('dark')
+    expect(localStorage.getItem(AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY)).toBe('1')
     expect(localStorage.getItem(RECENT_IMPERSONATIONS_STORAGE_KEY)).toBeNull()
     expect(localStorage.getItem('private-cache')).toBeNull()
     expect(sessionStorage.getItem('mothership-queue')).toBeNull()
@@ -88,10 +94,12 @@ describe('clearUserData', () => {
 
   it('preserves recent impersonations only across an explicit impersonation transition', async () => {
     localStorage.setItem(RECENT_IMPERSONATIONS_STORAGE_KEY, '["user-a"]')
+    localStorage.setItem(AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY, '1')
 
     await clearUserData({ preserveRecentImpersonations: true })
 
     expect(localStorage.getItem(RECENT_IMPERSONATIONS_STORAGE_KEY)).toBe('["user-a"]')
+    expect(localStorage.getItem(AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY)).toBe('1')
   })
 
   it('clears persisted user data even when the lazy store reset fails', async () => {

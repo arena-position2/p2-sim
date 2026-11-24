@@ -7,6 +7,7 @@ import {
   buildArenaSimResumeUrl,
 } from '@/lib/auth/arena-sim-resume'
 import { isLocalLoginEnabled } from '@/lib/core/config/env-flags'
+import { AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY } from '@/stores'
 
 const logger = createLogger('AutoLoginSessionMigrationProvider')
 
@@ -23,9 +24,10 @@ const logger = createLogger('AutoLoginSessionMigrationProvider')
  * Children mount only after migration is done when we stay on-page (already
  * migrated, or auth surface / failed resume). A successful resume navigates away.
  *
- * Bump the localStorage key when a new clear pass is required in production.
+ * The key lives in {@link AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY} so
+ * `clearUserData` can preserve it across identity boundaries. Bump the key
+ * suffix when a new clear pass is required in production.
  */
-const AUTO_LOGIN_MIGRATION_KEY = 'sim_auth_session_cookie_scope_migration_v3'
 
 interface AutoLoginSessionMigrationProviderProps {
   children: ReactNode
@@ -33,7 +35,7 @@ interface AutoLoginSessionMigrationProviderProps {
 
 function markMigrationDone(): void {
   if (typeof window !== 'undefined') {
-    window.localStorage.setItem(AUTO_LOGIN_MIGRATION_KEY, '1')
+    window.localStorage.setItem(AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY, '1')
   }
 }
 
@@ -56,7 +58,7 @@ export function AutoLoginSessionMigrationProvider({
 }: AutoLoginSessionMigrationProviderProps) {
   const [ready, setReady] = useState(() => {
     if (typeof window === 'undefined') return false
-    return window.localStorage.getItem(AUTO_LOGIN_MIGRATION_KEY) === '1'
+    return window.localStorage.getItem(AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY) === '1'
   })
 
   useEffect(() => {
