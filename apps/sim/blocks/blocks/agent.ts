@@ -297,7 +297,9 @@ Return ONLY the JSON array.`,
       id: 'memoryType',
       title: 'Memory',
       type: 'dropdown',
-      defaultValue: 'none',
+      // Conversation so multi-turn chat (and Arena Auto) keeps prior turns.
+      // Arena Auto also upgrades legacy `none` → conversation at runtime.
+      defaultValue: 'conversation',
       options: [
         { label: 'none', id: 'none' },
         { label: 'conversation', id: 'conversation' },
@@ -315,6 +317,7 @@ Return ONLY the JSON array.`,
       title: 'Conversation ID',
       type: 'short-input',
       placeholder: 'Defaults to <start.conversationId> when available',
+      // Auto fills from Start at runtime when empty; wire <start.conversationId> for chat.
       condition: {
         field: 'memoryType',
         value: 'none',

@@ -126,7 +126,7 @@ import {
   canUseProviderLargeFilePath,
   getInlineHydrationMaxBytes,
 } from '@/providers/file-attachments.server'
-import { isAutoModel, isEvaluationModel, SIM_AUTO_MODEL_ID } from '@/providers/models'
+import { ARENA_AUTO_MODEL_ID, isAutoModel, isEvaluationModel } from '@/providers/models'
 import {
   type ProviderToolInputProvenance,
   registerProviderToolInputProvenance,
@@ -171,6 +171,65 @@ const AGENT_RAW_PROVIDER_ERROR_INPUT_PATHS: readonly ResolvedSecretInputPath[] =
 interface IndexedToolInput {
   tool: ToolInput
   toolIndex: number
+}
+
+/**
+ * Arena Auto must keep multi-turn chat context. Agent Memory defaults to
+ * `none`, which only sends the current user message — follow-ups like
+ * "give me point 2 from above" then fail. When Auto is selected, upgrade
+ * `none` → `conversation` and fill conversationId from the Start block when
+ * the Agent field is empty (chat workflows always emit start.conversationId).
+ */
+function ensureAutoConversationMemory(
+  ctx: ExecutionContext,
+  inputs: AgentInputs
+): AgentInputs {
+  if (!isAutoModel(inputs.model || '')) return inputs
+
+  const needsMemory = !inputs.memoryType || inputs.memoryType === 'none'
+  let conversationId =
+    typeof inputs.conversationId === 'string' ? inputs.conversationId.trim() : ''
+
+  if (!conversationId) {
+    const starter = ctx.workflow?.blocks?.find((block) => block.metadata?.id === BlockType.STARTER)
+    const starterOutput = starter ? ctx.blockStates.get(starter.id)?.output : undefined
+    if (typeof starterOutput?.conversationId === 'string' && starterOutput.conversationId.trim()) {
+      conversationId = starterOutput.conversationId.trim()
+    } else {
+      for (const state of ctx.blockStates.values()) {
+        const id = state?.output?.conversationId
+        if (typeof id === 'string' && id.trim()) {
+          conversationId = id.trim()
+          break
+        }
+      }
+    }
+  }
+
+  if (!needsMemory && conversationId && conversationId === inputs.conversationId) {
+    return inputs
+  }
+
+  if (needsMemory && !conversationId) {
+    logger.warn(
+      'arena-auto: Memory is none and no conversationId on Start/Agent — follow-ups will not see prior turns. Set Memory to conversation and wire conversationId (e.g. <start.conversationId>).'
+    )
+    return inputs
+  }
+
+  if (!needsMemory && !conversationId) return inputs
+
+  logger.info('arena-auto: enabling conversation memory for multi-turn context', {
+    previousMemoryType: inputs.memoryType ?? 'none',
+    memoryType: needsMemory ? 'conversation' : inputs.memoryType,
+    hasConversationId: Boolean(conversationId),
+  })
+
+  return {
+    ...inputs,
+    ...(needsMemory ? { memoryType: 'conversation' as const } : {}),
+    ...(conversationId ? { conversationId } : {}),
+  }
 }
 
 /**
@@ -360,6 +419,8 @@ export class AgentBlockHandler implements BlockHandler {
           evaluationQuestions: inputs.evaluationQuestions,
         }
       : inputs
+    // Arena Auto: force conversation memory so follow-ups keep prior turns.
+    inputs = ensureAutoConversationMemory(ctx, inputs)
     ctx.mcpBlockId = block.id
     const providerErrorRegistry = ctx.resolvedSecretTraceRegistry?.forkForInputPaths(
       AGENT_RAW_PROVIDER_ERROR_INPUT_PATHS
@@ -453,6 +514,30 @@ export class AgentBlockHandler implements BlockHandler {
       let model = configuredModel
       let autoRouting: AutoRoutingResult | null = null
       if (isAutoModel(configuredModel)) {
+        // Pull durable memory into routing signals so vague follow-ups
+        // ("point 2 from above") still classify with prior-turn context.
+        // Full answer context is still built later in buildMessages.
+        let memoryMessagesForRouting: Message[] | undefined
+        if (
+          filteredInputs.memoryType &&
+          filteredInputs.memoryType !== 'none' &&
+          filteredInputs.conversationId &&
+          ctx.workspaceId
+        ) {
+          try {
+            memoryMessagesForRouting = await memoryService.fetchMemoryMessages(
+              ctx,
+              filteredInputs,
+              fileProjection.projectedNameByFile
+            )
+          } catch (error) {
+            logger.warn('arena-auto: failed to load memory for routing signals', {
+              blockId: block.id,
+              error: getErrorMessage(error, 'memory fetch failed'),
+            })
+          }
+        }
+
         // Arena Auto: classify (LLM or heuristic) → pick from auto_routing_pool.
         // productSurface 'agent' excludes arena_copilot-only rows.
         autoRouting = await resolveAutoModel({
@@ -466,7 +551,8 @@ export class AgentBlockHandler implements BlockHandler {
                 ? modelInputs.userPrompt
                 : filteredInputs.userPrompt,
             },
-            responseFormat
+            responseFormat,
+            memoryMessagesForRouting
           ),
           fallbackModel: AGENT.DEFAULT_MODEL,
           productSurface: 'agent',
@@ -635,7 +721,7 @@ export class AgentBlockHandler implements BlockHandler {
           model,
           apiKey: modelInputs.apiKey,
           isPrimary: true,
-          ...(autoRouting ? { traceName: SIM_AUTO_MODEL_ID } : {}),
+          ...(autoRouting ? { traceName: ARENA_AUTO_MODEL_ID } : {}),
         },
         ...fallbackCandidates.map((candidate) => ({ ...candidate, isPrimary: false })),
       ]
@@ -648,7 +734,7 @@ export class AgentBlockHandler implements BlockHandler {
         retryPrimaryOnStreamStart:
           fallbacksHeld && configuredFallbacks.length > 0 && !modelInputs.previousInteractionId,
         primaryModel: model,
-        configuredModel: autoRouting ? SIM_AUTO_MODEL_ID : model,
+        configuredModel: autoRouting ? ARENA_AUTO_MODEL_ID : model,
         primaryProviderId: providerId,
         messages: messagesWithInputFiles,
         hydratedByProvider,
@@ -730,8 +816,14 @@ export class AgentBlockHandler implements BlockHandler {
    * Derives compact Arena Auto routing signals from the block's resolved inputs.
    * Includes a truncated prior-turn snippet (`recentHistory`) so follow-ups keep
    * scenario context for tier selection — still excerpts only, not full chat.
+   * When durable memory is available, merge it ahead of `inputs.messages` so
+   * chat turns (which only send the current input) still route with history.
    */
-  private buildAutoRoutingSignals(inputs: AgentInputs, responseFormat: any): AutoRoutingSignals {
+  private buildAutoRoutingSignals(
+    inputs: AgentInputs,
+    responseFormat: any,
+    memoryMessages?: Message[]
+  ): AutoRoutingSignals {
     const lastMessage =
       typeof inputs.userPrompt === 'string'
         ? inputs.userPrompt
@@ -743,9 +835,13 @@ export class AgentBlockHandler implements BlockHandler {
               ? stringifyJSON(inputs.messages.at(-1)?.content)
               : ''
     const systemPrompt = inputs.systemPrompt ?? ''
+    const historySource =
+      memoryMessages && memoryMessages.length > 0
+        ? [...memoryMessages, ...(inputs.messages ?? [])]
+        : inputs.messages
     // Prior turns for the classifier (capped). Excludes the current lastMessage
     // when it is already the trailing chat message so we do not double-send it.
-    const recentHistory = formatAutoRoutingRecentHistory(inputs.messages, {
+    const recentHistory = formatAutoRoutingRecentHistory(historySource, {
       excludeTrailingContent: lastMessage,
     })
     const normalizedFiles = normalizeFileInput(inputs.files)
@@ -753,13 +849,13 @@ export class AgentBlockHandler implements BlockHandler {
       systemPrompt.length +
       lastMessage.length +
       (recentHistory?.length ?? 0) +
-      (inputs.messages ? stringifyJSON(inputs.messages).length : 0)
+      (historySource ? stringifyJSON(historySource).length : 0)
 
     return {
       systemPrompt,
       lastMessage,
       recentHistory,
-      messageCount: (inputs.messages?.length ?? 0) + (inputs.userPrompt ? 1 : 0),
+      messageCount: (historySource?.length ?? 0) + (inputs.userPrompt ? 1 : 0),
       toolNames: (inputs.tools ?? []).map((t) => t.title || t.type || 'tool'),
       mediaKind: this.resolveMediaKind(inputs, normalizedFiles),
       hasResponseFormat: Boolean(responseFormat),
@@ -793,11 +889,10 @@ export class AgentBlockHandler implements BlockHandler {
   }
 
   /**
-   * Reports a completed auto run under the `sim-auto` identity everywhere the
-   * run is observed — the block output, the trace span, and the usage-ledger
-   * row keyed on the model name — so the pool model that served the request
-   * stays an implementation detail (matching the block's configured model and
-   * the hidden identity preamble the models themselves run under).
+   * Reports a completed Auto run under the Arena Auto identity (`arena-auto`)
+   * everywhere the run is observed — block output, trace span, usage ledger —
+   * so the pool model that served the request stays an implementation detail
+   * (matching the block's configured model and the hidden identity preamble).
    *
    * Runs after `executeProviderRequest`, whose billability gate and pricing
    * key on the concrete pool model: tokens and cost are already settled here,
@@ -818,7 +913,7 @@ export class AgentBlockHandler implements BlockHandler {
         timeSegments?: Array<{ type?: string; name?: string; provider?: string }>
       }
     }
-    target.model = SIM_AUTO_MODEL_ID
+    target.model = ARENA_AUTO_MODEL_ID
 
     // Model segments name themselves after the model (every provider does) and
     // carry the serving provider, which the log detail renders as that
@@ -826,7 +921,7 @@ export class AgentBlockHandler implements BlockHandler {
     for (const segment of target.providerTiming?.timeSegments ?? []) {
       if (segment.type !== 'model') continue
       if (segment.name?.toLowerCase() === resolvedModel.toLowerCase()) {
-        segment.name = SIM_AUTO_MODEL_ID
+        segment.name = ARENA_AUTO_MODEL_ID
       }
       segment.provider = undefined
     }

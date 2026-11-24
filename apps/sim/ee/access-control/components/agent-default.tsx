@@ -13,9 +13,9 @@ import { useProviderModelLists } from '@/hooks/queries/providers'
 import {
   DYNAMIC_MODEL_PROVIDERS,
   getModelSunsetStatus,
+  ARENA_AUTO_MODEL_ID,
   getProviderIcon,
   getProviderModels,
-  SIM_AUTO_MODEL_ID,
 } from '@/providers/models'
 import type { ProviderId } from '@/providers/types'
 
@@ -55,8 +55,8 @@ export function AgentDefault({ config, providerIds, workspaceId, onChange }: Age
     ])
     const modelOptions: ComboboxOption[] = [
       { label: 'Platform default', value: PLATFORM_DEFAULT },
-      ...(hosted && isAllowed(SIM_AUTO_MODEL_ID)
-        ? [{ label: 'Auto', value: SIM_AUTO_MODEL_ID }]
+      ...(hosted && isAllowed(ARENA_AUTO_MODEL_ID)
+        ? [{ label: 'Auto', value: ARENA_AUTO_MODEL_ID }]
         : []),
       ...[...models]
         .filter((model) => isAllowed(model) && getModelSunsetStatus(model) !== 'deprecated')

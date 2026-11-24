@@ -610,7 +610,7 @@ function validateFallbackModelEntry(item: any, index: number): string | null {
     return `${where} is missing a string "model"`
   }
   if (isAutoModel(model)) {
-    return `${where}: sim-auto cannot be a fallback model; it already routes and falls back on its own`
+    return `${where}: Auto cannot be a fallback model; it already routes and falls back on its own`
   }
   if (!isKnownModelId(model) && !isCustomModelId(model)) {
     const suggestions = suggestModelIdsForUnknownModel(model)

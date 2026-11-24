@@ -14,7 +14,7 @@ import {
 import { executeBlockProviderRequest } from '@/executor/utils/provider-request'
 import { projectResolvedSecretDiagnosticError } from '@/executor/utils/resolved-secret-content-projection'
 import type { ResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
-import { isAutoModel, SIM_AUTO_MODEL_ID } from '@/providers/models'
+import { ARENA_AUTO_MODEL_ID, isAutoModel } from '@/providers/models'
 import type { ProviderRequest, ProviderResponse } from '@/providers/types'
 import { getProviderFromModel } from '@/providers/utils'
 import type { SerializedBlock } from '@/serializer/types'
@@ -127,7 +127,7 @@ export async function executeModelRequestWithFallbacks({
     } catch (error) {
       lastError = error
       failedModels.push(
-        isPrimary && isAutoModel(configuredModel) ? SIM_AUTO_MODEL_ID : candidate.model
+        isPrimary && isAutoModel(configuredModel) ? ARENA_AUTO_MODEL_ID : candidate.model
       )
       if (
         index === candidates.length - 1 ||

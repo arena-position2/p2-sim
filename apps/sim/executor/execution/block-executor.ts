@@ -16,6 +16,7 @@ import {
   hydrateUserFilesWithBase64,
 } from '@/lib/uploads/utils/user-file-base64.server'
 import { sanitizeInputFormat, sanitizeTools } from '@/lib/workflows/comparison/normalize'
+import { ARENA_AUTO_MODEL_ID, isAutoModel } from '@/providers/models'
 import { isCustomBlockType } from '@/blocks/custom/build-config'
 import { validateBlockType } from '@/ee/access-control/utils/permission-check'
 import {
@@ -1077,6 +1078,11 @@ export class BlockExecutor {
       } else {
         result[key] = value
       }
+    }
+
+    // Arena: log Auto under `arena-auto` even when the block still stores legacy `sim-auto`.
+    if (typeof result.model === 'string' && isAutoModel(result.model)) {
+      result.model = ARENA_AUTO_MODEL_ID
     }
 
     return redactApiKeys(result)

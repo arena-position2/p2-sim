@@ -18,7 +18,7 @@ import {
   isCustomModelId,
   isEvaluationModel,
   orderModelIdsByReleaseDate,
-  SIM_AUTO_MODEL_ID,
+  ARENA_AUTO_MODEL_ID,
 } from '@/providers/models'
 import { isPiSupportedModel } from '@/providers/pi-providers'
 import type { ProviderId } from '@/providers/types'
@@ -125,8 +125,9 @@ function buildModelOptions(includeEvaluation: boolean) {
   // searches for it, but never the first thing the dropdown offers.
   // Arena: AgentIcon (inline SVG sparkles) — not SimAutoIcon / remote PNG.
   // Auto resolves via `@/lib/model-router/arena-resolve`, not mothership resolve.
+  // Public id is `arena-auto` (logs/output); legacy `sim-auto` still works via isAutoModel.
   if (getDeploymentShape().hosted) {
-    options.push({ label: 'Auto', id: SIM_AUTO_MODEL_ID, icon: AgentIcon })
+    options.push({ label: 'Auto', id: ARENA_AUTO_MODEL_ID, icon: AgentIcon })
   }
 
   return options
