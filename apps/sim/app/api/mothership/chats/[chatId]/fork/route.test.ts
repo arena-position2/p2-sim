@@ -355,7 +355,7 @@ describe('POST /api/mothership/chats/[chatId]/fork', () => {
 
   it('publishes a Local copilot fork when the worker has no conversation', async () => {
     setEnv({ COPILOT_API_KEY: 'test-key' })
-    mockFetchGo.mockResolvedValue(Response.json({ error: 'Chat not found' }, { status: 404 }))
+    mockFetchWorker.mockResolvedValue(Response.json({ error: 'Chat not found' }, { status: 404 }))
     const res = await POST(
       createRequest('chat-1', { upToMessageId: 'msg-2', copilotBackend: 'local' }),
       createRouteContext({ chatId: 'chat-1' })

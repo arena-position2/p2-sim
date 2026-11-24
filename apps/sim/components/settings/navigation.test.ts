@@ -41,6 +41,7 @@ const SELF_HOSTED: DeploymentShape = {
     sessionPolicies: true,
     sso: false,
     usageMonitoring: false,
+    whitelabeling: true,
   },
 }
 
@@ -113,6 +114,7 @@ describe('settings navigation boundaries', () => {
     expect(ACCOUNT_SETTINGS_ITEMS.map(({ id }) => id)).toEqual([
       'general',
       'billing',
+      'desktop',
       'api-keys',
       'admin',
       'skill-share',
