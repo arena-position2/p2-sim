@@ -134,9 +134,17 @@ COMMENT ON COLUMN auto_routing_pool.is_active IS
 --      • Images need vision-capable models.
 --      • live_data focuses on search/grounding models.
 --      • arena_copilot prefers slightly cheaper/faster defaults where noted.
+--      • Replacements for Sim-catalog legacy models (still callable unless noted):
+--          gpt-4.1-nano → gpt-5.4-mini
+--          o4-mini      → gpt-5.4-mini  (Agent reasoning cheap fallback)
+--      • claude-fable-5 kept: Anthropic still serves it; catalog marks it legacy
+--        only because fable-5-1 is newer (primary creative stays fable-5-1).
+--      • Search / live pool: gpt-4o-search-preview + gemini-4-argon often fail
+--        (deprecated / permission denied). Prefer deep-research + grok + workhorse.
 -- ---------------------------------------------------------------------------
 
--- Re-runnable seed: wipe pool rows then re-insert (tier defs upsert above)
+-- Re-runnable seed: wipe pool rows then re-insert (tier defs upsert above).
+-- If you emptied both tables yourself, this DELETE is a no-op.
 DELETE FROM auto_routing_pool;
 
 -- ========================= TEXT =========================
@@ -145,7 +153,7 @@ INSERT INTO auto_routing_pool
   ('text', 'fast', 1, 'gpt-5.4-nano',          1, 'both',          'Ultra-fast triage / classification / formatting', false),
   ('text', 'fast', 1, 'gemini-3.5-flash-lite', 2, 'both',          'Cheap high-throughput extraction', false),
   ('text', 'fast', 1, 'claude-haiku-5-5',      3, 'both',          'Fast fallback with strong instruction following', false),
-  ('text', 'fast', 1, 'gpt-4.1-nano',          4, 'both',          'Last-resort nano fallback', false);
+  ('text', 'fast', 1, 'gpt-5.4-mini',          4, 'both',          'Last-resort mini fallback (replaces legacy gpt-4.1-nano)', false);
 
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
@@ -168,13 +176,13 @@ INSERT INTO auto_routing_pool
   ('text', 'reasoning', 5, 'o3-pro',                      1, 'both', 'Hard math / formal logic / deep planning', false),
   ('text', 'reasoning', 5, 'gpt-5.5-pro',                 2, 'both', 'Complex constraint solving', false),
   ('text', 'reasoning', 5, 'claude-opus-5-5',             3, 'both', 'Architectural reasoning fallback', false),
-  ('text', 'reasoning', 5, 'o4-mini',                     4, 'agent', 'Cheaper reasoning fallback for Agent', false),
+  ('text', 'reasoning', 5, 'gpt-5.4-mini',                4, 'agent', 'Cheaper reasoning fallback for Agent (replaces legacy o4-mini)', false),
   ('text', 'reasoning', 5, 'grok-4.20-0309-reasoning',    4, 'arena_copilot', 'Copilot reasoning fallback', false);
 
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
   ('text', 'creative', 3, 'claude-fable-5-1',  1, 'both', 'Storytelling / nuanced tone / worldbuilding', false),
-  ('text', 'creative', 3, 'claude-fable-5',    2, 'both', 'Creative long-form fallback', false),
+  ('text', 'creative', 3, 'claude-fable-5',    2, 'both', 'Creative long-form fallback (still served by Anthropic)', false),
   ('text', 'creative', 3, 'claude-opus-5-5',   3, 'both', 'High-quality creative / copywriting fallback', false);
 
 INSERT INTO auto_routing_pool
@@ -184,8 +192,9 @@ INSERT INTO auto_routing_pool
 
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
-  ('text', 'search', 2, 'gpt-4o-search-preview', 1, 'both', 'Live web search / current events', false),
-  ('text', 'search', 2, 'gemini-4-argon',        2, 'both', 'Search grounding fallback', false);
+  ('text', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Live web / current-events research', true),
+  ('text', 'search', 2, 'grok-4.7',                          2, 'both', 'Current-events fallback', false),
+  ('text', 'search', 2, 'gpt-6.1-sol',                       3, 'both', 'General fallback when research models unavailable', true);
 
 -- ========================= IMAGE =========================
 INSERT INTO auto_routing_pool
@@ -209,14 +218,15 @@ INSERT INTO auto_routing_pool
   ('image', 'reasoning', 5, 'o3-pro',          3, 'both', 'Formal reasoning over visual inputs', false),
 
   ('image', 'creative', 3, 'claude-fable-5-1', 1, 'both', 'Creative writing grounded on images', false),
-  ('image', 'creative', 3, 'claude-fable-5',   2, 'both', 'Creative vision fallback', false),
+  ('image', 'creative', 3, 'claude-fable-5',   2, 'both', 'Creative vision fallback (still served by Anthropic)', false),
   ('image', 'creative', 3, 'claude-opus-5-5',  3, 'both', 'High-quality multimodal creative', false),
 
   ('image', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Research that includes figures/screenshots', true),
   ('image', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent research with images', true),
 
-  ('image', 'search', 2, 'gemini-4-argon',        1, 'both', 'Image + grounded live lookup', false),
-  ('image', 'search', 2, 'gpt-4o-search-preview', 2, 'both', 'Search model fallback', false);
+  ('image', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Image + live research', true),
+  ('image', 'search', 2, 'gemini-3.8-flash',                   2, 'both', 'Vision + general fallback', true),
+  ('image', 'search', 2, 'gpt-6.1-sol',                        3, 'both', 'GPT multimodal live fallback', true);
 
 -- ========================= FILE (PDF / docs / non-image) =========================
 INSERT INTO auto_routing_pool
@@ -243,31 +253,34 @@ INSERT INTO auto_routing_pool
   ('file', 'reasoning', 5, 'gpt-5.6-sol',     4, 'agent', 'Agent long-context file fallback (Sim Auto-like)', false),
 
   ('file', 'creative', 3, 'claude-fable-5-1', 1, 'both', 'Rewrite / tone from source docs', false),
-  ('file', 'creative', 3, 'claude-fable-5',   2, 'both', 'Creative doc rewrite fallback', false),
+  ('file', 'creative', 3, 'claude-fable-5',   2, 'both', 'Creative doc rewrite fallback (still served by Anthropic)', false),
   ('file', 'creative', 3, 'claude-opus-5-5',  3, 'both', 'High-quality long-form from docs', false),
 
   ('file', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Research synthesis over uploaded corpora', true),
   ('file', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent doc research fallback', true),
 
-  ('file', 'search', 2, 'gemini-4-argon',        1, 'both', 'Doc + live grounding', false),
-  ('file', 'search', 2, 'gpt-4o-search-preview', 2, 'both', 'Search-augmented doc Q&A', false);
+  ('file', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Doc + live research', true),
+  ('file', 'search', 2, 'claude-sonnet-5-5',                 2, 'both', 'Doc Q&A fallback', true),
+  ('file', 'search', 2, 'gpt-6.1-sol',                       3, 'both', 'GPT doc + tools fallback', true);
 
 -- ========================= LIVE DATA =========================
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
-  ('live_data', 'search', 2, 'gpt-4o-search-preview', 1, 'both', 'Primary live web / current events', false),
-  ('live_data', 'search', 2, 'gemini-4-argon',        2, 'both', 'Grounded live lookup fallback', false),
+  ('live_data', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Primary live web / current events', true),
+  ('live_data', 'search', 2, 'grok-4.7',                          2, 'both', 'Current-events fallback', false),
+  ('live_data', 'search', 2, 'gpt-6.1-sol',                       3, 'both', 'General + tools fallback', true),
 
-  ('live_data', 'fast', 1, 'gpt-4o-search-preview', 1, 'both', 'Quick live fact check', false),
-  ('live_data', 'fast', 1, 'gemini-4-argon',        2, 'both', 'Quick grounded lookup fallback', false),
+  ('live_data', 'fast', 1, 'grok-4.7',        1, 'both', 'Quick live fact check', false),
+  ('live_data', 'fast', 1, 'gemini-3.8-flash', 2, 'both', 'Quick multimodal fallback', false),
+  ('live_data', 'fast', 1, 'gpt-6.1-sol',     3, 'both', 'Quick GPT fallback', true),
 
-  ('live_data', 'workhorse', 3, 'gpt-4o-search-preview', 1, 'both', 'Standard live-data agent turns', true),
-  ('live_data', 'workhorse', 3, 'gemini-4-argon',        2, 'both', 'Grounded workhorse fallback', true),
-  ('live_data', 'workhorse', 3, 'gpt-6.1-sol',           3, 'both', 'If search model unavailable, general model + tools', true),
+  ('live_data', 'workhorse', 3, 'deep-research-pro-preview-12-2025', 1, 'both', 'Standard live-data agent turns', true),
+  ('live_data', 'workhorse', 3, 'grok-4.7',                          2, 'both', 'Live workhorse fallback', true),
+  ('live_data', 'workhorse', 3, 'gpt-6.1-sol',                       3, 'both', 'General model + tools', true),
 
   ('live_data', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Exhaustive live research reports', true),
   ('live_data', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent live research', true),
-  ('live_data', 'research', 5, 'gpt-4o-search-preview',            3, 'both', 'Search-primary research fallback', true),
+  ('live_data', 'research', 5, 'gpt-6.1-sol',                      3, 'both', 'Research tools fallback', true),
 
   ('live_data', 'coding', 4, 'gpt-5.3-codex',     1, 'both', 'Code using live API/docs status', true),
   ('live_data', 'coding', 4, 'claude-sonnet-5-5', 2, 'both', 'Coding agent with live context tools', true),
@@ -276,41 +289,9 @@ INSERT INTO auto_routing_pool
   ('live_data', 'reasoning', 5, 'gpt-5.5-pro',     2, 'both', 'Hard reasoning + live facts', true),
   ('live_data', 'reasoning', 5, 'claude-opus-5-5', 3, 'both', 'Reasoning fallback with tools', true),
 
-  ('live_data', 'creative', 3, 'claude-fable-5-1',       1, 'both', 'Creative copy using live references', false),
-  ('live_data', 'creative', 3, 'gpt-4o-search-preview',  2, 'both', 'Creative + live facts fallback', false);
+  ('live_data', 'creative', 3, 'claude-fable-5-1', 1, 'both', 'Creative copy using live references', false),
+  ('live_data', 'creative', 3, 'grok-4.7',         2, 'both', 'Creative + live facts fallback', false);
 
 COMMIT;
-
--- Classifier candidates (active tier definitions only):
---   SELECT tier_code AS id, description AS hint
---   FROM auto_route_tier
---   WHERE is_active
---   ORDER BY sort_order;
---
--- Runtime model pick (respects disabled tiers):
---   SELECT p.model_id
---   FROM auto_routing_pool p
---   JOIN auto_route_tier t ON t.tier_code = p.route_tier
---   WHERE p.media_kind = $media
---     AND p.route_tier = $tier
---     AND p.product_surface IN ($product, 'both')
---     AND p.is_active
---     AND t.is_active
---     AND (p.requires_tools IS NULL OR p.requires_tools = $requires_tools)
---   ORDER BY
---     CASE WHEN p.complexity_score = $complexity THEN 0 ELSE 1 END,
---     CASE p.product_surface WHEN $product THEN 0 ELSE 1 END,
---     ABS(p.complexity_score - $complexity),
---     p.selection_rank
---   LIMIT 1;
---   -- then walk selection_rank if primary fails permissions/keys
---
--- Disable a whole tier for routing (does NOT flip pool.is_active):
---   UPDATE auto_route_tier SET is_active = false WHERE tier_code = 'research';
---
--- Also hide those pool rows in raw pool queries:
---   UPDATE auto_routing_pool SET is_active = false, updated_at = NOW()
---   WHERE route_tier = 'research';
-
 
 

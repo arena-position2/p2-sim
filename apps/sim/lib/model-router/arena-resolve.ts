@@ -44,9 +44,12 @@ const MAX_RECENT_HISTORY_TURNS = 6
 const MAX_RECENT_HISTORY_TURN_CHARS = 280
 const DECISION_CACHE_TTL_MS = 5 * 60 * 1000
 const DECISION_CACHE_MAX_ENTRIES = 500
-/** Heuristic upgrade from `text` → `live_data` when the prompt smells like realtime. */
-const LIVE_DATA_HINT =
-  /\b(current|live|today|price|weather|news|latest|realtime|real-time|stock|exchange rate)\b/i
+/**
+ * Thin backup only — primary live detection is the classifier's
+ * `needs_live_data`. Used when the LLM call fails or omits the flag.
+ */
+const LIVE_DATA_HINT_FALLBACK =
+  /\b(current|live|today|latest|realtime|real-time|weather|stock price|exchange rate|who is the current|recent score)\b/i
 
 /**
  * Hidden identity preamble prepended to the system prompt of every Arena Auto
@@ -190,6 +193,8 @@ interface ClassifierDecision {
   tier: string
   complexityScore: number
   requiresTools: boolean
+  /** Classifier (or heuristic fallback) says the task needs up-to-date / web facts. */
+  needsLiveData: boolean
   decidedBy: 'llm' | 'heuristic'
   billableRoutingCost: number
   usage?: AutoRoutingResult['usage']
@@ -199,17 +204,14 @@ interface CacheEntry {
   tier: string
   complexityScore: number
   requiresTools: boolean
+  needsLiveData: boolean
   mediaKind: DbAutoMediaKind
   expires: number
 }
 
 const decisionCache = new Map<string, CacheEntry>()
 
-function cacheKey(
-  signals: AutoRoutingSignals,
-  productSurface: AutoProductSurface,
-  mediaKind: DbAutoMediaKind
-): string {
+function cacheKey(signals: AutoRoutingSignals, productSurface: AutoProductSurface): string {
   const tokenBucket = Math.round(signals.approxInputTokens / 500)
   return createHash('sha256')
     .update(
@@ -219,7 +221,7 @@ function cacheKey(
         (signals.recentHistory ?? '').slice(0, 500),
         [...signals.toolNames].sort(),
         signals.hasResponseFormat,
-        mediaKind,
+        signals.mediaKind,
         productSurface,
         tokenBucket,
       ])
@@ -246,19 +248,69 @@ function writeDecisionCache(key: string, entry: Omit<CacheEntry, 'expires'>): vo
 }
 
 /**
- * Maps Agent attachment kind (+ live-data heuristics) onto `auto_routing_pool.media_kind`.
- * `none` becomes `text`, unless the prompt/tools imply live/web → `live_data`.
+ * Thin regex / tool-name backup when the classifier is unavailable or omits
+ * `needs_live_data`. Prefer the model flag in the main path.
  */
-export function resolveDbMediaKind(signals: AutoRoutingSignals): DbAutoMediaKind {
+export function signalsNeedLiveDataHeuristic(signals: AutoRoutingSignals): boolean {
+  const haystack =
+    `${signals.recentHistory ?? ''} ${signals.lastMessage ?? ''} ${signals.systemPrompt ?? ''}`.trim()
+  return (
+    LIVE_DATA_HINT_FALLBACK.test(haystack) ||
+    signals.toolNames.some((name) => /search|web|browser|exa/i.test(name))
+  )
+}
+
+/** @deprecated Use {@link signalsNeedLiveDataHeuristic} — kept for older imports. */
+export const signalsNeedLiveData = signalsNeedLiveDataHeuristic
+
+/**
+ * Attachment-only media mapping (no live detection). Live vs text is decided by
+ * the classifier's `needs_live_data` (with a thin heuristic fallback).
+ */
+export function resolveAttachmentMediaKind(signals: AutoRoutingSignals): DbAutoMediaKind {
   if (signals.mediaKind === 'image') return 'image'
   if (signals.mediaKind === 'file') return 'file'
+  return 'text'
+}
 
-  const haystack = `${signals.recentHistory ?? ''} ${signals.lastMessage ?? ''} ${signals.toolNames.join(' ')}`
-  const wantsLive =
-    LIVE_DATA_HINT.test(haystack) ||
-    signals.toolNames.some((name) => /search|web|browser|exa/i.test(name))
+/**
+ * Sync helper for tests / callers without a classifier result.
+ * Attachments win; otherwise the thin live heuristic may upgrade to `live_data`.
+ */
+export function resolveDbMediaKind(signals: AutoRoutingSignals): DbAutoMediaKind {
+  const attachment = resolveAttachmentMediaKind(signals)
+  if (attachment !== 'text') return attachment
+  return signalsNeedLiveDataHeuristic(signals) ? 'live_data' : 'text'
+}
 
-  return wantsLive ? 'live_data' : 'text'
+function resolveFinalMediaKind(
+  signals: AutoRoutingSignals,
+  needsLiveData: boolean
+): DbAutoMediaKind {
+  const attachment = resolveAttachmentMediaKind(signals)
+  if (attachment !== 'text') return attachment
+  return needsLiveData ? 'live_data' : 'text'
+}
+
+/**
+ * When the task needs live facts, force the `search` pool even if the
+ * classifier still returned `fast` (that path was picking gpt-5.4-nano).
+ */
+function preferSearchTierForLiveData(
+  decision: ClassifierDecision,
+  tiers: TierCandidate[],
+  signals: AutoRoutingSignals
+): ClassifierDecision {
+  if (!decision.needsLiveData) return decision
+  if (!tiers.some((t) => t.id === 'search')) return decision
+  if (decision.tier === 'search' || decision.tier === 'research') return decision
+
+  return {
+    ...decision,
+    tier: 'search',
+    complexityScore: Math.max(decision.complexityScore, 2),
+    requiresTools: decision.requiresTools || signals.toolNames.length > 0,
+  }
 }
 
 /** Active rows from `auto_route_tier` — classifier may only pick these codes. */
@@ -288,47 +340,52 @@ function classifyTierHeuristic(
   const text =
     `${signals.systemPrompt ?? ''}\n${signals.recentHistory ?? ''}\n${signals.lastMessage ?? ''}`.toLowerCase()
   const tierIds = new Set(tiers.map((t) => t.id))
-  const pick = (id: string, score: number, requiresTools: boolean): ClassifierDecision => ({
+  const needsLiveData = signalsNeedLiveDataHeuristic(signals)
+  const pick = (
+    id: string,
+    score: number,
+    requiresTools: boolean,
+    live = needsLiveData
+  ): ClassifierDecision => ({
     tier: tierIds.has(id) ? id : (tiers[0]?.id ?? 'workhorse'),
     complexityScore: score,
     requiresTools,
+    needsLiveData: live,
     decidedBy: 'heuristic',
     billableRoutingCost: 0,
   })
 
-  if (/\b(search|current|live|today|price|news)\b/.test(text) || signals.toolNames.length > 0) {
-    if (/\b(search|current|live|price|news)\b/.test(text) && tierIds.has('search')) {
-      return pick('search', 2, signals.toolNames.length > 0)
-    }
+  if (needsLiveData && tierIds.has('search')) {
+    return pick('search', 2, signals.toolNames.length > 0, true)
   }
   if (
     /\b(code|refactor|debug|typescript|javascript|python|repo|compile|test|bug|for loop)\b/.test(
       text
     )
   ) {
-    return pick('coding', 4, true)
+    return pick('coding', 4, true, false)
   }
   if (/\b(prove|theorem|architect|constraint|formal|reason deeply|optimize algorithm)\b/.test(text)) {
-    return pick('reasoning', 5, false)
+    return pick('reasoning', 5, false, false)
   }
   if (/\b(story|poem|tone|copywriting|worldbuild|narrative|creative)\b/.test(text)) {
-    return pick('creative', 3, false)
+    return pick('creative', 3, false, false)
   }
   if (/\b(research|literature|synthesize|exhaustive|multi-agent)\b/.test(text)) {
-    return pick('research', 5, true)
+    return pick('research', 5, true, false)
   }
   if (
     signals.approxInputTokens < 400 &&
     signals.toolNames.length === 0 &&
     !signals.hasResponseFormat
   ) {
-    return pick('fast', 1, false)
+    return pick('fast', 1, false, false)
   }
-  return pick('workhorse', 3, signals.toolNames.length > 0)
+  return pick('workhorse', 3, signals.toolNames.length > 0, false)
 }
 
 /**
- * Asks CLASSIFIER_MODEL for `{ tier, complexity_score, requires_tools }`.
+ * Asks CLASSIFIER_MODEL for tier + whether the task needs live / web facts.
  * Returns null on any failure so the caller can use `classifyTierHeuristic`.
  */
 async function classifyTierWithLlm(
@@ -342,8 +399,18 @@ async function classifyTierWithLlm(
   const systemPrompt = `You are a model router. Choose exactly one tier for the task.
 Use recentHistory (prior turns) plus lastMessage (current user turn). Follow-ups
 like "add a for loop" should keep the prior scenario's tier when clear.
+
+Also set needs_live_data:
+- true when the answer must use up-to-date / web / live facts (current office holders,
+  live scores, prices, weather, news, "who is the current…", recent match results).
+- false for offline work (code, rewrite, math on given inputs, general knowledge that
+  does not change day-to-day).
+
+If needs_live_data is true, tier MUST be "search" (never "fast").
+"fast" is only for trivial offline work (format, classify, rewrite).
+
 Reply ONLY with JSON:
-{"tier":"<tier_code>","complexity_score":1,"requires_tools":false,"rationale":"short"}
+{"tier":"<tier_code>","complexity_score":1,"requires_tools":false,"needs_live_data":false,"rationale":"short"}
 
 Valid tiers:
 ${tiers.map((t) => `- ${t.id}: ${t.hint}`).join('\n')}
@@ -358,7 +425,7 @@ complexity_score is 1 (trivial) to 5 (hardest).`
     toolNames: signals.toolNames,
     hasResponseFormat: signals.hasResponseFormat,
     approxInputTokens: signals.approxInputTokens,
-    mediaKind: signals.mediaKind,
+    attachmentMediaKind: signals.mediaKind,
   })
 
   try {
@@ -383,9 +450,10 @@ complexity_score is 1 (trivial) to 5 (hardest).`
             tier: { type: 'string' },
             complexity_score: { type: 'number' },
             requires_tools: { type: 'boolean' },
+            needs_live_data: { type: 'boolean' },
             rationale: { type: 'string' },
           },
-          required: ['tier', 'complexity_score', 'requires_tools'],
+          required: ['tier', 'complexity_score', 'requires_tools', 'needs_live_data'],
           additionalProperties: false,
         },
         strict: true,
@@ -400,6 +468,7 @@ complexity_score is 1 (trivial) to 5 (hardest).`
       tier?: string
       complexity_score?: number
       requires_tools?: boolean
+      needs_live_data?: boolean
     }
 
     const tier = tiers.find((t) => t.id === parsed.tier)?.id
@@ -410,10 +479,15 @@ complexity_score is 1 (trivial) to 5 (hardest).`
       Math.max(1, Math.round(Number(parsed.complexity_score) || 3))
     )
 
+    // Model is primary; thin heuristic only fills a missing/false-negative gap.
+    const needsLiveData =
+      Boolean(parsed.needs_live_data) || signalsNeedLiveDataHeuristic(signals)
+
     return {
       tier,
       complexityScore,
       requiresTools: Boolean(parsed.requires_tools),
+      needsLiveData,
       decidedBy: 'llm',
       billableRoutingCost: response.cost?.total ?? 0,
       usage: {
@@ -524,7 +598,8 @@ async function pickModelFromPool(args: {
 /**
  * Resolves Agent `sim-auto` → concrete catalog model via Arena DB pool.
  *
- * Flow: media kind → load tiers → (cache | LLM | heuristic) → pool pick.
+ * Flow: load tiers → (cache | LLM | heuristic) → media kind from
+ * `needs_live_data` → force search when live → pool pick.
  * Never throws: empty tiers, empty pool, or classifier failure → `fallbackModel`.
  *
  * Call only from Agent (`productSurface: 'agent'`). Evaluator/Router stay on
@@ -547,21 +622,33 @@ export async function resolveAutoModel(args: {
   }
 
   try {
-    const mediaKind = resolveDbMediaKind(signals)
     const tiers = await loadActiveTiers()
     if (tiers.length === 0) {
       logger.warn('arena-auto: no active tiers in auto_route_tier, using fallback', { blockId })
       return fallback
     }
 
-    const key = cacheKey(signals, productSurface, mediaKind)
+    const key = cacheKey(signals, productSurface)
     const cached = readDecisionCache(key)
     if (cached) {
+      const cachedDecision = preferSearchTierForLiveData(
+        {
+          tier: cached.tier,
+          complexityScore: cached.complexityScore,
+          requiresTools: cached.requiresTools,
+          needsLiveData: cached.needsLiveData,
+          decidedBy: 'heuristic',
+          billableRoutingCost: 0,
+        },
+        tiers,
+        signals
+      )
+      const mediaKind = resolveFinalMediaKind(signals, cachedDecision.needsLiveData)
       const pick = await pickModelFromPool({
-        mediaKind: cached.mediaKind,
-        tier: cached.tier,
-        complexityScore: cached.complexityScore,
-        requiresTools: cached.requiresTools,
+        mediaKind,
+        tier: cachedDecision.tier,
+        complexityScore: cachedDecision.complexityScore,
+        requiresTools: cachedDecision.requiresTools,
         productSurface,
         ctx,
       })
@@ -569,9 +656,10 @@ export async function resolveAutoModel(args: {
       logger.info('arena-auto: resolved from cache', {
         blockId,
         model: pick.modelId,
-        tier: cached.tier,
-        mediaKind: cached.mediaKind,
-        complexityScore: cached.complexityScore,
+        tier: cachedDecision.tier,
+        mediaKind,
+        needsLiveData: cachedDecision.needsLiveData,
+        complexityScore: cachedDecision.complexityScore,
         poolComplexityScore: pick.poolComplexityScore,
         selectionRank: pick.selectionRank,
         decidedBy: 'cache',
@@ -579,23 +667,38 @@ export async function resolveAutoModel(args: {
       })
       return {
         model: pick.modelId,
-        tier: cached.tier,
+        tier: cachedDecision.tier,
         decidedBy: 'cache',
         billableRoutingCost: 0,
-        complexityScore: cached.complexityScore,
+        complexityScore: cachedDecision.complexityScore,
         selectionRank: pick.selectionRank,
         poolComplexityScore: pick.poolComplexityScore,
       }
     }
 
+    // Classify first — the model owns `needs_live_data`; media kind follows.
     const llmDecision = await classifyTierWithLlm(signals, tiers, ctx, blockId)
-    const decision = llmDecision ?? classifyTierHeuristic(signals, tiers)
+    const rawDecision = llmDecision ?? classifyTierHeuristic(signals, tiers)
+    const decision = preferSearchTierForLiveData(rawDecision, tiers, signals)
+    const mediaKind = resolveFinalMediaKind(signals, decision.needsLiveData)
+
+    if (decision.tier !== rawDecision.tier) {
+      logger.info('arena-auto: overridden tier for live data', {
+        blockId,
+        fromTier: rawDecision.tier,
+        toTier: decision.tier,
+        needsLiveData: decision.needsLiveData,
+        mediaKind,
+        decidedBy: rawDecision.decidedBy,
+      })
+    }
 
     logger.info('arena-auto: classifier decision', {
       blockId,
       tier: decision.tier,
       complexityScore: decision.complexityScore,
       requiresTools: decision.requiresTools,
+      needsLiveData: decision.needsLiveData,
       decidedBy: decision.decidedBy,
       mediaKind,
     })
@@ -604,6 +707,7 @@ export async function resolveAutoModel(args: {
       tier: decision.tier,
       complexityScore: decision.complexityScore,
       requiresTools: decision.requiresTools,
+      needsLiveData: decision.needsLiveData,
       mediaKind,
     })
 
@@ -630,6 +734,7 @@ export async function resolveAutoModel(args: {
       model: pick.modelId,
       tier: decision.tier,
       mediaKind,
+      needsLiveData: decision.needsLiveData,
       complexityScore: decision.complexityScore,
       poolComplexityScore: pick.poolComplexityScore,
       selectionRank: pick.selectionRank,
