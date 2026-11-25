@@ -1,0 +1,19 @@
+{
+  "namespace": "arena",
+  "methods": {
+    "arena_comments": "addComments",
+    "arena_comments_task_number": "addCommentsTaskNumber",
+    "arena_create_sub_task": "createSubTask",
+    "arena_create_sub_task_fields": "createSubTaskNamesEmails",
+    "arena_create_task": "createTask",
+    "arena_create_task_fields": "createTaskNamesEmails",
+    "arena_fetch_searched_tasks": "fetchTasksClientProjectAssigneeStateName",
+    "arena_get_meetings": "getMeetings",
+    "arena_get_my_overdue_tasks": "getMyOverdueTasks",
+    "arena_get_my_tasks": "getMyTasks",
+    "arena_get_token": "getToken",
+    "arena_save_summary": "saveSummary",
+    "arena_search_task": "searchTask",
+    "arena_search_task_simple": "searchTaskNameOnly"
+  }
+}

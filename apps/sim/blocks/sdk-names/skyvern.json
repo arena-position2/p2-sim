@@ -1,0 +1,9 @@
+{
+  "namespace": "skyvern",
+  "methods": {
+    "skyvern_create_workflow": "createWorkflow",
+    "skyvern_get_run": "getRunStatus",
+    "skyvern_list_workflows": "listWorkflows",
+    "skyvern_run_workflow": "runWorkflow"
+  }
+}

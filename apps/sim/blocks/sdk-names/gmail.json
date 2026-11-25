@@ -2,6 +2,7 @@
   "namespace": "legacy.gmail",
   "methods": {
     "add_label_gmail": "addLabel",
+    "advanced_search_gmail": "advancedSearch",
     "archive_gmail": "archiveEmail",
     "delete_gmail": "deleteEmail",
     "draft_gmail": "draftEmail",
@@ -10,6 +11,7 @@
     "mark_unread_gmail": "markAsUnread",
     "move_gmail": "moveEmail",
     "read_gmail": "readEmail",
+    "read_thread_gmail": "readThread",
     "remove_label_gmail": "removeLabel",
     "search_gmail": "searchEmail",
     "send_gmail": "sendEmail",

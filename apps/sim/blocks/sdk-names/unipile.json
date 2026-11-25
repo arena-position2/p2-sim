@@ -1,0 +1,25 @@
+{
+  "namespace": "unipile",
+  "methods": {
+    "comment_post": "commentOnAPost",
+    "create_post": "createPost",
+    "get_chat": "retrieveAChat",
+    "get_linkedin_search_parameters": "retrieveSearchParameters",
+    "get_message_attachment": "getMessageAttachment",
+    "get_post": "getPost",
+    "get_user_profile": "retrieveAProfile",
+    "linkedin_search": "performSearch",
+    "list_all_chats": "listAllChats",
+    "list_chat_attendees": "listChatAttendees",
+    "list_chat_messages": "listChatMessages",
+    "list_post_comments": "listPostComments",
+    "list_post_reactions": "listAllReactionsFromAPost",
+    "list_user_comments": "listUserComments",
+    "list_user_posts": "listAllPosts",
+    "list_user_reactions": "listUserReactions",
+    "list_user_relations": "listUserRelations",
+    "retrieve_company_details": "retrieveCompanyProfile",
+    "send_chat_message": "sendChatMessage",
+    "start_new_chat": "startNewChat"
+  }
+}

@@ -24,6 +24,7 @@ prints a portable JSON document, or YAML when selected.
 | `-P, --profile <name>` | Profile to use (env: SIM_PROFILE). |
 | `--endpoint <url>` | Sim deployment to talk to (env: SIM_ENDPOINT). |
 | `-w, --workspace <id>` | Workspace to target (env: SIM_WORKSPACE). |
+| `--billing-email <email>` | Email sent as X-Sim-Email on workflow API calls (env: SIM_BILLING_EMAIL). |
 | `--output <format>` | Output format for this command. Accepted values: `table`, `json`, `yaml`, `text`. |
 
 Use `--help` to inspect a command. `sim --version` prints the CLI version,
@@ -391,7 +392,7 @@ sim billing logs [options]
 | Option | Required | Description |
 | --- | --- | --- |
 | `--source <value>` | No | Filter by usage source; sim-chat combines Sim agent and workspace Chat usage. Accepted values: `workflow`, `wand`, `sim-chat`, `mcp_copilot`, `mothership_block`, `knowledge-base`, `voice-input`, `enrichment`, `voice-output`, `api-tool`. |
-| `--period <value>` | No | Billing period. Defaults to "30d". Accepted values: `1d`, `7d`, `30d`, `all`, `custom`. |
+| `--period <value>` | No | Billing period. Defaults to "30d". Accepted values: `1d`, `7d`, `30d`, `90d`, `all`, `custom`. |
 | `--start-date <value>` | No | Custom period start (ISO 8601). |
 | `--end-date <value>` | No | Custom period end (ISO 8601). |
 | `--limit <n>` | No | Maximum items to return (0 for everything). Defaults to `100`. |

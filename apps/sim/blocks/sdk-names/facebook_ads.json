@@ -1,0 +1,8 @@
+{
+  "namespace": "facebookAds",
+  "paramAliases": {
+    "action": {
+      "oauthCredential": "credential"
+    }
+  }
+}

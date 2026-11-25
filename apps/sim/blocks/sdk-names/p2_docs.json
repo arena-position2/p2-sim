@@ -1,0 +1,8 @@
+{
+  "namespace": "p2Docs",
+  "methods": {
+    "get_p2_users": "getP2TeamMembers",
+    "get_presentation_icons": "getIconsLibrary",
+    "get_template_schema": "getTemplateSchema"
+  }
+}

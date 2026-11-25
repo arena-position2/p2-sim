@@ -1,0 +1,15 @@
+{
+  "namespace": "figma",
+  "methods": {
+    "figma_create": "generateDesignAi",
+    "figma_delete_comment": "deleteComment",
+    "figma_get_comments": "getComments",
+    "figma_get_file": "getFile",
+    "figma_get_file_images": "getFileImages",
+    "figma_get_file_nodes": "getFileNodes",
+    "figma_get_project_files": "getProjectFiles",
+    "figma_get_team_projects": "getTeamProjects",
+    "figma_post_comment": "postComment",
+    "figma_to_html_ai": "convertToHtml"
+  }
+}
