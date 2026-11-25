@@ -1,7 +1,7 @@
 import type { SVGProps } from 'react'
 import { useId } from 'react'
 import { cn } from '@sim/emcn'
-import Image, { type ImageProps } from 'next/image'
+import Image from 'next/image'
 
 interface FlowIconProps extends SVGProps<SVGSVGElement> {}
 
