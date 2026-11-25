@@ -197,7 +197,7 @@ describe('credentials outside password fields', () => {
       'a token in the URL query',
       "  api('Call', { url: 'https://x.io/v1?api_key=a1b2c3d4e5f6g7h8' })",
     ],
-    ['a password in the URL', "  api('Call', { url: 'postgres://admin:Hunter2pass@db.local/x' })"],
+    ['a password in the URL', "  api('Call', { url: 'postgres://admin:Hunter2pass@localhost/x' })"],
     [
       'a credential property in a JSON body',
       "  api('Call', { url: 'https://x.io', body: { client_secret: 's3cr3t-v4lu3-9876' } })",
