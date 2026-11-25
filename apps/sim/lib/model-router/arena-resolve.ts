@@ -358,8 +358,10 @@ async function classifyTierWithLlm(
 ): Promise<ClassifierDecision | null> {
   if (tiers.length === 0) return null
 
-  const systemPrompt = `You are a model router. Choose exactly one tier for the task.
-Your tier choice is final — no keyword heuristics will override it.
+  const systemPrompt = `You are a model router. Choose exactly one tier AND a complexity_score.
+Your tier + complexity_score are final — no keyword heuristics will override them.
+The pool maps each (tier, complexity_score) to a different model, so use the full
+1–5 range inside the tier you pick (do not always emit 3 or 4).
 
 Use recentHistory (prior turns) plus lastMessage (current user turn). Follow-ups
 like "add a for loop" should keep the prior scenario's tier when clear.
@@ -372,6 +374,16 @@ Tier guidance:
 - fast: trivial offline format / classify / rewrite
 - workhorse / reasoning / creative / research: as their hints describe
 
+complexity_score (within the chosen tier):
+- 1: tiny / trivial for that tier (one-liner, rename, format)
+- 2: small, localized change
+- 3: normal multi-step work for the tier
+- 4: hard / multi-file / careful tool use
+- 5: hardest (architecture, deep reasoning, exhaustive research)
+
+Examples: coding+1 = tweak a snippet; coding+4 = repo refactor with tools;
+reasoning+5 = hard formal proof; search+2 = simple current-events lookup.
+
 Also set needs_live_data true only when the answer needs live/web facts (same bar
 as tier "search"). false for code, rewrite, and offline knowledge.
 If needs_live_data is true, tier MUST be "search".
@@ -380,9 +392,7 @@ Reply ONLY with JSON:
 {"tier":"<tier_code>","complexity_score":1,"requires_tools":false,"needs_live_data":false,"rationale":"short"}
 
 Valid tiers:
-${tiers.map((t) => `- ${t.id}: ${t.hint}`).join('\n')}
-
-complexity_score is 1 (trivial) to 5 (hardest).`
+${tiers.map((t) => `- ${t.id}: ${t.hint}`).join('\n')}`
 
   const userPrompt = JSON.stringify({
     systemPrompt: (signals.systemPrompt ?? '').slice(0, MAX_SIGNAL_CHARS),
