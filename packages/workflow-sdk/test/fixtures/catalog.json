@@ -6245,8 +6245,7 @@
               "bedrock/anthropic.claude-opus-5",
               "bedrock/anthropic.claude-sonnet-5",
               "bedrock/anthropic.claude-opus-4-8",
-              "bedrock/anthropic.claude-opus-4-6-v1",
-              "bedrock/anthropic.claude-sonnet-4-6"
+              "bedrock/anthropic.claude-opus-4-6-v1"
             ]
           },
           "defaultValue": false,
