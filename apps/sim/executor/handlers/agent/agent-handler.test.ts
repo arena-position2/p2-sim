@@ -775,6 +775,71 @@ describe('AgentBlockHandler', () => {
       expect(blockLog).toMatchObject({ modelFallbacks: ['gpt-4o'] })
     })
 
+    it('on Arena Auto, tries the next same-tier pool model after a primary error', async () => {
+      // Classifier → coding pool (codex primary, sonnet rank 2). Primary errors → sonnet serves.
+      resetDbChainMock()
+      dbChainMockFns.limit
+        .mockResolvedValueOnce([{ id: 'coding', hint: 'code' }])
+        .mockResolvedValueOnce([
+          {
+            modelId: 'gpt-5.3-codex',
+            selectionRank: 1,
+            complexityScore: 4,
+            productSurface: 'both',
+            requiresTools: true,
+          },
+          {
+            modelId: 'claude-sonnet-5-5',
+            selectionRank: 2,
+            complexityScore: 4,
+            productSurface: 'both',
+            requiresTools: true,
+          },
+        ])
+
+      mockGetProviderFromModel.mockImplementation((model: string) => {
+        if (model.includes('claude')) return 'anthropic'
+        return 'openai'
+      })
+      mockExecuteProviderRequest
+        .mockResolvedValueOnce({
+          content: JSON.stringify({
+            tier: 'coding',
+            complexity_score: 4,
+            requires_tools: true,
+            needs_live_data: false,
+            rationale: 'code edit',
+          }),
+          tokens: { input: 5, output: 5 },
+          cost: { total: 0.0001 },
+        })
+        .mockRejectedValueOnce(new Error('primary pool model overloaded'))
+        .mockResolvedValueOnce(providerResponse('claude-sonnet-5-5', 'from pool fallback'))
+
+      const blockLog = openLog()
+      const ctx = { ...mockContext, blockLogs: [blockLog] }
+
+      const result = await handler.execute(ctx, mockBlock, {
+        model: ARENA_AUTO_MODEL_ID,
+        userPrompt: 'optimize this function',
+      })
+
+      expect(mockExecuteProviderRequest).toHaveBeenCalledTimes(3)
+      expect(mockExecuteProviderRequest.mock.calls[1][1].model).toBe('gpt-5.3-codex')
+      expect(mockExecuteProviderRequest.mock.calls[2][1].model).toBe('claude-sonnet-5-5')
+      // Pool fallback still reports as Arena Auto, not the concrete catalog id.
+      expect((result as { model: string }).model).toBe(ARENA_AUTO_MODEL_ID)
+      expect(mockAgentLogger.warn).toHaveBeenCalledWith(
+        'Agent model failed; trying fallback',
+        expect.objectContaining({
+          failedModel: 'gpt-5.3-codex',
+          nextModel: 'claude-sonnet-5-5',
+        })
+      )
+      // Trace / log list uses the auto identity so the pool model stays private.
+      expect(blockLog).toMatchObject({ modelFallbacks: [ARENA_AUTO_MODEL_ID] })
+    })
+
     it.each([
       { memoryType: 'conversation', streaming: false },
       { memoryType: 'conversation', streaming: true },

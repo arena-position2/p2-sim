@@ -139,8 +139,8 @@ COMMENT ON COLUMN auto_routing_pool.is_active IS
 --          o4-mini      → gpt-5.4-mini  (Agent reasoning cheap fallback)
 --      • claude-fable-5 kept: Anthropic still serves it; catalog marks it legacy
 --        only because fable-5-1 is newer (primary creative stays fable-5-1).
---      • Search / live pool: gpt-4o-search-preview + gemini-4-argon often fail
---        (deprecated / permission denied). Prefer deep-research + grok + workhorse.
+--      • Search / live pool: no Google deep-research (needs Interactions agent
+--        access). Prefer grok / gpt / gemini. Arena Auto preamble supplies UTC date.
 -- ---------------------------------------------------------------------------
 
 -- Re-runnable seed: wipe pool rows then re-insert (tier defs upsert above).
@@ -187,14 +187,15 @@ INSERT INTO auto_routing_pool
 
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
-  ('text', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Open-ended multi-step synthesis / reports', true),
-  ('text', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent research fallback', true);
+  ('text', 'research', 5, 'grok-4.20-multi-agent-0309', 1, 'both', 'Open-ended multi-step synthesis / reports', true),
+  ('text', 'research', 5, 'gpt-6.1-sol',                2, 'both', 'Research fallback on GPT workhorse', true),
+  ('text', 'research', 5, 'claude-opus-5-5',            3, 'both', 'Deep research synthesis fallback', true);
 
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
-  ('text', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Live web / current-events research', true),
-  ('text', 'search', 2, 'grok-4.7',                          2, 'both', 'Current-events fallback', false),
-  ('text', 'search', 2, 'gpt-6.1-sol',                       3, 'both', 'General fallback when research models unavailable', true);
+  ('text', 'search', 2, 'grok-4.7',          1, 'both', 'Live / current-events (XAI)', false),
+  ('text', 'search', 2, 'gpt-6.1-sol',       2, 'both', 'Live fallback on GPT', true),
+  ('text', 'search', 2, 'gemini-3.8-flash',  3, 'both', 'Live fallback on Gemini', true);
 
 -- ========================= IMAGE =========================
 INSERT INTO auto_routing_pool
@@ -221,12 +222,13 @@ INSERT INTO auto_routing_pool
   ('image', 'creative', 3, 'claude-fable-5',   2, 'both', 'Creative vision fallback (still served by Anthropic)', false),
   ('image', 'creative', 3, 'claude-opus-5-5',  3, 'both', 'High-quality multimodal creative', false),
 
-  ('image', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Research that includes figures/screenshots', true),
-  ('image', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent research with images', true),
+  ('image', 'research', 5, 'grok-4.20-multi-agent-0309', 1, 'both', 'Research that includes figures/screenshots', true),
+  ('image', 'research', 5, 'gpt-6.1-sol',                2, 'both', 'Multimodal research fallback', true),
+  ('image', 'research', 5, 'claude-opus-5-5',            3, 'both', 'Deep multimodal research fallback', true),
 
-  ('image', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Image + live research', true),
-  ('image', 'search', 2, 'gemini-3.8-flash',                   2, 'both', 'Vision + general fallback', true),
-  ('image', 'search', 2, 'gpt-6.1-sol',                        3, 'both', 'GPT multimodal live fallback', true);
+  ('image', 'search', 2, 'grok-4.7',          1, 'both', 'Image + live / current events', false),
+  ('image', 'search', 2, 'gemini-3.8-flash',  2, 'both', 'Vision + live fallback', true),
+  ('image', 'search', 2, 'gpt-6.1-sol',       3, 'both', 'GPT multimodal live fallback', true);
 
 -- ========================= FILE (PDF / docs / non-image) =========================
 INSERT INTO auto_routing_pool
@@ -256,31 +258,32 @@ INSERT INTO auto_routing_pool
   ('file', 'creative', 3, 'claude-fable-5',   2, 'both', 'Creative doc rewrite fallback (still served by Anthropic)', false),
   ('file', 'creative', 3, 'claude-opus-5-5',  3, 'both', 'High-quality long-form from docs', false),
 
-  ('file', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Research synthesis over uploaded corpora', true),
-  ('file', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent doc research fallback', true),
+  ('file', 'research', 5, 'grok-4.20-multi-agent-0309', 1, 'both', 'Research synthesis over uploaded corpora', true),
+  ('file', 'research', 5, 'claude-sonnet-5-5',          2, 'both', 'Doc research fallback', true),
+  ('file', 'research', 5, 'gpt-6.1-sol',                3, 'both', 'GPT doc research fallback', true),
 
-  ('file', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Doc + live research', true),
-  ('file', 'search', 2, 'claude-sonnet-5-5',                 2, 'both', 'Doc Q&A fallback', true),
-  ('file', 'search', 2, 'gpt-6.1-sol',                       3, 'both', 'GPT doc + tools fallback', true);
+  ('file', 'search', 2, 'grok-4.7',          1, 'both', 'Doc + live / current events', false),
+  ('file', 'search', 2, 'claude-sonnet-5-5', 2, 'both', 'Doc Q&A fallback', true),
+  ('file', 'search', 2, 'gpt-6.1-sol',       3, 'both', 'GPT doc + tools fallback', true);
 
 -- ========================= LIVE DATA =========================
 INSERT INTO auto_routing_pool
   (media_kind, route_tier, complexity_score, model_id, selection_rank, product_surface, best_for, requires_tools) VALUES
-  ('live_data', 'search', 2, 'deep-research-pro-preview-12-2025', 1, 'both', 'Primary live web / current events', true),
-  ('live_data', 'search', 2, 'grok-4.7',                          2, 'both', 'Current-events fallback', false),
-  ('live_data', 'search', 2, 'gpt-6.1-sol',                       3, 'both', 'General + tools fallback', true),
+  ('live_data', 'search', 2, 'grok-4.7',          1, 'both', 'Primary live / current events (XAI)', false),
+  ('live_data', 'search', 2, 'gpt-6.1-sol',       2, 'both', 'Live fallback on GPT', true),
+  ('live_data', 'search', 2, 'gemini-3.8-flash',  3, 'both', 'Live fallback on Gemini', true),
 
-  ('live_data', 'fast', 1, 'grok-4.7',        1, 'both', 'Quick live fact check', false),
+  ('live_data', 'fast', 1, 'grok-4.7',         1, 'both', 'Quick live fact check', false),
   ('live_data', 'fast', 1, 'gemini-3.8-flash', 2, 'both', 'Quick multimodal fallback', false),
-  ('live_data', 'fast', 1, 'gpt-6.1-sol',     3, 'both', 'Quick GPT fallback', true),
+  ('live_data', 'fast', 1, 'gpt-6.1-sol',      3, 'both', 'Quick GPT fallback', true),
 
-  ('live_data', 'workhorse', 3, 'deep-research-pro-preview-12-2025', 1, 'both', 'Standard live-data agent turns', true),
-  ('live_data', 'workhorse', 3, 'grok-4.7',                          2, 'both', 'Live workhorse fallback', true),
-  ('live_data', 'workhorse', 3, 'gpt-6.1-sol',                       3, 'both', 'General model + tools', true),
+  ('live_data', 'workhorse', 3, 'grok-4.7',          1, 'both', 'Standard live-data agent turns', false),
+  ('live_data', 'workhorse', 3, 'gpt-6.1-sol',       2, 'both', 'Live workhorse fallback', true),
+  ('live_data', 'workhorse', 3, 'gemini-3.8-flash',  3, 'both', 'Gemini live workhorse', true),
 
-  ('live_data', 'research', 5, 'deep-research-pro-preview-12-2025', 1, 'both', 'Exhaustive live research reports', true),
-  ('live_data', 'research', 5, 'grok-4.20-multi-agent-0309',       2, 'both', 'Multi-agent live research', true),
-  ('live_data', 'research', 5, 'gpt-6.1-sol',                      3, 'both', 'Research tools fallback', true),
+  ('live_data', 'research', 5, 'grok-4.20-multi-agent-0309', 1, 'both', 'Exhaustive live research reports', true),
+  ('live_data', 'research', 5, 'gpt-6.1-sol',                2, 'both', 'Research tools fallback', true),
+  ('live_data', 'research', 5, 'claude-opus-5-5',            3, 'both', 'Deep research fallback', true),
 
   ('live_data', 'coding', 4, 'gpt-5.3-codex',     1, 'both', 'Code using live API/docs status', true),
   ('live_data', 'coding', 4, 'claude-sonnet-5-5', 2, 'both', 'Coding agent with live context tools', true),

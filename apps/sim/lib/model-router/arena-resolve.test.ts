@@ -70,26 +70,13 @@ describe('addAutoRoutingCost', () => {
 })
 
 describe('resolveDbMediaKind', () => {
-  it('maps none to text and upgrades live hints to live_data', () => {
+  it('maps attachments only — never upgrades text prompts to live_data via regex', () => {
     expect(resolveDbMediaKind(makeSignals({ mediaKind: 'none', lastMessage: 'hello' }))).toBe(
       'text'
     )
     expect(
       resolveDbMediaKind(makeSignals({ mediaKind: 'none', lastMessage: 'current bitcoin price' }))
-    ).toBe('live_data')
-    expect(
-      resolveDbMediaKind(
-        makeSignals({ mediaKind: 'none', lastMessage: 'who is the current cm of karnataka?' })
-      )
-    ).toBe('live_data')
-    expect(
-      resolveDbMediaKind(
-        makeSignals({
-          mediaKind: 'none',
-          lastMessage: 'give me the recent score result of ind vs nz test match',
-        })
-      )
-    ).toBe('live_data')
+    ).toBe('text')
     expect(resolveDbMediaKind(makeSignals({ mediaKind: 'image' }))).toBe('image')
     expect(resolveDbMediaKind(makeSignals({ mediaKind: 'file' }))).toBe('file')
   })
@@ -173,6 +160,9 @@ describe('resolveAutoModel', () => {
     expect(result.complexityScore).toBe(4)
     expect(result.selectionRank).toBe(1)
     expect(result.poolComplexityScore).toBe(4)
+    expect(result.poolFallbacks).toEqual([
+      { model: 'claude-sonnet-5-5', selectionRank: 2 },
+    ])
   })
 
   it('falls back when no active tiers exist', async () => {
@@ -262,17 +252,17 @@ describe('resolveAutoModel', () => {
     expect(result.decidedBy).toBe('heuristic')
   })
 
-  it('uses classifier needs_live_data to force search even when tier is fast', async () => {
-    // Primary path: model sets needs_live_data; we force search (not gpt-5.4-nano).
+  it('trusts the classifier tier for live questions (no regex override)', async () => {
     dbChainMockFns.limit
       .mockResolvedValueOnce([
         { id: 'fast', hint: 'easy' },
         { id: 'search', hint: 'live web' },
+        { id: 'coding', hint: 'code' },
         { id: 'workhorse', hint: 'general' },
       ])
       .mockResolvedValueOnce([
         {
-          modelId: 'o4-mini-deep-research',
+          modelId: 'grok-4.7',
           selectionRank: 1,
           complexityScore: 2,
           productSurface: 'both',
@@ -282,8 +272,8 @@ describe('resolveAutoModel', () => {
 
     mockExecuteProviderRequest.mockResolvedValue({
       content: JSON.stringify({
-        tier: 'fast',
-        complexity_score: 1,
+        tier: 'search',
+        complexity_score: 2,
         requires_tools: false,
         needs_live_data: true,
         rationale: 'needs current office holder',
@@ -296,7 +286,6 @@ describe('resolveAutoModel', () => {
       ctx,
       blockId: 'b5',
       signals: makeSignals({
-        // Avoid thin regex backup — rely on the model flag alone.
         lastMessage: `who is the cm of karnataka right now? ${++signalSeq}`,
         toolNames: [],
         approxInputTokens: 40,
@@ -305,13 +294,57 @@ describe('resolveAutoModel', () => {
       productSurface: 'agent',
     })
 
-    expect(result.model).toBe('o4-mini-deep-research')
+    expect(result.model).toBe('grok-4.7')
     expect(result.tier).toBe('search')
-    expect(result.complexityScore).toBeGreaterThanOrEqual(2)
+    expect(result.decidedBy).toBe('llm')
+  })
 
-    const classifierCall = mockExecuteProviderRequest.mock.calls[0]?.[1] as {
-      responseFormat?: { schema?: { required?: string[] } }
-    }
-    expect(classifierCall.responseFormat?.schema?.required).toContain('needs_live_data')
+  it('routes code optimize asks to coding when the classifier says coding', async () => {
+    // Regression: source containing "live"/"current" must not regex into search.
+    dbChainMockFns.limit
+      .mockResolvedValueOnce([
+        { id: 'fast', hint: 'easy' },
+        { id: 'search', hint: 'live web' },
+        { id: 'coding', hint: 'code' },
+        { id: 'workhorse', hint: 'general' },
+      ])
+      .mockResolvedValueOnce([
+        {
+          modelId: 'gpt-5.3-codex',
+          selectionRank: 1,
+          complexityScore: 4,
+          productSurface: 'both',
+          requiresTools: true,
+        },
+      ])
+
+    mockExecuteProviderRequest.mockResolvedValue({
+      content: JSON.stringify({
+        tier: 'coding',
+        complexity_score: 4,
+        requires_tools: true,
+        needs_live_data: false,
+        rationale: 'optimize provided source',
+      }),
+      tokens: { input: 10, output: 5 },
+      cost: { total: 0.001 },
+    })
+
+    const result = await resolveAutoModel({
+      ctx,
+      blockId: 'b6',
+      signals: makeSignals({
+        lastMessage: `optimize the code bit where we do changes ${++signalSeq}`,
+        systemPrompt: 'function liveCurrentRealtime() { return "current" }',
+        toolNames: [],
+        approxInputTokens: 800,
+      }),
+      fallbackModel: 'gpt-5',
+      productSurface: 'agent',
+    })
+
+    expect(result.model).toBe('gpt-5.3-codex')
+    expect(result.tier).toBe('coding')
+    expect(result.decidedBy).toBe('llm')
   })
 })

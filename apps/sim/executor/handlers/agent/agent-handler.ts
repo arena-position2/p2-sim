@@ -50,6 +50,7 @@ import {
 import { hydrateUserFilesWithBase64 } from '@/lib/uploads/utils/user-file-base64.server'
 import {
   type FallbackModelCandidate,
+  MAX_FALLBACK_MODELS,
   resolveFallbackTuning,
 } from '@/lib/workflows/blocks/fallback-models'
 import { resolveCustomBlockToolBinding } from '@/lib/workflows/custom-blocks/operations'
@@ -200,6 +201,11 @@ interface ModelCandidate extends FallbackModelCandidate {
    * `applyAutoModelLabel` exists to close.
    */
   traceName?: string
+  /**
+   * Same-tier Arena Auto pool fallback: keep the auto identity preamble and
+   * report as arena-auto. Builder-named fallbacks leave this unset.
+   */
+  preserveAutoIdentity?: boolean
 }
 
 interface ExecuteAcrossModelsConfig {
@@ -617,21 +623,50 @@ export class AgentBlockHandler implements BlockHandler {
       }
       const retry = nodeMetadata?.retry
       const fallbacksHeld = retry !== undefined && !retry.isFinalTry
+      /**
+       * Arena Auto: after the primary pool model, try the next selection_rank
+       * rows in the same tier. Builder-named fallbacks still follow those.
+       */
+      const poolFallbackCandidates: ModelCandidate[] = (autoRouting?.poolFallbacks ?? [])
+        .filter((row) => row.model.toLowerCase() !== model.toLowerCase())
+        .slice(0, MAX_FALLBACK_MODELS)
+        .map((row) => ({
+          model: row.model,
+          isPrimary: false,
+          preserveAutoIdentity: true,
+          traceName: ARENA_AUTO_MODEL_ID,
+        }))
+      const configuredFallbackCandidates = configuredFallbacks.filter((candidate) => {
+        const key = candidate.model.toLowerCase()
+        if (key === model.toLowerCase()) return false
+        return !poolFallbackCandidates.some((row) => row.model.toLowerCase() === key)
+      })
       const fallbackCandidates =
         modelInputs.previousInteractionId || fallbacksHeld
           ? []
-          : configuredFallbacks.filter(
-              (candidate) => candidate.model.toLowerCase() !== model.toLowerCase()
-            )
-      if (configuredFallbacks.length > 0 && modelInputs.previousInteractionId) {
+          : [...poolFallbackCandidates, ...configuredFallbackCandidates]
+      if (
+        (poolFallbackCandidates.length > 0 || configuredFallbacks.length > 0) &&
+        modelInputs.previousInteractionId
+      ) {
         logger.info('Fallback models skipped for a deep-research follow-up turn', {
           blockId: block.id,
         })
-      } else if (configuredFallbacks.length > 0 && fallbacksHeld) {
+      } else if (
+        (poolFallbackCandidates.length > 0 || configuredFallbacks.length > 0) &&
+        fallbacksHeld
+      ) {
         logger.info('Fallback models held for the final try', {
           blockId: block.id,
           attempt: retry.attempt,
           maxTries: retry.maxTries,
+        })
+      } else if (poolFallbackCandidates.length > 0) {
+        logger.info('Arena Auto pool fallbacks armed for same-tier retry', {
+          blockId: block.id,
+          primary: model,
+          tier: autoRouting?.tier,
+          fallbacks: poolFallbackCandidates.map((row) => row.model),
         })
       }
       const candidates: ModelCandidate[] = [
@@ -641,7 +676,10 @@ export class AgentBlockHandler implements BlockHandler {
           isPrimary: true,
           ...(autoRouting ? { traceName: ARENA_AUTO_MODEL_ID } : {}),
         },
-        ...fallbackCandidates.map((candidate) => ({ ...candidate, isPrimary: false })),
+        ...fallbackCandidates.map((candidate) => ({
+          ...candidate,
+          isPrimary: false as const,
+        })),
       ]
       const {
         result,
@@ -650,7 +688,9 @@ export class AgentBlockHandler implements BlockHandler {
       } = await this.executeAcrossModels(ctx, block, {
         candidates,
         retryPrimaryOnStreamStart:
-          fallbacksHeld && configuredFallbacks.length > 0 && !modelInputs.previousInteractionId,
+          fallbacksHeld &&
+          (poolFallbackCandidates.length > 0 || configuredFallbacks.length > 0) &&
+          !modelInputs.previousInteractionId,
         primaryModel: model,
         configuredModel: autoRouting ? ARENA_AUTO_MODEL_ID : model,
         primaryProviderId: providerId,
@@ -674,11 +714,17 @@ export class AgentBlockHandler implements BlockHandler {
       }
 
       /**
-       * A fallback the builder named explicitly is not a pool model, so it keeps
-       * its own name; only the routed pool model hides behind the auto label.
+       * Pool primary and same-tier pool fallbacks hide behind the auto label.
+       * A fallback the builder named explicitly keeps its own catalog name.
        */
-      if (autoRouting && servedModel === model) {
-        this.applyAutoModelLabel(result, model)
+      if (autoRouting) {
+        const poolModels = new Set([
+          model.toLowerCase(),
+          ...(autoRouting.poolFallbacks ?? []).map((row) => row.model.toLowerCase()),
+        ])
+        if (poolModels.has(servedModel.toLowerCase())) {
+          this.applyAutoModelLabel(result, servedModel)
+        }
       }
 
       if (this.isStreamingExecution(result)) {
@@ -2722,6 +2768,8 @@ export class AgentBlockHandler implements BlockHandler {
           config.modelInputs
         )
         const sameProvider = candidateProviderId === config.primaryProviderId
+        const stripAutoIdentity =
+          config.fallbackSystemPrompt !== undefined && !candidate.preserveAutoIdentity
         inputs = {
           ...(sameProvider
             ? config.modelInputs
@@ -2735,9 +2783,7 @@ export class AgentBlockHandler implements BlockHandler {
             logger,
           }),
           previousInteractionId: undefined,
-          ...(config.fallbackSystemPrompt !== undefined
-            ? { systemPrompt: config.fallbackSystemPrompt }
-            : {}),
+          ...(stripAutoIdentity ? { systemPrompt: config.fallbackSystemPrompt } : {}),
           ...tuning,
         }
         if (adjustments.length > 0) {
@@ -2757,7 +2803,9 @@ export class AgentBlockHandler implements BlockHandler {
         providerId: candidateProviderId,
         model: candidate.model,
         messages:
-          !candidate.isPrimary && config.fallbackSystemPrompt !== undefined
+          !candidate.isPrimary &&
+          config.fallbackSystemPrompt !== undefined &&
+          !candidate.preserveAutoIdentity
             ? stripAutoPreamble(messages)
             : messages,
         inputs,
