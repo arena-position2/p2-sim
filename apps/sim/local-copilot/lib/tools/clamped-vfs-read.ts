@@ -10,6 +10,7 @@ import { readWorkspaceFileContent } from '@/lib/workspace-files/application/read
 import { clampReadResultForLocalModel } from '@/local-copilot/lib/tools/clamp-read-result'
 import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-server-tool-context'
 import type { ToolExecutionContext, ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
+import { withLocalWorkspaceFileDeliveryObservation } from '@/local-copilot/lib/tools/observe-workspace-file-delivery'
 
 const logger = createLogger('LocalCopilotClampedVfsRead')
 
@@ -93,36 +94,38 @@ export async function recoverOversizedVfsReadForLocal(
 
   try {
     const delegation = toCopilotServerToolContext(ctx)
-    const file = await resolveCopilotWorkspaceFileReference(
-      delegation,
-      fileOperations.readContent,
-      { workspaceId: ctx.workspaceId, reference }
-    )
-    if (isImageFileType(file.type)) return null
+    return await withLocalWorkspaceFileDeliveryObservation(ctx, async () => {
+      const file = await resolveCopilotWorkspaceFileReference(
+        delegation,
+        fileOperations.readContent,
+        { workspaceId: ctx.workspaceId, reference }
+      )
+      if (isImageFileType(file.type)) return null
 
-    const { content } = await executeCopilotFileUseCase(delegation, readWorkspaceFileContent, {
-      fileId: file.id,
-      assertedWorkspaceId: ctx.workspaceId,
+      const { content } = await executeCopilotFileUseCase(delegation, readWorkspaceFileContent, {
+        fileId: file.id,
+        assertedWorkspaceId: ctx.workspaceId,
+      })
+      const text = content.toString('utf8')
+      const raw = { content: text, totalLines: text.split('\n').length }
+      const windowed = applyLineWindow(raw, offset, limit)
+      const clamped = clampReadResultForLocalModel(windowed)
+
+      logger.info('Recovered oversized VFS read for Local Copilot', {
+        path,
+        rawChars: raw.content.length,
+        clampedChars: clamped.content.length,
+        truncated: clamped.truncated === true,
+        offset,
+        limit,
+      })
+
+      return {
+        toolName: 'read',
+        success: true,
+        result: clamped,
+      }
     })
-    const text = content.toString('utf8')
-    const raw = { content: text, totalLines: text.split('\n').length }
-    const windowed = applyLineWindow(raw, offset, limit)
-    const clamped = clampReadResultForLocalModel(windowed)
-
-    logger.info('Recovered oversized VFS read for Local Copilot', {
-      path,
-      rawChars: raw.content.length,
-      clampedChars: clamped.content.length,
-      truncated: clamped.truncated === true,
-      offset,
-      limit,
-    })
-
-    return {
-      toolName: 'read',
-      success: true,
-      result: clamped,
-    }
   } catch (error) {
     logger.warn('Local oversized VFS read recovery failed', {
       path,

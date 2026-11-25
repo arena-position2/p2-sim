@@ -243,7 +243,11 @@ export function ChatMessageContainer({
       <div
         ref={setScrollContainerRef}
         className={cn(
-          '!scroll-smooth min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-auto',
+          // Arena: never force CSS scroll-smooth while streaming — it turns every
+          // stick-to-bottom `scrollTo` into an animation that fights manual scroll.
+          // JS still uses behavior:'smooth' for the jump button when not streaming.
+          'min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-auto',
+          isStreaming ? 'scroll-auto' : 'scroll-smooth',
           showTimeline && CONVERSATION_TIMELINE_GUTTER_CLASS
         )}
       >

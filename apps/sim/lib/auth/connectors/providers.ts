@@ -759,6 +759,11 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       },
     },
 
+    /**
+     * Without `select_account`, Entra silently reuses the browser's Microsoft
+     * session, so "Connect another" reconnects the same mailbox. Matches
+     * social Microsoft sign-in and managed Microsoft OAuth.
+     */
     {
       providerId: 'microsoft-ad',
       clientId: env.MICROSOFT_CLIENT_ID as string,
@@ -771,6 +776,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-ad`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'microsoft-ad')
@@ -789,6 +795,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-teams`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'microsoft-teams')
@@ -807,6 +814,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-excel`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'microsoft-excel')
@@ -824,6 +832,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-word`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'microsoft-word')
@@ -845,6 +854,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-dataverse`,
       getUserInfo: async (tokens) => {
         const oauthState = await getOAuthState()
@@ -877,6 +887,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-intune`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'microsoft-intune')
@@ -894,6 +905,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-planner`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'microsoft-planner')
@@ -911,6 +923,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/microsoft-powerbi`,
       getUserInfo: async (tokens) => {
         const canonicalScopes = getCanonicalScopesForProvider('microsoft-powerbi')
@@ -934,6 +947,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/outlook`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'outlook')
@@ -952,6 +966,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/onedrive`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'onedrive')
@@ -970,6 +985,7 @@ export function buildConnectorProviders(): GenericOAuthConfig[] {
       accessType: 'offline',
       authentication: 'basic',
       pkce: true,
+      prompt: 'select_account',
       redirectURI: `${getBaseUrl()}/api/auth/oauth2/callback/sharepoint`,
       getUserInfo: async (tokens) => {
         return getMicrosoftUserInfoFromIdToken(tokens, 'sharepoint')

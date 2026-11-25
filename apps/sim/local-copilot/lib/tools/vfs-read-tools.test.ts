@@ -6,6 +6,7 @@
  * - no workspace → denied
  * - unsupported namespaces (agent/, workflows/, …) → empty/note, not Tool not found
  * - glob / read happy path over workspace files (regression: must not 404)
+ * - read without secret-trace registry → provenance unavailable (Cloud parity)
  * - executor early intercept for glob/grep/read
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -22,6 +23,7 @@ vi.mock('@/lib/mothership/tools/handlers/upload-file-reader', () => ({
   listChatUploads,
 }))
 
+import { createIncompleteResolvedSecretTraceRegistry } from '@/executor/utils/resolved-secret-trace-registry'
 import {
   executeLocalCopilotTool,
   type ToolExecutionContext,
@@ -52,6 +54,10 @@ function toolCtx(overrides?: Partial<ToolExecutionContext>): ToolExecutionContex
     workspaceId,
     userPermission: 'admin',
     structuredContext,
+    resolvedSecretTraceRegistry: createIncompleteResolvedSecretTraceRegistry({
+      userId,
+      workspaceId,
+    }),
     ...overrides,
   }
 }
@@ -155,6 +161,19 @@ describe('executeLocalVfsTool', () => {
     const result = await executeLocalVfsTool('read', { path: 'workflows/abc' }, toolCtx())
     expect(result.success).toBe(false)
     expect(result.error).toMatch(/files\/ and uploads\//i)
+  })
+
+  it('refuses read when file delivery provenance cannot be observed', async () => {
+    mockWorkspaceFiles([{ name: 'notes.md' }])
+
+    const result = await executeLocalVfsTool(
+      'read',
+      { path: 'files/notes.md' },
+      toolCtx({ resolvedSecretTraceRegistry: undefined })
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/File read provenance is unavailable/i)
+    expect(executeCopilotFileUseCase).not.toHaveBeenCalled()
   })
 })
 

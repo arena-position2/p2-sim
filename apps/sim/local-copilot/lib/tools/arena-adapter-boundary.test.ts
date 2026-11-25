@@ -93,6 +93,38 @@ describe('Level B Arena adapter boundary', () => {
     expect(toServerRegistryToolName('materialize_file')).toBe('save_upload')
   })
 
+  it('registers an in-process save_upload handler from local-copilot (not mothership)', async () => {
+    const { hasHandler } = await import('@/lib/mothership/tool-executor/executor')
+    const { executeMothershipDelegatedTool } = await import(
+      '@/local-copilot/lib/tools/mothership-delegated-tools'
+    )
+    // Trigger Local runtime registration without needing a real upload.
+    await executeMothershipDelegatedTool(
+      'materialize_file',
+      { fileNames: [] },
+      {
+        userId: 'user-1',
+        workspaceId: 'workspace-1',
+        userPermission: 'admin',
+        structuredContext: {
+          workspace: { id: 'workspace-1', name: 'Workspace', environment: 'self_hosted' },
+          connectedIntegrations: [],
+          envVariables: [],
+          hostedKeysAvailable: false,
+          execution: {
+            lastRunStatus: 'unknown',
+            logs: [],
+            failedBlockId: null,
+            error: null,
+          },
+          availableIntegrations: [],
+          availableBlocks: [],
+        },
+      }
+    )
+    expect(hasHandler('save_upload')).toBe(true)
+  })
+
   it('registers user_memory and list_workspaces for Local Copilot delegation', () => {
     const registered = new Set(getRegisteredServerToolNames())
     expect(registered.has('user_memory')).toBe(true)

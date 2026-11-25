@@ -176,6 +176,11 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const [messagesScrollNode, setMessagesScrollNode] = useState<HTMLDivElement | null>(null)
+  const attachMessagesContainer = useCallback((node: HTMLDivElement | null) => {
+    messagesContainerRef.current = node
+    setMessagesScrollNode(node)
+  }, [])
   const threadSearchInputRef = useRef<HTMLInputElement>(null)
   const chatInputWrapperRef = useRef<HTMLDivElement>(null)
   const [conversationId, setConversationId] = useState('')
@@ -197,12 +202,15 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
 
   const [showScrollButton, setShowScrollButton] = useState(false)
-  const [, setUserHasScrolled] = useState(false)
-  const isUserScrollingRef = useRef(false)
+  /** ChatGPT-style: follow the stream only while pinned to the bottom. */
+  const stickToBottomRef = useRef(true)
+  const ignoreScrollRef = useRef(false)
+  const ignoreScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentChatIdRef = useRef(currentChatId)
   const messagesRef = useRef(messages)
   const streamingChatIdRef = useRef<string | null>(null)
   const messagesByChatIdRef = useRef(new Map<string, ChatMessage[]>())
+  const NEAR_BOTTOM_THRESHOLD_PX = 100
 
   const [authRequired, setAuthRequired] = useState<'password' | 'email' | 'sso' | null>(null)
 
@@ -319,17 +327,77 @@ export default function ChatClient({ identifier }: { identifier: string }) {
 
   const isNewChatActive = isUnsavedChat && !showFeedbackView && !isGoldenQueriesOpen
 
-  const scrollToBottom = useCallback(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+  const markProgrammaticScroll = useCallback((behavior: ScrollBehavior) => {
+    ignoreScrollRef.current = true
+    if (ignoreScrollTimeoutRef.current) {
+      clearTimeout(ignoreScrollTimeoutRef.current)
     }
+    ignoreScrollTimeoutRef.current = setTimeout(
+      () => {
+        ignoreScrollRef.current = false
+        ignoreScrollTimeoutRef.current = null
+      },
+      behavior === 'smooth' ? 400 : 50
+    )
   }, [])
 
-  /** Stick-to-bottom only while viewing the chat that owns the active stream. */
+  /**
+   * Arena deployed-chat scroll (ChatGPT-style; keep on upstream sync):
+   * - Stream / send → pin to bottom and follow chunks
+   * - Wheel/touch scroll away → unpin immediately (manual scroll works)
+   * - Near bottom again or jump button → re-pin
+   * - Only the streaming chatId is followed; other threads are untouched
+   */
+  const scrollContainerToBottom = useCallback(
+    (behavior: ScrollBehavior = 'smooth', options?: { force?: boolean }) => {
+      const force = options?.force === true
+      if (!force && !stickToBottomRef.current) return
+      if (force) {
+        stickToBottomRef.current = true
+        setShowScrollButton(false)
+      }
+
+      const container = messagesContainerRef.current
+      markProgrammaticScroll(behavior)
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior })
+        return
+      }
+      messagesEndRef.current?.scrollIntoView({ behavior })
+    },
+    [markProgrammaticScroll]
+  )
+
+  const enableStreamStickiness = useCallback(() => {
+    stickToBottomRef.current = true
+    setShowScrollButton(false)
+  }, [])
+
   const scrollActiveStreamToBottom = useCallback(() => {
     if (currentChatIdRef.current !== streamingChatIdRef.current) return
-    scrollToBottom()
-  }, [scrollToBottom])
+    if (!stickToBottomRef.current) return
+
+    // Safety net for scrollbar-drag races: if the user already left the bottom,
+    // unpin and do not yank them back on the next chunk.
+    const container = messagesContainerRef.current
+    if (container) {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight
+      if (distanceFromBottom > NEAR_BOTTOM_THRESHOLD_PX) {
+        stickToBottomRef.current = false
+        setShowScrollButton(true)
+        return
+      }
+    }
+
+    scrollContainerToBottom('auto')
+  }, [scrollContainerToBottom])
+
+  const handleScrollToBottomClick = useCallback(() => {
+    scrollContainerToBottom('smooth', { force: true })
+  }, [scrollContainerToBottom])
+
+  const scrollToBottom = handleScrollToBottomClick
 
   useEffect(() => {
     const incoming = chatConfig?.customizations?.goldenQueries ?? []
@@ -381,22 +449,62 @@ export default function ChatClient({ identifier }: { identifier: string }) {
     throttle(() => {
       const container = messagesContainerRef.current
       if (!container) return
+      // Ignore our own stick-to-bottom writes so they do not flip the pin.
+      if (ignoreScrollRef.current) return
 
       const { scrollTop, scrollHeight, clientHeight } = container
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      setShowScrollButton(distanceFromBottom > 100)
-
-      // Only treat scroll as "user interrupted stream stickiness" on the running thread.
-      if (
-        isStreamingResponse &&
-        currentChatIdRef.current === streamingChatIdRef.current &&
-        !isUserScrollingRef.current
-      ) {
-        setUserHasScrolled(true)
-      }
+      const nearBottom = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+      stickToBottomRef.current = nearBottom
+      setShowScrollButton(!nearBottom)
     }, 100),
-    [isStreamingResponse]
+    []
   )
+
+  /**
+   * Detach stickiness on real user intent (wheel/touch) immediately — do not wait
+   * for a scroll event that may be masked by programmatic ignoreScrollRef.
+   */
+  useEffect(() => {
+    const container = messagesScrollNode
+    if (!container) return
+
+    const detachIfStreamingThisChat = () => {
+      if (!isStreamingResponse) return
+      if (currentChatIdRef.current !== streamingChatIdRef.current) return
+      stickToBottomRef.current = false
+      setShowScrollButton(true)
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      // Scroll-up intent leaves the bottom; that is when ChatGPT stops following.
+      if (event.deltaY < 0) {
+        detachIfStreamingThisChat()
+      }
+    }
+
+    let touchStartY: number | null = null
+    const onTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? null
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY
+      if (touchStartY == null || currentY == null) return
+      // Finger moving down → content scrolls up → leave the live tail.
+      if (currentY > touchStartY + 8) {
+        detachIfStreamingThisChat()
+      }
+    }
+
+    container.addEventListener('wheel', onWheel, { passive: true })
+    container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchmove', onTouchMove, { passive: true })
+    return () => {
+      container.removeEventListener('wheel', onWheel)
+      container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchmove', onTouchMove)
+    }
+  }, [isStreamingResponse, messagesScrollNode])
 
   // Fetch history messages
   useEffect(() => {
@@ -609,27 +717,30 @@ export default function ChatClient({ identifier }: { identifier: string }) {
   }, [identifier, chatConfig, currentChatId, historyRefreshKey, userName, scrollToBottom])
 
   useEffect(() => {
-    const container = messagesContainerRef.current
+    const container = messagesScrollNode
     if (!container) return
 
     container.addEventListener('scroll', handleScroll, { passive: true })
     return () => container.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
+  }, [handleScroll, messagesScrollNode])
 
-  // Reset user scroll tracking when streaming starts on the thread being viewed.
+  // Scenario 1: stream begins on the viewed chat → pin to bottom once.
   useEffect(() => {
     if (!isViewingActiveStream) return
-
-    setUserHasScrolled(false)
-
-    // Give a small delay to distinguish between programmatic scroll and user scroll
-    isUserScrollingRef.current = true
+    stickToBottomRef.current = true
+    setShowScrollButton(false)
+    const container = messagesScrollNode ?? messagesContainerRef.current
+    ignoreScrollRef.current = true
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+    }
     const timeoutId = setTimeout(() => {
-      isUserScrollingRef.current = false
-    }, 1000)
-
+      ignoreScrollRef.current = false
+    }, 50)
     return () => clearTimeout(timeoutId)
-  }, [isViewingActiveStream])
+  }, [isViewingActiveStream, messagesScrollNode])
 
   const fetchChatConfig = async () => {
     try {
@@ -831,10 +942,10 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       filesCount: (files?.length ?? 0) + effectiveGeneratedImages.length,
     })
 
-    // Reset userHasScrolled when sending a new message
-    setUserHasScrolled(false)
+    // Scenario 1/4: sending a prompt (even from the top of history) enables
+    // stickiness and jumps to the bottom before the stream starts.
+    enableStreamStickiness()
 
-    let userMessageId: string | null = null
     // Create abort controller for request cancellation
     const abortController = new AbortController()
     const timeoutId = setTimeout(() => {
@@ -885,7 +996,6 @@ export default function ChatClient({ identifier }: { identifier: string }) {
             dataUrl: file.dataUrl || '',
           })),
         }
-        userMessageId = userMessage.id
         setMessages((prev) => {
           const next = [...prev, userMessage]
           messagesRef.current = next
@@ -900,12 +1010,9 @@ export default function ChatClient({ identifier }: { identifier: string }) {
       clearSelectedGeneratedImages()
       setIsLoading(true)
 
-      if (userMessageId) {
-        // Scroll to show only the user's message and loading indicator (if message exists)
-        setTimeout(() => {
-          scrollToMessage(userMessageId!, true)
-        }, 100)
-      }
+      setTimeout(() => {
+        scrollContainerToBottom('smooth')
+      }, 100)
 
       // Build complete workflow input with all Start Block fields
       // Use messageToSend directly (may be empty if form was submitted)
@@ -985,6 +1092,7 @@ export default function ChatClient({ identifier }: { identifier: string }) {
 
       streamingChatIdRef.current = currentChatId
       setStreamingChatId(currentChatId)
+      enableStreamStickiness()
       if (currentChatId) {
         messagesByChatIdRef.current.set(currentChatId, messagesRef.current)
       }
@@ -1752,9 +1860,9 @@ export default function ChatClient({ identifier }: { identifier: string }) {
                       }
                       isStreaming={isViewingActiveStream}
                       showScrollButton={showScrollButton}
-                      messagesContainerRef={messagesContainerRef as RefObject<HTMLDivElement>}
+                      messagesContainerRef={attachMessagesContainer}
                       messagesEndRef={messagesEndRef as RefObject<HTMLDivElement>}
-                      scrollToBottom={scrollToBottom}
+                      scrollToBottom={handleScrollToBottomClick}
                       scrollToMessage={scrollToMessage}
                       chatConfig={chatConfig}
                       setMessages={setMessages}
