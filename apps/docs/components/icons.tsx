@@ -1,7 +1,7 @@
 import type { SVGProps } from 'react'
 import { useId } from 'react'
 import { cn } from '@sim/emcn'
-import Image, { type ImageProps } from 'next/image'
+import Image from 'next/image'
 
 interface FlowIconProps extends SVGProps<SVGSVGElement> {}
 
@@ -280,28 +280,44 @@ export function Spinner() {
 }
 
 /**
- * Arena Agent glyph — vimi sparkle PNG on the purple→teal gradient.
- * Rendered via next/image so tiled surfaces that opt in with `[&_img]:size-full`
- * get the same full-bleed presence as Image Generator's colored tile.
+ * Arena Agent glyph — vimi sparkle on the purple→teal gradient.
+ * Fills its parent (`size-full`) the way the prior PNG did with `[&_img]:size-full`.
  */
-export function AgentIcon({
-  className,
-  style,
-  ...props
-}: Omit<ImageProps, 'src' | 'alt' | 'fill'>) {
+export function AgentIcon({ className, style, ...props }: SVGProps<SVGSVGElement>) {
+  const gradientId = useId().replace(/:/g, '')
   return (
-    <Image
-      src='https://arenav2image.s3.us-west-1.amazonaws.com/vimi-sparkle.png'
-      alt='Agent'
-      width={14}
-      height={14}
+    <svg
+      viewBox='0 0 24 24'
+      fill='none'
+      role='img'
+      aria-label='Agent'
+      xmlns='http://www.w3.org/2000/svg'
+      className={cn('box-border size-full overflow-hidden rounded-[4px]', className)}
+      style={style}
       {...props}
-      style={{
-        backgroundImage: 'linear-gradient(179.65deg, #7B4796 -0.59%, #017496 102.42%)',
-        ...style,
-      }}
-      className={cn('box-border size-full rounded-[4px] object-contain p-[20%]', className)}
-    />
+    >
+      <defs>
+        <linearGradient id={gradientId} x1='0.35%' y1='-0.59%' x2='0.35%' y2='102.42%'>
+          <stop offset='0%' stopColor='#7B4796' />
+          <stop offset='100%' stopColor='#017496' />
+        </linearGradient>
+      </defs>
+      <rect width='24' height='24' rx='4' fill={`url(#${gradientId})`} />
+      <svg x='4.8' y='4.8' width='14.4' height='14.4' viewBox='-1 -2 24 24' overflow='visible'>
+        <path
+          d='M9.6 3.8C9.6 8.12 11.28 9.8 15.6 9.8C11.28 9.8 9.6 11.48 9.6 15.8C9.6 11.48 7.92 9.8 3.6 9.8C7.92 9.8 9.6 8.12 9.6 3.8Z'
+          fill='white'
+        />
+        <path
+          d='M16.6 1.1C16.6 2.96 17.64 4 19.5 4C17.64 4 16.6 5.04 16.6 6.9C16.6 5.04 15.56 4 13.7 4C15.56 4 16.6 2.96 16.6 1.1Z'
+          fill='white'
+        />
+        <path
+          d='M3.7 13.1C3.7 14.76 4.64 15.7 6.3 15.7C4.64 15.7 3.7 16.64 3.7 18.3C3.7 16.64 2.76 15.7 1.1 15.7C2.76 15.7 3.7 14.76 3.7 13.1Z'
+          fill='white'
+        />
+      </svg>
+    </svg>
   )
 }
 

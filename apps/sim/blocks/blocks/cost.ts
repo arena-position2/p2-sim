@@ -1,9 +1,5 @@
-import type { SVGProps } from 'react'
-import { createElement } from 'react'
 import { CircleDollarSign } from 'lucide-react'
 import type { BlockConfig } from '@/blocks/types'
-
-const CostIcon = (props: SVGProps<SVGSVGElement>) => createElement(CircleDollarSign, props)
 
 const CURRENCY_OPTIONS = [
   { label: 'USD', id: 'USD' },
@@ -32,7 +28,7 @@ export const CostBlock: BlockConfig = {
   `,
   category: 'blocks',
   bgColor: '#10B981',
-  icon: CostIcon,
+  icon: CircleDollarSign,
   docsLink: 'https://docs.sim.ai/workflows/blocks/cost',
   subBlocks: [
     {
