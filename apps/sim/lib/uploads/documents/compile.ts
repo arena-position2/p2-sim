@@ -949,6 +949,9 @@ export async function compileDoc(args: CompileArgs): Promise<CompiledDocResult> 
       ...(contributingFiles.length > 0 ? { contributingFiles } : {}),
     }
   }
+  // A missing artifact for pdf-lib JavaScript must not fall through to the
+  // Python PDF engine. That engine writes a file that will not open.
+  if (sourceMime === 'text/x-pdflibjs') return compileDocInLegacySandbox(args, fmt)
   return buildCompiledDoc(args, fmt, referencedImages)
 }
 

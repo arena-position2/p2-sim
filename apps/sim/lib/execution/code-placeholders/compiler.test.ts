@@ -1286,7 +1286,6 @@ describe('direct environment reads in Python', () => {
 describe('direct environment reads in shell', () => {
   it('reports bare and braced parameter expansions', async () => {
     const compiled = await compileCodePlaceholders({
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a JS template
       code: ['echo "$API_KEY"', 'curl -H "Authorization: ${OTHER_KEY}"'].join('\n'),
       language: CodeLanguage.Shell,
       environmentVariables: { API_KEY: 'a-value', OTHER_KEY: 'b-value', UNUSED: 'c-value' },
@@ -1297,7 +1296,6 @@ describe('direct environment reads in shell', () => {
 
   it('keeps the name when a default is supplied', async () => {
     const compiled = await compileCodePlaceholders({
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a JS template
       code: 'echo "${API_KEY:-fallback}"',
       language: CodeLanguage.Shell,
       environmentVariables: { API_KEY: 'a-value' },
@@ -1406,7 +1404,6 @@ describe('direct environment read edge cases', () => {
   })
 
   it('does not guess a shell indirect expansion', async () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a JS template
     expect(await directReadNames('echo "${!API_KEY}"', CodeLanguage.Shell)).toEqual([])
   })
 
@@ -1623,7 +1620,6 @@ describe('shell true positives survive the fail-closed rule', () => {
     ['inside double quotes', 'curl -H "Authorization: Bearer $API_KEY"'],
     ['command substitution', 'X=$(echo $API_KEY)'],
     ['backticks', 'X=`echo $API_KEY`'],
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a JS template
     ['braced', 'echo ${API_KEY}'],
     ['second line', 'set -e\necho $API_KEY'],
     ['trailing comment on another line', 'echo $API_KEY # note'],

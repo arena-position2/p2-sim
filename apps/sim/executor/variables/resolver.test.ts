@@ -1069,7 +1069,6 @@ describe('VariableResolver function block inputs', () => {
     )
 
     expect(result.resolvedInputs.code).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — asserting template literal is preserved
       'return `value: ${JSON.stringify(globalThis["__blockRef_0"])}`'
     )
     expect(result.displayInputs.code).toBe('return `value: "hello world"`')

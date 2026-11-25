@@ -27,6 +27,7 @@ import {
   PPTXGENJS_SOURCE_MIME,
 } from '@/lib/uploads/documents/compile'
 import { DocCompileUserError } from '@/lib/uploads/documents/compile-error'
+import { storeCompiledDoc } from '@/lib/uploads/documents/compiled-store'
 import {
   admitCreateWorkspaceFile,
   createWorkspaceFile,
@@ -315,20 +316,36 @@ export async function compileDocForWrite(args: {
     return { ok: true, sourceMime: e2bFmt.sourceMime }
   }
 
-  if (docInfo.isDoc) {
+  if (
+    docInfo.isDoc &&
+    docInfo.taskId &&
+    docInfo.ext &&
+    docInfo.binaryContentType &&
+    docInfo.sourceMime &&
+    docInfo.formatName
+  ) {
     try {
-      await runSandboxTask(
-        docInfo.taskId!,
+      const compiled = await runSandboxTask(
+        docInfo.taskId,
         { code: source, workspaceId },
         { ownerKey, signal, filePrincipal: principal }
       )
+      if (!Buffer.isBuffer(compiled) || compiled.length === 0) {
+        return {
+          ok: false,
+          message: `${docInfo.formatName} generation produced an empty file. Add content (e.g. pptx.addSlide() / pdf.addPage()) and retry.`,
+        }
+      }
+      // Serve and download load this artifact. Without it, an E2B-enabled read
+      // recompiles JavaScript pdf-lib source as Python and the file will not open.
+      await storeCompiledDoc(workspaceId, source, docInfo.ext, docInfo.binaryContentType, compiled)
     } catch (err) {
       return {
         ok: false,
         message: `${docInfo.formatName} generation failed: ${toError(err).message}. Fix the code and retry.`,
       }
     }
-    return { ok: true, sourceMime: docInfo.sourceMime! }
+    return { ok: true, sourceMime: docInfo.sourceMime }
   }
 
   return { ok: true, sourceMime: fallbackMime }
