@@ -181,6 +181,10 @@
         "packages/logger/src/**"
       ],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/*.integration.ts", "**/*.spec.ts"],
+      "linter": { "rules": { "suspicious": { "noTemplateCurlyInString": "off" } } }
     }
   ],
   "javascript": {
