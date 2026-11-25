@@ -1296,7 +1296,7 @@ export async function importWorkspaceFileSecretProvenanceForRuntime(args: {
 }
 
 /** Imports a classification already bound by an authorized read to its returned byte snapshot. */
-async function importWorkspaceFileSnapshotProvenance(args: {
+export async function importWorkspaceFileSnapshotProvenance(args: {
   workspaceId: string
   provenance: WorkspaceFileSecretProvenance
   resourceId?: string

@@ -45,15 +45,15 @@ import {
   decompressArchiveBufferToWorkspaceFiles,
   MAX_ARCHIVE_BYTES,
 } from '@/lib/uploads/archive'
-import { findWorkspaceFileFolderIdByPath } from '@/lib/uploads/contexts/workspace/workspace-file-folder-manager'
+import { findWorkspaceFileFolderIdByPath } from '@/lib/uploads/contexts/workspace/file-folder-manager'
 import {
   allocateUniqueWorkspaceFileName,
   fetchWorkspaceFileBuffer,
-} from '@/lib/uploads/contexts/workspace/workspace-file-manager'
-import { getBoundWorkspaceFileSecretProvenance } from '@/lib/uploads/contexts/workspace/workspace-file-secret-provenance'
+} from '@/lib/uploads/contexts/workspace/file-manager'
+import { getBoundWorkspaceFileSecretProvenance } from '@/lib/uploads/contexts/workspace/file-secret-provenance'
 import { hasCloudStorage, headObject } from '@/lib/uploads/core/storage-service'
 import { getWorkspaceFileSize } from '@/lib/uploads/shared/types'
-import { isArchiveFileName } from '@/lib/uploads/utils/file-utils'
+import { isArchiveFileName } from '@/lib/uploads/utils/file'
 import { encodeVfsPathSegments } from '@/lib/vfs/path'
 import { parseWorkflowJson } from '@/lib/workflows/operations/import-export'
 import { MAX_IMPORT_BODY_BYTES } from '@/lib/workflows/operations/import-workflow'
