@@ -5178,6 +5178,47 @@ export const localCopilotUserMemory = pgTable(
   })
 )
 
+/**
+ * Per-LLM-round Local Copilot prompt traces (system / messages / tools / response).
+ * Gated by `LOCAL_COPILOT_LLM_TRACE` — expand-only; retention is manual for now.
+ */
+export const localCopilotLlmTraces = pgTable(
+  'local_copilot_llm_traces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: text('run_id'),
+    chatId: text('chat_id'),
+    conversationId: uuid('conversation_id').references(() => localCopilotConversations.id, {
+      onDelete: 'set null',
+    }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    systemPrompt: text('system_prompt'),
+    messages: jsonb('messages').notNull().default([]),
+    tools: jsonb('tools').notNull().default([]),
+    responseText: text('response_text'),
+    thinking: text('thinking'),
+    toolCalls: jsonb('tool_calls').notNull().default([]),
+    usage: jsonb('usage').notNull().default({}),
+    injectedNudges: jsonb('injected_nudges').notNull().default([]),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdIdx: index('local_copilot_llm_traces_user_id_idx').on(table.userId),
+    workspaceIdIdx: index('local_copilot_llm_traces_workspace_id_idx').on(table.workspaceId),
+    chatIdIdx: index('local_copilot_llm_traces_chat_id_idx').on(table.chatId),
+    runIdIdx: index('local_copilot_llm_traces_run_id_idx').on(table.runId),
+    createdAtIdx: index('local_copilot_llm_traces_created_at_idx').on(table.createdAt),
+  })
+)
+
 export type LocalCopilotPatchStatus = (typeof localCopilotPatchStatusEnum.enumValues)[number]
 export type LocalCopilotAuditStatus = (typeof localCopilotAuditStatusEnum.enumValues)[number]
 

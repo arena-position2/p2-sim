@@ -54,6 +54,7 @@ import {
   resolveStagnationAction,
 } from '@/local-copilot/lib/agent/tool-stagnation'
 import { formatUxPhaseStatus, type LocalUxPhase } from '@/local-copilot/lib/agent/ux-phase'
+import { maybeRecordLocalCopilotLlmTrace } from '@/local-copilot/lib/audit/llm-traces'
 import { logCopilotAction } from '@/local-copilot/lib/audit/logger'
 import { sanitizeToolIoForPersistence } from '@/local-copilot/lib/audit/sanitize-persistence'
 import { recordLocalCopilotTurnUsage } from '@/local-copilot/lib/billing/record-turn-usage'
@@ -1443,6 +1444,32 @@ export async function* runLocalCopilotAgent(
       roundDurationMs: timing.since(modelRoundMark),
       ttftMs: firstModelOutputMs === null ? null : timing.since(modelRoundMark, 'firstModelOutput'),
       memory: getLocalCopilotMemorySnapshot(),
+    })
+
+    maybeRecordLocalCopilotLlmTrace({
+      userId: params.userId,
+      workspaceId: params.workspaceId,
+      round,
+      provider: config.provider,
+      model: config.model,
+      messages,
+      tools: roundTools,
+      responseText: roundRawText,
+      thinking: roundReasoningContent || undefined,
+      toolCalls: pendingToolCalls.map((call) => ({
+        id: call.id,
+        name: call.name,
+        arguments: call.arguments,
+      })),
+      usage: {
+        inputTokens: roundInputTokens,
+        outputTokens: roundOutputTokens,
+        cacheReadTokens: roundCacheReadTokens,
+        cacheCreationTokens: roundCacheCreationTokens,
+      },
+      runId: params.runId,
+      chatId: params.chatId,
+      conversationId,
     })
 
     if (roundGeminiModelParts.length > 0) {
@@ -3347,6 +3374,7 @@ export async function* runLocalCopilotAgent(
       previous: activeDocumentsState,
       currentTurnUploadPaths: currentRequestUploadPaths,
       toolRecords: turnToolRecords,
+      message: params.message,
     })
     if (nextActiveDocuments) {
       activeDocumentsState = nextActiveDocuments
