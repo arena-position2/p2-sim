@@ -1,3 +1,5 @@
+# Lint and format the staged files. This hook does not run `next build` or
+# `bun run build`; those stay on hosted CI.
 bunx lint-staged
 
 # Regenerate projections when a canonical source is staged, so .claude/skills
@@ -6,4 +8,15 @@ bunx lint-staged
 if git diff --cached --name-only | grep -qE '^\.agents/skills/.*/SKILL\.md$|^\.claude/rules/.*\.md$'; then
   bun run skills:sync
   git add .claude/skills .cursor/rules
+fi
+
+# Type-check the packages this commit changes, including their dependents.
+# `type-check` is `tsc --noEmit` (docs also runs `next typegen`). It does not
+# depend on the `build` task.
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
+if printf '%s\n' "$staged" | grep -qE '\.(cjs|cts|js|jsx|json|mjs|mts|ts|tsx)$|^scripts/'; then
+  if printf '%s\n' "$staged" | grep -q '^scripts/'; then
+    bun run type-check:scripts:esm
+  fi
+  bunx turbo run type-check --filter='...[HEAD]' --output-logs=errors-only
 fi

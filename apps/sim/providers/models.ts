@@ -6252,23 +6252,6 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         sunset: { status: 'legacy' },
       },
       {
-        id: 'bedrock/anthropic.claude-sonnet-4-6',
-        pricing: {
-          input: 3.3,
-          cachedInput: 0.33,
-          output: 16.5,
-          updatedAt: '2026-09-14',
-        },
-        capabilities: {
-          temperature: { min: 0, max: 1 },
-          nativeStructuredOutputs: true,
-          maxOutputTokens: 64000,
-          promptCaching: { minimumCacheableTokens: 1024 },
-        },
-        contextWindow: 1000000,
-        releaseDate: '2026-02-17',
-      },
-      {
         id: 'bedrock/anthropic.claude-opus-4-5-20251101-v1:0',
         pricing: {
           input: 5.0,

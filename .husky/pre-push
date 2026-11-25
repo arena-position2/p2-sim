@@ -2,6 +2,8 @@
 # Checks only what this push changes against its merge base with origin/staging (the PR base):
 # biome format + lint on the changed files, type-check for the affected workspaces, then
 # `bun run generate` so no committed generated artifact is left stale.
+# Pre-commit already linted the staged files and type-checked that commit. This pass covers
+# the whole push. Neither hook runs `next build` or `bun run build`; hosted CI owns builds.
 # CI runs the full lint, type-check and audit gate on every PR, so it stays the backstop.
 set -e
 
