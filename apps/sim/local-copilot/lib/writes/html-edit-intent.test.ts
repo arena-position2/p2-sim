@@ -3,20 +3,26 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
   MAX_HTML_EDIT_GREP_NUDGE_ROUNDS,
   MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
 } from '@/local-copilot/lib/agent/limits'
 import {
+  buildHtmlEditEmptyGrepWriteNudgeMessage,
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
+  countEmptyGreps,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
+  filterHtmlEditForcedTools,
   hasHtmlEditContext,
+  isEmptyGrepResult,
   looksLikeHtmlAnalysisOnly,
   looksLikeHtmlEditIntent,
   shouldForceHtmlEditGrepNudge,
+  shouldForceHtmlEditWriteAfterEmptyGreps,
   shouldForceHtmlEditWriteNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
@@ -84,11 +90,13 @@ describe('shouldForceHtmlEditGrepNudge', () => {
     hasSuccessfulRead: true,
     hasSuccessfulGrep: false,
     hasFileMutationTools: false,
-    streamedUserFacingText: 'Let me read the file first.',
-    roundDisplayText: '',
   }
 
   it('nudges once when an HTML edit turn only read without grep', () => {
+    expect(shouldForceHtmlEditGrepNudge(base)).toBe(true)
+  })
+
+  it('nudges even when the model already streamed non-bridge prose', () => {
     expect(shouldForceHtmlEditGrepNudge(base)).toBe(true)
   })
 
@@ -130,6 +138,26 @@ describe('buildHtmlEditGrepNudgeMessage', () => {
   })
 })
 
+describe('empty grep helpers', () => {
+  it('detects empty match payloads', () => {
+    expect(isEmptyGrepResult({ matches: [] })).toBe(true)
+    expect(isEmptyGrepResult({ matches: [{ line: 1 }] })).toBe(false)
+    expect(isEmptyGrepResult({ counts: [{ path: 'a.html', count: 0 }] })).toBe(true)
+    expect(isEmptyGrepResult({ files: [] })).toBe(true)
+  })
+
+  it('counts empty greps in the turn', () => {
+    expect(
+      countEmptyGreps([
+        { name: 'grep', success: true, result: { matches: [] } },
+        { name: 'grep', success: true, result: { matches: [{ line: 1 }] } },
+        { name: 'grep', success: false, result: { matches: [] } },
+        { name: 'read', success: true, result: { content: 'x' } },
+      ])
+    ).toBe(1)
+  })
+})
+
 describe('HTML edit write nudge', () => {
   const writeBase = {
     postBuildToolMode: 'all',
@@ -142,8 +170,6 @@ describe('HTML edit write nudge', () => {
     userMessage: 'Apply the validation and clickable-stepper fixes',
     hasHtmlContext: true,
     hasFileMutationTools: false,
-    streamedUserFacingText: 'Let me grep the go() handler next.',
-    roundDisplayText: '',
   }
 
   it('counts successful file inspections only', () => {
@@ -167,6 +193,23 @@ describe('HTML edit write nudge', () => {
       shouldForceHtmlEditWriteNudge({
         ...writeBase,
         inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE - 1,
+      })
+    ).toBe(false)
+  })
+
+  it('forces write after repeated empty greps', () => {
+    expect(
+      shouldForceHtmlEditWriteAfterEmptyGreps({
+        ...writeBase,
+        emptyGrepCount: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+        emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+      })
+    ).toBe(true)
+    expect(
+      shouldForceHtmlEditWriteAfterEmptyGreps({
+        ...writeBase,
+        emptyGrepCount: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE - 1,
+        emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
       })
     ).toBe(false)
   })
@@ -204,6 +247,15 @@ describe('HTML edit write nudge', () => {
     expect(message).toMatch(/Do NOT call read, grep/i)
     expect(message).toContain('files/ad-generator.html')
 
+    const emptyGrepMessage = buildHtmlEditEmptyGrepWriteNudgeMessage({
+      tokens: ['CTA'],
+      preferredPath: 'files/ad-generator.html',
+      attempt: 1,
+      maxAttempts: 2,
+    })
+    expect(emptyGrepMessage).toMatch(/no matches/i)
+    expect(emptyGrepMessage).toContain('files/ad-generator.html/content')
+
     const giveUp = buildHtmlEditWriteGiveUpMessage({
       tokens: [],
       preferredPath: 'files/ad-generator.html',
@@ -211,5 +263,25 @@ describe('HTML edit write nudge', () => {
     })
     expect(giveUp).toMatch(/left unchanged/i)
     expect(giveUp).toMatch(/exact button label|function name/i)
+  })
+
+  it('strips inspect tools when write-forced and search tools when search-forced', () => {
+    const tools = [
+      { name: 'read' },
+      { name: 'grep' },
+      { name: 'workspace_file' },
+      { name: 'edit_content' },
+      { name: 'function_execute' },
+    ]
+    expect(filterHtmlEditForcedTools(tools, 'search').map((tool) => tool.name)).toEqual([
+      'read',
+      'workspace_file',
+      'edit_content',
+    ])
+    expect(filterHtmlEditForcedTools(tools, 'write').map((tool) => tool.name)).toEqual([
+      'workspace_file',
+      'edit_content',
+    ])
+    expect(filterHtmlEditForcedTools(tools, 'none')).toEqual(tools)
   })
 })

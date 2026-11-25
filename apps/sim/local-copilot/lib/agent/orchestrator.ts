@@ -9,6 +9,7 @@ import {
 import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
+  EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
@@ -264,13 +265,18 @@ import { mutationRequiresVerification } from '@/local-copilot/lib/verification/p
 import { runPostMutationVerification } from '@/local-copilot/lib/verification/run-verification'
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
 import {
+  buildHtmlEditEmptyGrepWriteNudgeMessage,
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
+  countEmptyGreps,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
+  filterHtmlEditForcedTools,
+  type HtmlEditToolSuppressMode,
   hasHtmlEditContext,
   shouldForceHtmlEditGrepNudge,
+  shouldForceHtmlEditWriteAfterEmptyGreps,
   shouldForceHtmlEditWriteNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
@@ -1055,6 +1061,8 @@ export async function* runLocalCopilotAgent(
   let forcedFileEditContinuations = 0
   let forcedHtmlEditGrepNudges = 0
   let forcedHtmlEditWriteNudges = 0
+  /** Once set, subsequent model rounds strip search and/or inspect tools. */
+  let htmlEditToolSuppressMode: HtmlEditToolSuppressMode = 'none'
   let forcedResearchSearchContinuations = 0
   /** Successful get_blocks_metadata calls after create and before the first populate edit. */
   let prePopulateDiscoveryCalls = 0
@@ -1195,7 +1203,10 @@ export async function* runLocalCopilotAgent(
 
     // Keep tools attached even for `final_only` — Bedrock rejects requests that
     // omit toolConfig once history already has toolUse/toolResult blocks.
-    const roundTools = resolvePostBuildRoundTools(postBuildToolMode, tools)
+    const roundTools = filterHtmlEditForcedTools(
+      resolvePostBuildRoundTools(postBuildToolMode, tools),
+      htmlEditToolSuppressMode
+    )
 
     // Stream user-facing prose live for real replies. Hold bridging narration when
     // tools are available, and stop emitting once a tool_call arrives — otherwise
@@ -1694,8 +1705,13 @@ export async function* runLocalCopilotAgent(
         candidatePaths: activeEditTarget.candidates,
       })
       const fileInspectionCount = countSuccessfulFileInspections(turnToolRecords)
+      const emptyGrepCount = countEmptyGreps(turnToolRecords)
       const hasFileMutations = turnHasFileMutationTools(turnToolRecords)
       const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+
+      if (hasFileMutations) {
+        htmlEditToolSuppressMode = 'none'
+      }
 
       const canForceHtmlEditGrep = shouldForceHtmlEditGrepNudge({
         postBuildToolMode,
@@ -1708,8 +1724,6 @@ export async function* runLocalCopilotAgent(
         hasSuccessfulRead,
         hasSuccessfulGrep,
         hasFileMutationTools: hasFileMutations,
-        streamedUserFacingText,
-        roundDisplayText: intentDisplay,
       })
 
       if (canForceHtmlEditGrep) {
@@ -1731,6 +1745,47 @@ export async function* runLocalCopilotAgent(
         continue
       }
 
+      const canForceHtmlEditWriteAfterEmptyGreps = shouldForceHtmlEditWriteAfterEmptyGreps({
+        postBuildToolMode,
+        forcedHtmlEditWriteNudges,
+        maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        emptyGrepCount,
+        emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasFileMutationTools: hasFileMutations,
+      })
+
+      if (canForceHtmlEditWriteAfterEmptyGreps) {
+        forcedHtmlEditWriteNudges += 1
+        // First empty-grep force keeps read; later forced writes strip inspect tools.
+        htmlEditToolSuppressMode =
+          forcedHtmlEditWriteNudges > 1 || htmlEditToolSuppressMode === 'write' ? 'write' : 'search'
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildHtmlEditEmptyGrepWriteNudgeMessage({
+            tokens: htmlEditGrepTokens,
+            preferredPath: activeEditTarget.preferredPath,
+            attempt: forcedHtmlEditWriteNudges,
+            maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML edit write after empty greps', {
+          round,
+          forcedHtmlEditWriteNudges,
+          emptyGrepCount,
+          grepTokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
       const canForceHtmlEditWrite = shouldForceHtmlEditWriteNudge({
         postBuildToolMode,
         forcedHtmlEditWriteNudges,
@@ -1742,12 +1797,11 @@ export async function* runLocalCopilotAgent(
         userMessage: userTurnText,
         hasHtmlContext: htmlEditContext,
         hasFileMutationTools: hasFileMutations,
-        streamedUserFacingText,
-        roundDisplayText: intentDisplay,
       })
 
       if (canForceHtmlEditWrite) {
         forcedHtmlEditWriteNudges += 1
+        htmlEditToolSuppressMode = 'write'
         if (intentDisplay.trim()) {
           messages.push({ role: 'assistant', content: intentDisplay })
           assistantText = ''
