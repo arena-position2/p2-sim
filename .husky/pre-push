@@ -62,8 +62,9 @@ changed=$(git diff --name-only "$base" HEAD)
 existing=$(git diff --name-only --diff-filter=ACMR "$base" HEAD)
 
 if [ -n "$existing" ]; then
-  # Word-splitting the list is deliberate; no path biome checks contains a space.
-  bunx biome check --no-errors-on-unmatched --files-ignore-unknown=true $existing
+  # xargs batches under ARG_MAX; a single argv with every path fails on large syncs.
+  # Newline-split is fine; no path biome checks contains a space or newline.
+  printf '%s\n' "$existing" | xargs bunx biome check --no-errors-on-unmatched --files-ignore-unknown=true
 fi
 
 if printf '%s\n' "$changed" | grep -qE '^scripts/'; then
