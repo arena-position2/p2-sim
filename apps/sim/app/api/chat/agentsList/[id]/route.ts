@@ -7,6 +7,10 @@ import { verifyCronAuth } from '@/lib/auth/internal'
 import { hasAgentEmailAccess } from '@/lib/chat/agent-email-access'
 import { getAgentDepartmentLabel } from '@/lib/chat/arena-departments'
 import {
+  isAdCreativeAgentUrl,
+  withLoggedInEmailOnAdAgentUrl,
+} from '@/lib/chat/ad-agent-redirect'
+import {
   isVideoBuilderAgentUrl,
   withLoggedInEmailOnVideoAgentUrl,
 } from '@/lib/chat/video-agent-redirect'
@@ -75,7 +79,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const row = rows[0]
     const appRedirectUrl = row.deploymentType === 'app' && row.redirectUrl ? row.redirectUrl : null
-    if (!emailId && !isVideoBuilderAgentUrl(appRedirectUrl)) {
+    if (
+      !emailId &&
+      !isVideoBuilderAgentUrl(appRedirectUrl) &&
+      !isAdCreativeAgentUrl(appRedirectUrl)
+    ) {
       return NextResponse.json({ success: false, error: 'emailId is required' }, { status: 400 })
     }
     const blockNamesByWorkflowId = await getUniqueBlockNamesByWorkflowId([row.workflowId])
@@ -94,7 +102,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       identifier: row.identifier,
       deployment_type: row.deploymentType === 'app' ? 'app' : 'chat',
       redirect_url: appRedirectUrl
-        ? withLoggedInEmailOnVideoAgentUrl(appRedirectUrl, emailId)
+        ? withLoggedInEmailOnAdAgentUrl(
+            withLoggedInEmailOnVideoAgentUrl(appRedirectUrl, emailId),
+            emailId
+          )
         : `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
       arena_path: row.arenaPath?.trim() || null,
       block_names: blockNamesByWorkflowId.get(row.workflowId) ?? [],

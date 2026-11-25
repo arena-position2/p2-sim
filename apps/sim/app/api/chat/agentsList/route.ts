@@ -14,6 +14,7 @@ import {
   labelFromDepartmentMap,
   resolveAgentDepartmentValue,
 } from '@/lib/chat/arena-departments'
+import { withLoggedInEmailOnAdAgentUrl } from '@/lib/chat/ad-agent-redirect'
 import { withLoggedInEmailOnVideoAgentUrl } from '@/lib/chat/video-agent-redirect'
 import { getUniqueBlockNamesByWorkflowId } from '@/lib/chat/workflow-block-names'
 import { getBaseUrl } from '@/lib/core/utils/urls'
@@ -59,7 +60,10 @@ function toAgentListItem(
     identifier: row.identifier,
     deployment_type: row.deploymentType === 'app' ? 'app' : 'chat',
     redirect_url: appRedirectUrl
-      ? withLoggedInEmailOnVideoAgentUrl(appRedirectUrl, viewerEmail)
+      ? withLoggedInEmailOnAdAgentUrl(
+          withLoggedInEmailOnVideoAgentUrl(appRedirectUrl, viewerEmail),
+          viewerEmail
+        )
       : `${getBaseUrl()}/chat/${row.identifier || row.workflowId}?workspaceId=${row.workspaceId}`,
     arena_path: row.arenaPath?.trim() || null,
     block_names: blockNames,
