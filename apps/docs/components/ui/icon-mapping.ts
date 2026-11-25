@@ -16,7 +16,6 @@ import {
   Task,
   Webhook,
 } from '@sim/emcn/icons'
-import { CircleDollarSign } from 'lucide-react'
 import {
   A2AIcon,
   AffinityIcon,
@@ -72,6 +71,7 @@ import {
   ConnectIcon,
   ContextDevIcon,
   ConvexIcon,
+  CostIcon,
   CredentialIcon,
   CrowdStrikeIcon,
   CrunchbaseIcon,
@@ -426,7 +426,7 @@ export const blockTypeToIconMap: Record<string, IconComponent> = {
   context_dev: ContextDevIcon,
   convex: ConvexIcon,
   convex_v2: ConvexIcon,
-  cost: CircleDollarSign,
+  cost: CostIcon,
   credential: CredentialIcon,
   credential_group: GridOffset,
   crowdstrike: CrowdStrikeIcon,

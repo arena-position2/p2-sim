@@ -1,4 +1,4 @@
-import { CircleDollarSign } from 'lucide-react'
+import { CostIcon } from '@/components/icons'
 import type { BlockConfig } from '@/blocks/types'
 
 const CURRENCY_OPTIONS = [
@@ -28,7 +28,7 @@ export const CostBlock: BlockConfig = {
   `,
   category: 'blocks',
   bgColor: '#10B981',
-  icon: CircleDollarSign,
+  icon: CostIcon,
   docsLink: 'https://docs.sim.ai/workflows/blocks/cost',
   subBlocks: [
     {
