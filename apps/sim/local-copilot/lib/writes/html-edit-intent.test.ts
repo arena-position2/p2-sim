@@ -21,6 +21,7 @@ import {
   isEmptyGrepResult,
   looksLikeHtmlAnalysisOnly,
   looksLikeHtmlEditIntent,
+  resolveHtmlEditMidStreamSuppress,
   shouldForceHtmlEditGrepNudge,
   shouldForceHtmlEditWriteAfterEmptyGreps,
   shouldForceHtmlEditWriteNudge,
@@ -283,5 +284,88 @@ describe('HTML edit write nudge', () => {
       'edit_content',
     ])
     expect(filterHtmlEditForcedTools(tools, 'none')).toEqual(tools)
+  })
+})
+
+describe('resolveHtmlEditMidStreamSuppress', () => {
+  const base = {
+    turnJob: 'html_edit',
+    currentMode: 'none' as const,
+    inspectionCount: 0,
+    inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+    emptyGrepCount: 0,
+    emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+    hasFileMutationTools: false,
+  }
+
+  it('escalates to write after enough inspections without waiting for text settle', () => {
+    expect(
+      resolveHtmlEditMidStreamSuppress({
+        ...base,
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+      })
+    ).toBe('write')
+  })
+
+  it('escalates empty greps to search first, then write', () => {
+    expect(
+      resolveHtmlEditMidStreamSuppress({
+        ...base,
+        emptyGrepCount: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+      })
+    ).toBe('search')
+    expect(
+      resolveHtmlEditMidStreamSuppress({
+        ...base,
+        currentMode: 'search',
+        emptyGrepCount: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+      })
+    ).toBe('write')
+  })
+
+  it('does not escalate for summarize_upload or after a mutation', () => {
+    expect(
+      resolveHtmlEditMidStreamSuppress({
+        ...base,
+        turnJob: 'summarize_upload',
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+      })
+    ).toBe('none')
+    expect(
+      resolveHtmlEditMidStreamSuppress({
+        ...base,
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        hasFileMutationTools: true,
+      })
+    ).toBe('none')
+  })
+
+  it('does not escalate before the inspection threshold', () => {
+    expect(
+      resolveHtmlEditMidStreamSuppress({
+        ...base,
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE - 1,
+      })
+    ).toBe('none')
+  })
+})
+
+describe('isHtmlEditJob gate', () => {
+  it('skips write force when isHtmlEditJob is false (A5 fence)', () => {
+    expect(
+      shouldForceHtmlEditWriteNudge({
+        postBuildToolMode: 'all',
+        forcedHtmlEditWriteNudges: 0,
+        maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        inspectionCount: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        round: 2,
+        maxToolRounds: 10,
+        userMessage: 'Update the header',
+        hasHtmlContext: true,
+        hasFileMutationTools: false,
+        isHtmlEditJob: false,
+      })
+    ).toBe(false)
   })
 })

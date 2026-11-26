@@ -283,6 +283,7 @@ import {
   filterHtmlEditForcedTools,
   type HtmlEditToolSuppressMode,
   hasHtmlEditContext,
+  resolveHtmlEditMidStreamSuppress,
   shouldForceHtmlEditGrepNudge,
   shouldForceHtmlEditWriteAfterEmptyGreps,
   shouldForceHtmlEditWriteNudge,
@@ -1802,7 +1803,7 @@ export async function* runLocalCopilotAgent(
         hasSuccessfulRead,
         hasSuccessfulGrep,
         hasFileMutationTools: hasFileMutations,
-        isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
+        isHtmlEditJob: turnJob === 'html_edit',
       })
 
       if (canForceHtmlEditGrep) {
@@ -1835,7 +1836,7 @@ export async function* runLocalCopilotAgent(
         userMessage: userTurnText,
         hasHtmlContext: htmlEditContext,
         hasFileMutationTools: hasFileMutations,
-        isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
+        isHtmlEditJob: turnJob === 'html_edit',
       })
 
       if (canForceHtmlEditWriteAfterEmptyGreps) {
@@ -1877,7 +1878,7 @@ export async function* runLocalCopilotAgent(
         userMessage: userTurnText,
         hasHtmlContext: htmlEditContext,
         hasFileMutationTools: hasFileMutations,
-        isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
+        isHtmlEditJob: turnJob === 'html_edit',
       })
 
       if (canForceHtmlEditWrite) {
@@ -1915,7 +1916,7 @@ export async function* runLocalCopilotAgent(
           userMessage: userTurnText,
           hasHtmlContext: htmlEditContext,
           hasFileMutationTools: hasFileMutations,
-          isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
+          isHtmlEditJob: turnJob === 'html_edit',
         })
       ) {
         stagnationStopMessage = buildHtmlEditWriteGiveUpMessage({
@@ -3011,6 +3012,57 @@ export async function* runLocalCopilotAgent(
     }
     for (const deferred of deferredSystemMessages) {
       messages.push(deferred)
+    }
+
+    // Mid-stream HTML-edit interrupt (Slice B): strip explore/sandbox for the
+    // *next* model round without waiting for a text-only settle (A2 thrash).
+    {
+      const midStreamMutations = turnHasFileMutationTools(turnToolRecords)
+      const midStreamInspections = countSuccessfulFileInspections(turnToolRecords)
+      const midStreamEmptyGreps = countEmptyGreps(turnToolRecords)
+      const nextHtmlEditSuppress = resolveHtmlEditMidStreamSuppress({
+        turnJob,
+        currentMode: htmlEditToolSuppressMode,
+        inspectionCount: midStreamInspections,
+        inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        emptyGrepCount: midStreamEmptyGreps,
+        emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+        hasFileMutationTools: midStreamMutations,
+      })
+      if (nextHtmlEditSuppress !== htmlEditToolSuppressMode) {
+        const previousMode = htmlEditToolSuppressMode
+        htmlEditToolSuppressMode = nextHtmlEditSuppress
+        if (nextHtmlEditSuppress === 'search' || nextHtmlEditSuppress === 'write') {
+          forcedHtmlEditWriteNudges += 1
+          const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+          messages.push({
+            role: 'user',
+            content:
+              nextHtmlEditSuppress === 'write'
+                ? buildHtmlEditWriteNudgeMessage({
+                    tokens: htmlEditGrepTokens,
+                    preferredPath: activeEditTarget.preferredPath,
+                    attempt: forcedHtmlEditWriteNudges,
+                    maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+                  })
+                : buildHtmlEditEmptyGrepWriteNudgeMessage({
+                    tokens: htmlEditGrepTokens,
+                    preferredPath: activeEditTarget.preferredPath,
+                    attempt: forcedHtmlEditWriteNudges,
+                    maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+                  }),
+          })
+          logger.info('Arena Copilot mid-stream HTML edit suppress', {
+            round,
+            previousMode,
+            nextMode: nextHtmlEditSuppress,
+            midStreamInspections,
+            midStreamEmptyGreps,
+            forcedHtmlEditWriteNudges,
+            preferredPath: activeEditTarget.preferredPath,
+          })
+        }
+      }
     }
 
     if (

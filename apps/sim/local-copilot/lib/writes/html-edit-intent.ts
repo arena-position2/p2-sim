@@ -186,6 +186,16 @@ export function countEmptyGreps(
   ).length
 }
 
+function isHtmlEditForceJob(options: {
+  isHtmlEditJob?: boolean
+  isCreateFromImageJob?: boolean
+}): boolean {
+  // Prefer explicit turnJob gate (Slice A/B). Legacy create-from-image flag still blocks.
+  if (options.isHtmlEditJob === false) return false
+  if (options.isCreateFromImageJob) return false
+  return true
+}
+
 /**
  * Soft orchestration: edit-intent turn inspected with read only (no grep yet).
  * Bridge narration is intentionally ignored — prose must not block the force.
@@ -201,10 +211,12 @@ export function shouldForceHtmlEditGrepNudge(options: {
   hasSuccessfulRead: boolean
   hasSuccessfulGrep: boolean
   hasFileMutationTools: boolean
-  /** Create-from-image is a different job — never steer toward grep→patch. */
+  /** When false, skip (summarize_upload / create_from_image / general). */
+  isHtmlEditJob?: boolean
+  /** @deprecated Prefer isHtmlEditJob — kept for older call sites. */
   isCreateFromImageJob?: boolean
 }): boolean {
-  if (options.isCreateFromImageJob) return false
+  if (!isHtmlEditForceJob(options)) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditGrepNudges >= options.maxForcedHtmlEditGrepNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -230,9 +242,10 @@ export function shouldForceHtmlEditWriteNudge(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isHtmlEditJob?: boolean
   isCreateFromImageJob?: boolean
 }): boolean {
-  if (options.isCreateFromImageJob) return false
+  if (!isHtmlEditForceJob(options)) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -258,9 +271,10 @@ export function shouldForceHtmlEditWriteAfterEmptyGreps(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isHtmlEditJob?: boolean
   isCreateFromImageJob?: boolean
 }): boolean {
-  if (options.isCreateFromImageJob) return false
+  if (!isHtmlEditForceJob(options)) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -283,15 +297,44 @@ export function shouldStopHtmlEditWithoutWrite(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isHtmlEditJob?: boolean
   isCreateFromImageJob?: boolean
 }): boolean {
-  if (options.isCreateFromImageJob) return false
+  if (!isHtmlEditForceJob(options)) return false
   if (options.hasFileMutationTools) return false
   if (!options.hasHtmlContext) return false
   if (!looksLikeHtmlEditIntent(options.userMessage)) return false
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (options.inspectionCount < options.inspectionsBeforeWriteNudge) return false
   return options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges
+}
+
+/**
+ * Mid-stream (between tool rounds): escalate suppress without waiting for a
+ * text-only settle. Only for turnJob html_edit — never summarize_upload.
+ */
+export function resolveHtmlEditMidStreamSuppress(options: {
+  turnJob: string
+  currentMode: HtmlEditToolSuppressMode
+  inspectionCount: number
+  inspectionsBeforeWriteNudge: number
+  emptyGrepCount: number
+  emptyGrepsBeforeWriteNudge: number
+  hasFileMutationTools: boolean
+}): HtmlEditToolSuppressMode {
+  if (options.turnJob !== 'html_edit') return options.currentMode
+  if (options.hasFileMutationTools) return 'none'
+
+  if (options.emptyGrepCount >= options.emptyGrepsBeforeWriteNudge) {
+    if (options.currentMode === 'none') return 'search'
+    return 'write'
+  }
+
+  if (options.inspectionCount >= options.inspectionsBeforeWriteNudge) {
+    return 'write'
+  }
+
+  return options.currentMode
 }
 
 /**
