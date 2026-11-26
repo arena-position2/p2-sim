@@ -268,7 +268,6 @@ import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/ve
 import {
   buildCreateFromImageContinuationMessage,
   buildCreateFromImageJobSystemMessage,
-  isCreateFromImageJob as detectCreateFromImageJob,
   filterCreateFromImageForcedTools,
   shouldForceCreateFromImageContinuation,
   turnHasSuccessfulCreateFile,
@@ -289,6 +288,11 @@ import {
   shouldForceHtmlEditWriteNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
+import {
+  buildSummarizeUploadJobSystemMessage,
+  filterSummarizeUploadForcedTools,
+  resolveTurnJob,
+} from '@/local-copilot/lib/writes/turn-job'
 import { createTurnMutations } from '@/local-copilot/lib/writes/turn-mutations'
 import { MAX_TOOL_ITERATIONS } from '@/providers'
 
@@ -639,10 +643,15 @@ export async function* runLocalCopilotAgent(
     ...(snapshotPromptPlan ? { snapshotRevision: snapshotPromptPlan.meta.contentRevision } : {}),
   })
   const userTurnText = getLocalCopilotUserTurnText(userTurn)
-  const createFromImageJob = detectCreateFromImageJob({
-    resolveReason: activeEditTarget.reason,
+  const turnJob = resolveTurnJob({
     userMessage: userTurnText,
+    resolveReason: activeEditTarget.reason,
+    preferredPath: activeEditTarget.preferredPath,
+    candidatePaths: activeEditTarget.candidates,
+    currentTurnUploadPaths: currentRequestUploadPaths,
   })
+  const createFromImageJob = turnJob === 'create_from_image'
+  const summarizeUploadJob = turnJob === 'summarize_upload'
 
   const pinnedDirective =
     extractedDirectives.activeDirective?.trim() || sessionMemory?.activeDirective?.trim() || ''
@@ -734,6 +743,16 @@ export async function* runLocalCopilotAgent(
       ...(createFromImageJob
         ? [{ role: 'system' as const, content: buildCreateFromImageJobSystemMessage() }]
         : []),
+      ...(summarizeUploadJob
+        ? [
+            {
+              role: 'system' as const,
+              content: buildSummarizeUploadJobSystemMessage({
+                uploadPaths: currentRequestUploadPaths,
+              }),
+            },
+          ]
+        : []),
       ...historyMessages,
       userTurn,
     ],
@@ -763,7 +782,9 @@ export async function* runLocalCopilotAgent(
     toolCatalogCount: allTools.length,
     microcompactClearedCount: historyMicrocompact.clearedCount,
     microcompactCharsFreed: historyMicrocompact.charsFreed,
+    turnJob,
     createFromImageJob,
+    summarizeUploadJob,
     activeEditResolveReason: activeEditTarget.reason,
     specialistPrimary: intent.primary,
     specialistSecondary: intent.secondary,
@@ -885,6 +906,7 @@ export async function* runLocalCopilotAgent(
     structuredContext,
     selectedBlockId: params.selectedBlockId,
     lastUserMessage: userTurnText,
+    turnJob,
     mutationIdempotency: new Map(),
     listedIntegrationToolIds: new Set(),
     readVfsPaths: new Set(),
@@ -1224,12 +1246,15 @@ export async function* runLocalCopilotAgent(
     // omit toolConfig once history already has toolUse/toolResult blocks.
     const createFromImageSuppressActive =
       createFromImageJob && !turnHasSuccessfulCreateFile(turnToolRecords)
-    const roundTools = filterCreateFromImageForcedTools(
-      filterHtmlEditForcedTools(
-        resolvePostBuildRoundTools(postBuildToolMode, tools),
-        htmlEditToolSuppressMode
+    const roundTools = filterSummarizeUploadForcedTools(
+      filterCreateFromImageForcedTools(
+        filterHtmlEditForcedTools(
+          resolvePostBuildRoundTools(postBuildToolMode, tools),
+          htmlEditToolSuppressMode
+        ),
+        createFromImageSuppressActive
       ),
-      createFromImageSuppressActive
+      summarizeUploadJob
     )
 
     // Stream user-facing prose live for real replies. Hold bridging narration when
@@ -1777,7 +1802,7 @@ export async function* runLocalCopilotAgent(
         hasSuccessfulRead,
         hasSuccessfulGrep,
         hasFileMutationTools: hasFileMutations,
-        isCreateFromImageJob: createFromImageJob,
+        isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
       })
 
       if (canForceHtmlEditGrep) {
@@ -1810,7 +1835,7 @@ export async function* runLocalCopilotAgent(
         userMessage: userTurnText,
         hasHtmlContext: htmlEditContext,
         hasFileMutationTools: hasFileMutations,
-        isCreateFromImageJob: createFromImageJob,
+        isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
       })
 
       if (canForceHtmlEditWriteAfterEmptyGreps) {
@@ -1852,7 +1877,7 @@ export async function* runLocalCopilotAgent(
         userMessage: userTurnText,
         hasHtmlContext: htmlEditContext,
         hasFileMutationTools: hasFileMutations,
-        isCreateFromImageJob: createFromImageJob,
+        isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
       })
 
       if (canForceHtmlEditWrite) {
@@ -1890,7 +1915,7 @@ export async function* runLocalCopilotAgent(
           userMessage: userTurnText,
           hasHtmlContext: htmlEditContext,
           hasFileMutationTools: hasFileMutations,
-          isCreateFromImageJob: createFromImageJob,
+          isCreateFromImageJob: createFromImageJob || summarizeUploadJob,
         })
       ) {
         stagnationStopMessage = buildHtmlEditWriteGiveUpMessage({
@@ -1909,6 +1934,7 @@ export async function* runLocalCopilotAgent(
 
       const canForceFileEdit =
         !createFromImageJob &&
+        !summarizeUploadJob &&
         shouldForceFileEditContinuation({
           postBuildToolMode,
           forcedFileEditContinuations,

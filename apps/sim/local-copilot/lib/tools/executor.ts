@@ -218,6 +218,11 @@ export interface ToolExecutionContext {
    * project queries/results through secret provenance (e.g. knowledge_base query).
    */
   resolvedSecretTraceRegistry?: ResolvedSecretTraceRegistry
+  /**
+   * Primary job for this user turn (summarize_upload, html_edit, …). Used to
+   * hard-reject out-of-scope mutations when preferred HTML would otherwise bleed.
+   */
+  turnJob?: import('@/local-copilot/lib/writes/turn-job').LocalCopilotTurnJob
 }
 
 export interface ToolExecutionResult {
@@ -652,6 +657,19 @@ async function executeLocalCopilotToolInner(
   ctx.livePatchExcerptTokens ??= new Map()
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
+
+  // Turn-job fence (A5): summarize/read-upload must not mutate preferred HTML.
+  if (ctx.turnJob === 'summarize_upload') {
+    const { rejectOutOfJobToolCall } = await import('@/local-copilot/lib/writes/turn-job')
+    const outOfJob = rejectOutOfJobToolCall({ turnJob: ctx.turnJob, toolName, args })
+    if (outOfJob) {
+      logger.info('Arena Copilot rejected out-of-job tool for summarize_upload', {
+        toolName,
+        workflowId: ctx.workflowId,
+      })
+      return outOfJob
+    }
+  }
 
   if (toolSupportsIdempotency(toolName)) {
     const key = buildIdempotencyKey(toolName, args, ctx.activeToolCallId)
