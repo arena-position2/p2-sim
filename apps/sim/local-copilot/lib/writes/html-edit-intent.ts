@@ -15,6 +15,19 @@ const HTML_EDIT_SIGNAL_PATTERN =
 const HTML_MAKE_BETTER_PATTERN =
   /\bmake\b[\s\S]{0,40}\b(better|stronger|bigger|green|bold|clearer|more|prominent)\b/i
 
+/**
+ * Option-chip titles become the next user message verbatim. They are short
+ * imperatives ("Add format presets") without classic edit verbs — treat as
+ * implement only when chip-sized so long "Add …" prose does not false-fire.
+ */
+const HTML_SHORT_IMPLEMENT_FOLLOW_UP_MAX_CHARS = 80
+const HTML_SHORT_IMPLEMENT_FOLLOW_UP_PATTERN =
+  /^(add|enable|include|show|hide|insert|set|expand|widen|tighten|increase|decrease|remove|replace|rename|toggle|introduce|support|wire(?:\s+up)?|turn\s+on|turn\s+off)\b/i
+
+/** Still analysis / brainstorm — never promote a short "Add suggestions" chip. */
+const HTML_SHORT_IMPLEMENT_ANALYSIS_EXCLUDE =
+  /\b(suggestion|suggestions|feedback|ideas|improvements|review|critique|analy[sz]e|what do you think)\b/i
+
 const HTML_MENTION_PATTERN = /\b(\.html?\b|html\b|the page|this page|the file)\b/i
 
 const TOKEN_STOPWORDS = new Set([
@@ -63,12 +76,26 @@ export type HtmlEditToolSuppressMode = 'none' | 'search' | 'write'
 const FILE_INSPECTION_TOOL_NAMES = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
 
 /**
+ * True for short option-chip / follow-up titles that mean "implement this UX
+ * change" (e.g. "Add format presets") without classic edit verbs.
+ */
+export function looksLikeShortHtmlImplementFollowUp(message: string): boolean {
+  const text = message.trim()
+  if (!text || text.length > HTML_SHORT_IMPLEMENT_FOLLOW_UP_MAX_CHARS) return false
+  if (/\n/.test(text) || /\?$/.test(text)) return false
+  if (HTML_SHORT_IMPLEMENT_ANALYSIS_EXCLUDE.test(text)) return false
+  if (HTML_ANALYSIS_ONLY_PATTERN.test(text)) return false
+  return HTML_SHORT_IMPLEMENT_FOLLOW_UP_PATTERN.test(text)
+}
+
+/**
  * True when the user is asking to change HTML (not only review / suggest).
  */
 export function looksLikeHtmlEditIntent(message: string): boolean {
   const text = message.trim()
   if (!text) return false
   if (HTML_EDIT_SIGNAL_PATTERN.test(text) || HTML_MAKE_BETTER_PATTERN.test(text)) return true
+  if (looksLikeShortHtmlImplementFollowUp(text)) return true
   return false
 }
 
@@ -118,6 +145,16 @@ export function extractHtmlEditGrepTokens(message: string): string[] {
     /\b(Generate Ad|Call to Action|CTA|Brand Logo|template|headline|subtitle)\b/gi
   )) {
     add(match[1] ?? '')
+  }
+
+  // Chip titles: "Add format presets" → grep "format presets"
+  if (tokens.length === 0 && looksLikeShortHtmlImplementFollowUp(message)) {
+    const remainder = message
+      .trim()
+      .replace(HTML_SHORT_IMPLEMENT_FOLLOW_UP_PATTERN, '')
+      .replace(/^(the|a|an)\s+/i, '')
+      .trim()
+    if (remainder.length >= 2) add(remainder)
   }
 
   return tokens.slice(0, 6)

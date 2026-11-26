@@ -41,6 +41,23 @@ describe('looksLikeHtmlEditIntent / analysis-only', () => {
     expect(looksLikeHtmlEditIntent('Make the Generate Ad button stronger')).toBe(true)
     expect(looksLikeHtmlAnalysisOnly("Great let's move to the 3rd point.")).toBe(false)
   })
+
+  it('treats short option-chip titles as edit intent', () => {
+    expect(looksLikeHtmlEditIntent('Add format presets')).toBe(true)
+    expect(looksLikeHtmlEditIntent('Enable dark mode toggle')).toBe(true)
+    expect(looksLikeHtmlEditIntent('Widen the sidebar')).toBe(true)
+    expect(looksLikeHtmlAnalysisOnly('Add format presets')).toBe(false)
+  })
+
+  it('does not treat long Add-prose or suggestion chips as short implement', () => {
+    expect(
+      looksLikeHtmlEditIntent(
+        'Add more detail about every section of the layout and explain the tradeoffs for each choice'
+      )
+    ).toBe(false)
+    expect(looksLikeHtmlEditIntent('Add more UX suggestions')).toBe(false)
+    expect(looksLikeHtmlEditIntent('Share feedback?')).toBe(false)
+  })
 })
 
 describe('extractHtmlEditGrepTokens', () => {
@@ -52,6 +69,10 @@ describe('extractHtmlEditGrepTokens', () => {
 
   it('returns empty when nothing distinctive is quoted', () => {
     expect(extractHtmlEditGrepTokens("Great let's move to the 3rd point.")).toEqual([])
+  })
+
+  it('derives a grep token from short option-chip titles', () => {
+    expect(extractHtmlEditGrepTokens('Add format presets')).toEqual(['format presets'])
   })
 })
 

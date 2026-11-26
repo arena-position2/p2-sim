@@ -87,6 +87,30 @@ describe('resolveTurnJob', () => {
       })
     ).toBe('html_edit')
   })
+
+  it('promotes short option-chip titles to html_edit when preferred is HTML', () => {
+    expect(
+      resolveTurnJob({
+        userMessage: 'Add format presets',
+        resolveReason: 'preferred',
+        preferredPath: 'files/Apps/Ad Generator.html',
+        candidatePaths: ['files/Apps/Ad Generator.html'],
+        currentTurnUploadPaths: [],
+      })
+    ).toBe('html_edit')
+  })
+
+  it('does not promote short Add titles without HTML context', () => {
+    expect(
+      resolveTurnJob({
+        userMessage: 'Add format presets',
+        resolveReason: 'none',
+        preferredPath: 'files/notes.md',
+        candidatePaths: [],
+        currentTurnUploadPaths: [],
+      })
+    ).toBe('general')
+  })
 })
 
 describe('hasDocumentUploadFocus', () => {
