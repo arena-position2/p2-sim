@@ -159,6 +159,11 @@ export function formatActiveDocumentsSystemMessage(
     rules: [
       'Current-turn uploads win over older preferred documents.',
       'Image uploads (png/jpeg/gif/webp) are reference only — never preferredPath.',
+      ...(resolution?.reason === 'image_reference'
+        ? [
+            'resolveReason image_reference: create a NEW file with create_file from the image — do not explore or patch unrelated existing HTML.',
+          ]
+        : []),
       'If the user names a file, edit that path only.',
       'If multiple documents could match and the user is vague, ask which file — do not silently patch the wrong one.',
       'After create_file / materialize / successful edit, keep editing that same path (do not create a duplicate).',

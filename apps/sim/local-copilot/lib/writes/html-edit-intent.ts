@@ -201,7 +201,10 @@ export function shouldForceHtmlEditGrepNudge(options: {
   hasSuccessfulRead: boolean
   hasSuccessfulGrep: boolean
   hasFileMutationTools: boolean
+  /** Create-from-image is a different job — never steer toward grep→patch. */
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (options.isCreateFromImageJob) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditGrepNudges >= options.maxForcedHtmlEditGrepNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -227,7 +230,9 @@ export function shouldForceHtmlEditWriteNudge(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (options.isCreateFromImageJob) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -253,7 +258,9 @@ export function shouldForceHtmlEditWriteAfterEmptyGreps(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (options.isCreateFromImageJob) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -276,7 +283,9 @@ export function shouldStopHtmlEditWithoutWrite(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (options.isCreateFromImageJob) return false
   if (options.hasFileMutationTools) return false
   if (!options.hasHtmlContext) return false
   if (!looksLikeHtmlEditIntent(options.userMessage)) return false

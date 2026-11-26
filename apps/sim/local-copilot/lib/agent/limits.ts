@@ -58,6 +58,12 @@ export const EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE = 2
 export const MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS = 2
 
 /**
+ * Extra model rounds on create-from-image (screenshot → new file) when the
+ * model has not yet called create_file. Separate from HTML-edit write nudges.
+ */
+export const MAX_CREATE_FROM_IMAGE_CONTINUATION_ROUNDS = 2
+
+/**
  * Successful read/grep/glob/load_copilot_artifact calls on the same path
  * (offset/limit ignored) before hard-stopping when no file mutation ran.
  * Caps endless HTML paging that never reaches workspace_file / edit_content.
