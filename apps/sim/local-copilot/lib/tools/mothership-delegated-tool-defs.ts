@@ -19,9 +19,9 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
     'Loads workflow structure and metadata by workflowId (useful on home chat when no workflow is open).',
   list_integration_tools:
     'Lists available operations for a connected integration service (e.g. gmail, google_sheets, slack). Then call invoke_integration_tool with the exact tool id — do not call load_integration_tool.',
-  read: 'Reads files/ or uploads/ by VFS path. Chat uploads: read("uploads/<name>"). Durable workspace text/HTML: read("files/<name>/content") — bare files/<name>.html is metadata. When not: do not invent bytes; prefer grep for targeted HTML edits before large offset paging.',
+  read: 'Reads files/ or uploads/ by VFS path. Chat uploads: read("uploads/<name>"). Durable workspace text/HTML: read("files/<name>/content") — bare files/<name>.html is metadata. HTML/HTM /content is raw source (tags/classes/scripts intact) for patching. When not: do not invent bytes; prefer grep for targeted HTML edits before large offset paging.',
   glob: 'Finds workspace files by glob pattern (e.g. files/**/*.csv). When not: do not start an HTML fix with glob — use preferredPath / uploads / read / grep.',
-  grep: 'Searches file contents under a path. When: HTML edit follow-ups — grep user tokens (label/heading/id) before large reads. When not: after empty matches on the preferred file, stop inventing patterns — read /content once then workspace_file patch.',
+  grep: 'Searches file contents under a path (HTML matches against raw source). When: HTML edit follow-ups — grep user tokens (label/heading/id/class) before large reads. When not: after empty matches on the preferred file, stop inventing patterns — read /content once then workspace_file patch; empty ≠ stripped markup.',
   create_file:
     'Creates a workspace file at fileName (e.g. files/Deck.pptx). Text/md/json/csv/html: pass full content (lean HTML only). Office pptx/docx/pdf: empty shell (no content) then workspace_file → edit_content. When not: never create_file images — use generate_image; never dump megabyte Arena/Figma HTML.',
   create_file_folder:
