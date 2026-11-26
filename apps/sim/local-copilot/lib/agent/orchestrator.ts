@@ -11,6 +11,7 @@ import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-id
 import {
   EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
   MAX_CREATE_FROM_IMAGE_CONTINUATION_ROUNDS,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
@@ -265,6 +266,12 @@ import { resolveTurnCompletion } from '@/local-copilot/lib/verification/completi
 import { mutationRequiresVerification } from '@/local-copilot/lib/verification/policy'
 import { runPostMutationVerification } from '@/local-copilot/lib/verification/run-verification'
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
+import {
+  buildCreateFromDocumentContinuationMessage,
+  buildCreateFromDocumentJobSystemMessage,
+  filterCreateFromDocumentForcedTools,
+  shouldForceCreateFromDocumentContinuation,
+} from '@/local-copilot/lib/writes/create-from-document-intent'
 import {
   buildCreateFromImageContinuationMessage,
   buildCreateFromImageJobSystemMessage,
@@ -652,6 +659,7 @@ export async function* runLocalCopilotAgent(
     currentTurnUploadPaths: currentRequestUploadPaths,
   })
   const createFromImageJob = turnJob === 'create_from_image'
+  const createFromDocumentJob = turnJob === 'create_from_document'
   const summarizeUploadJob = turnJob === 'summarize_upload'
 
   const pinnedDirective =
@@ -744,6 +752,9 @@ export async function* runLocalCopilotAgent(
       ...(createFromImageJob
         ? [{ role: 'system' as const, content: buildCreateFromImageJobSystemMessage() }]
         : []),
+      ...(createFromDocumentJob
+        ? [{ role: 'system' as const, content: buildCreateFromDocumentJobSystemMessage() }]
+        : []),
       ...(summarizeUploadJob
         ? [
             {
@@ -785,6 +796,7 @@ export async function* runLocalCopilotAgent(
     microcompactCharsFreed: historyMicrocompact.charsFreed,
     turnJob,
     createFromImageJob,
+    createFromDocumentJob,
     summarizeUploadJob,
     activeEditResolveReason: activeEditTarget.reason,
     specialistPrimary: intent.primary,
@@ -1103,6 +1115,7 @@ export async function* runLocalCopilotAgent(
   let forcedHtmlEditGrepNudges = 0
   let forcedHtmlEditWriteNudges = 0
   let forcedCreateFromImageContinuations = 0
+  let forcedCreateFromDocumentContinuations = 0
   /** Once set, subsequent model rounds strip search and/or inspect tools. */
   let htmlEditToolSuppressMode: HtmlEditToolSuppressMode = 'none'
   let forcedResearchSearchContinuations = 0
@@ -1115,7 +1128,11 @@ export async function* runLocalCopilotAgent(
   let turnInputTokens = 0
   let turnOutputTokens = 0
   const stagnationTracker = createToolStagnationTracker()
-  const fileExploreTracker = createFileExploreTracker()
+  const fileExploreTracker = createFileExploreTracker(
+    undefined,
+    undefined,
+    createFromDocumentJob ? 'create_from_document' : undefined
+  )
   let stagnationStopMessage: string | null = null
   /**
    * Explore hard-stops must not wait on another model round — that await is
@@ -1139,7 +1156,10 @@ export async function* runLocalCopilotAgent(
       return {
         stop: true,
         skipModelRound: true,
-        systemMessage: buildFileExploreSystemMessage(exploreHit),
+        systemMessage: buildFileExploreSystemMessage(
+          exploreHit,
+          createFromDocumentJob ? { turnJob: 'create_from_document' } : undefined
+        ),
         userMessage: exploreHit.message,
       }
     }
@@ -1247,13 +1267,21 @@ export async function* runLocalCopilotAgent(
     // omit toolConfig once history already has toolUse/toolResult blocks.
     const createFromImageSuppressActive =
       createFromImageJob && !turnHasSuccessfulCreateFile(turnToolRecords)
+    // After the first create-from-document force, strip explore so paging cannot resume.
+    const createFromDocumentSuppressActive =
+      createFromDocumentJob &&
+      forcedCreateFromDocumentContinuations > 0 &&
+      !turnHasSuccessfulCreateFile(turnToolRecords)
     const roundTools = filterSummarizeUploadForcedTools(
-      filterCreateFromImageForcedTools(
-        filterHtmlEditForcedTools(
-          resolvePostBuildRoundTools(postBuildToolMode, tools),
-          htmlEditToolSuppressMode
+      filterCreateFromDocumentForcedTools(
+        filterCreateFromImageForcedTools(
+          filterHtmlEditForcedTools(
+            resolvePostBuildRoundTools(postBuildToolMode, tools),
+            htmlEditToolSuppressMode
+          ),
+          createFromImageSuppressActive
         ),
-        createFromImageSuppressActive
+        createFromDocumentSuppressActive
       ),
       summarizeUploadJob
     )
@@ -1767,6 +1795,34 @@ export async function* runLocalCopilotAgent(
         logger.info('Arena Copilot forcing create-from-image continuation', {
           round,
           forcedCreateFromImageContinuations,
+          resolveReason: activeEditTarget.reason,
+        })
+        continue
+      }
+
+      const canForceCreateFromDocument = shouldForceCreateFromDocumentContinuation({
+        postBuildToolMode,
+        isCreateFromDocumentJob: createFromDocumentJob,
+        forcedCreateFromDocumentContinuations,
+        maxForcedCreateFromDocumentContinuations: MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+        round,
+        maxToolRounds,
+        hasSuccessfulCreateFile,
+      })
+
+      if (canForceCreateFromDocument) {
+        forcedCreateFromDocumentContinuations += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildCreateFromDocumentContinuationMessage(),
+        })
+        logger.info('Arena Copilot forcing create-from-document continuation', {
+          round,
+          forcedCreateFromDocumentContinuations,
           resolveReason: activeEditTarget.reason,
         })
         continue

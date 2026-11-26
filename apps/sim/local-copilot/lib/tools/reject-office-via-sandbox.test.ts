@@ -46,6 +46,29 @@ describe('rejectOfficeFileViaSandbox', () => {
     ).toBeNull()
   })
 
+  it('allows read-only python-docx extract into JSON (not an office rebuild)', () => {
+    expect(
+      rejectOfficeFileViaSandbox('function_execute', {
+        language: 'python',
+        code: 'from docx import Document\nd = Document("/home/user/brief.docx")\nprint(d.paragraphs[0].text)',
+        inputs: {
+          files: [{ path: 'files/brief.docx', sandboxPath: '/home/user/brief.docx' }],
+        },
+        outputs: { files: [{ path: 'files/BetaBionics/brief_extract.json', mode: 'create' }] },
+      })
+    ).toBeNull()
+  })
+
+  it('still rejects python-docx when writing a .docx output', () => {
+    expect(
+      rejectOfficeFileViaSandbox('function_execute', {
+        language: 'python',
+        code: 'from docx import Document\nDocument().save("/home/user/out.docx")',
+        outputs: { files: [{ path: 'files/out.docx', mode: 'create' }] },
+      })?.success
+    ).toBe(false)
+  })
+
   it('ignores unrelated tools', () => {
     expect(
       rejectOfficeFileViaSandbox('create_file', {

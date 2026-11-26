@@ -14,6 +14,7 @@ import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-se
 import {
   enrichCreateFileArgs,
   enrichEditContentArgs,
+  enrichFunctionExecuteArgs,
   enrichWorkspaceFileArgs,
   rejectCreateFileImageAsText,
 } from '@/local-copilot/lib/tools/enrich-file-tool-args'
@@ -404,6 +405,11 @@ export async function executeMothershipDelegatedTool(
 
   const languageError = enforceLocalCopilotSandboxLanguages(toolName, enrichedArgs)
   if (languageError) return languageError
+
+  // Coerce stringified inputs/outputs before schema + office/html guards.
+  if (toolName === 'function_execute') {
+    enrichFunctionExecuteArgs(enrichedArgs)
+  }
 
   const officeSandboxError = rejectOfficeFileViaSandbox(toolName, enrichedArgs)
   if (officeSandboxError) return officeSandboxError

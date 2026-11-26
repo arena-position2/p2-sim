@@ -6,6 +6,7 @@
 
 import type { ActiveEditTargetReason } from '@/local-copilot/lib/context/active-documents'
 import type { ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
+import { looksLikeCreateFromDocumentIntent } from '@/local-copilot/lib/writes/create-from-document-intent'
 import { isCreateFromImageJob } from '@/local-copilot/lib/writes/create-from-image-intent'
 import {
   hasHtmlEditContext,
@@ -13,7 +14,12 @@ import {
   looksLikeHtmlEditIntent,
 } from '@/local-copilot/lib/writes/html-edit-intent'
 
-export type LocalCopilotTurnJob = 'summarize_upload' | 'create_from_image' | 'html_edit' | 'general'
+export type LocalCopilotTurnJob =
+  | 'summarize_upload'
+  | 'create_from_image'
+  | 'create_from_document'
+  | 'html_edit'
+  | 'general'
 
 /** Read / summarize / overview of an uploaded document — not an HTML edit. */
 const SUMMARIZE_UPLOAD_SIGNAL =
@@ -119,6 +125,18 @@ export function resolveTurnJob(input: ResolveTurnJobInput): LocalCopilotTurnJob 
   // Summarize + HTML edit in one message: allow both tool families (no hard fence).
   if (dual) {
     return 'general'
+  }
+
+  // Create/prototype from an uploaded brief beats HTML-edit misclassification
+  // ("this page" + preferred docx).
+  if (
+    looksLikeCreateFromDocumentIntent(input.userMessage) &&
+    hasDocumentUploadFocus({
+      userMessage: input.userMessage,
+      currentTurnUploadPaths: input.currentTurnUploadPaths,
+    })
+  ) {
+    return 'create_from_document'
   }
 
   if (

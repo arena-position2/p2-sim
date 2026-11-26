@@ -1,10 +1,17 @@
 import type { ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
 
 const OFFICE_OUTPUT_PATH = /\.(pptx|docx|pdf)(?:\s|"|'|$|\?|#)/i
+/** Build-oriented sandbox code — never allowed via function_execute. */
+const OFFICE_BUILD_CODE =
+  /\b(?:python-pptx|from\s+pptx\b|import\s+pptx\b|reportlab|Presentation\s*\()\b/i
+/** Read/parse Word — allowed for extract when not writing office binaries. */
+const OFFICE_DOCX_READ_CODE = /\b(?:python-docx|from\s+docx\b|import\s+docx\b|Document\s*\()\b/i
 const OFFICE_SANDBOX_CODE =
   /\b(?:python-pptx|python-docx|from\s+pptx\b|import\s+pptx\b|from\s+docx\b|import\s+docx\b|reportlab|Presentation\s*\(|Document\s*\()\b/i
 const OFFICE_SANDBOX_DEP =
   /^(?:python-pptx|python-docx|reportlab|python-docx-template|pptx|docx)(?:[=<>!~].*)?$/i
+const OFFICE_BUILD_DEP = /^(?:python-pptx|reportlab|python-docx-template|pptx)(?:[=<>!~].*)?$/i
+const OFFICE_DOCX_READ_DEP = /^(?:python-docx|docx)(?:[=<>!~].*)?$/i
 
 export const OFFICE_VIA_SANDBOX_ERROR =
   'Do not use function_execute / manage_sandbox / python-pptx / python-docx / reportlab to build workspace PPTX/DOCX/PDF. Those office tools are always available: create_file (empty shell with fileName only) → workspace_file operation=update → edit_content with the document JS. Never tell the user office file tools are unavailable.'
@@ -53,6 +60,10 @@ function collectOutputPaths(args: Record<string, unknown>): string[] {
   return paths
 }
 
+function hasOfficeBinaryOutputs(args: Record<string, unknown>): boolean {
+  return collectOutputPaths(args).some((path) => OFFICE_OUTPUT_PATH.test(path))
+}
+
 function rejection(toolName: string): ToolExecutionResult {
   return {
     toolName,
@@ -63,9 +74,9 @@ function rejection(toolName: string): ToolExecutionResult {
 }
 
 /**
- * Blocks remote-sandbox attempts to build workspace office docs. Models fall
- * back here after inventing "office tools unavailable", then hang on flaky
- * manage_sandbox / function_execute — the create_file pipeline must be used.
+ * Blocks remote-sandbox attempts to *build* workspace office docs. Read-only
+ * python-docx / Document() extract into JSON/text is allowed on function_execute
+ * when outputs are not .pptx/.docx/.pdf.
  */
 export function rejectOfficeFileViaSandbox(
   toolName: string,
@@ -78,20 +89,30 @@ export function rejectOfficeFileViaSandbox(
     ...collectDependencyStrings(args.packages),
     ...collectDependencyStrings(args.requirements),
   ]
-  if (deps.some((dep) => OFFICE_SANDBOX_DEP.test(dep))) {
-    return rejection(toolName)
-  }
-
   const code = collectCodeBlobs(args).join('\n')
-  if (OFFICE_SANDBOX_CODE.test(code)) {
+
+  // Writing office binaries via sandbox is never the Arena office path.
+  if (toolName === 'function_execute' && hasOfficeBinaryOutputs(args)) {
     return rejection(toolName)
   }
 
-  // function_execute writing a .pptx/.docx/.pdf is never the Arena office path.
-  if (
-    toolName === 'function_execute' &&
-    collectOutputPaths(args).some((path) => OFFICE_OUTPUT_PATH.test(path))
-  ) {
+  if (toolName === 'manage_sandbox') {
+    if (deps.some((dep) => OFFICE_SANDBOX_DEP.test(dep))) return rejection(toolName)
+    if (OFFICE_SANDBOX_CODE.test(code)) return rejection(toolName)
+    return null
+  }
+
+  // function_execute: always block pptx/reportlab builders.
+  if (OFFICE_BUILD_CODE.test(code) || deps.some((dep) => OFFICE_BUILD_DEP.test(dep))) {
+    return rejection(toolName)
+  }
+
+  // Read-only Word extract (zipfile/Document → json/txt) is OK.
+  if (OFFICE_DOCX_READ_CODE.test(code) || deps.some((dep) => OFFICE_DOCX_READ_DEP.test(dep))) {
+    return null
+  }
+
+  if (OFFICE_SANDBOX_CODE.test(code) || deps.some((dep) => OFFICE_SANDBOX_DEP.test(dep))) {
     return rejection(toolName)
   }
 

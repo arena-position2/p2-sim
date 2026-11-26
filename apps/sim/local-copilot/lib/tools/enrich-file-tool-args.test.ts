@@ -2,7 +2,10 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import { enrichCreateFileArgs } from '@/local-copilot/lib/tools/enrich-file-tool-args'
+import {
+  enrichCreateFileArgs,
+  enrichFunctionExecuteArgs,
+} from '@/local-copilot/lib/tools/enrich-file-tool-args'
 import { firstFileBodyString } from '@/local-copilot/lib/tools/file-body-args'
 
 describe('Claude-facing create_file content enrichment', () => {
@@ -19,5 +22,44 @@ describe('Claude-facing create_file content enrichment', () => {
     expect(firstFileBodyString({ body: { hello: 'world' } })).toBe(
       JSON.stringify({ hello: 'world' }, null, 2)
     )
+  })
+})
+
+describe('enrichFunctionExecuteArgs', () => {
+  it('parses stringified inputs/outputs objects (audit stringification failure)', () => {
+    const args: Record<string, unknown> = {
+      language: 'python',
+      code: 'print(1)',
+      inputs: JSON.stringify({
+        files: [
+          {
+            path: 'files/BetaBionics/brief_extract.json',
+            sandboxPath: '/home/user/out.json',
+          },
+        ],
+      }),
+      outputs: JSON.stringify({
+        files: [{ path: 'files/BetaBionics/grouped.json', mode: 'overwrite' }],
+      }),
+    }
+    enrichFunctionExecuteArgs(args)
+    expect(args.inputs).toEqual({
+      files: [
+        {
+          path: 'files/BetaBionics/brief_extract.json',
+          sandboxPath: '/home/user/out.json',
+        },
+      ],
+    })
+    expect(args.outputs).toEqual({
+      files: [{ path: 'files/BetaBionics/grouped.json', mode: 'overwrite' }],
+    })
+  })
+
+  it('leaves already-object inputs alone', () => {
+    const inputs = { files: [{ path: 'files/a.docx' }] }
+    const args: Record<string, unknown> = { inputs }
+    enrichFunctionExecuteArgs(args)
+    expect(args.inputs).toBe(inputs)
   })
 })
