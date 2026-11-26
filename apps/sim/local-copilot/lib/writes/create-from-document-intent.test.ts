@@ -2,16 +2,22 @@
  * @vitest-environment node
  *
  * Protects create-from-document: brief+prototype must not thrash as HTML edit
- * or settle without create_file.
+ * or settle without create_file. Mid-stream interrupt must fire without a
+ * text-only settle (Beta Bionics extract→read thrash).
  */
 import { describe, expect, it } from 'vitest'
-import { MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS } from '@/local-copilot/lib/agent/limits'
+import {
+  CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
+  MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+} from '@/local-copilot/lib/agent/limits'
 import {
   buildCreateFromDocumentContinuationMessage,
   buildCreateFromDocumentJobSystemMessage,
   filterCreateFromDocumentForcedTools,
   looksLikeCreateFromDocumentIntent,
+  shouldActivateCreateFromDocumentMidStreamSuppress,
   shouldForceCreateFromDocumentContinuation,
+  turnHasSuccessfulFunctionExecute,
 } from '@/local-copilot/lib/writes/create-from-document-intent'
 import { resolveTurnJob } from '@/local-copilot/lib/writes/turn-job'
 
@@ -108,16 +114,16 @@ describe('shouldForceCreateFromDocumentContinuation', () => {
 })
 
 describe('create-from-document tool filter + messages', () => {
-  it('strips explore tools but keeps create_file and function_execute', () => {
+  it('strips explore and sandbox but keeps create_file and materialize', () => {
     const tools = [
       { name: 'read' },
       { name: 'grep' },
       { name: 'function_execute' },
+      { name: 'manage_sandbox' },
       { name: 'create_file' },
       { name: 'materialize_file' },
     ]
     expect(filterCreateFromDocumentForcedTools(tools, true).map((tool) => tool.name)).toEqual([
-      'function_execute',
       'create_file',
       'materialize_file',
     ])
@@ -126,5 +132,90 @@ describe('create-from-document tool filter + messages', () => {
   it('mentions create_file in job and continuation messages', () => {
     expect(buildCreateFromDocumentJobSystemMessage()).toMatch(/create_file/i)
     expect(buildCreateFromDocumentContinuationMessage()).toMatch(/create_file/i)
+  })
+})
+
+describe('shouldActivateCreateFromDocumentMidStreamSuppress', () => {
+  const base = {
+    turnJob: 'create_from_document',
+    alreadyActive: false,
+    inspectionCount: 0,
+    inspectionsBeforeCreateNudge: CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
+    hasSuccessfulFunctionExecute: false,
+    hasSuccessfulCreateFile: false,
+    forcedCreateFromDocumentContinuations: 0,
+    maxForcedCreateFromDocumentContinuations: MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+  }
+
+  it('activates after a successful function_execute extract (no settle needed)', () => {
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        hasSuccessfulFunctionExecute: true,
+      })
+    ).toBe(true)
+  })
+
+  it('activates after enough inspections without create_file', () => {
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        inspectionCount: CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
+      })
+    ).toBe(true)
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        inspectionCount: CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE - 1,
+      })
+    ).toBe(false)
+  })
+
+  it('stays off for other jobs, after create_file, or when budget exhausted', () => {
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        turnJob: 'html_edit',
+        hasSuccessfulFunctionExecute: true,
+      })
+    ).toBe(false)
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        hasSuccessfulFunctionExecute: true,
+        hasSuccessfulCreateFile: true,
+      })
+    ).toBe(false)
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        hasSuccessfulFunctionExecute: true,
+        forcedCreateFromDocumentContinuations: MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+      })
+    ).toBe(false)
+  })
+
+  it('stays active once armed until create_file', () => {
+    expect(
+      shouldActivateCreateFromDocumentMidStreamSuppress({
+        ...base,
+        alreadyActive: true,
+        forcedCreateFromDocumentContinuations: 1,
+      })
+    ).toBe(true)
+  })
+})
+
+describe('turnHasSuccessfulFunctionExecute', () => {
+  it('detects a successful extract call', () => {
+    expect(
+      turnHasSuccessfulFunctionExecute([
+        { name: 'materialize_file', success: true },
+        { name: 'function_execute', success: true },
+      ])
+    ).toBe(true)
+    expect(turnHasSuccessfulFunctionExecute([{ name: 'function_execute', success: false }])).toBe(
+      false
+    )
   })
 })

@@ -9,6 +9,7 @@ import {
 import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
+  CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
   EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
   MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
@@ -270,7 +271,9 @@ import {
   buildCreateFromDocumentContinuationMessage,
   buildCreateFromDocumentJobSystemMessage,
   filterCreateFromDocumentForcedTools,
+  shouldActivateCreateFromDocumentMidStreamSuppress,
   shouldForceCreateFromDocumentContinuation,
+  turnHasSuccessfulFunctionExecute,
 } from '@/local-copilot/lib/writes/create-from-document-intent'
 import {
   buildCreateFromImageContinuationMessage,
@@ -3118,6 +3121,37 @@ export async function* runLocalCopilotAgent(
             preferredPath: activeEditTarget.preferredPath,
           })
         }
+      }
+    }
+
+    // Mid-stream create-from-document interrupt: after extract or N inspects,
+    // strip explore/sandbox and force create_file (Claude-style: ship artifact).
+    {
+      const hasSuccessfulCreateFileMid = turnHasSuccessfulCreateFile(turnToolRecords)
+      const wasCreateSuppressActive = forcedCreateFromDocumentContinuations > 0
+      const activateCreateSuppress = shouldActivateCreateFromDocumentMidStreamSuppress({
+        turnJob,
+        alreadyActive: wasCreateSuppressActive,
+        inspectionCount: countSuccessfulFileInspections(turnToolRecords),
+        inspectionsBeforeCreateNudge: CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
+        hasSuccessfulFunctionExecute: turnHasSuccessfulFunctionExecute(turnToolRecords),
+        hasSuccessfulCreateFile: hasSuccessfulCreateFileMid,
+        forcedCreateFromDocumentContinuations,
+        maxForcedCreateFromDocumentContinuations: MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+      })
+      if (activateCreateSuppress && !wasCreateSuppressActive && !hasSuccessfulCreateFileMid) {
+        forcedCreateFromDocumentContinuations += 1
+        messages.push({
+          role: 'user',
+          content: buildCreateFromDocumentContinuationMessage(),
+        })
+        logger.info('Arena Copilot mid-stream create-from-document suppress', {
+          round,
+          forcedCreateFromDocumentContinuations,
+          inspectionCount: countSuccessfulFileInspections(turnToolRecords),
+          hasSuccessfulFunctionExecute: turnHasSuccessfulFunctionExecute(turnToolRecords),
+          preferredPath: activeEditTarget.preferredPath,
+        })
       }
     }
 

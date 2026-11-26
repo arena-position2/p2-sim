@@ -67,6 +67,12 @@ export const MAX_CREATE_FROM_IMAGE_CONTINUATION_ROUNDS = 2
 export const MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS = 2
 
 /**
+ * Successful inspects (read/grep/glob/artifact) before mid-stream create force
+ * on create-from-document — well below file_explore_hard_stop (16).
+ */
+export const CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE = 3
+
+/**
  * Successful read/grep/glob/load_copilot_artifact calls on the same path
  * (offset/limit ignored) before hard-stopping when no file mutation ran.
  * Caps endless HTML paging that never reaches workspace_file / edit_content.

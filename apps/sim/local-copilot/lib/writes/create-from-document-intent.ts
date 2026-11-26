@@ -1,7 +1,7 @@
 /**
  * Create-from-document job: uploaded brief (docx/pdf/…) + create/prototype ask.
  * Distinct from HTML *edit* and summarize — extract may use the sandbox once,
- * then create_file; do not thrash-read extract JSON forever.
+ * then create_file; mid-stream interrupt strips explore so paging cannot resume.
  */
 
 import { turnHasSuccessfulCreateFile } from '@/local-copilot/lib/writes/create-from-image-intent'
@@ -11,9 +11,8 @@ const CREATE_FROM_DOCUMENT_SIGNAL =
   /\b(create|build|generate|design|prototype|mock-?up|mockup)\b[\s\S]{0,120}\b(page|html|webpage|web\s*page|layout|prototype|visual|ui|site|mock-?up|design)\b|\b(visual design prototype|html prototype|design prototype|webpage prototype)\b/i
 
 /**
- * Explore tools that thrash after a brief extract. Keep materialize +
- * function_execute available for one-shot docx/pdf parse. Lifted after
- * successful create_file.
+ * Tools stripped once mid-stream create force activates. Keep create_file +
+ * materialize_file. Drop explore *and* further sandbox so extract→create sticks.
  */
 export const CREATE_FROM_DOCUMENT_SUPPRESSED_TOOLS = new Set([
   'read',
@@ -25,6 +24,8 @@ export const CREATE_FROM_DOCUMENT_SUPPRESSED_TOOLS = new Set([
   'rename_file_folder',
   'move_file_folder',
   'delete_file_folder',
+  'function_execute',
+  'manage_sandbox',
 ])
 
 /**
@@ -57,12 +58,14 @@ export function buildCreateFromDocumentContinuationMessage(): string {
   return (
     '[System] Create-from-document: you have enough of the brief. Call create_file NOW with ' +
     'fileName under files/ (e.g. files/Apps/…html) and the prototype HTML body. Do not read ' +
-    'or grep the extract JSON again this turn.'
+    'or grep the extract JSON again this turn. Do not call function_execute again — ' +
+    'read/grep/load_copilot_artifact/function_execute are unavailable this round.'
   )
 }
 
 /**
- * Soft force: create-from-document turn with no successful create_file yet.
+ * Soft force: create-from-document turn with no successful create_file yet
+ * (text-only settle path — backup for mid-stream interrupt).
  */
 export function shouldForceCreateFromDocumentContinuation(options: {
   postBuildToolMode: string
@@ -87,7 +90,45 @@ export function shouldForceCreateFromDocumentContinuation(options: {
 }
 
 /**
- * After the first create force, strip explore tools so the model cannot resume paging.
+ * Mid-stream (between tool rounds): activate explore/sandbox suppress without
+ * waiting for a text-only settle. Mirrors HTML-edit Slice B for create jobs.
+ * Triggers after a successful function_execute extract **or** enough inspects.
+ */
+export function shouldActivateCreateFromDocumentMidStreamSuppress(options: {
+  turnJob: string
+  alreadyActive: boolean
+  inspectionCount: number
+  inspectionsBeforeCreateNudge: number
+  hasSuccessfulFunctionExecute: boolean
+  hasSuccessfulCreateFile: boolean
+  forcedCreateFromDocumentContinuations: number
+  maxForcedCreateFromDocumentContinuations: number
+}): boolean {
+  if (options.turnJob !== 'create_from_document') return false
+  if (options.hasSuccessfulCreateFile) return false
+  if (options.alreadyActive) return true
+  if (
+    options.forcedCreateFromDocumentContinuations >=
+    options.maxForcedCreateFromDocumentContinuations
+  ) {
+    return false
+  }
+  if (options.hasSuccessfulFunctionExecute) return true
+  if (options.inspectionCount >= options.inspectionsBeforeCreateNudge) return true
+  return false
+}
+
+/**
+ * True when this turn already ran a successful function_execute (brief extract).
+ */
+export function turnHasSuccessfulFunctionExecute(
+  records: ReadonlyArray<{ name: string; success: boolean }>
+): boolean {
+  return records.some((record) => record.name === 'function_execute' && record.success)
+}
+
+/**
+ * After mid-stream create force, strip explore/sandbox so paging cannot resume.
  * Never empty list.
  */
 export function filterCreateFromDocumentForcedTools<T extends { name: string }>(
