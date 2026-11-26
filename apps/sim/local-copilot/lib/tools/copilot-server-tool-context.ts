@@ -16,6 +16,8 @@ export function toCopilotServerToolContext(
     // fail-closed as "no write" — that makes create_file look "unavailable" and
     // pushes the model into the stuck python-pptx sandbox loop.
     userPermission: ctx.userPermission?.trim() || 'write',
+    // Panel tools (open_resource) require agent|plan; Local has no assistant mode.
+    requestMode: 'agent',
     chatId: ctx.chatId,
     messageId: ctx.messageId,
     abortSignal: ctx.abortSignal,

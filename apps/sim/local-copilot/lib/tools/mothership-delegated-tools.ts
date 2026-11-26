@@ -536,6 +536,14 @@ export async function executeMothershipDelegatedTool(
     enrichEditContentArgs(enrichedArgs)
   }
 
+  if (toolName === 'open_resource') {
+    const { enrichOpenResourceArgs } = await import(
+      '@/local-copilot/lib/tools/enrich-open-resource-args'
+    )
+    const openResourceReject = await enrichOpenResourceArgs(enrichedArgs, ctx)
+    if (openResourceReject) return openResourceReject
+  }
+
   // Arena always runs server-registry tools in-process via ServerToolAdapter.
   // Never send go-catalogued tools (e.g. search_online) through shared
   // executeTool — that path treats route:'go' as an app-tool lookup and

@@ -63,6 +63,10 @@ import {
   executeLoadUserSkill,
   LOAD_USER_SKILL_TOOL_NAME,
 } from '@/local-copilot/lib/tools/user-skills'
+import {
+  executeLocalFileFolderTool,
+  isLocalFileFolderToolName,
+} from '@/local-copilot/lib/tools/vfs-folder-tools'
 import { executeLocalVfsTool, isLocalVfsToolName } from '@/local-copilot/lib/tools/vfs-read-tools'
 import {
   runCreateWorkflowTool,
@@ -684,6 +688,12 @@ async function executeLocalCopilotToolInner(
   if (isLocalVfsToolName(toolName)) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runLocalVfsTool(toolName, args, ctx)
+  }
+
+  // Folder leaves have no mothership handlers — stub locally so create_file paths work.
+  if (isLocalFileFolderToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return executeLocalFileFolderTool(toolName, args, ctx)
   }
 
   // Workspace MCP deploy family (publish workflows as MCP servers). Distinct

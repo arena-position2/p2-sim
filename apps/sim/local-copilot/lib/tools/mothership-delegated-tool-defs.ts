@@ -24,7 +24,8 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   grep: 'Searches file contents under a path. When: HTML edit follow-ups — grep user tokens (label/heading/id) before large reads. When not: after empty matches on the preferred file, stop inventing patterns — read /content once then workspace_file patch.',
   create_file:
     'Creates a workspace file at fileName (e.g. files/Deck.pptx). Text/md/json/csv/html: pass full content (lean HTML only). Office pptx/docx/pdf: empty shell (no content) then workspace_file → edit_content. When not: never create_file images — use generate_image; never dump megabyte Arena/Figma HTML.',
-  create_file_folder: 'Creates a folder under the workspace files tree.',
+  create_file_folder:
+    'Optional folder stub. Prefer create_file with fileName like files/Apps/Page.html — folders are path prefixes and need no separate create.',
   workspace_file:
     'Declares an edit on an existing file. REQUIRED: operation, target={kind:"path", path:"files/..."}, title. Targeted HTML/text: operation=patch + search_replace (short live substring from read/grep). Does not write the body — call edit_content next round. When not: never operation=create / target.kind=new_file; never full update on large HTML (≥40KB).',
   download_to_workspace_file: 'Downloads a URL into a workspace file.',
@@ -32,7 +33,8 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
     'Creates, reads, and updates workspace tables (create, get, get_schema, insert_row, batch_insert_rows, query_rows, update_row, add_column, import_file, create_from_file).',
   knowledge_base:
     'Manages knowledge bases (create/list/get/query/add_file/update/delete/connectors). add_file accepts files/ paths only — materialize uploads/ first; never a markdown transcript of a PDF. When not: do not VFS-read knowledgebases/connectors — use get_connector_schema.',
-  open_resource: 'Opens a workspace resource (workflow, file, table, knowledge base) in the UI.',
+  open_resource:
+    'Opens a workspace resource in the UI. REQUIRED: resources=[{type,id}] — for files you may pass path (e.g. files/Apps/Page.html) instead of id; Local resolves path→id. Use after create_file to show the new file.',
   materialize_file:
     'Copies uploads/... into durable files/... (same bytes/type). Required before function_execute, knowledge_base add_file, and durable HTML/office edits that must leave uploads/.',
   generate_image:
@@ -110,12 +112,13 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   move_file:
     'Moves workspace files into a folder. REQUIRED: paths (array). Omit destinationPath (or pass "files") for root.',
   list_file_folders:
-    'Lists folders under the workspace files tree. When not: do not start HTML/office edits with folder listing — use preferredPath or create_file.',
-  rename_file_folder: 'Renames a files-tree folder. REQUIRED: path and name (new folder name).',
+    'Optional folder stub (often empty). When not: do not start HTML/office creates with folder listing — call create_file with files/<folder>/name.ext directly.',
+  rename_file_folder:
+    'Not available in Local Copilot yet — rename individual files with rename_file, or use the Files UI.',
   move_file_folder:
-    'Moves a files-tree folder. REQUIRED: path. Omit destinationPath (or pass "files") for root.',
+    'Not available in Local Copilot yet — move individual files with move_file, or use the Files UI.',
   delete_file_folder:
-    'Deletes files-tree folders by canonical VFS paths. REQUIRED: paths (array). Destructive — only call when the user explicitly asked.',
+    'Not available in Local Copilot yet — delete individual files with delete_file when the user explicitly asked, or use the Files UI.',
   set_block_enabled:
     'Enables or disables a block in a workflow. REQUIRED: blockId and enabled (boolean). Pass workflowId on home chat.',
   set_global_workflow_variables:

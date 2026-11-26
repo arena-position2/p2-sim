@@ -689,7 +689,7 @@ export function formatToolResultForLlm(
       formatted = {
         ...record,
         followUpHint:
-          'No folders yet — that is normal. Call create_file_folder if you need a subfolder, or create_file directly under files/. An empty folder list is not a tool failure.',
+          'No folders yet — that is normal. Call create_file with fileName like files/Apps/Page.html (folders are path prefixes). An empty folder list is not a tool failure.',
       }
     } else {
       formatted = record
