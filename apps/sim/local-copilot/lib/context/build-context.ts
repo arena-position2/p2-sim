@@ -14,6 +14,7 @@ import { getLocalCopilotConfig, isSelfHostedDeployment } from '@/local-copilot/l
 import { buildContextPromptPayload } from '@/local-copilot/lib/context/context-budget'
 import { getLocalCopilotE2bCapabilities } from '@/local-copilot/lib/context/e2b-capabilities'
 import {
+  attachSignedInIntegrationOwnership,
   loadWorkspaceIntegrations,
   mapSnapshotToWorkspaceIntegrations,
   oauthIntegrationsToCredentialMetadata,
@@ -201,8 +202,8 @@ export async function buildLocalCopilotContext(
 
   // Snapshot is often the slowest call. Kick off everything that does not need it
   // in the same wave so integrations / user / memories / open-workflow overlap it.
-  // When mothership already passed a snapshot, map integrations from it — do not
-  // re-run OAuth + env decrypt (that was a multi-second cost on top of stamp).
+  // When mothership already passed a snapshot, map integrations from it and only
+  // look up credential ownership — do not re-run the env decrypt.
   const snapshotPromise = timed('snapshot', () => resolveWorkspaceSnapshot(params))
   const integrationsPromise = hasCallerSnapshot
     ? null
@@ -263,7 +264,13 @@ export async function buildLocalCopilotContext(
         })
       : (workspaceRowFallbackPromise ?? timed('workspaceRow', () => loadWorkspaceRow(workspaceId))),
     hasCallerSnapshot && snapshot
-      ? Promise.resolve({ value: mapSnapshotToWorkspaceIntegrations(snapshot), ms: 0 })
+      ? timed('integrations', () =>
+          attachSignedInIntegrationOwnership(
+            workspaceId,
+            userId,
+            mapSnapshotToWorkspaceIntegrations(snapshot)
+          )
+        )
       : (integrationsPromise ??
         timed('integrations', () => loadWorkspaceIntegrations(workspaceId, userId))),
     currentUserPromise,

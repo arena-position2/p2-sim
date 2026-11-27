@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import { DocsShell } from '@/components/docs/shell'
 import { DocsThemeProvider } from '@/components/docs/theme'
+import { ARENA_LOGO_URL, DOCS_TITLE } from '@/lib/brand'
 import { getNavigation } from '@/lib/content/catalog'
 import { serializeJsonLd } from '@/lib/json-ld'
 import { DOCS_BASE_URL, SIM_SITE_URL } from '@/lib/urls'
@@ -42,7 +43,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
             __html: serializeJsonLd({
               '@context': 'https://schema.org',
               '@type': 'WebSite',
-              name: 'Sim Documentation',
+              name: DOCS_TITLE,
               description,
               url: DOCS_BASE_URL,
               inLanguage: 'en',
@@ -89,42 +90,43 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL(DOCS_BASE_URL),
-  title: { default: 'Sim documentation', template: '%s | Sim Docs' },
+  title: { default: DOCS_TITLE, template: `%s | ${DOCS_TITLE}` },
   description,
-  applicationName: 'Sim Docs',
+  applicationName: DOCS_TITLE,
   authors: [{ name: 'Sim', url: SIM_SITE_URL }],
   publisher: 'Sim',
   manifest: '/favicon/site.webmanifest',
   icons: {
-    icon: [{ url: '/icon.svg', type: 'image/svg+xml', sizes: 'any' }],
-    apple: '/favicon/apple-touch-icon.png',
+    icon: [{ url: ARENA_LOGO_URL, type: 'image/svg+xml', sizes: 'any' }],
+    apple: ARENA_LOGO_URL,
+    shortcut: ARENA_LOGO_URL,
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'P2 Agents Docs',
+    title: DOCS_TITLE,
   },
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    siteName: 'Sim Documentation',
-    title: 'Sim documentation',
+    siteName: DOCS_TITLE,
+    title: DOCS_TITLE,
     description,
     images: [
       {
-        url: '/api/og?title=Sim%20Documentation',
+        url: '/api/og?title=P2%20Agents%20Docs',
         width: 1200,
         height: 675,
-        alt: 'Sim Documentation',
+        alt: DOCS_TITLE,
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Sim documentation',
+    title: DOCS_TITLE,
     description,
     site: '@simdotai',
-    images: ['/api/og?title=Sim%20Documentation'],
+    images: ['/api/og?title=P2%20Agents%20Docs'],
   },
   robots: {
     googleBot: { 'max-video-preview': -1, 'max-image-preview': 'large', 'max-snippet': -1 },

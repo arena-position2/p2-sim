@@ -122,7 +122,7 @@ async function open(page: Page, path: string) {
 async function verifyClientMetadata(page: Page, path: string, title: string) {
   const description = (await page.locator('main > div > header > p').textContent())?.trim()
   expect(description).toBeTruthy()
-  await expect(page).toHaveTitle(`${title} | Sim Docs`)
+  await expect(page).toHaveTitle(`${title} | P2 Agents Docs`)
   await expect(page.locator('link[rel="canonical"]')).toHaveCount(1)
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     'href',

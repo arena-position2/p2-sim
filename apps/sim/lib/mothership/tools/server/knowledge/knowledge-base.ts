@@ -288,6 +288,30 @@ type KnowledgeBaseArgs = {
   args?: Record<string, any>
 }
 
+/**
+ * Local Copilot advertises query fields beside `operation`. The Cloud schema
+ * nests them under `args`. Nested values win; flat fields fill what `args` omits.
+ */
+function knowledgeBaseOperationArgs(
+  params: KnowledgeBaseArgs
+): NonNullable<KnowledgeBaseArgs['args']> {
+  const record = params as Record<string, unknown>
+  const nestedSource = record.args
+  const nested =
+    nestedSource && typeof nestedSource === 'object' && !Array.isArray(nestedSource)
+      ? nestedSource
+      : {}
+  const flat: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'operation' || key === 'args' || key === 'workspaceId' || key === 'workflowId') {
+      continue
+    }
+    if (value === undefined) continue
+    flat[key] = value
+  }
+  return { ...flat, ...nested }
+}
+
 type KnowledgeBaseResult = {
   success: boolean
   message: string
@@ -321,7 +345,8 @@ export const knowledgeBaseServerTool: BaseServerTool<KnowledgeBaseArgs, Knowledg
     context?: ServerToolContext
   ): Promise<KnowledgeBaseResult> {
     if (!context) throw new Error('Knowledge delegation requires a Copilot execution context')
-    const { operation, args = {} } = params
+    const { operation } = params
+    const args = knowledgeBaseOperationArgs(params)
     const workspaceId = requireCopilotKnowledgeWorkspaceId(context)
     const assertNotAborted = () =>
       assertServerToolNotAborted(

@@ -12,14 +12,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import {
-  type ClipboardContent,
-  cn,
-  overflowFadeSizeClass,
-  scrollFadeAttributes,
-  scrollFadeClass,
-  useScrollEdges,
-} from '@sim/emcn'
+import { type ClipboardContent, cn } from '@sim/emcn'
 import { Calendar, Clock } from '@sim/emcn/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { defaultRangeExtractor, type Range, useVirtualizer } from '@tanstack/react-virtual'
@@ -626,10 +619,6 @@ export function MothershipChat({
   })
 
   const hasMessages = messages.length > 0
-  const scrollEdges = useScrollEdges(scrollElementRef, {
-    contentRef: sizerRef,
-    enabled: !isLoading || hasMessages,
-  })
 
   /**
    * Keep a bottom-pinned transcript pinned when the scroll container resizes.
@@ -1015,15 +1004,17 @@ export function MothershipChat({
           />
         )}
         <div className='relative flex min-h-0 flex-1 flex-col'>
+          {/*
+            No scroll-edge mask here. mask-image promotes this variable Inter
+            transcript onto its own layer, and Chromium paints that layer heavier,
+            so body copy turns bold while the transcript is scrolled.
+          */}
           <div
             ref={setScrollElement}
             className={cn(
               styles.scrollContainer,
-              scrollFadeClass,
-              overflowFadeSizeClass,
               showTimeline && CONVERSATION_TIMELINE_GUTTER_CLASS
             )}
-            {...scrollFadeAttributes(scrollEdges)}
             onCopy={handleCopy}
           >
             {isLoading && !hasMessages ? (

@@ -46,7 +46,7 @@ function DeployedChatDescriptionPreview({
     <div className='relative mt-3'>
       <p
         ref={descriptionRef}
-        className='max-h-[3.2em] overflow-hidden whitespace-pre-wrap text-center text-[var(--text-muted)] text-sm leading-[21px]'
+        className='max-h-[3.2em] overflow-hidden whitespace-pre-wrap break-words text-center text-[var(--text-muted)] text-sm leading-[21px]'
       >
         <WelcomeMessageWithCtas
           content={text}

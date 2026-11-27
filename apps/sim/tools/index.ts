@@ -54,7 +54,10 @@ import {
 import { getBaseUrl, getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import { collectUserFilesById, isUserFile } from '@/lib/core/utils/user-file'
 import { isSameOrigin } from '@/lib/core/utils/validation'
-import { getAccessibleOAuthCredentials } from '@/lib/credentials/environment'
+import {
+  getAccessibleOAuthCredentials,
+  getEnrolledManagedOAuthCredentials,
+} from '@/lib/credentials/environment'
 import { pickPreferredOAuthCredential } from '@/lib/credentials/pick-oauth-credential'
 import { REJECTED_TOKEN_MINIMUM_AGE_MS } from '@/lib/credentials/token-request-resilience'
 import { SIM_VIA_HEADER, serializeCallChain } from '@/lib/execution/call-chain'
@@ -931,8 +934,11 @@ async function injectOAuthCredentialFromUserContextIfNeeded(
   const workspaceId = executionContext?.workspaceId ?? ctx?.workspaceId
   if (!userId || !workspaceId) return
   try {
-    const accessible = await getAccessibleOAuthCredentials(workspaceId, userId)
-    const match = pickPreferredOAuthCredential(accessible, oauth.provider, userId)
+    const [accessible, managed] = await Promise.all([
+      getAccessibleOAuthCredentials(workspaceId, userId),
+      getEnrolledManagedOAuthCredentials(workspaceId, userId),
+    ])
+    const match = pickPreferredOAuthCredential([...accessible, ...managed], oauth.provider, userId)
     if (!match) return
     params.credential = match.id
     logger.info(`[${requestId}] Auto-resolved OAuth credential for ${tool.id}`, {

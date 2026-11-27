@@ -10,7 +10,7 @@ import { DocsNavigationDrawer } from '@/components/docs/navigation-drawer'
 import { docsScrollAreaClass } from '@/components/docs/primitives'
 import { DocsSearchProvider, DocsSearchTrigger } from '@/components/docs/search'
 import { ThemeSwitch } from '@/components/docs/theme'
-import { SimWordmark } from '@/components/ui/sim-logo'
+import { ARENA_WORDMARK_URL, DOCS_TITLE } from '@/lib/brand'
 import type { DocsSection, NavNode } from '@/lib/content/types'
 import { DOCS_SECTIONS, getDocsSection } from '@/lib/navigation'
 import { SIM_SITE_URL } from '@/lib/urls'
@@ -68,10 +68,14 @@ export function DocsShell({ children, navigationBySection }: DocsShellProps) {
               <Link
                 href='/introduction'
                 draggable={false}
-                aria-label='Sim documentation home'
+                aria-label={`${DOCS_TITLE} home`}
                 className='inline-flex h-8 shrink-0 items-center focus-visible:outline-2 focus-visible:outline-[var(--docs-link)] focus-visible:outline-offset-4'
               >
-                <SimWordmark />
+                <img
+                  src={ARENA_WORDMARK_URL}
+                  alt=''
+                  className='h-8 w-auto max-w-[180px] object-contain object-left'
+                />
               </Link>
               <SectionTabs pathname={pathname} />
               <div className='ml-auto flex items-center gap-2 font-[450] text-docs-header'>
@@ -110,11 +114,15 @@ export function DocsShell({ children, navigationBySection }: DocsShellProps) {
             <div className='flex flex-wrap items-center justify-between gap-x-10 gap-y-5'>
               <a
                 href={SIM_SITE_URL}
-                aria-label='Sim home'
+                aria-label={DOCS_TITLE}
                 draggable={false}
                 className='inline-flex h-8 items-center'
               >
-                <SimWordmark />
+                <img
+                  src={ARENA_WORDMARK_URL}
+                  alt=''
+                  className='h-8 w-auto max-w-[180px] object-contain object-left'
+                />
               </a>
               <nav
                 aria-label='Footer navigation'
@@ -141,7 +149,7 @@ export function DocsShell({ children, navigationBySection }: DocsShellProps) {
               </nav>
             </div>
             <div className='mt-7 flex flex-wrap items-center justify-between gap-4 text-[var(--docs-muted)] text-docs-control leading-5'>
-              <p>© {new Date().getFullYear()} Sim</p>
+              <p>© {new Date().getFullYear()} Arena</p>
               <ThemeSwitch />
             </div>
           </footer>

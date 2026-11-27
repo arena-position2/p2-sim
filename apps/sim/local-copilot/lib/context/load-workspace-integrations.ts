@@ -1,7 +1,9 @@
 import { isHosted } from '@/lib/core/config/env-flags'
+import type { AccessibleOAuthCredential } from '@/lib/credentials/environment'
 import {
   getAccessibleEnvCredentials,
   getAccessibleOAuthCredentials,
+  getEnrolledManagedOAuthCredentials,
 } from '@/lib/credentials/environment'
 import { getEffectiveDecryptedEnv } from '@/lib/environment/utils'
 import {
@@ -36,6 +38,55 @@ export function mapSnapshotToWorkspaceIntegrations(
   }
 }
 
+function ownedManagedIntegrations(
+  rows: AccessibleOAuthCredential[],
+  presentIds: ReadonlySet<string>
+): LocalCopilotConnectedIntegration[] {
+  return rows
+    .filter((row) => !presentIds.has(row.id))
+    .map((row) => ({
+      credentialId: row.id,
+      providerId: row.providerId,
+      displayName: row.displayName,
+      role: 'member',
+      isOwn: true,
+      updatedAt: row.updatedAt,
+    }))
+}
+
+/**
+ * The workspace snapshot has no owner field, and it omits Credential Group
+ * connections. Restore which OAuth rows belong to the signed-in user and add
+ * that person's enrolled accounts so Copilot can use their Slack.
+ */
+export async function attachSignedInIntegrationOwnership(
+  workspaceId: string,
+  userId: string,
+  mapped: WorkspaceIntegrationsContext
+): Promise<WorkspaceIntegrationsContext> {
+  const [oauthRows, managedRows] = await Promise.all([
+    getAccessibleOAuthCredentials(workspaceId, userId),
+    getEnrolledManagedOAuthCredentials(workspaceId, userId),
+  ])
+  const oauthById = new Map(oauthRows.map((row) => [row.id, row]))
+  const connectedIntegrations = mapped.connectedIntegrations.map((integration) => {
+    const row = oauthById.get(integration.credentialId)
+    if (!row) return integration
+    return {
+      ...integration,
+      ...(row.ownerUserId === userId ? { isOwn: true } : {}),
+      updatedAt: row.updatedAt,
+    }
+  })
+  const presentIds = new Set(connectedIntegrations.map((integration) => integration.credentialId))
+  const managed = ownedManagedIntegrations(managedRows, presentIds)
+  return {
+    ...mapped,
+    connectedIntegrations:
+      managed.length > 0 ? [...connectedIntegrations, ...managed] : connectedIntegrations,
+  }
+}
+
 /**
  * Loads OAuth connections and configured env key names for Arena Copilot context.
  * Secret values are never returned — only key names and credential metadata.
@@ -44,10 +95,11 @@ export async function loadWorkspaceIntegrations(
   workspaceId: string,
   userId: string
 ): Promise<WorkspaceIntegrationsContext> {
-  const [oauthRows, envCredentialRows, decryptedEnv] = await Promise.all([
+  const [oauthRows, envCredentialRows, decryptedEnv, managedRows] = await Promise.all([
     getAccessibleOAuthCredentials(workspaceId, userId),
     getAccessibleEnvCredentials(workspaceId, userId),
     getEffectiveDecryptedEnv(userId, workspaceId),
+    getEnrolledManagedOAuthCredentials(workspaceId, userId),
   ])
 
   const envKeysFromCredentials = envCredentialRows
@@ -60,6 +112,7 @@ export async function loadWorkspaceIntegrations(
 
   const envVariables = [...new Set([...envKeysFromCredentials, ...envKeysFromRuntime])].sort()
 
+  const updatedAtById = new Map(oauthRows.map((row) => [row.id, row.updatedAt]))
   const connectedIntegrations = mergeOAuthIntegrationPresence(
     oauthRows.map((credential) => ({
       id: credential.id,
@@ -70,16 +123,23 @@ export async function loadWorkspaceIntegrations(
     })),
     envKeysFromCredentials,
     getHubSpotSharedAccountOptionIds()
-  ).map((integration) => ({
-    credentialId: integration.id,
-    providerId: integration.providerId,
-    displayName: integration.displayName,
-    role: integration.role ?? null,
-    ...(integration.isOwn ? { isOwn: true } : {}),
-  }))
+  ).map((integration) => {
+    const updatedAt = updatedAtById.get(integration.id)
+    return {
+      credentialId: integration.id,
+      providerId: integration.providerId,
+      displayName: integration.displayName,
+      role: integration.role ?? null,
+      ...(integration.isOwn ? { isOwn: true } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    }
+  })
+  const presentIds = new Set(connectedIntegrations.map((integration) => integration.credentialId))
+  const managed = ownedManagedIntegrations(managedRows, presentIds)
 
   return {
-    connectedIntegrations,
+    connectedIntegrations:
+      managed.length > 0 ? [...connectedIntegrations, ...managed] : connectedIntegrations,
     envVariables,
     hostedKeysAvailable: isHosted,
   }

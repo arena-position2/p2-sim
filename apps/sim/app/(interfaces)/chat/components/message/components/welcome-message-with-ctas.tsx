@@ -66,7 +66,7 @@ export function WelcomeMessageWithCtas({
     const parts = groupWelcomeParts(segments)
 
     return (
-      <div className={cn('flex max-w-full flex-col break-words', className)}>
+      <div className={cn('flex w-full min-w-0 max-w-full flex-col break-words', className)}>
         {parts.map((part, index) => {
           if (part.type === 'text') {
             return (
@@ -83,14 +83,17 @@ export function WelcomeMessageWithCtas({
           return (
             <div
               key={`w-queries-${index}`}
-              className={cn('flex max-w-full flex-col items-start gap-2', index > 0 && 'mt-3')}
+              className={cn(
+                'flex w-full min-w-0 max-w-full flex-col items-start gap-2',
+                index > 0 && 'mt-3'
+              )}
             >
               {part.values.map((query, queryIndex) => (
                 <button
                   key={`w-query-${index}-${queryIndex}`}
                   type='button'
                   className={cn(
-                    'w-fit max-w-full cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-left font-[family-name:var(--font-inter)] font-medium text-[var(--text-primary)] text-small leading-[21px] transition-colors',
+                    'w-fit max-w-full min-w-0 cursor-pointer whitespace-normal break-words rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-left font-[family-name:var(--font-inter)] font-medium text-[var(--text-primary)] text-small leading-[21px] transition-colors',
                     'hover:bg-[var(--surface-hover)]'
                   )}
                   onClick={() => onQueryClick?.(query)}
@@ -107,7 +110,7 @@ export function WelcomeMessageWithCtas({
   }
 
   return (
-    <span className={cn('whitespace-pre-wrap', className)}>
+    <span className={cn('whitespace-pre-wrap break-words', className)}>
       {segments.map((segment, index) => {
         if (segment.type === 'text') {
           return <span key={`w-text-${index}`}>{segment.value}</span>
@@ -116,7 +119,7 @@ export function WelcomeMessageWithCtas({
           <button
             key={`w-query-${index}`}
             type='button'
-            className='inline cursor-pointer rounded-sm border-0 bg-transparent p-0 font-medium text-[var(--color-ds-text-link-hover,#155CBA)] underline decoration-[var(--color-ds-text-link-hover,#155CBA)]/40 underline-offset-2 transition-colors hover:decoration-[var(--color-ds-text-link-hover,#155CBA)]'
+            className='inline cursor-pointer break-words rounded-sm border-0 bg-transparent p-0 font-medium text-[var(--color-ds-text-link-hover,#155CBA)] underline decoration-[var(--color-ds-text-link-hover,#155CBA)]/40 underline-offset-2 transition-colors hover:decoration-[var(--color-ds-text-link-hover,#155CBA)]'
             onClick={() => onQueryClick?.(segment.value)}
             title='Run this query'
           >

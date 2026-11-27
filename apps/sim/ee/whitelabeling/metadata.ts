@@ -3,6 +3,15 @@ import type { Metadata } from 'next'
 import { getBaseUrl, isSearchIndexableAppUrl } from '@/lib/core/utils/urls'
 import { getBrandConfig } from '@/ee/whitelabeling/branding'
 
+function brandIcon(url: string): { url: string; sizes: 'any'; type: string } {
+  const path = url.split('?')[0] ?? url
+  return {
+    url,
+    sizes: 'any',
+    type: path.endsWith('.svg') ? 'image/svg+xml' : 'image/png',
+  }
+}
+
 /**
  * Generate dynamic metadata based on brand configuration.
  *
@@ -96,26 +105,31 @@ export function generateBrandedMetadata(override: Partial<Metadata> = {}): Metad
       site: '@position2',
     },
     manifest: '/manifest.webmanifest',
-    icons: {
-      icon: [
-        ...(brand.faviconUrl ? [] : [{ url: '/icon.svg', type: 'image/svg+xml', sizes: 'any' }]),
-        { url: '/favicon/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
-        { url: '/favicon/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-        {
-          url: '/favicon/android-chrome-192x192.png',
-          sizes: '192x192',
-          type: 'image/png',
+    icons: brand.faviconUrl
+      ? {
+          icon: [brandIcon(brand.faviconUrl)],
+          apple: brand.faviconUrl,
+          shortcut: brand.faviconUrl,
+        }
+      : {
+          icon: [
+            { url: '/icon.svg', type: 'image/svg+xml', sizes: 'any' },
+            { url: '/favicon/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+            { url: '/favicon/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+            {
+              url: '/favicon/android-chrome-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+            },
+            {
+              url: '/favicon/android-chrome-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+            },
+          ],
+          apple: '/favicon/apple-touch-icon.png',
+          shortcut: '/icon.svg',
         },
-        {
-          url: '/favicon/android-chrome-512x512.png',
-          sizes: '512x512',
-          type: 'image/png',
-        },
-        ...(brand.faviconUrl ? [{ url: brand.faviconUrl, sizes: 'any', type: 'image/png' }] : []),
-      ],
-      apple: '/favicon/apple-touch-icon.png',
-      shortcut: brand.faviconUrl || '/icon.svg',
-    },
     appleWebApp: {
       capable: true,
       statusBarStyle: 'default',

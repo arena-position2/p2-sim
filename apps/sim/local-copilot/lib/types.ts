@@ -73,6 +73,8 @@ export interface LocalCopilotConnectedIntegration {
   role?: string | null
   /** True when this OAuth connection belongs to the signed-in user. */
   isOwn?: boolean
+  /** Used to prefer the signed-in user's newest connection for a provider. */
+  updatedAt?: Date
 }
 
 export interface LocalCopilotExecutionContext {
