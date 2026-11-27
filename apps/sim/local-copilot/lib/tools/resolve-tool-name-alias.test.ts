@@ -43,6 +43,8 @@ describe('resolveLocalCopilotToolName', () => {
       ['manage_mcp_tool', 'manage_mcp_connection'],
       ['list_user_workspaces', 'list_workspaces'],
       ['search_documentation', 'search_docs'],
+      ['table_insert_row', 'user_table'],
+      ['table_batch_insert_rows', 'user_table'],
     ] as const) {
       expect(resolveLocalCopilotToolName(cloud)).toEqual({ kind: 'ok', name: arena })
     }

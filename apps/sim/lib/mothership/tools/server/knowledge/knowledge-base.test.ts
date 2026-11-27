@@ -26,6 +26,7 @@ const {
   mockCreateKnowledgeTag,
   mockListKnowledgeTags,
   mockListKnowledgeBases,
+  mockListKnowledgeDocuments,
   mockIsKnowledgeMemberAccessAvailable,
   knowledgeOperations,
 } = vi.hoisted(() => {
@@ -61,6 +62,7 @@ const {
     mockCreateKnowledgeTag: vi.fn(),
     mockListKnowledgeTags: vi.fn(),
     mockListKnowledgeBases: vi.fn(),
+    mockListKnowledgeDocuments: vi.fn(),
     mockIsKnowledgeMemberAccessAvailable: vi.fn(),
     knowledgeOperations: {
       addWorkspaceFiles: defineOperation('knowledge.documents.add_workspace_files', 'write'),
@@ -73,6 +75,7 @@ const {
       deleteConnector: defineOperation('knowledge.connectors.delete', 'write'),
       deleteTag: defineOperation('knowledge.tags.delete', 'write'),
       list: defineOperation('knowledge.list', 'read'),
+      listDocuments: defineOperation('knowledge.documents.list', 'read'),
       listTags: defineOperation('knowledge.tags.list', 'read'),
       read: defineOperation('knowledge.read', 'read'),
       readTagUsage: defineOperation('knowledge.tags.read_usage', 'read'),
@@ -140,6 +143,10 @@ vi.mock('@/lib/knowledge/application/documents', () => ({
   deleteKnowledgeDocument: {
     operation: knowledgeOperations.deleteDocument,
     execute: mockDeleteKnowledgeDocument,
+  },
+  listKnowledgeDocuments: {
+    operation: knowledgeOperations.listDocuments,
+    execute: mockListKnowledgeDocuments,
   },
   updateKnowledgeDocument: {
     operation: knowledgeOperations.updateDocument,
@@ -286,6 +293,7 @@ describe('manage_knowledge_base trusted application delegation', () => {
       failed: [],
     })
     mockIsKnowledgeMemberAccessAvailable.mockResolvedValue(true)
+    mockListKnowledgeDocuments.mockResolvedValue({ documents: [] })
     mockSearchKnowledge.mockResolvedValue({
       results: [],
       query: 'query',
@@ -469,6 +477,45 @@ describe('manage_knowledge_base trusted application delegation', () => {
       signal: controller.signal,
     })
     expect(mockReadKnowledgeBase).not.toHaveBeenCalled()
+  })
+
+  it('queries from a flat id and accepts the workflow search operation', async () => {
+    const byId = await knowledgeBaseServerTool.execute(
+      { operation: 'query', id: KNOWLEDGE_BASE.id, query: 'handbook' },
+      { ...CONTEXT, resolvedSecretTraceRegistry: new ResolvedSecretTraceRegistry() }
+    )
+    expect(byId.success).toBe(true)
+    expect(mockSearchKnowledge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          knowledgeBaseIds: [KNOWLEDGE_BASE.id],
+          query: 'handbook',
+        }),
+      })
+    )
+
+    mockSearchKnowledge.mockClear()
+    const bySearch = await knowledgeBaseServerTool.execute(
+      { operation: 'search', knowledgeBaseId: KNOWLEDGE_BASE.id, query: 'handbook' },
+      { ...CONTEXT, resolvedSecretTraceRegistry: new ResolvedSecretTraceRegistry() }
+    )
+    expect(bySearch.success).toBe(true)
+    expect(mockSearchKnowledge).toHaveBeenCalled()
+  })
+
+  it('tells the model to query again while uploaded documents are still indexing', async () => {
+    mockListKnowledgeDocuments.mockResolvedValue({
+      documents: [{ id: 'document-1', processingStatus: 'pending' }],
+    })
+
+    const result = await knowledgeBaseServerTool.execute(
+      { operation: 'query', args: { knowledgeBaseId: KNOWLEDGE_BASE.id, query: 'handbook' } },
+      { ...CONTEXT, resolvedSecretTraceRegistry: new ResolvedSecretTraceRegistry() }
+    )
+
+    expect(result.success).toBe(true)
+    expect(result.message).toMatch(/still indexing/)
+    expect(result.message).toMatch(/query again/i)
   })
 
   it('attributes knowledge queries to the trusted Slack context', async () => {

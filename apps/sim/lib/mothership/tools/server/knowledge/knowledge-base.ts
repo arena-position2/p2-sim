@@ -21,6 +21,7 @@ import {
 import {
   deleteKnowledgeDocument,
   type KnowledgeDocumentTagValueAssignment,
+  listKnowledgeDocuments,
   updateKnowledgeDocument,
 } from '@/lib/knowledge/application/documents'
 import {
@@ -318,6 +319,37 @@ type KnowledgeBaseResult = {
   data?: any
 }
 
+/**
+ * A query that matches nothing while documents are still pending or processing
+ * is not an empty knowledge base. Tell the model to query again.
+ */
+async function knowledgeIndexingMessage(
+  context: ServerToolContext,
+  workspaceId: string,
+  knowledgeBaseId: string
+): Promise<string | null> {
+  try {
+    const page = await executeCopilotKnowledgeUseCase(context, listKnowledgeDocuments, {
+      knowledgeBaseId,
+      assertedWorkspaceId: workspaceId,
+      enabledFilter: 'all',
+      limit: 50,
+    })
+    const indexing = page.documents.filter(
+      (document) =>
+        document.processingStatus === 'pending' || document.processingStatus === 'processing'
+    )
+    if (indexing.length === 0) return null
+    return `No chunks are searchable yet because ${indexing.length} document(s) are still indexing. Call query again once indexing finishes.`
+  } catch (error) {
+    logger.warn('Could not check knowledge document indexing status', {
+      knowledgeBaseId,
+      error: getErrorMessage(error),
+    })
+    return null
+  }
+}
+
 function isKnowledgeDocumentTagValueAssignment(
   value: unknown
 ): value is KnowledgeDocumentTagValueAssignment {
@@ -345,8 +377,11 @@ export const knowledgeBaseServerTool: BaseServerTool<KnowledgeBaseArgs, Knowledg
     context?: ServerToolContext
   ): Promise<KnowledgeBaseResult> {
     if (!context) throw new Error('Knowledge delegation requires a Copilot execution context')
-    const { operation } = params
+    const operation = params.operation === 'search' ? 'query' : params.operation
     const args = knowledgeBaseOperationArgs(params)
+    if (!args.knowledgeBaseId && typeof args.id === 'string' && args.id.trim()) {
+      args.knowledgeBaseId = args.id.trim()
+    }
     const workspaceId = requireCopilotKnowledgeWorkspaceId(context)
     const assertNotAborted = () =>
       assertServerToolNotAborted(
@@ -563,10 +598,16 @@ export const knowledgeBaseServerTool: BaseServerTool<KnowledgeBaseArgs, Knowledg
           })
 
           const foundMessage = `Found ${results.length} result(s) for query "${truncate(args.query, 50)}".`
+          const indexingMessage =
+            results.length === 0
+              ? await knowledgeIndexingMessage(context, workspaceId, args.knowledgeBaseId)
+              : null
 
           return {
             success: true,
-            message: citable ? `${foundMessage} ${KNOWLEDGE_CITATION_INSTRUCTION}` : foundMessage,
+            message:
+              indexingMessage ??
+              (citable ? `${foundMessage} ${KNOWLEDGE_CITATION_INSTRUCTION}` : foundMessage),
             data: {
               knowledgeBaseId: args.knowledgeBaseId,
               knowledgeBaseName: knowledgeBase.name,

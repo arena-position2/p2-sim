@@ -23,7 +23,7 @@ vi.mock('@/lib/mothership/application/execute-workflow-use-case', () => ({
 }))
 
 import type { ToolExecutionContext } from '@/local-copilot/lib/tools/executor'
-import { executeUserTable } from '@/local-copilot/lib/tools/user-table'
+import { executeUserTable, prepareUserTableCall } from '@/local-copilot/lib/tools/user-table'
 import type { LocalCopilotStructuredContext } from '@/local-copilot/lib/types'
 
 function toolCtx(): ToolExecutionContext {
@@ -102,6 +102,54 @@ describe('executeUserTable', () => {
       data: {
         table: expect.objectContaining({ id: 'tbl_1', name: 'Scrapes' }),
       },
+    })
+  })
+
+  it('rewrites table_insert_row onto user_table insert_row with a flat row payload', () => {
+    expect(
+      prepareUserTableCall('table_insert_row', {
+        tableId: 'tbl_1',
+        values: { title: 'Ada' },
+      })
+    ).toEqual({
+      toolName: 'user_table',
+      args: expect.objectContaining({
+        operation: 'insert_row',
+        args: expect.objectContaining({
+          tableId: 'tbl_1',
+          data: { title: 'Ada' },
+        }),
+      }),
+    })
+  })
+
+  it('inserts a row keyed by column id', async () => {
+    executeCopilotTableUseCase
+      .mockResolvedValueOnce({
+        table: {
+          id: 'tbl_1',
+          name: 'Scrapes',
+          schema: { columns: [{ id: 'col_title', name: 'title', type: 'string' }] },
+          workspaceId: 'workspace-1',
+        },
+        folderPath: '/',
+      })
+      .mockResolvedValueOnce({ kind: 'single', row: { id: 'row_1' } })
+
+    const result = await executeUserTable(
+      {
+        operation: 'insert_row',
+        args: { tableId: 'tbl_1' },
+        data: { col_title: 'Ada' },
+      },
+      toolCtx()
+    )
+
+    expect(result.success).toBe(true)
+    const insertCall = executeCopilotTableUseCase.mock.calls[1]
+    expect(insertCall?.[2]).toMatchObject({
+      dataKeying: 'names',
+      data: { title: 'Ada' },
     })
   })
 })

@@ -84,6 +84,81 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
   return trimmed.length > 0 ? trimmed : undefined
 }
 
+const TABLE_REGISTRY_OPERATIONS = {
+  table_insert_row: 'insert_row',
+  table_batch_insert_rows: 'batch_insert_rows',
+} as const
+
+/**
+ * Block-registry ids (`table_insert_row`) and flat row fields are rewritten onto
+ * `user_table` before execution. Nested `args` win; `row` and `values` fill `data`.
+ */
+export function prepareUserTableCall(
+  toolName: string,
+  rawParams: Record<string, unknown>
+): { toolName: string; args: Record<string, unknown> } {
+  const aliasedOperation =
+    TABLE_REGISTRY_OPERATIONS[toolName as keyof typeof TABLE_REGISTRY_OPERATIONS]
+  const hasNestedArgs = isRecordLike(rawParams.args)
+  const nested = hasNestedArgs ? { ...toRecord(rawParams.args) } : { ...toRecord(rawParams) }
+  if (hasNestedArgs) {
+    for (const key of ['tableId', 'data', 'rows', 'row', 'values'] as const) {
+      if (nested[key] === undefined && rawParams[key] !== undefined) {
+        nested[key] = rawParams[key]
+      }
+    }
+  }
+  if (!isRecordLike(nested.data)) {
+    if (isRecordLike(nested.row)) nested.data = nested.row
+    else if (isRecordLike(nested.values)) nested.data = nested.values
+  }
+  const operation =
+    typeof rawParams.operation === 'string' && rawParams.operation.trim()
+      ? rawParams.operation.trim()
+      : aliasedOperation
+  return {
+    toolName: aliasedOperation ? USER_TABLE_TOOL_NAME : toolName,
+    args: {
+      ...rawParams,
+      ...(operation ? { operation } : {}),
+      args: nested,
+    },
+  }
+}
+
+function rowDataByColumnName(data: RowData, columns: ColumnDefinition[]): RowData {
+  const names = new Set(columns.map((column) => column.name))
+  const nameById = new Map(
+    columns.flatMap((column) =>
+      column.id && column.id !== column.name ? [[column.id, column.name] as const] : []
+    )
+  )
+  const next: RowData = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (names.has(key)) {
+      next[key] = value
+      continue
+    }
+    const name = nameById.get(key)
+    next[name ?? key] = value
+  }
+  return next
+}
+
+async function loadTableColumns(
+  toolContext: ReturnType<typeof toCopilotServerToolContext>,
+  tableId: string,
+  workspaceId: string
+): Promise<ColumnDefinition[]> {
+  const loaded = await executeCopilotTableUseCase(
+    toolContext,
+    readTableUseCase,
+    { tableId, workspaceId },
+    { tableId }
+  )
+  return loaded.table.schema.columns
+}
+
 function requireTableId(args: Record<string, unknown>): string | UserTableFailure {
   const tableId = stringArg(args, 'tableId')
   if (!tableId) return fail('args.tableId is required')
@@ -141,10 +216,11 @@ export async function executeUserTable(
   rawParams: Record<string, unknown>,
   ctx: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
-  const operation = String(rawParams.operation ?? '')
+  const prepared = prepareUserTableCall(USER_TABLE_TOOL_NAME, rawParams)
+  const operation = String(prepared.args.operation ?? '')
     .trim()
     .toLowerCase()
-  const args = isRecordLike(rawParams.args) ? toRecord(rawParams.args) : toRecord(rawParams)
+  const args = isRecordLike(prepared.args.args) ? toRecord(prepared.args.args) : {}
 
   if (!operation) {
     return {
@@ -386,6 +462,7 @@ async function dispatchUserTableOperation(
       const tableId = requireTableId(args)
       if (typeof tableId !== 'string') return tableId
       if (!isRecordLike(args.data)) return fail('args.data is required for insert_row')
+      const columns = await loadTableColumns(toolContext, tableId, workspaceId)
       const result = await executeCopilotTableUseCase(
         toolContext,
         createTableRows,
@@ -395,7 +472,7 @@ async function dispatchUserTableOperation(
           kind: 'single',
           strictWrite: true,
           dataKeying: 'names',
-          data: args.data as RowData,
+          data: rowDataByColumnName(args.data as RowData, columns),
           ...(typeof args.position === 'number' ? { position: args.position } : {}),
         },
         { tableId }
@@ -409,6 +486,7 @@ async function dispatchUserTableOperation(
       if (typeof tableId !== 'string') return tableId
       const rows = toArray(args.rows).filter(isRecordLike) as RowData[]
       if (rows.length === 0) return fail('args.rows must be a non-empty array')
+      const columns = await loadTableColumns(toolContext, tableId, workspaceId)
       const result = await executeCopilotTableUseCase(
         toolContext,
         createTableRows,
@@ -418,7 +496,7 @@ async function dispatchUserTableOperation(
           kind: 'batch',
           strictWrite: true,
           dataKeying: 'names',
-          rows,
+          rows: rows.map((row) => rowDataByColumnName(row, columns)),
         },
         { tableId }
       )

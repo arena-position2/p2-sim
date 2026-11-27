@@ -879,8 +879,15 @@ export const buildNanoBananaRequestBody = async (params: {
     },
   ]
 
-  if (Array.isArray(params.inputImages) && params.inputImages.length > 0) {
-    const inlineImages = await resolveInlineImageDataArray(params.inputImages)
+  const referenceImages =
+    Array.isArray(params.inputImages) && params.inputImages.length > 0
+      ? params.inputImages
+      : Array.isArray(params.inputImage)
+        ? params.inputImage
+        : null
+
+  if (referenceImages && referenceImages.length > 0) {
+    const inlineImages = await resolveInlineImageDataArray(referenceImages)
     for (const inlineImage of inlineImages) {
       parts.push({ inlineData: inlineImage })
     }

@@ -11,7 +11,11 @@ vi.mock('@/lib/uploads/utils/image-storage.server', () => ({
   saveGeneratedImage: mockSaveGeneratedImage,
 }))
 
-import { buildNanoBananaToolResponse, resolveInlineImageData } from '@/app/api/google/api-service'
+import {
+  buildNanoBananaRequestBody,
+  buildNanoBananaToolResponse,
+  resolveInlineImageData,
+} from '@/app/api/google/api-service'
 import { nanoBananaTool } from '@/tools/google/nano-banana'
 
 describe('Nano Banana tool', () => {
@@ -139,6 +143,33 @@ describe('Nano Banana tool', () => {
       mimeType: 'image/jpeg',
       data: Buffer.from(jpegBytes).toString('base64'),
     })
+  })
+
+  it('inlines a selected-image array passed as inputImage', async () => {
+    const jpegBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0x00])
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(jpegBytes, {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg' },
+        })
+      )
+    )
+
+    const body = await buildNanoBananaRequestBody({
+      prompt: 'Add a car to this image',
+      inputImage: [
+        {
+          url: 'https://files.example.com/selected.jpg',
+          type: 'image/jpeg',
+        },
+      ],
+    })
+
+    expect(body.contents[0]?.parts.some((part) => part.inlineData?.mimeType === 'image/jpeg')).toBe(
+      true
+    )
   })
 
   it('rejects empty external object URL references before Gemini', async () => {

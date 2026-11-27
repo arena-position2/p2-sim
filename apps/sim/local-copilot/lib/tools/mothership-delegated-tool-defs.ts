@@ -361,6 +361,15 @@ export function patchKnowledgeBaseToolParameters(
         description: 'Knowledge base IDs for batch delete.',
         items: { type: 'string' },
       },
+      query: {
+        type: 'string',
+        description:
+          'Natural-language question for query. Send this with knowledgeBaseId (the id returned as data.id from create).',
+      },
+      topK: {
+        type: 'number',
+        description: 'How many query chunks to return (1-100, default 5).',
+      },
       search: {
         type: 'string',
         description: 'Optional name filter for list (case-insensitive substring).',

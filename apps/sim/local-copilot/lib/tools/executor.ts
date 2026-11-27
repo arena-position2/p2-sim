@@ -63,6 +63,7 @@ import {
   executeLoadUserSkill,
   LOAD_USER_SKILL_TOOL_NAME,
 } from '@/local-copilot/lib/tools/user-skills'
+import { prepareUserTableCall } from '@/local-copilot/lib/tools/user-table'
 import { executeLocalVfsTool, isLocalVfsToolName } from '@/local-copilot/lib/tools/vfs-read-tools'
 import {
   runCreateWorkflowTool,
@@ -629,7 +630,14 @@ async function executeLocalCopilotToolInner(
   args: Record<string, unknown>,
   ctx: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
-  const resolvedName = resolveLocalCopilotToolName(requestedToolName)
+  const preparedTableCall =
+    requestedToolName === 'user_table' ||
+    requestedToolName === 'table_insert_row' ||
+    requestedToolName === 'table_batch_insert_rows'
+      ? prepareUserTableCall(requestedToolName, args)
+      : { toolName: requestedToolName, args }
+  const resolvedName = resolveLocalCopilotToolName(preparedTableCall.toolName)
+  args = preparedTableCall.args
   if (resolvedName.kind === 'unsupported') {
     return {
       toolName: requestedToolName,

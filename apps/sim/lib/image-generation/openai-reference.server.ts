@@ -14,6 +14,21 @@ const MAX_IMAGE_JSON_BYTES = Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 256 * 1024
 const GPT_IMAGE_2_MODEL = 'gpt-image-2'
 const logger = createLogger('OpenAIImageReference')
 
+/** Selected chat images arrive as a UserFile array inside `inputImage`. Each element is one reference. */
+function flattenReferenceSources(sources: readonly unknown[]): unknown[] {
+  const flattened: unknown[] = []
+  for (const source of sources) {
+    if (Array.isArray(source)) {
+      flattened.push(...flattenReferenceSources(source))
+      continue
+    }
+    if (source !== undefined && source !== null && source !== '') {
+      flattened.push(source)
+    }
+  }
+  return flattened
+}
+
 const GPT_IMAGE_EDIT_MODELS = new Set([
   'gpt-image-2',
   'gpt-image-1.5',
@@ -160,12 +175,13 @@ export async function generateOpenAIImageEdit(
     })
   }
 
-  const referenceSources =
+  const referenceSources = flattenReferenceSources(
     Array.isArray(params.inputImages) && params.inputImages.length > 0
       ? params.inputImages
       : params.inputImage !== undefined && params.inputImage !== null && params.inputImage !== ''
         ? [params.inputImage]
         : []
+  )
 
   const supportsMultipleReferences = model === GPT_IMAGE_2_MODEL
   const sourcesToResolve = supportsMultipleReferences

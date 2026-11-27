@@ -66,6 +66,47 @@ describe('generateOpenAIImageEdit', () => {
     expect(mockFetch.mock.calls[0]?.[0]).toBe('https://api.openai.com/v1/images/edits')
   })
 
+  it('resolves each file when the selected image arrives as an inputImage array', async () => {
+    const referenceImage = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00,
+    ])
+    const generatedImage = Buffer.from('generated-image').toString('base64')
+    const selectedImage = {
+      key: 'execution/ws/wf/ex/selected.png',
+      url: 'https://dev-agent.thearena.ai/api/files/serve/execution/ws/wf/ex/selected.png',
+      type: 'image/png',
+    }
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ b64_json: generatedImage }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    )
+
+    mockResolveProviderInlineImageData.mockResolvedValue({
+      mimeType: 'image/png',
+      data: referenceImage.toString('base64'),
+    })
+    global.fetch = mockFetch as unknown as typeof fetch
+
+    await generateOpenAIImageEdit(
+      'openai-key',
+      {
+        model: 'gpt-image-1.5',
+        prompt: 'Add a car to this image',
+        inputImage: [selectedImage],
+      },
+      { userId: 'user-1', requestId: 'req-array' }
+    )
+
+    expect(mockResolveProviderInlineImageData).toHaveBeenCalledWith(
+      selectedImage,
+      undefined,
+      'user-1',
+      'req-array-0'
+    )
+  })
+
   it('appends multiple reference images for gpt-image-2 edits', async () => {
     const referenceImage = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00,
