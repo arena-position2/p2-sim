@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import {
   filterSummarizeUploadForcedTools,
   hasDocumentUploadFocus,
+  looksLikeCreateDocumentArtifactIntent,
   looksLikeSummarizeAndHtmlEditDualIntent,
   looksLikeSummarizeUploadIntent,
   rejectOutOfJobToolCall,
@@ -15,15 +16,55 @@ import {
   SUMMARIZE_UPLOAD_OUT_OF_SCOPE_ERROR,
 } from '@/local-copilot/lib/writes/turn-job'
 
+const CREATE_PDF_REPORT_BRIEF = `Create a professional PDF report titled "AI Testing Performance Report".
+
+Include:
+
+* Executive Summary
+* Testing Environment
+* Test Execution Summary
+* Total Tests: 250
+* Passed: 218
+* Failed: 22
+* Skipped: 10
+* Pass Percentage
+* Defect Summary
+* Performance Metrics
+* Key Findings
+* Recommendations
+
+Generate the final output as a PDF file (.pdf).`
+
 describe('looksLikeSummarizeUploadIntent', () => {
   it('detects A5-style summarize asks', () => {
     expect(looksLikeSummarizeUploadIntent('Summarise the PDF content.')).toBe(true)
     expect(looksLikeSummarizeUploadIntent('Summarize the uploaded document')).toBe(true)
     expect(looksLikeSummarizeUploadIntent('Give me a TL;DR of this PDF')).toBe(true)
+    expect(looksLikeSummarizeUploadIntent('Give me a summary of the PDF')).toBe(true)
   })
 
   it('does not treat plain HTML edits as summarize', () => {
     expect(looksLikeSummarizeUploadIntent('Update the header to Team To-Do List')).toBe(false)
+  })
+
+  it('does not treat report outline section titles as summarize', () => {
+    expect(looksLikeSummarizeUploadIntent('Executive Summary')).toBe(false)
+    expect(looksLikeSummarizeUploadIntent('Defect Summary')).toBe(false)
+    expect(looksLikeSummarizeUploadIntent('Test Execution Summary')).toBe(false)
+    expect(looksLikeSummarizeUploadIntent(CREATE_PDF_REPORT_BRIEF)).toBe(false)
+  })
+})
+
+describe('looksLikeCreateDocumentArtifactIntent', () => {
+  it('detects create/generate PDF or report asks', () => {
+    expect(looksLikeCreateDocumentArtifactIntent(CREATE_PDF_REPORT_BRIEF)).toBe(true)
+    expect(
+      looksLikeCreateDocumentArtifactIntent('Generate the AI Testing Performance Report PDF now')
+    ).toBe(true)
+  })
+
+  it('does not steal A5 summarize asks', () => {
+    expect(looksLikeCreateDocumentArtifactIntent('Summarise the PDF content.')).toBe(false)
   })
 })
 
@@ -107,6 +148,18 @@ describe('resolveTurnJob', () => {
         resolveReason: 'none',
         preferredPath: 'files/notes.md',
         candidatePaths: [],
+        currentTurnUploadPaths: [],
+      })
+    ).toBe('general')
+  })
+
+  it('does not classify create-PDF report briefs as summarize_upload', () => {
+    expect(
+      resolveTurnJob({
+        userMessage: CREATE_PDF_REPORT_BRIEF,
+        resolveReason: 'preferred',
+        preferredPath: 'files/Beta Bionics/Published Research Prototype - 6 Category Boxes.html',
+        candidatePaths: ['files/Beta Bionics/Published Research Prototype - 6 Category Boxes.html'],
         currentTurnUploadPaths: [],
       })
     ).toBe('general')

@@ -21,9 +21,23 @@ export type LocalCopilotTurnJob =
   | 'html_edit'
   | 'general'
 
-/** Read / summarize / overview of an uploaded document — not an HTML edit. */
+/**
+ * Read / summarize an uploaded document — not an HTML edit.
+ *
+ * Deliberately avoids bare `summary` / `executive summary` / `overview`: those
+ * appear as report *section titles* in create-PDF briefs and false-triggered
+ * summarize_upload (blocking create_file). Prefer verbs and "summary of …".
+ */
 const SUMMARIZE_UPLOAD_SIGNAL =
-  /\b(summaris[ee]|summarize|summary|tl;?dr|tldr|overview|executive summary|key (points|takeaways)|what('?s| is) in|explain (this|the)\b[\s\S]{0,40}\b(pdf|document|doc|upload|file)|read (this|the)\b[\s\S]{0,40}\b(pdf|document|doc))\b/i
+  /\b(summaris[ee]|summarize|tl;?dr|tldr|(give|write|provide|produce)\b[\s\S]{0,24}\b(a |an |the )?(brief |short |quick )?(summary|overview|executive summary)\b|summary of|overview of|executive summary of|key (points|takeaways)|what('?s| is) in|explain (this|the)\b[\s\S]{0,40}\b(pdf|document|doc|upload|file)|read (this|the)\b[\s\S]{0,40}\b(pdf|document|doc))\b/i
+
+/**
+ * User is asking to *create* a PDF/DOCX/report artifact — not summarize an upload.
+ * Wins over summarize_upload so outline sections titled "Executive Summary" plus
+ * "output as a PDF" cannot fence create_file.
+ */
+const CREATE_DOCUMENT_ARTIFACT_SIGNAL =
+  /\b(create|generate|build|write|make|produce|draft)\b[\s\S]{0,160}\b(pdf(\s+file)?|\.pdf\b|(pdf\s+)?report|docx?|pptx?)\b/i
 
 const DOCUMENT_OR_UPLOAD_MENTION =
   /\b(\.pdf\b|pdf\b|docx?\b|pptx?\b|the (pdf|document|doc|upload|attachment)|this (pdf|document|doc|upload|attachment)|uploaded (pdf|document|doc|file))\b/i
@@ -77,6 +91,13 @@ export function looksLikeSummarizeUploadIntent(message: string): boolean {
 }
 
 /**
+ * True when the user is asking to create/generate a PDF/DOCX/report file.
+ */
+export function looksLikeCreateDocumentArtifactIntent(message: string): boolean {
+  return CREATE_DOCUMENT_ARTIFACT_SIGNAL.test(message.trim())
+}
+
+/**
  * Dual ask: summarize upload AND edit HTML/page in the same message.
  */
 export function looksLikeSummarizeAndHtmlEditDualIntent(options: {
@@ -108,6 +129,7 @@ export function resolveTurnJob(input: ResolveTurnJobInput): LocalCopilotTurnJob 
   }
 
   const summarize = looksLikeSummarizeUploadIntent(input.userMessage)
+  const createArtifact = looksLikeCreateDocumentArtifactIntent(input.userMessage)
   const docFocus = hasDocumentUploadFocus({
     userMessage: input.userMessage,
     currentTurnUploadPaths: input.currentTurnUploadPaths,
@@ -118,7 +140,9 @@ export function resolveTurnJob(input: ResolveTurnJobInput): LocalCopilotTurnJob 
     candidatePaths: input.candidatePaths,
   })
 
-  if (summarize && docFocus && !dual) {
+  // Create-PDF/report briefs often list "Executive Summary" and say "as a PDF" —
+  // that is not a summarize-upload job; do not hard-fence create_file.
+  if (summarize && docFocus && !dual && !createArtifact) {
     return 'summarize_upload'
   }
 
