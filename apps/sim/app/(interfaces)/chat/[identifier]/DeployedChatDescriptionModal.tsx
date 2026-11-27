@@ -51,7 +51,7 @@ export function DeployedChatDescriptionModal({
         showClose={false}
         srTitle={title}
         size='lg'
-        className='overflow-hidden border-0 bg-transparent p-0 shadow-none'
+        className='flex max-h-[min(85vh,720px)] w-full flex-col overflow-hidden border-0 bg-transparent p-0 shadow-none'
       >
         <div
           className='flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border p-6'
@@ -84,7 +84,7 @@ export function DeployedChatDescriptionModal({
             className='min-h-0 flex-1 overflow-y-auto rounded-xl border bg-[var(--color-ds-surface-raised)] p-6'
             style={{ borderColor: DEPLOYED_CHAT_DIVIDER }}
           >
-            <p
+            <div
               className='whitespace-pre-wrap break-words text-left font-normal text-[14px] leading-[1.6]'
               style={{ color: DEPLOYED_CHAT_TEXT_BODY }}
             >
@@ -93,7 +93,7 @@ export function DeployedChatDescriptionModal({
                 variant='landing'
                 onQueryClick={onWelcomeQueryClick ? handleQueryClick : undefined}
               />
-            </p>
+            </div>
           </div>
         </div>
       </ModalContent>

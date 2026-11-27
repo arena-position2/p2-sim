@@ -8,10 +8,11 @@ import { isLandingPath } from '@/lib/landing/routes'
 
 /**
  * First path segments outside the `(landing)` group whose pages pin the light
- * token layer in their own shell — `(auth)`, the chat interfaces, the public
- * file view, the pages reached from an email, and the `AuthShell` handoffs for
- * the CLI and credential groups. Segments, not prefixes: they are matched by
- * set membership, so `f` covers `/f/<token>` and needs no trailing slash.
+ * token layer in their own shell — `(auth)`, the public file view, the pages
+ * reached from an email, and the `AuthShell` handoffs for the CLI and
+ * credential groups. Deployed chat (`/chat`) follows the account theme.
+ * Segments, not prefixes: they are matched by set membership, so `f` covers
+ * `/f/<token>` and needs no trailing slash.
  */
 const NON_LANDING_LIGHT_SEGMENTS = [
   'login',
@@ -20,7 +21,6 @@ const NON_LANDING_LIGHT_SEGMENTS = [
   'sso',
   'invite',
   'verify',
-  'chat',
   'resume',
   'oauth',
   'oauth-error',

@@ -471,7 +471,7 @@ export function SlackManagedUsersModal({
         <ChipModalBody>
           {organizationSetup ? (
             checkingSetup ? (
-              <ChipModalField type='custom' title='Sim Search app'>
+              <ChipModalField type='custom' title='Arena Search app'>
                 <p role='status' className='text-[var(--text-secondary)] text-sm'>
                   Checking the installed Slack app…
                 </p>
@@ -479,7 +479,7 @@ export function SlackManagedUsersModal({
             ) : failedSetup ? (
               <ChipModalField
                 type='custom'
-                title='Sim Search app'
+                title='Arena Search app'
                 error={failedSetup.error?.message}
               >
                 <Chip onClick={() => void failedSetup.refetch()} disabled={failedSetup.isFetching}>
@@ -496,7 +496,7 @@ export function SlackManagedUsersModal({
                 </p>
               </ChipModalField>
             ) : needsApp ? (
-              <ChipModalField type='custom' title='Install Sim Search first'>
+              <ChipModalField type='custom' title='Install Arena Search first'>
                 <p className='text-[var(--text-secondary)] text-sm'>
                   Install the Sim Search app in your Slack workspace to use the bot and connect
                   Slack accounts.
@@ -507,7 +507,7 @@ export function SlackManagedUsersModal({
                 {availableApps.length > 1 ? (
                   <ChipModalField
                     type='dropdown'
-                    title='Sim Search app'
+                    title='Arena Search app'
                     value={selectedApp?.appId}
                     onChange={setAppId}
                     disabled={pending}
@@ -520,7 +520,7 @@ export function SlackManagedUsersModal({
                     required
                   />
                 ) : (
-                  <ChipModalField type='custom' title='Sim Search app'>
+                  <ChipModalField type='custom' title='Arena Search app'>
                     <p className='text-[var(--text-body)] text-sm'>
                       Installed in {selectedApp?.teamName}
                     </p>

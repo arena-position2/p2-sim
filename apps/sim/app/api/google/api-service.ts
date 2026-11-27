@@ -497,6 +497,31 @@ export const buildGenerateContentUrl = (model: string): string => {
   return url
 }
 
+async function inlineImageFromDataUrl(
+  value: string,
+  mimeOverride?: string
+): Promise<InlineImageData | null> {
+  const match = value.trim().match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i)
+  if (!match?.[2]) return null
+  const mimeType = mimeOverride || match[1]?.toLowerCase() || 'image/png'
+  return ensureSupportedMime(Buffer.from(match[2].replace(/\s/g, ''), 'base64'), mimeType)
+}
+
+/**
+ * Selected chat images often arrive as a data URL or `dataUrl`/`base64` field
+ * rather than a storage key. Those are still valid reference images.
+ */
+function alternateImageReference(record: Record<string, unknown>): string | undefined {
+  for (const key of ['dataUrl', 'src', 'imageUrl', 'remoteUrl', 'fileUrl', 'base64'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  if (typeof record.url === 'string' && record.url.trim().startsWith('data:')) {
+    return record.url.trim()
+  }
+  return undefined
+}
+
 /**
  * Convert an input image reference into inline data accepted by Gemini.
  *
@@ -521,6 +546,8 @@ export const resolveInlineImageData = async (
 
   if (typeof inputImage === 'string') {
     const str = inputImage.trim()
+    const dataUrlImage = await inlineImageFromDataUrl(str, inputImageMimeType)
+    if (dataUrlImage) return dataUrlImage
     if (isInternalFileUrl(str)) {
       try {
         const s3Key = extractStorageKey(str)
@@ -639,6 +666,11 @@ export const resolveInlineImageData = async (
     }
   }
 
+  const alternate = alternateImageReference(inputImage as Record<string, unknown>)
+  if (alternate) {
+    return resolveInlineImageData(alternate, obj.type || inputImageMimeType)
+  }
+
   throw new Error('Invalid input image format')
 }
 
@@ -690,6 +722,8 @@ export const resolveProviderInlineImageData = async (
 
   if (typeof inputImage === 'string') {
     const str = inputImage.trim()
+    const dataUrlImage = await inlineImageFromDataUrl(str, inputImageMimeType)
+    if (dataUrlImage) return dataUrlImage
     if (isInternalFileUrl(str)) {
       return resolveInternalImageViaProviderUrl(str, inputImageMimeType, userId, requestId)
     }
@@ -754,6 +788,16 @@ export const resolveProviderInlineImageData = async (
 
   if (obj.url && (obj.url.startsWith('http://') || obj.url.startsWith('https://'))) {
     return fetchImageUrlForInlineData(obj.url, obj.type || inputImageMimeType)
+  }
+
+  const alternate = alternateImageReference(inputImage as Record<string, unknown>)
+  if (alternate) {
+    return resolveProviderInlineImageData(
+      alternate,
+      obj.type || inputImageMimeType,
+      userId,
+      requestId
+    )
   }
 
   throw new Error('Invalid input image format')

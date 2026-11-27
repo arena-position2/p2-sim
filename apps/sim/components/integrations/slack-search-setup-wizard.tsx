@@ -120,10 +120,10 @@ export function SlackSearchSetupWizard({
         onOpenChange={(open) => {
           if (!open) close()
         }}
-        srTitle='Sim Search in Slack'
+        srTitle='Arena Search in Slack'
       >
         <ChipModalHeader icon={SlackIcon} onClose={close}>
-          Sim Search in Slack
+          Arena Search in Slack
         </ChipModalHeader>
         <ChipModalBody>
           {prepare.error ? (
@@ -160,11 +160,11 @@ export function SlackSearchSetupWizard({
         onOpenChange={(open) => {
           if (!open) close()
         }}
-        srTitle='Install the Sim Search app'
+        srTitle='Install the Arena Search app'
         size='sm'
       >
         <ChipModalHeader icon={SlackIcon} onClose={close}>
-          Install the Sim Search app
+          Install the Arena Search app
         </ChipModalHeader>
         <ChipModalBody>
           <p className='px-2 text-[var(--text-secondary)] text-sm'>

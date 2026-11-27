@@ -70,6 +70,9 @@ const OrganizationSecuritySettings = dynamic(() =>
   SECTION_MODULES.security().then((m) => m.OrganizationSecuritySettings)
 )
 const UsageMonitoring = dynamic(() => SECTION_MODULES.usage().then((m) => m.UsageMonitoring))
+const WhitelabelingSettings = dynamic(() =>
+  SECTION_MODULES.whitelabeling().then((m) => m.WhitelabelingSettings)
+)
 const Usage = dynamic(() => SECTION_MODULES['arena-usage']().then((m) => m.Usage))
 const Desktop = dynamic(() => SECTION_MODULES.desktop().then((m) => m.Desktop))
 const Browser = dynamic(() => SECTION_MODULES.browser().then((m) => m.Browser))
@@ -161,6 +164,9 @@ function SettingsPageContent({ section }: SettingsPageProps) {
       {effectiveSection === 'custom-blocks' && <CustomBlocks />}
       {effectiveSection === 'audit-logs' && organizationId && (
         <AuditLogs organizationId={organizationId} />
+      )}
+      {effectiveSection === 'whitelabeling' && organizationId && (
+        <WhitelabelingSettings organizationId={organizationId} />
       )}
       {effectiveSection === 'usage' && organizationId && (
         <UsageMonitoring
