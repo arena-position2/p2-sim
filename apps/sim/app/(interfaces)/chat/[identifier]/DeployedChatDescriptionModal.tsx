@@ -85,7 +85,7 @@ export function DeployedChatDescriptionModal({
             style={{ borderColor: DEPLOYED_CHAT_DIVIDER }}
           >
             <p
-              className='break-words whitespace-pre-wrap text-left font-normal text-[14px] leading-[1.6]'
+              className='whitespace-pre-wrap break-words text-left font-normal text-[14px] leading-[1.6]'
               style={{ color: DEPLOYED_CHAT_TEXT_BODY }}
             >
               <WelcomeMessageWithCtas

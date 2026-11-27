@@ -93,7 +93,7 @@ export function WelcomeMessageWithCtas({
                   key={`w-query-${index}-${queryIndex}`}
                   type='button'
                   className={cn(
-                    'w-fit max-w-full min-w-0 cursor-pointer whitespace-normal break-words rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-left font-[family-name:var(--font-inter)] font-medium text-[var(--text-primary)] text-small leading-[21px] transition-colors',
+                    'w-fit min-w-0 max-w-full cursor-pointer whitespace-normal break-words rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-left font-[family-name:var(--font-inter)] font-medium text-[var(--text-primary)] text-small leading-[21px] transition-colors',
                     'hover:bg-[var(--surface-hover)]'
                   )}
                   onClick={() => onQueryClick?.(query)}
