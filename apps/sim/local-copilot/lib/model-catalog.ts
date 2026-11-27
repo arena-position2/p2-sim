@@ -1,7 +1,7 @@
 import type { LocalCopilotProviderId } from '@/local-copilot/lib/types'
 
 /** Default catalog selection for new local chats and new user-access rows. */
-export const DEFAULT_LOCAL_COPILOT_CATALOG_ID = 'gemini-3.8-flash' as const
+export const DEFAULT_LOCAL_COPILOT_CATALOG_ID = 'bedrock-claude-fable-5-1' as const
 
 /** Top-level picker groups shown when Local is selected. */
 export type LocalCopilotProviderGroup = 'claude' | 'gemini' | 'vertex' | 'bedrock'
@@ -24,13 +24,6 @@ export const LOCAL_COPILOT_CATALOG = [
     label: 'Gemini 3.8 Flash',
     provider: 'gemini' as LocalCopilotProviderId,
     model: 'gemini-3.8-flash',
-  },
-  {
-    id: 'gemini-2.5-pro',
-    providerGroup: 'gemini',
-    label: 'Gemini 2.5 Pro',
-    provider: 'gemini' as LocalCopilotProviderId,
-    model: 'gemini-2.5-pro',
   },
   {
     id: 'gemini-3.1-pro',
@@ -164,6 +157,8 @@ const CATALOG_BY_ID = new Map<string, (typeof LOCAL_COPILOT_CATALOG)[number]>(
  */
 const LEGACY_LOCAL_COPILOT_CATALOG_IDS: Record<string, LocalCopilotCatalogId> = {
   'claude-opus-4-8': 'claude',
+  // Gemini 2.5 Pro is retired for new Google API users (404 NOT_FOUND).
+  'gemini-2.5-pro': 'bedrock-claude-fable-5-1',
   // Earlier Vertex picker SKUs → sole Studio-aligned Vertex leaf.
   'vertex-gemini-3.5-flash': 'vertex-gemini-3.8-flash',
   'vertex-gemini-2.5-flash': 'vertex-gemini-3.8-flash',
@@ -188,22 +183,23 @@ export function remapLegacyLocalCopilotCatalogId(
 }
 
 /**
- * Returns an allowlisted catalog id, falling back to the Gemini default.
+ * Returns an allowlisted catalog id, falling back to Claude Fable 5.1.
+ * Retired / leftover ids (including `gemini-2.5-pro`) are remapped first.
  */
 export function resolveLocalCopilotCatalogId(
   value: string | undefined | null
 ): LocalCopilotCatalogId {
-  if (value && isLocalCopilotCatalogId(value)) return value
   const remapped = remapLegacyLocalCopilotCatalogId(value)
   if (remapped) return remapped
+  if (value && isLocalCopilotCatalogId(value)) return value
   return DEFAULT_LOCAL_COPILOT_CATALOG_ID
 }
 
 /**
  * Local request model: leftover stored `claude-opus-4-8` switches onto
- * `claude`; otherwise honor a valid picker id, otherwise a leftover request
- * id, otherwise the per-user `default_model` enum (Gemini when that is
- * missing or a Cloud model string).
+ * `claude`; retired `gemini-2.5-pro` switches onto Claude Fable 5.1;
+ * otherwise honor a valid picker id, otherwise a leftover request id,
+ * otherwise the per-user `default_model` enum.
  */
 export function resolveLocalCopilotRequestCatalogId(
   requested: string | undefined | null,
@@ -212,9 +208,9 @@ export function resolveLocalCopilotRequestCatalogId(
 ): LocalCopilotCatalogId {
   const remappedStored = remapLegacyLocalCopilotCatalogId(storedChatModel)
   if (remappedStored) return remappedStored
-  if (requested && isLocalCopilotCatalogId(requested)) return requested
   const remappedRequested = remapLegacyLocalCopilotCatalogId(requested)
   if (remappedRequested) return remappedRequested
+  if (requested && isLocalCopilotCatalogId(requested)) return requested
   return resolveLocalCopilotCatalogId(defaultFromAccess)
 }
 
