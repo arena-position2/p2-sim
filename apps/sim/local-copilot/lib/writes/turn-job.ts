@@ -1,0 +1,285 @@
+/**
+ * Turn-scoped job isolation. Preferred HTML from prior turns must not invent a
+ * second job (A5: summarize PDF then re-patch Team To-Do). Enforcement is
+ * tool suppress + executor reject — prompts alone are not enough.
+ */
+
+import type { ActiveEditTargetReason } from '@/local-copilot/lib/context/active-documents'
+import type { ToolExecutionResult } from '@/local-copilot/lib/tools/executor'
+import { looksLikeCreateFromDocumentIntent } from '@/local-copilot/lib/writes/create-from-document-intent'
+import { isCreateFromImageJob } from '@/local-copilot/lib/writes/create-from-image-intent'
+import {
+  hasHtmlEditContext,
+  looksLikeHtmlAnalysisOnly,
+  looksLikeHtmlEditIntent,
+} from '@/local-copilot/lib/writes/html-edit-intent'
+
+export type LocalCopilotTurnJob =
+  | 'summarize_upload'
+  | 'create_from_image'
+  | 'create_from_document'
+  | 'html_edit'
+  | 'general'
+
+/**
+ * Read / summarize an uploaded document — not an HTML edit.
+ *
+ * Deliberately avoids bare `summary` / `executive summary` / `overview`: those
+ * appear as report *section titles* in create-PDF briefs and false-triggered
+ * summarize_upload (blocking create_file). Prefer verbs and "summary of …".
+ */
+const SUMMARIZE_UPLOAD_SIGNAL =
+  /\b(summaris[ee]|summarize|tl;?dr|tldr|(give|write|provide|produce)\b[\s\S]{0,24}\b(a |an |the )?(brief |short |quick )?(summary|overview|executive summary)\b|summary of|overview of|executive summary of|key (points|takeaways)|what('?s| is) in|explain (this|the)\b[\s\S]{0,40}\b(pdf|document|doc|upload|file)|read (this|the)\b[\s\S]{0,40}\b(pdf|document|doc))\b/i
+
+/**
+ * User is asking to *create* a PDF/DOCX/report artifact — not summarize an upload.
+ * Wins over summarize_upload so outline sections titled "Executive Summary" plus
+ * "output as a PDF" cannot fence create_file.
+ */
+const CREATE_DOCUMENT_ARTIFACT_SIGNAL =
+  /\b(create|generate|build|write|make|produce|draft)\b[\s\S]{0,160}\b(pdf(\s+file)?|\.pdf\b|(pdf\s+)?report|docx?|pptx?)\b/i
+
+const DOCUMENT_OR_UPLOAD_MENTION =
+  /\b(\.pdf\b|pdf\b|docx?\b|pptx?\b|the (pdf|document|doc|upload|attachment)|this (pdf|document|doc|upload|attachment)|uploaded (pdf|document|doc|file))\b/i
+
+const DOCUMENT_UPLOAD_EXTENSION = /\.(pdf|docx?|pptx?|txt|md|rtf|csv)$/i
+
+const HTML_PATH = /\.html?(?:\/content)?$/i
+
+/**
+ * Mutations / HTML side-quests that must not run on summarize_upload turns.
+ * `read`/`grep` stay available for the upload; executor rejects HTML paths.
+ */
+export const SUMMARIZE_UPLOAD_SUPPRESSED_TOOLS = new Set([
+  'workspace_file',
+  'edit_content',
+  'create_file',
+  'function_execute',
+  'manage_sandbox',
+  'list_file_folders',
+  'create_file_folder',
+  'rename_file_folder',
+  'move_file_folder',
+  'delete_file_folder',
+])
+
+export interface ResolveTurnJobInput {
+  userMessage: string
+  resolveReason: ActiveEditTargetReason
+  preferredPath?: string | null
+  candidatePaths?: readonly string[]
+  currentTurnUploadPaths?: readonly string[]
+}
+
+/**
+ * True when this turn's uploads (or message) focus a non-image document.
+ */
+export function hasDocumentUploadFocus(options: {
+  userMessage: string
+  currentTurnUploadPaths?: readonly string[]
+}): boolean {
+  const uploads = options.currentTurnUploadPaths ?? []
+  if (uploads.some((path) => DOCUMENT_UPLOAD_EXTENSION.test(path))) return true
+  return DOCUMENT_OR_UPLOAD_MENTION.test(options.userMessage)
+}
+
+/**
+ * True when the user is asking to summarize/read a document upload.
+ */
+export function looksLikeSummarizeUploadIntent(message: string): boolean {
+  return SUMMARIZE_UPLOAD_SIGNAL.test(message.trim())
+}
+
+/**
+ * True when the user is asking to create/generate a PDF/DOCX/report file.
+ */
+export function looksLikeCreateDocumentArtifactIntent(message: string): boolean {
+  return CREATE_DOCUMENT_ARTIFACT_SIGNAL.test(message.trim())
+}
+
+/**
+ * Dual ask: summarize upload AND edit HTML/page in the same message.
+ */
+export function looksLikeSummarizeAndHtmlEditDualIntent(options: {
+  userMessage: string
+  preferredPath?: string | null
+  candidatePaths?: readonly string[]
+}): boolean {
+  if (!looksLikeSummarizeUploadIntent(options.userMessage)) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  return hasHtmlEditContext({
+    userMessage: options.userMessage,
+    preferredPath: options.preferredPath,
+    candidatePaths: options.candidatePaths,
+  })
+}
+
+/**
+ * Picks the primary job for this user turn.
+ */
+export function resolveTurnJob(input: ResolveTurnJobInput): LocalCopilotTurnJob {
+  if (
+    isCreateFromImageJob({
+      resolveReason: input.resolveReason,
+      userMessage: input.userMessage,
+    })
+  ) {
+    return 'create_from_image'
+  }
+
+  const summarize = looksLikeSummarizeUploadIntent(input.userMessage)
+  const createArtifact = looksLikeCreateDocumentArtifactIntent(input.userMessage)
+  const docFocus = hasDocumentUploadFocus({
+    userMessage: input.userMessage,
+    currentTurnUploadPaths: input.currentTurnUploadPaths,
+  })
+  const dual = looksLikeSummarizeAndHtmlEditDualIntent({
+    userMessage: input.userMessage,
+    preferredPath: input.preferredPath,
+    candidatePaths: input.candidatePaths,
+  })
+
+  // Create-PDF/report briefs often list "Executive Summary" and say "as a PDF" —
+  // that is not a summarize-upload job; do not hard-fence create_file.
+  if (summarize && docFocus && !dual && !createArtifact) {
+    return 'summarize_upload'
+  }
+
+  // Summarize + HTML edit in one message: allow both tool families (no hard fence).
+  if (dual) {
+    return 'general'
+  }
+
+  // Create/prototype from an uploaded brief beats HTML-edit misclassification
+  // ("this page" + preferred docx).
+  if (
+    looksLikeCreateFromDocumentIntent(input.userMessage) &&
+    hasDocumentUploadFocus({
+      userMessage: input.userMessage,
+      currentTurnUploadPaths: input.currentTurnUploadPaths,
+    })
+  ) {
+    return 'create_from_document'
+  }
+
+  if (
+    looksLikeHtmlEditIntent(input.userMessage) &&
+    !looksLikeHtmlAnalysisOnly(input.userMessage) &&
+    hasHtmlEditContext({
+      userMessage: input.userMessage,
+      preferredPath: input.preferredPath,
+      candidatePaths: input.candidatePaths,
+    })
+  ) {
+    return 'html_edit'
+  }
+
+  return 'general'
+}
+
+/**
+ * System fence so preferred HTML does not become a second job.
+ */
+export function buildSummarizeUploadJobSystemMessage(options?: {
+  uploadPaths?: readonly string[]
+}): string {
+  const uploads = (options?.uploadPaths ?? []).filter((path) =>
+    DOCUMENT_UPLOAD_EXTENSION.test(path)
+  )
+  const focus =
+    uploads.length > 0
+      ? uploads.map((path) => `\`${path}\``).join(', ')
+      : 'the uploaded document (PDF/DOC/etc.)'
+  return (
+    `[System] Summarize/read-upload job: this turn's only job is to read and summarize ${focus}. ` +
+    'Do NOT grep, read, patch, or open preferred HTML from earlier turns ' +
+    '(e.g. files/**/*.html). Do NOT call workspace_file, edit_content, or create_file. ' +
+    'preferredPath is for vague *edit* follow-ups only — ignore it for mutation this turn. ' +
+    'Reply with the summary; do not re-verify prior UI edits.'
+  )
+}
+
+/**
+ * Strips mutation / sandbox tools on summarize_upload. Never empty list.
+ */
+export function filterSummarizeUploadForcedTools<T extends { name: string }>(
+  tools: T[],
+  active: boolean
+): T[] {
+  if (!active) return tools
+  const filtered = tools.filter((tool) => !SUMMARIZE_UPLOAD_SUPPRESSED_TOOLS.has(tool.name))
+  return filtered.length > 0 ? filtered : tools
+}
+
+function extractToolPath(args: Record<string, unknown>): string {
+  if (typeof args.path === 'string' && args.path.trim()) return args.path.trim()
+  const target = args.target
+  if (target && typeof target === 'object' && !Array.isArray(target)) {
+    const path = (target as { path?: unknown }).path
+    if (typeof path === 'string' && path.trim()) return path.trim()
+  }
+  const resources = args.resources
+  if (Array.isArray(resources) && resources[0] && typeof resources[0] === 'object') {
+    const first = resources[0] as { path?: unknown; type?: unknown }
+    if (first.type === 'file' && typeof first.path === 'string') return first.path.trim()
+  }
+  return ''
+}
+
+function isHtmlWorkspacePath(path: string): boolean {
+  const normalized = path.replace(/%20/g, ' ').split('?')[0] ?? path
+  return HTML_PATH.test(normalized) || /(?:^|\/)files\/.+\.html?(?:\/|$)/i.test(normalized)
+}
+
+export const SUMMARIZE_UPLOAD_OUT_OF_SCOPE_ERROR =
+  'Out of scope for this turn: the user asked to summarize/read an uploaded document. Do not inspect or mutate preferred HTML. Call read on the upload path (uploads/…) and reply with the summary only.'
+
+/**
+ * Hard reject mutations / HTML side-quests when turnJob is summarize_upload.
+ */
+export function rejectOutOfJobToolCall(options: {
+  turnJob: LocalCopilotTurnJob | undefined
+  toolName: string
+  args: Record<string, unknown>
+}): ToolExecutionResult | null {
+  if (options.turnJob !== 'summarize_upload') return null
+
+  const { toolName, args } = options
+  if (
+    toolName === 'workspace_file' ||
+    toolName === 'edit_content' ||
+    toolName === 'create_file' ||
+    toolName === 'function_execute' ||
+    toolName === 'manage_sandbox'
+  ) {
+    return {
+      toolName,
+      success: false,
+      error: SUMMARIZE_UPLOAD_OUT_OF_SCOPE_ERROR,
+      result: {
+        success: false,
+        message: SUMMARIZE_UPLOAD_OUT_OF_SCOPE_ERROR,
+        followUpHint: 'Read uploads/<document> and summarize. Do not patch HTML.',
+      },
+    }
+  }
+
+  if (toolName === 'read' || toolName === 'grep' || toolName === 'open_resource') {
+    const path = extractToolPath(args)
+    if (path && isHtmlWorkspacePath(path)) {
+      return {
+        toolName,
+        success: false,
+        error: SUMMARIZE_UPLOAD_OUT_OF_SCOPE_ERROR,
+        result: {
+          success: false,
+          message: SUMMARIZE_UPLOAD_OUT_OF_SCOPE_ERROR,
+          followUpHint: 'Use the uploaded document path under uploads/, not files/**/*.html.',
+        },
+      }
+    }
+  }
+
+  return null
+}

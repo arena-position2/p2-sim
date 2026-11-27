@@ -109,6 +109,42 @@ describe('resolveActiveEditTarget', () => {
     expect(resolved.reason).toBe('ambiguous')
     expect(resolved.preferredPath).toBeNull()
   })
+
+  it('never prefers an image upload; create-from-screenshot clears prior preferred', () => {
+    const resolved = resolveActiveEditTarget({
+      state,
+      currentTurnPaths: ['uploads/shot.png'],
+      message: 'Build from this screenshot',
+    })
+    expect(resolved).toEqual({
+      preferredPath: null,
+      reason: 'image_reference',
+      candidates: ['uploads/shot.png'],
+    })
+  })
+
+  it('keeps prior preferred when image-only turn is clearly an edit of existing', () => {
+    const resolved = resolveActiveEditTarget({
+      state,
+      currentTurnPaths: ['uploads/shot.png'],
+      message: 'fix the header spacing using this screenshot as reference',
+    })
+    expect(resolved.reason).toBe('preferred')
+    expect(resolved.preferredPath).toBe('files/old.html')
+  })
+
+  it('prefers editable upload when HTML and screenshot arrive together', () => {
+    const resolved = resolveActiveEditTarget({
+      state,
+      currentTurnPaths: ['uploads/shot.png', 'uploads/page.html'],
+      message: 'update the page to match the screenshot',
+    })
+    expect(resolved).toEqual({
+      preferredPath: 'uploads/page.html',
+      reason: 'current_upload',
+      candidates: ['uploads/page.html'],
+    })
+  })
 })
 
 describe('updateActiveDocumentsFromTurn', () => {
@@ -142,6 +178,41 @@ describe('updateActiveDocumentsFromTurn', () => {
       expect.arrayContaining(['uploads/shot.png', 'files/Care_Plan.html'])
     )
     expect(next?.documents.find((doc) => doc.path === 'files/Care_Plan.html')?.role).toBe('edited')
+  })
+
+  it('does not let an image upload become preferredPath', () => {
+    const previous = touchActiveDocument(null, {
+      path: 'files/page.html',
+      role: 'generated',
+      lastTouchedAt: '2026-01-01T00:00:00.000Z',
+    })
+    const next = updateActiveDocumentsFromTurn({
+      previous,
+      currentTurnUploadPaths: ['uploads/shot.png'],
+      message: 'Build from this screenshot',
+      now: '2026-03-01T00:00:00.000Z',
+      toolRecords: [],
+    })
+    expect(next?.preferredPath).toBeNull()
+    expect(next?.documents.map((doc) => doc.path)).toEqual(
+      expect.arrayContaining(['files/page.html', 'uploads/shot.png'])
+    )
+  })
+
+  it('round-trips an intentional preferredPath clear through parse', () => {
+    const cleared = updateActiveDocumentsFromTurn({
+      previous: touchActiveDocument(null, {
+        path: 'files/page.html',
+        role: 'generated',
+        lastTouchedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      currentTurnUploadPaths: ['uploads/shot.png'],
+      message: 'Build from this screenshot',
+      toolRecords: [],
+    })
+    expect(cleared?.preferredPath).toBeNull()
+    const reparsed = parseActiveDocumentsState(cleared)
+    expect(reparsed?.preferredPath).toBeNull()
   })
 
   it('ignores failed patch tools', () => {

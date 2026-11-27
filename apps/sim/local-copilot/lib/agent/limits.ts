@@ -40,14 +40,37 @@ export const MAX_HTML_EDIT_GREP_NUDGE_ROUNDS = 1
 /**
  * Successful file inspections (read/grep/glob/artifact) before an HTML edit
  * turn is forced to call workspace_file instead of paging further.
+ * Kept low so soft prose cannot burn the round budget on more search.
  */
-export const HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE = 6
+export const HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE = 3
+
+/**
+ * Successful greps that returned zero matches before forcing read+write on the
+ * preferred HTML path (instead of more search-shaped greps).
+ */
+export const EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE = 2
 
 /**
  * Forced "patch now" rounds after the inspection threshold. After this budget
  * is exhausted with still no write, the turn stops with a clear user closer.
+ * Lower than before because inspect tools are stripped once write-forced.
  */
-export const MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS = 5
+export const MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS = 2
+
+/**
+ * Extra model rounds on create-from-image (screenshot → new file) when the
+ * model has not yet called create_file. Separate from HTML-edit write nudges.
+ */
+export const MAX_CREATE_FROM_IMAGE_CONTINUATION_ROUNDS = 2
+
+/** Soft forces to create_file on create-from-document before explore thrash. */
+export const MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS = 2
+
+/**
+ * Successful inspects (read/grep/glob/artifact) before mid-stream create force
+ * on create-from-document — well below file_explore_hard_stop (16).
+ */
+export const CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE = 3
 
 /**
  * Successful read/grep/glob/load_copilot_artifact calls on the same path

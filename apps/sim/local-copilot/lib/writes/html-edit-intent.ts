@@ -1,12 +1,8 @@
 /**
  * Detects HTML *edit* follow-ups (vs analysis-only) and extracts grep tokens
- * so the orchestrator can soft-nudge read-paging turns toward grep → patch.
+ * so the orchestrator can force grep → patch (and strip inspect tools once
+ * write-forced) instead of endless search thrash.
  */
-
-import {
-  isBridgingAssistantNarration,
-  isFileInspectionBridgeNarration,
-} from '@/local-copilot/lib/user-facing-text'
 
 /** Analysis-only asks should not force a write path. */
 const HTML_ANALYSIS_ONLY_PATTERN =
@@ -18,6 +14,19 @@ const HTML_EDIT_SIGNAL_PATTERN =
 
 const HTML_MAKE_BETTER_PATTERN =
   /\bmake\b[\s\S]{0,40}\b(better|stronger|bigger|green|bold|clearer|more|prominent)\b/i
+
+/**
+ * Option-chip titles become the next user message verbatim. They are short
+ * imperatives ("Add format presets") without classic edit verbs — treat as
+ * implement only when chip-sized so long "Add …" prose does not false-fire.
+ */
+const HTML_SHORT_IMPLEMENT_FOLLOW_UP_MAX_CHARS = 80
+const HTML_SHORT_IMPLEMENT_FOLLOW_UP_PATTERN =
+  /^(add|enable|include|show|hide|insert|set|expand|widen|tighten|increase|decrease|remove|replace|rename|toggle|introduce|support|wire(?:\s+up)?|turn\s+on|turn\s+off)\b/i
+
+/** Still analysis / brainstorm — never promote a short "Add suggestions" chip. */
+const HTML_SHORT_IMPLEMENT_ANALYSIS_EXCLUDE =
+  /\b(suggestion|suggestions|feedback|ideas|improvements|review|critique|analy[sz]e|what do you think)\b/i
 
 const HTML_MENTION_PATTERN = /\b(\.html?\b|html\b|the page|this page|the file)\b/i
 
@@ -44,6 +53,41 @@ const TOKEN_STOPWORDS = new Set([
   'suggestions',
 ])
 
+/** After empty greps: ban more search/sandbox thrash; keep `read` for one live excerpt. */
+export const HTML_EDIT_SEARCH_SUPPRESSED_TOOLS = new Set([
+  'grep',
+  'glob',
+  'function_execute',
+  'manage_sandbox',
+])
+
+/** After inspection-threshold write force: ban all inspect/sandbox tools. */
+export const HTML_EDIT_WRITE_SUPPRESSED_TOOLS = new Set([
+  'read',
+  'grep',
+  'glob',
+  'load_copilot_artifact',
+  'function_execute',
+  'manage_sandbox',
+])
+
+export type HtmlEditToolSuppressMode = 'none' | 'search' | 'write'
+
+const FILE_INSPECTION_TOOL_NAMES = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
+
+/**
+ * True for short option-chip / follow-up titles that mean "implement this UX
+ * change" (e.g. "Add format presets") without classic edit verbs.
+ */
+export function looksLikeShortHtmlImplementFollowUp(message: string): boolean {
+  const text = message.trim()
+  if (!text || text.length > HTML_SHORT_IMPLEMENT_FOLLOW_UP_MAX_CHARS) return false
+  if (/\n/.test(text) || /\?$/.test(text)) return false
+  if (HTML_SHORT_IMPLEMENT_ANALYSIS_EXCLUDE.test(text)) return false
+  if (HTML_ANALYSIS_ONLY_PATTERN.test(text)) return false
+  return HTML_SHORT_IMPLEMENT_FOLLOW_UP_PATTERN.test(text)
+}
+
 /**
  * True when the user is asking to change HTML (not only review / suggest).
  */
@@ -51,6 +95,7 @@ export function looksLikeHtmlEditIntent(message: string): boolean {
   const text = message.trim()
   if (!text) return false
   if (HTML_EDIT_SIGNAL_PATTERN.test(text) || HTML_MAKE_BETTER_PATTERN.test(text)) return true
+  if (looksLikeShortHtmlImplementFollowUp(text)) return true
   return false
 }
 
@@ -102,6 +147,16 @@ export function extractHtmlEditGrepTokens(message: string): string[] {
     add(match[1] ?? '')
   }
 
+  // Chip titles: "Add format presets" → grep "format presets"
+  if (tokens.length === 0 && looksLikeShortHtmlImplementFollowUp(message)) {
+    const remainder = message
+      .trim()
+      .replace(HTML_SHORT_IMPLEMENT_FOLLOW_UP_PATTERN, '')
+      .replace(/^(the|a|an)\s+/i, '')
+      .trim()
+    if (remainder.length >= 2) add(remainder)
+  }
+
   return tokens.slice(0, 6)
 }
 
@@ -123,8 +178,6 @@ export function buildHtmlEditGrepNudgeMessage(tokens: string[]): string {
   )
 }
 
-const FILE_INSPECTION_TOOL_NAMES = new Set(['read', 'grep', 'glob', 'load_copilot_artifact'])
-
 /**
  * Counts successful file-inspection tool calls this turn.
  */
@@ -135,12 +188,54 @@ export function countSuccessfulFileInspections(
     .length
 }
 
-function isHtmlEditBridgeNarration(text: string): boolean {
-  return isFileInspectionBridgeNarration(text) || isBridgingAssistantNarration(text)
+/**
+ * True when a successful grep result has zero matches / zero hit counts.
+ */
+export function isEmptyGrepResult(result: unknown): boolean {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return false
+  const record = result as Record<string, unknown>
+  const payload =
+    record.output && typeof record.output === 'object' && !Array.isArray(record.output)
+      ? (record.output as Record<string, unknown>)
+      : record
+
+  if (Array.isArray(payload.matches)) return payload.matches.length === 0
+  if (Array.isArray(payload.files)) return payload.files.length === 0
+  if (Array.isArray(payload.counts)) {
+    if (payload.counts.length === 0) return true
+    return payload.counts.every((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true
+      const count = (entry as Record<string, unknown>).count
+      return typeof count === 'number' ? count === 0 : true
+    })
+  }
+  return false
+}
+
+/**
+ * Counts successful greps this turn that returned no hits.
+ */
+export function countEmptyGreps(
+  records: ReadonlyArray<{ name: string; success: boolean; result?: unknown }>
+): number {
+  return records.filter(
+    (record) => record.name === 'grep' && record.success && isEmptyGrepResult(record.result)
+  ).length
+}
+
+function isHtmlEditForceJob(options: {
+  isHtmlEditJob?: boolean
+  isCreateFromImageJob?: boolean
+}): boolean {
+  // Prefer explicit turnJob gate (Slice A/B). Legacy create-from-image flag still blocks.
+  if (options.isHtmlEditJob === false) return false
+  if (options.isCreateFromImageJob) return false
+  return true
 }
 
 /**
  * Soft orchestration: edit-intent turn inspected with read only (no grep yet).
+ * Bridge narration is intentionally ignored — prose must not block the force.
  */
 export function shouldForceHtmlEditGrepNudge(options: {
   postBuildToolMode: string
@@ -153,9 +248,12 @@ export function shouldForceHtmlEditGrepNudge(options: {
   hasSuccessfulRead: boolean
   hasSuccessfulGrep: boolean
   hasFileMutationTools: boolean
-  streamedUserFacingText: string
-  roundDisplayText: string
+  /** When false, skip (summarize_upload / create_from_image / general). */
+  isHtmlEditJob?: boolean
+  /** @deprecated Prefer isHtmlEditJob — kept for older call sites. */
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (!isHtmlEditForceJob(options)) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditGrepNudges >= options.maxForcedHtmlEditGrepNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -164,12 +262,6 @@ export function shouldForceHtmlEditGrepNudge(options: {
   if (!looksLikeHtmlEditIntent(options.userMessage)) return false
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (!options.hasSuccessfulRead || options.hasSuccessfulGrep) return false
-
-  const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
-  const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
-
   return true
 }
 
@@ -187,9 +279,10 @@ export function shouldForceHtmlEditWriteNudge(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
-  streamedUserFacingText: string
-  roundDisplayText: string
+  isHtmlEditJob?: boolean
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (!isHtmlEditForceJob(options)) return false
   if (options.postBuildToolMode !== 'all') return false
   if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
   if (options.round >= options.maxToolRounds - 1) return false
@@ -198,12 +291,35 @@ export function shouldForceHtmlEditWriteNudge(options: {
   if (!looksLikeHtmlEditIntent(options.userMessage)) return false
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (options.inspectionCount < options.inspectionsBeforeWriteNudge) return false
+  return true
+}
 
-  const streamed = options.streamedUserFacingText.trim()
-  if (streamed && !isHtmlEditBridgeNarration(streamed)) return false
-  const roundDisplay = options.roundDisplayText.trim()
-  if (roundDisplay && !isHtmlEditBridgeNarration(roundDisplay)) return false
-
+/**
+ * After repeated empty greps, stop searching and force preferred-path read+write.
+ */
+export function shouldForceHtmlEditWriteAfterEmptyGreps(options: {
+  postBuildToolMode: string
+  forcedHtmlEditWriteNudges: number
+  maxForcedHtmlEditWriteNudges: number
+  emptyGrepCount: number
+  emptyGrepsBeforeWriteNudge: number
+  round: number
+  maxToolRounds: number
+  userMessage: string
+  hasHtmlContext: boolean
+  hasFileMutationTools: boolean
+  isHtmlEditJob?: boolean
+  isCreateFromImageJob?: boolean
+}): boolean {
+  if (!isHtmlEditForceJob(options)) return false
+  if (options.postBuildToolMode !== 'all') return false
+  if (options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges) return false
+  if (options.round >= options.maxToolRounds - 1) return false
+  if (options.hasFileMutationTools) return false
+  if (!options.hasHtmlContext) return false
+  if (!looksLikeHtmlEditIntent(options.userMessage)) return false
+  if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
+  if (options.emptyGrepCount < options.emptyGrepsBeforeWriteNudge) return false
   return true
 }
 
@@ -218,13 +334,44 @@ export function shouldStopHtmlEditWithoutWrite(options: {
   userMessage: string
   hasHtmlContext: boolean
   hasFileMutationTools: boolean
+  isHtmlEditJob?: boolean
+  isCreateFromImageJob?: boolean
 }): boolean {
+  if (!isHtmlEditForceJob(options)) return false
   if (options.hasFileMutationTools) return false
   if (!options.hasHtmlContext) return false
   if (!looksLikeHtmlEditIntent(options.userMessage)) return false
   if (looksLikeHtmlAnalysisOnly(options.userMessage)) return false
   if (options.inspectionCount < options.inspectionsBeforeWriteNudge) return false
   return options.forcedHtmlEditWriteNudges >= options.maxForcedHtmlEditWriteNudges
+}
+
+/**
+ * Mid-stream (between tool rounds): escalate suppress without waiting for a
+ * text-only settle. Only for turnJob html_edit — never summarize_upload.
+ */
+export function resolveHtmlEditMidStreamSuppress(options: {
+  turnJob: string
+  currentMode: HtmlEditToolSuppressMode
+  inspectionCount: number
+  inspectionsBeforeWriteNudge: number
+  emptyGrepCount: number
+  emptyGrepsBeforeWriteNudge: number
+  hasFileMutationTools: boolean
+}): HtmlEditToolSuppressMode {
+  if (options.turnJob !== 'html_edit') return options.currentMode
+  if (options.hasFileMutationTools) return 'none'
+
+  if (options.emptyGrepCount >= options.emptyGrepsBeforeWriteNudge) {
+    if (options.currentMode === 'none') return 'search'
+    return 'write'
+  }
+
+  if (options.inspectionCount >= options.inspectionsBeforeWriteNudge) {
+    return 'write'
+  }
+
+  return options.currentMode
 }
 
 /**
@@ -251,10 +398,41 @@ export function buildHtmlEditWriteNudgeMessage(options: {
 
   return (
     `[System] HTML edit write nudge (${options.attempt}/${options.maxAttempts}): you already inspected the file enough${pathHint}. ` +
-    'Do NOT call read, grep, glob, or load_copilot_artifact again this round. ' +
+    'Do NOT call read, grep, glob, load_copilot_artifact, or function_execute — those tools are unavailable this round. ' +
     `Call workspace_file operation=patch with search_replace NOW (${tokenHint}), then edit_content with only the replacement. ` +
-    'One targeted patch for the user ask (e.g. stepper clickability OR validation) — not a full rewrite.' +
+    'One targeted patch for the user ask — not a full rewrite.' +
     lastAttempt
+  )
+}
+
+/**
+ * System nudge after empty greps: one preferred-path read (if needed) then patch.
+ */
+export function buildHtmlEditEmptyGrepWriteNudgeMessage(options: {
+  tokens: string[]
+  preferredPath?: string | null
+  attempt: number
+  maxAttempts: number
+}): string {
+  const preferred = options.preferredPath?.trim()
+  const contentPath = preferred
+    ? preferred.endsWith('/content')
+      ? preferred
+      : `${preferred}/content`
+    : null
+  const readHint = contentPath
+    ? `If you still lack a live substring, call read("${contentPath}") once with a tight offset/limit, then `
+    : 'If you still lack a live substring, call read on the preferred HTML /content path once with a tight offset/limit, then '
+  const tokenHint =
+    options.tokens.length > 0
+      ? `Prefer tokens: ${options.tokens.map((token) => JSON.stringify(token)).join(', ')}.`
+      : 'Use a distinctive label from the user ask.'
+
+  return (
+    `[System] HTML edit empty-grep write nudge (${options.attempt}/${options.maxAttempts}): ` +
+    'recent greps returned no matches — stop inventing new search patterns. ' +
+    `${readHint}call workspace_file operation=patch with search_replace (${tokenHint}). ` +
+    'Do NOT call grep/glob/function_execute again this round.'
   )
 }
 
@@ -276,6 +454,21 @@ export function buildHtmlEditWriteGiveUpMessage(options: {
     'The file was left unchanged — reply with the exact button label, heading, or function name to patch ' +
     '(for example `go` / stepper tabs / Next button), or ask me to apply only one of those fixes.'
   )
+}
+
+/**
+ * Strips search and/or inspect tools once an HTML edit turn is forced forward.
+ * Never returns an empty list (Bedrock requires toolConfig when history has tools).
+ */
+export function filterHtmlEditForcedTools<T extends { name: string }>(
+  tools: T[],
+  mode: HtmlEditToolSuppressMode
+): T[] {
+  if (mode === 'none') return tools
+  const suppressed =
+    mode === 'write' ? HTML_EDIT_WRITE_SUPPRESSED_TOOLS : HTML_EDIT_SEARCH_SUPPRESSED_TOOLS
+  const filtered = tools.filter((tool) => !suppressed.has(tool.name))
+  return filtered.length > 0 ? filtered : tools
 }
 
 function summarizeHtmlEditAsk(message: string): string {

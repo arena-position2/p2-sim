@@ -2,6 +2,7 @@ import { db } from '@sim/db'
 import {
   localCopilotAuditLogs,
   localCopilotConversations,
+  localCopilotLlmTraces,
   localCopilotMessages,
   localCopilotPatches,
   localCopilotToolCalls,
@@ -235,4 +236,49 @@ export async function writeAuditLog(params: {
     status: params.status ?? 'success',
     metadata: params.metadata ?? {},
   })
+}
+
+/**
+ * Persists one parent-agent LLM round (full prompt + response) for debugging.
+ * Callers gate on `LOCAL_COPILOT_LLM_TRACE` before invoking.
+ */
+export async function writeLlmTrace(params: {
+  userId: string
+  workspaceId: string
+  round: number
+  provider: string
+  model: string
+  systemPrompt?: string | null
+  messages: unknown
+  tools: unknown
+  responseText?: string | null
+  thinking?: string | null
+  toolCalls?: unknown
+  usage?: Record<string, unknown>
+  injectedNudges?: unknown
+  runId?: string
+  chatId?: string
+  conversationId?: string
+}): Promise<string> {
+  const id = generateId()
+  await db.insert(localCopilotLlmTraces).values({
+    id,
+    userId: params.userId,
+    workspaceId: params.workspaceId,
+    round: params.round,
+    provider: params.provider,
+    model: params.model,
+    systemPrompt: params.systemPrompt ?? null,
+    messages: params.messages ?? [],
+    tools: params.tools ?? [],
+    responseText: params.responseText ?? null,
+    thinking: params.thinking ?? null,
+    toolCalls: params.toolCalls ?? [],
+    usage: params.usage ?? {},
+    injectedNudges: params.injectedNudges ?? [],
+    runId: params.runId ?? null,
+    chatId: params.chatId ?? null,
+    conversationId: params.conversationId ?? null,
+  })
+  return id
 }

@@ -14,6 +14,7 @@ import { toCopilotServerToolContext } from '@/local-copilot/lib/tools/copilot-se
 import {
   enrichCreateFileArgs,
   enrichEditContentArgs,
+  enrichFunctionExecuteArgs,
   enrichWorkspaceFileArgs,
   rejectCreateFileImageAsText,
 } from '@/local-copilot/lib/tools/enrich-file-tool-args'
@@ -28,6 +29,7 @@ import {
   type MothershipDelegatedToolName,
   WORKFLOW_SCOPED_DELEGATED_TOOLS,
 } from '@/local-copilot/lib/tools/mothership-delegated-tool-defs'
+import { rejectHtmlFileViaSandbox } from '@/local-copilot/lib/tools/reject-html-via-sandbox'
 import { rejectOfficeFileViaSandbox } from '@/local-copilot/lib/tools/reject-office-via-sandbox'
 import {
   ARENA_ALIASED_SERVER_TOOL_NAMES,
@@ -404,8 +406,16 @@ export async function executeMothershipDelegatedTool(
   const languageError = enforceLocalCopilotSandboxLanguages(toolName, enrichedArgs)
   if (languageError) return languageError
 
+  // Coerce stringified inputs/outputs before schema + office/html guards.
+  if (toolName === 'function_execute') {
+    enrichFunctionExecuteArgs(enrichedArgs)
+  }
+
   const officeSandboxError = rejectOfficeFileViaSandbox(toolName, enrichedArgs)
   if (officeSandboxError) return officeSandboxError
+
+  const htmlSandboxError = rejectHtmlFileViaSandbox(toolName, enrichedArgs)
+  if (htmlSandboxError) return htmlSandboxError
 
   if (!workflowId && ctx.workspaceId) {
     workflowId = await resolveWorkflowIdFromDatabase(ctx.workspaceId, enrichedArgs)
@@ -530,6 +540,14 @@ export async function executeMothershipDelegatedTool(
 
   if (toolName === 'edit_content') {
     enrichEditContentArgs(enrichedArgs)
+  }
+
+  if (toolName === 'open_resource') {
+    const { enrichOpenResourceArgs } = await import(
+      '@/local-copilot/lib/tools/enrich-open-resource-args'
+    )
+    const openResourceReject = await enrichOpenResourceArgs(enrichedArgs, ctx)
+    if (openResourceReject) return openResourceReject
   }
 
   // Arena always runs server-registry tools in-process via ServerToolAdapter.

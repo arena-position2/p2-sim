@@ -33,6 +33,7 @@ export type ActiveEditTargetReason =
   | 'preferred'
   | 'single'
   | 'ambiguous'
+  | 'image_reference'
   | 'none'
 
 export interface ResolvedActiveEditTarget {
@@ -40,6 +41,9 @@ export interface ResolvedActiveEditTarget {
   reason: ActiveEditTargetReason
   candidates: string[]
 }
+
+/** Image uploads are visual references — never auto-preferred edit targets. */
+const IMAGE_DOCUMENT_EXTENSION = /\.(png|jpe?g|gif|webp)$/i
 
 const ACTIVE_DOC_TOUCH_TOOLS = new Set([
   'create_file',
@@ -75,19 +79,31 @@ export function parseActiveDocumentsState(value: unknown): ActiveDocumentsState 
     documents.push({ path, role, lastTouchedAt, ...(name ? { name } : {}) })
   }
 
+  const preferredSpecified = Object.hasOwn(record, 'preferredPath')
   const preferredRaw =
     typeof record.preferredPath === 'string' ? normalizeDocumentPath(record.preferredPath) : ''
   const preferredPath =
     preferredRaw && documents.some((doc) => doc.path === preferredRaw) ? preferredRaw : null
 
   if (documents.length === 0 && !preferredPath) return null
-  return clampActiveDocumentsState({ documents, preferredPath })
+  return clampActiveDocumentsState(
+    { documents, preferredPath },
+    {
+      // Explicit null in chat config means "cleared" (e.g. image-only create turn).
+      allowEmptyPreferred: preferredSpecified && record.preferredPath === null,
+    }
+  )
 }
 
 /**
  * Enforces size caps and canonical preferredPath.
+ * Pass `allowEmptyPreferred` when an image-only create turn intentionally clears
+ * preferredPath so a prior HTML file is not silently re-selected.
  */
-export function clampActiveDocumentsState(state: ActiveDocumentsState): ActiveDocumentsState {
+export function clampActiveDocumentsState(
+  state: ActiveDocumentsState,
+  options?: { allowEmptyPreferred?: boolean }
+): ActiveDocumentsState {
   const byPath = new Map<string, ActiveDocument>()
   for (const doc of state.documents) {
     const path = normalizeDocumentPath(doc.path)
@@ -108,12 +124,16 @@ export function clampActiveDocumentsState(state: ActiveDocumentsState): ActiveDo
     .sort((a, b) => a.lastTouchedAt.localeCompare(b.lastTouchedAt))
     .slice(-MAX_ACTIVE_DOCUMENTS)
 
-  const preferred =
-    state.preferredPath && documents.some((doc) => doc.path === state.preferredPath)
-      ? state.preferredPath
-      : documents.length > 0
-        ? (documents[documents.length - 1]?.path ?? null)
-        : null
+  const preferredValid =
+    Boolean(state.preferredPath) &&
+    documents.some((doc) => doc.path === state.preferredPath) &&
+    !isImageDocumentPath(state.preferredPath ?? '')
+
+  const preferred = preferredValid
+    ? state.preferredPath
+    : options?.allowEmptyPreferred
+      ? null
+      : lastEditableDocumentPath(documents)
 
   return { documents, preferredPath: preferred }
 }
@@ -138,6 +158,12 @@ export function formatActiveDocumentsSystemMessage(
     })),
     rules: [
       'Current-turn uploads win over older preferred documents.',
+      'Image uploads (png/jpeg/gif/webp) are reference only — never preferredPath.',
+      ...(resolution?.reason === 'image_reference'
+        ? [
+            'resolveReason image_reference: create a NEW file with create_file from the image — do not explore or patch unrelated existing HTML.',
+          ]
+        : []),
       'If the user names a file, edit that path only.',
       'If multiple documents could match and the user is vague, ask which file — do not silently patch the wrong one.',
       'After create_file / materialize / successful edit, keep editing that same path (do not create a duplicate).',
@@ -176,7 +202,9 @@ export async function persistActiveDocuments(
   state: ActiveDocumentsState
 ): Promise<void> {
   await mergeCopilotChatConfig(chatId, userId, {
-    activeDocuments: clampActiveDocumentsState(state),
+    activeDocuments: clampActiveDocumentsState(state, {
+      allowEmptyPreferred: state.preferredPath === null,
+    }),
   })
 }
 
@@ -214,7 +242,39 @@ export function pathsFromCurrentTurnUploads(params: {
 }
 
 /**
+ * True when the path is an image file (screenshot / mockup), not an edit target.
+ */
+export function isImageDocumentPath(path: string): boolean {
+  return IMAGE_DOCUMENT_EXTENSION.test(fileNameFromPath(normalizeDocumentPath(path)))
+}
+
+/**
+ * Whether an image-only turn should clear a prior preferred edit target.
+ * Create / build-from-screenshot intents clear; edit-existing intents keep it.
+ * Ambiguous image-only turns clear so we do not silently patch an old HTML file.
+ */
+export function shouldClearPreferredForImageOnlyTurn(message: string): boolean {
+  const text = message.trim().toLowerCase()
+  if (!text) return true
+
+  const createVerb =
+    /\b(build|create|generate|make|design|recreate|clone|convert|turn into)\b/.test(text)
+  const fromImage =
+    /\b(from|based on)\s+(this\s+)?(screenshot|image|png|photo|mockup|design)\b/.test(text)
+  const editVerb = /\b(fix|edit|update|change|patch|tweak|adjust|modify|rename|restyle)\b/.test(
+    text
+  )
+
+  // "fix the header using this screenshot as reference" → keep prior preferred.
+  if (editVerb && !createVerb && !fromImage) return false
+  if (createVerb || fromImage) return true
+  if (/\b(screenshot|mockup)\b/.test(text) && !editVerb) return true
+  return true
+}
+
+/**
  * Picks the edit target for this turn without colliding older files with new uploads.
+ * Image uploads never become preferredPath; create-from-screenshot clears a prior preferred.
  */
 export function resolveActiveEditTarget(params: {
   state: ActiveDocumentsState | null
@@ -227,9 +287,12 @@ export function resolveActiveEditTarget(params: {
       ...params.currentTurnPaths.map(normalizeDocumentPath).filter(Boolean),
     ]),
   ]
+  const knownEditable = known.filter((path) => !isImageDocumentPath(path))
   const current = [...new Set(params.currentTurnPaths.map(normalizeDocumentPath).filter(Boolean))]
+  const currentEditable = current.filter((path) => !isImageDocumentPath(path))
+  const currentImages = current.filter((path) => isImageDocumentPath(path))
 
-  const explicit = findExplicitPathMentions(params.message, known)
+  const explicit = findExplicitPathMentions(params.message, knownEditable)
   if (explicit.length === 1) {
     return { preferredPath: explicit[0] ?? null, reason: 'explicit_name', candidates: explicit }
   }
@@ -237,33 +300,56 @@ export function resolveActiveEditTarget(params: {
     return { preferredPath: null, reason: 'ambiguous', candidates: explicit }
   }
 
-  if (current.length === 1) {
-    return { preferredPath: current[0] ?? null, reason: 'current_upload', candidates: current }
+  if (currentEditable.length === 1) {
+    return {
+      preferredPath: currentEditable[0] ?? null,
+      reason: 'current_upload',
+      candidates: currentEditable,
+    }
   }
-  if (current.length > 1) {
-    return { preferredPath: null, reason: 'ambiguous', candidates: current }
+  if (currentEditable.length > 1) {
+    return { preferredPath: null, reason: 'ambiguous', candidates: currentEditable }
   }
 
-  // Preferred is the last created/edited doc — use it for vague follow-ups even when
+  if (currentImages.length > 0 && currentEditable.length === 0) {
+    if (shouldClearPreferredForImageOnlyTurn(params.message)) {
+      return {
+        preferredPath: null,
+        reason: 'image_reference',
+        candidates: currentImages,
+      }
+    }
+    const preferred = params.state?.preferredPath
+    if (preferred && knownEditable.includes(preferred) && !isImageDocumentPath(preferred)) {
+      return { preferredPath: preferred, reason: 'preferred', candidates: [preferred] }
+    }
+    return {
+      preferredPath: null,
+      reason: 'image_reference',
+      candidates: currentImages,
+    }
+  }
+
+  // Preferred is the last created/edited editable doc — use it for vague follow-ups even when
   // older uploads (e.g. a screenshot) remain in the map. Current-turn uploads above
   // already win so a new file two days later does not collide with the old preferred.
   const preferred = params.state?.preferredPath
-  if (preferred && known.includes(preferred)) {
+  if (preferred && knownEditable.includes(preferred) && !isImageDocumentPath(preferred)) {
     return { preferredPath: preferred, reason: 'preferred', candidates: [preferred] }
   }
 
-  if (known.length === 1) {
-    return { preferredPath: known[0] ?? null, reason: 'single', candidates: known }
+  if (knownEditable.length === 1) {
+    return { preferredPath: knownEditable[0] ?? null, reason: 'single', candidates: knownEditable }
   }
-  if (known.length > 1) {
-    return { preferredPath: null, reason: 'ambiguous', candidates: known }
+  if (knownEditable.length > 1) {
+    return { preferredPath: null, reason: 'ambiguous', candidates: knownEditable }
   }
 
   return { preferredPath: null, reason: 'none', candidates: [] }
 }
 
 /**
- * Applies a touch (upsert + set preferred).
+ * Applies a touch (upsert). Images are tracked but never become preferredPath.
  */
 export function touchActiveDocument(
   state: ActiveDocumentsState | null,
@@ -282,25 +368,36 @@ export function touchActiveDocument(
 
   const previous = state?.documents ?? []
   const without = previous.filter((doc) => doc.path !== path)
+  const preferredPath = isImageDocumentPath(path)
+    ? state?.preferredPath && !isImageDocumentPath(state.preferredPath)
+      ? state.preferredPath
+      : lastEditableDocumentPath(without)
+    : path
   return clampActiveDocumentsState({
     documents: [...without, nextDoc],
-    preferredPath: path,
+    preferredPath,
   })
 }
 
 /**
  * Merges current-turn uploads and successful file-tool touches into durable state.
+ * Image-only create/build-from-screenshot turns clear preferredPath so the next
+ * vague follow-up does not silently patch a prior HTML file.
  */
 export function updateActiveDocumentsFromTurn(params: {
   previous: ActiveDocumentsState | null
   currentTurnUploadPaths: string[]
   toolRecords: Array<{ name: string; success: boolean; result?: unknown }>
+  message?: string
   now?: string
 }): ActiveDocumentsState | null {
   const now = params.now ?? new Date().toISOString()
   let next = params.previous
+  const uploadPaths = params.currentTurnUploadPaths.map(normalizeDocumentPath).filter(Boolean)
+  const editableUploads = uploadPaths.filter((path) => !isImageDocumentPath(path))
+  const imageUploads = uploadPaths.filter((path) => isImageDocumentPath(path))
 
-  for (const path of params.currentTurnUploadPaths) {
+  for (const path of uploadPaths) {
     next = touchActiveDocument(next, { path, role: 'upload', lastTouchedAt: now })
   }
 
@@ -308,6 +405,27 @@ export function updateActiveDocumentsFromTurn(params: {
     const touch = extractActiveDocumentTouch(record.name, record.success, record.result, now)
     if (!touch) continue
     next = touchActiveDocument(next, touch)
+  }
+
+  if (
+    next &&
+    imageUploads.length > 0 &&
+    editableUploads.length === 0 &&
+    shouldClearPreferredForImageOnlyTurn(params.message ?? '')
+  ) {
+    const touchedEditableTool = params.toolRecords.some((record) => {
+      const touch = extractActiveDocumentTouch(record.name, record.success, record.result, now)
+      return Boolean(touch && !isImageDocumentPath(touch.path))
+    })
+    if (!touchedEditableTool) {
+      next = clampActiveDocumentsState(
+        {
+          documents: next.documents,
+          preferredPath: null,
+        },
+        { allowEmptyPreferred: true }
+      )
+    }
   }
 
   return next
@@ -403,6 +521,14 @@ export function normalizeDocumentPath(path: string): string {
 function fileNameFromPath(path: string): string {
   const parts = path.split('/').filter(Boolean)
   return parts[parts.length - 1] ?? ''
+}
+
+function lastEditableDocumentPath(documents: ActiveDocument[]): string | null {
+  for (let i = documents.length - 1; i >= 0; i -= 1) {
+    const path = documents[i]?.path
+    if (path && !isImageDocumentPath(path)) return path
+  }
+  return null
 }
 
 function findExplicitPathMentions(message: string, candidates: string[]): string[] {

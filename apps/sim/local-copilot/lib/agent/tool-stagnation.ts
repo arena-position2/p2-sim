@@ -167,7 +167,8 @@ export interface FileExploreStopHit {
  */
 export function createFileExploreTracker(
   pathThreshold = MAX_FILE_EXPLORE_WITHOUT_MUTATION,
-  totalThreshold = MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION
+  totalThreshold = MAX_FILE_EXPLORE_TOTAL_WITHOUT_MUTATION,
+  turnJob?: string
 ): {
   record: (toolName: string, argsJson: string, success: boolean) => FileExploreStopHit | null
   reset: () => void
@@ -198,7 +199,12 @@ export function createFileExploreTracker(
           count: pathCount,
           totalInspections,
           reason: 'path',
-          message: buildFileExploreStopMessage({ pathKey, count: pathCount, reason: 'path' }),
+          message: buildFileExploreStopMessage({
+            pathKey,
+            count: pathCount,
+            reason: 'path',
+            turnJob,
+          }),
         }
       }
       if (totalInspections >= totalThreshold) {
@@ -212,6 +218,7 @@ export function createFileExploreTracker(
             pathKey,
             count: totalInspections,
             reason: 'total',
+            turnJob,
           }),
         }
       }
@@ -231,7 +238,26 @@ export function buildFileExploreStopMessage(options: {
   pathKey: string
   count: number
   reason: 'path' | 'total'
+  /** When create_from_document, ask to create instead of "what to change". */
+  turnJob?: string
 }): string {
+  if (options.turnJob === 'create_from_document') {
+    if (options.reason === 'total') {
+      return (
+        `I inspected source files ${options.count} times but did not create the prototype. ` +
+        'No new file was written — reply "Create the HTML page" (or name the path) to continue.'
+      )
+    }
+    const label =
+      options.pathKey.startsWith('artifact:') || options.pathKey.startsWith('__')
+        ? 'the brief'
+        : options.pathKey
+    return (
+      `I kept reading ${label} (${options.count} looks) without creating the prototype. ` +
+      'No new file was written — reply "Create the HTML page" to continue from the brief.'
+    )
+  }
+
   if (options.reason === 'total') {
     return (
       `I inspected the file ${options.count} times but did not finish applying the fix. ` +
@@ -251,7 +277,19 @@ export function buildFileExploreStopMessage(options: {
 /**
  * System nudge so the model does not resume paging after an explore hard-stop.
  */
-export function buildFileExploreSystemMessage(hit: FileExploreStopHit): string {
+export function buildFileExploreSystemMessage(
+  hit: FileExploreStopHit,
+  options?: { turnJob?: string }
+): string {
+  if (options?.turnJob === 'create_from_document') {
+    return (
+      `[System] File-explore hard-stop: ${hit.reason === 'path' ? hit.count : hit.totalInspections} ` +
+      `inspection tool(s) without create_file` +
+      (hit.reason === 'path' ? ` on ${hit.pathKey}` : '') +
+      '. Do not call read, grep, glob, or load_copilot_artifact again this turn. ' +
+      'If you can still call tools, call create_file once for the prototype; otherwise tell the user no file was created.'
+    )
+  }
   return (
     `[System] File-explore hard-stop: ${hit.reason === 'path' ? hit.count : hit.totalInspections} ` +
     `inspection tool(s) without a successful file write` +

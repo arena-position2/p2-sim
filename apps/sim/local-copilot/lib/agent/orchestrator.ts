@@ -9,7 +9,11 @@ import {
 import type { VfsSnapshotV1 } from '@/lib/mothership/generated/vfs-snapshot-v1'
 import { iterateWithIdleStatus } from '@/local-copilot/lib/agent/iterate-with-idle-status'
 import {
+  CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
+  EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
   HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+  MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+  MAX_CREATE_FROM_IMAGE_CONTINUATION_ROUNDS,
   MAX_DEBUG_EXPLANATION_CONTINUATION_ROUNDS,
   MAX_FILE_EDIT_CONTINUATION_ROUNDS,
   MAX_FORCED_FOLLOW_UP_ROUNDS,
@@ -54,6 +58,7 @@ import {
   resolveStagnationAction,
 } from '@/local-copilot/lib/agent/tool-stagnation'
 import { formatUxPhaseStatus, type LocalUxPhase } from '@/local-copilot/lib/agent/ux-phase'
+import { maybeRecordLocalCopilotLlmTrace } from '@/local-copilot/lib/audit/llm-traces'
 import { logCopilotAction } from '@/local-copilot/lib/audit/logger'
 import { sanitizeToolIoForPersistence } from '@/local-copilot/lib/audit/sanitize-persistence'
 import { recordLocalCopilotTurnUsage } from '@/local-copilot/lib/billing/record-turn-usage'
@@ -263,16 +268,42 @@ import { mutationRequiresVerification } from '@/local-copilot/lib/verification/p
 import { runPostMutationVerification } from '@/local-copilot/lib/verification/run-verification'
 import type { MutationOutcome, VerificationRecord } from '@/local-copilot/lib/verification/types'
 import {
+  buildCreateFromDocumentContinuationMessage,
+  buildCreateFromDocumentJobSystemMessage,
+  filterCreateFromDocumentForcedTools,
+  shouldActivateCreateFromDocumentMidStreamSuppress,
+  shouldForceCreateFromDocumentContinuation,
+  turnHasSuccessfulFunctionExecute,
+} from '@/local-copilot/lib/writes/create-from-document-intent'
+import {
+  buildCreateFromImageContinuationMessage,
+  buildCreateFromImageJobSystemMessage,
+  filterCreateFromImageForcedTools,
+  shouldForceCreateFromImageContinuation,
+  turnHasSuccessfulCreateFile,
+} from '@/local-copilot/lib/writes/create-from-image-intent'
+import {
+  buildHtmlEditEmptyGrepWriteNudgeMessage,
   buildHtmlEditGrepNudgeMessage,
   buildHtmlEditWriteGiveUpMessage,
   buildHtmlEditWriteNudgeMessage,
+  countEmptyGreps,
   countSuccessfulFileInspections,
   extractHtmlEditGrepTokens,
+  filterHtmlEditForcedTools,
+  type HtmlEditToolSuppressMode,
   hasHtmlEditContext,
+  resolveHtmlEditMidStreamSuppress,
   shouldForceHtmlEditGrepNudge,
+  shouldForceHtmlEditWriteAfterEmptyGreps,
   shouldForceHtmlEditWriteNudge,
   shouldStopHtmlEditWithoutWrite,
 } from '@/local-copilot/lib/writes/html-edit-intent'
+import {
+  buildSummarizeUploadJobSystemMessage,
+  filterSummarizeUploadForcedTools,
+  resolveTurnJob,
+} from '@/local-copilot/lib/writes/turn-job'
 import { createTurnMutations } from '@/local-copilot/lib/writes/turn-mutations'
 import { MAX_TOOL_ITERATIONS } from '@/providers'
 
@@ -623,6 +654,16 @@ export async function* runLocalCopilotAgent(
     ...(snapshotPromptPlan ? { snapshotRevision: snapshotPromptPlan.meta.contentRevision } : {}),
   })
   const userTurnText = getLocalCopilotUserTurnText(userTurn)
+  const turnJob = resolveTurnJob({
+    userMessage: userTurnText,
+    resolveReason: activeEditTarget.reason,
+    preferredPath: activeEditTarget.preferredPath,
+    candidatePaths: activeEditTarget.candidates,
+    currentTurnUploadPaths: currentRequestUploadPaths,
+  })
+  const createFromImageJob = turnJob === 'create_from_image'
+  const createFromDocumentJob = turnJob === 'create_from_document'
+  const summarizeUploadJob = turnJob === 'summarize_upload'
 
   const pinnedDirective =
     extractedDirectives.activeDirective?.trim() || sessionMemory?.activeDirective?.trim() || ''
@@ -711,6 +752,22 @@ export async function* runLocalCopilotAgent(
         ? [formatSessionConstraintsSystemMessage(pinnedConstraints)]
         : []),
       ...(pinnedDirective ? [formatActiveDirectiveSystemMessage(pinnedDirective)] : []),
+      ...(createFromImageJob
+        ? [{ role: 'system' as const, content: buildCreateFromImageJobSystemMessage() }]
+        : []),
+      ...(createFromDocumentJob
+        ? [{ role: 'system' as const, content: buildCreateFromDocumentJobSystemMessage() }]
+        : []),
+      ...(summarizeUploadJob
+        ? [
+            {
+              role: 'system' as const,
+              content: buildSummarizeUploadJobSystemMessage({
+                uploadPaths: currentRequestUploadPaths,
+              }),
+            },
+          ]
+        : []),
       ...historyMessages,
       userTurn,
     ],
@@ -740,6 +797,11 @@ export async function* runLocalCopilotAgent(
     toolCatalogCount: allTools.length,
     microcompactClearedCount: historyMicrocompact.clearedCount,
     microcompactCharsFreed: historyMicrocompact.charsFreed,
+    turnJob,
+    createFromImageJob,
+    createFromDocumentJob,
+    summarizeUploadJob,
+    activeEditResolveReason: activeEditTarget.reason,
     specialistPrimary: intent.primary,
     specialistSecondary: intent.secondary,
     useFullCatalog: usedFullCatalog,
@@ -860,6 +922,7 @@ export async function* runLocalCopilotAgent(
     structuredContext,
     selectedBlockId: params.selectedBlockId,
     lastUserMessage: userTurnText,
+    turnJob,
     mutationIdempotency: new Map(),
     listedIntegrationToolIds: new Set(),
     readVfsPaths: new Set(),
@@ -1054,6 +1117,10 @@ export async function* runLocalCopilotAgent(
   let forcedFileEditContinuations = 0
   let forcedHtmlEditGrepNudges = 0
   let forcedHtmlEditWriteNudges = 0
+  let forcedCreateFromImageContinuations = 0
+  let forcedCreateFromDocumentContinuations = 0
+  /** Once set, subsequent model rounds strip search and/or inspect tools. */
+  let htmlEditToolSuppressMode: HtmlEditToolSuppressMode = 'none'
   let forcedResearchSearchContinuations = 0
   /** Successful get_blocks_metadata calls after create and before the first populate edit. */
   let prePopulateDiscoveryCalls = 0
@@ -1064,7 +1131,11 @@ export async function* runLocalCopilotAgent(
   let turnInputTokens = 0
   let turnOutputTokens = 0
   const stagnationTracker = createToolStagnationTracker()
-  const fileExploreTracker = createFileExploreTracker()
+  const fileExploreTracker = createFileExploreTracker(
+    undefined,
+    undefined,
+    createFromDocumentJob ? 'create_from_document' : undefined
+  )
   let stagnationStopMessage: string | null = null
   /**
    * Explore hard-stops must not wait on another model round — that await is
@@ -1088,7 +1159,10 @@ export async function* runLocalCopilotAgent(
       return {
         stop: true,
         skipModelRound: true,
-        systemMessage: buildFileExploreSystemMessage(exploreHit),
+        systemMessage: buildFileExploreSystemMessage(
+          exploreHit,
+          createFromDocumentJob ? { turnJob: 'create_from_document' } : undefined
+        ),
         userMessage: exploreHit.message,
       }
     }
@@ -1194,7 +1268,26 @@ export async function* runLocalCopilotAgent(
 
     // Keep tools attached even for `final_only` — Bedrock rejects requests that
     // omit toolConfig once history already has toolUse/toolResult blocks.
-    const roundTools = resolvePostBuildRoundTools(postBuildToolMode, tools)
+    const createFromImageSuppressActive =
+      createFromImageJob && !turnHasSuccessfulCreateFile(turnToolRecords)
+    // After the first create-from-document force, strip explore so paging cannot resume.
+    const createFromDocumentSuppressActive =
+      createFromDocumentJob &&
+      forcedCreateFromDocumentContinuations > 0 &&
+      !turnHasSuccessfulCreateFile(turnToolRecords)
+    const roundTools = filterSummarizeUploadForcedTools(
+      filterCreateFromDocumentForcedTools(
+        filterCreateFromImageForcedTools(
+          filterHtmlEditForcedTools(
+            resolvePostBuildRoundTools(postBuildToolMode, tools),
+            htmlEditToolSuppressMode
+          ),
+          createFromImageSuppressActive
+        ),
+        createFromDocumentSuppressActive
+      ),
+      summarizeUploadJob
+    )
 
     // Stream user-facing prose live for real replies. Hold bridging narration when
     // tools are available, and stop emitting once a tool_call arrives — otherwise
@@ -1445,6 +1538,32 @@ export async function* runLocalCopilotAgent(
       memory: getLocalCopilotMemorySnapshot(),
     })
 
+    maybeRecordLocalCopilotLlmTrace({
+      userId: params.userId,
+      workspaceId: params.workspaceId,
+      round,
+      provider: config.provider,
+      model: config.model,
+      messages,
+      tools: roundTools,
+      responseText: roundRawText,
+      thinking: roundReasoningContent || undefined,
+      toolCalls: pendingToolCalls.map((call) => ({
+        id: call.id,
+        name: call.name,
+        arguments: call.arguments,
+      })),
+      usage: {
+        inputTokens: roundInputTokens,
+        outputTokens: roundOutputTokens,
+        cacheReadTokens: roundCacheReadTokens,
+        cacheCreationTokens: roundCacheCreationTokens,
+      },
+      runId: params.runId,
+      chatId: params.chatId,
+      conversationId,
+    })
+
     if (roundGeminiModelParts.length > 0) {
       yield { type: 'gemini_model_parts', parts: roundGeminiModelParts }
     }
@@ -1655,6 +1774,63 @@ export async function* runLocalCopilotAgent(
         continue
       }
 
+      const hasSuccessfulCreateFile = turnHasSuccessfulCreateFile(turnToolRecords)
+      const canForceCreateFromImage = shouldForceCreateFromImageContinuation({
+        postBuildToolMode,
+        isCreateFromImageJob: createFromImageJob,
+        forcedCreateFromImageContinuations,
+        maxForcedCreateFromImageContinuations: MAX_CREATE_FROM_IMAGE_CONTINUATION_ROUNDS,
+        round,
+        maxToolRounds,
+        hasSuccessfulCreateFile,
+      })
+
+      if (canForceCreateFromImage) {
+        forcedCreateFromImageContinuations += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildCreateFromImageContinuationMessage(),
+        })
+        logger.info('Arena Copilot forcing create-from-image continuation', {
+          round,
+          forcedCreateFromImageContinuations,
+          resolveReason: activeEditTarget.reason,
+        })
+        continue
+      }
+
+      const canForceCreateFromDocument = shouldForceCreateFromDocumentContinuation({
+        postBuildToolMode,
+        isCreateFromDocumentJob: createFromDocumentJob,
+        forcedCreateFromDocumentContinuations,
+        maxForcedCreateFromDocumentContinuations: MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+        round,
+        maxToolRounds,
+        hasSuccessfulCreateFile,
+      })
+
+      if (canForceCreateFromDocument) {
+        forcedCreateFromDocumentContinuations += 1
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildCreateFromDocumentContinuationMessage(),
+        })
+        logger.info('Arena Copilot forcing create-from-document continuation', {
+          round,
+          forcedCreateFromDocumentContinuations,
+          resolveReason: activeEditTarget.reason,
+        })
+        continue
+      }
+
       const hasSuccessfulRead = turnToolRecords.some(
         (record) => record.name === 'read' && record.success
       )
@@ -1667,8 +1843,13 @@ export async function* runLocalCopilotAgent(
         candidatePaths: activeEditTarget.candidates,
       })
       const fileInspectionCount = countSuccessfulFileInspections(turnToolRecords)
+      const emptyGrepCount = countEmptyGreps(turnToolRecords)
       const hasFileMutations = turnHasFileMutationTools(turnToolRecords)
       const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+
+      if (hasFileMutations) {
+        htmlEditToolSuppressMode = 'none'
+      }
 
       const canForceHtmlEditGrep = shouldForceHtmlEditGrepNudge({
         postBuildToolMode,
@@ -1681,8 +1862,7 @@ export async function* runLocalCopilotAgent(
         hasSuccessfulRead,
         hasSuccessfulGrep,
         hasFileMutationTools: hasFileMutations,
-        streamedUserFacingText,
-        roundDisplayText: intentDisplay,
+        isHtmlEditJob: turnJob === 'html_edit',
       })
 
       if (canForceHtmlEditGrep) {
@@ -1704,6 +1884,48 @@ export async function* runLocalCopilotAgent(
         continue
       }
 
+      const canForceHtmlEditWriteAfterEmptyGreps = shouldForceHtmlEditWriteAfterEmptyGreps({
+        postBuildToolMode,
+        forcedHtmlEditWriteNudges,
+        maxForcedHtmlEditWriteNudges: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+        emptyGrepCount,
+        emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+        round,
+        maxToolRounds,
+        userMessage: userTurnText,
+        hasHtmlContext: htmlEditContext,
+        hasFileMutationTools: hasFileMutations,
+        isHtmlEditJob: turnJob === 'html_edit',
+      })
+
+      if (canForceHtmlEditWriteAfterEmptyGreps) {
+        forcedHtmlEditWriteNudges += 1
+        // First empty-grep force keeps read; later forced writes strip inspect tools.
+        htmlEditToolSuppressMode =
+          forcedHtmlEditWriteNudges > 1 || htmlEditToolSuppressMode === 'write' ? 'write' : 'search'
+        if (intentDisplay.trim()) {
+          messages.push({ role: 'assistant', content: intentDisplay })
+          assistantText = ''
+        }
+        messages.push({
+          role: 'user',
+          content: buildHtmlEditEmptyGrepWriteNudgeMessage({
+            tokens: htmlEditGrepTokens,
+            preferredPath: activeEditTarget.preferredPath,
+            attempt: forcedHtmlEditWriteNudges,
+            maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+          }),
+        })
+        logger.info('Arena Copilot forcing HTML edit write after empty greps', {
+          round,
+          forcedHtmlEditWriteNudges,
+          emptyGrepCount,
+          grepTokens: htmlEditGrepTokens,
+          preferredPath: activeEditTarget.preferredPath,
+        })
+        continue
+      }
+
       const canForceHtmlEditWrite = shouldForceHtmlEditWriteNudge({
         postBuildToolMode,
         forcedHtmlEditWriteNudges,
@@ -1715,12 +1937,12 @@ export async function* runLocalCopilotAgent(
         userMessage: userTurnText,
         hasHtmlContext: htmlEditContext,
         hasFileMutationTools: hasFileMutations,
-        streamedUserFacingText,
-        roundDisplayText: intentDisplay,
+        isHtmlEditJob: turnJob === 'html_edit',
       })
 
       if (canForceHtmlEditWrite) {
         forcedHtmlEditWriteNudges += 1
+        htmlEditToolSuppressMode = 'write'
         if (intentDisplay.trim()) {
           messages.push({ role: 'assistant', content: intentDisplay })
           assistantText = ''
@@ -1753,6 +1975,7 @@ export async function* runLocalCopilotAgent(
           userMessage: userTurnText,
           hasHtmlContext: htmlEditContext,
           hasFileMutationTools: hasFileMutations,
+          isHtmlEditJob: turnJob === 'html_edit',
         })
       ) {
         stagnationStopMessage = buildHtmlEditWriteGiveUpMessage({
@@ -1769,18 +1992,21 @@ export async function* runLocalCopilotAgent(
         break
       }
 
-      const canForceFileEdit = shouldForceFileEditContinuation({
-        postBuildToolMode,
-        forcedFileEditContinuations,
-        maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
-        round,
-        maxToolRounds,
-        hasFileInspectionTools: turnHasFileInspectionTools(turnToolRecords),
-        hasFileMutationTools: hasFileMutations,
-        hasDomainCompletionTools: turnHasDomainCompletionTools(turnToolRecords),
-        streamedUserFacingText,
-        roundDisplayText: intentDisplay,
-      })
+      const canForceFileEdit =
+        !createFromImageJob &&
+        !summarizeUploadJob &&
+        shouldForceFileEditContinuation({
+          postBuildToolMode,
+          forcedFileEditContinuations,
+          maxForcedFileEditContinuations: MAX_FILE_EDIT_CONTINUATION_ROUNDS,
+          round,
+          maxToolRounds,
+          hasFileInspectionTools: turnHasFileInspectionTools(turnToolRecords),
+          hasFileMutationTools: hasFileMutations,
+          hasDomainCompletionTools: turnHasDomainCompletionTools(turnToolRecords),
+          streamedUserFacingText,
+          roundDisplayText: intentDisplay,
+        })
 
       if (canForceFileEdit) {
         forcedFileEditContinuations += 1
@@ -2847,6 +3073,88 @@ export async function* runLocalCopilotAgent(
       messages.push(deferred)
     }
 
+    // Mid-stream HTML-edit interrupt (Slice B): strip explore/sandbox for the
+    // *next* model round without waiting for a text-only settle (A2 thrash).
+    {
+      const midStreamMutations = turnHasFileMutationTools(turnToolRecords)
+      const midStreamInspections = countSuccessfulFileInspections(turnToolRecords)
+      const midStreamEmptyGreps = countEmptyGreps(turnToolRecords)
+      const nextHtmlEditSuppress = resolveHtmlEditMidStreamSuppress({
+        turnJob,
+        currentMode: htmlEditToolSuppressMode,
+        inspectionCount: midStreamInspections,
+        inspectionsBeforeWriteNudge: HTML_EDIT_INSPECTIONS_BEFORE_WRITE_NUDGE,
+        emptyGrepCount: midStreamEmptyGreps,
+        emptyGrepsBeforeWriteNudge: EMPTY_GREPS_BEFORE_HTML_WRITE_NUDGE,
+        hasFileMutationTools: midStreamMutations,
+      })
+      if (nextHtmlEditSuppress !== htmlEditToolSuppressMode) {
+        const previousMode = htmlEditToolSuppressMode
+        htmlEditToolSuppressMode = nextHtmlEditSuppress
+        if (nextHtmlEditSuppress === 'search' || nextHtmlEditSuppress === 'write') {
+          forcedHtmlEditWriteNudges += 1
+          const htmlEditGrepTokens = extractHtmlEditGrepTokens(userTurnText)
+          messages.push({
+            role: 'user',
+            content:
+              nextHtmlEditSuppress === 'write'
+                ? buildHtmlEditWriteNudgeMessage({
+                    tokens: htmlEditGrepTokens,
+                    preferredPath: activeEditTarget.preferredPath,
+                    attempt: forcedHtmlEditWriteNudges,
+                    maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+                  })
+                : buildHtmlEditEmptyGrepWriteNudgeMessage({
+                    tokens: htmlEditGrepTokens,
+                    preferredPath: activeEditTarget.preferredPath,
+                    attempt: forcedHtmlEditWriteNudges,
+                    maxAttempts: MAX_HTML_EDIT_WRITE_NUDGE_ROUNDS,
+                  }),
+          })
+          logger.info('Arena Copilot mid-stream HTML edit suppress', {
+            round,
+            previousMode,
+            nextMode: nextHtmlEditSuppress,
+            midStreamInspections,
+            midStreamEmptyGreps,
+            forcedHtmlEditWriteNudges,
+            preferredPath: activeEditTarget.preferredPath,
+          })
+        }
+      }
+    }
+
+    // Mid-stream create-from-document interrupt: after extract or N inspects,
+    // strip explore/sandbox and force create_file (Claude-style: ship artifact).
+    {
+      const hasSuccessfulCreateFileMid = turnHasSuccessfulCreateFile(turnToolRecords)
+      const wasCreateSuppressActive = forcedCreateFromDocumentContinuations > 0
+      const activateCreateSuppress = shouldActivateCreateFromDocumentMidStreamSuppress({
+        turnJob,
+        alreadyActive: wasCreateSuppressActive,
+        inspectionCount: countSuccessfulFileInspections(turnToolRecords),
+        inspectionsBeforeCreateNudge: CREATE_FROM_DOCUMENT_INSPECTIONS_BEFORE_CREATE_NUDGE,
+        hasSuccessfulFunctionExecute: turnHasSuccessfulFunctionExecute(turnToolRecords),
+        hasSuccessfulCreateFile: hasSuccessfulCreateFileMid,
+        forcedCreateFromDocumentContinuations,
+        maxForcedCreateFromDocumentContinuations: MAX_CREATE_FROM_DOCUMENT_CONTINUATION_ROUNDS,
+      })
+      if (activateCreateSuppress && !wasCreateSuppressActive && !hasSuccessfulCreateFileMid) {
+        forcedCreateFromDocumentContinuations += 1
+        messages.push({
+          role: 'user',
+          content: buildCreateFromDocumentContinuationMessage(),
+        })
+        logger.info('Arena Copilot mid-stream create-from-document suppress', {
+          round,
+          forcedCreateFromDocumentContinuations,
+          inspectionCount: countSuccessfulFileInspections(turnToolRecords),
+          hasSuccessfulFunctionExecute: turnHasSuccessfulFunctionExecute(turnToolRecords),
+          preferredPath: activeEditTarget.preferredPath,
+        })
+      }
+    }
+
     if (
       shouldRefundPrePopulateDiscoveryRound({
         createdWorkflowThisTurn,
@@ -3347,6 +3655,7 @@ export async function* runLocalCopilotAgent(
       previous: activeDocumentsState,
       currentTurnUploadPaths: currentRequestUploadPaths,
       toolRecords: turnToolRecords,
+      message: params.message,
     })
     if (nextActiveDocuments) {
       activeDocumentsState = nextActiveDocuments

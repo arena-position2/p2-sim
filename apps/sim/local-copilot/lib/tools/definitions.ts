@@ -36,7 +36,7 @@ const CORE_LOCAL_COPILOT_TOOLS: LocalCopilotToolDefinition[] = [
   {
     name: 'edit_workflow',
     description:
-      'Applies block operations to a workflow (add, edit, delete). Requires workflowId from create_workflow or an open workflow. CONNECTIONS: never add edges as separate operations or type "edge". Wire on the SOURCE (upstream) block via params.connections — e.g. { source: "<target-block-id>" } on the Start block to connect Start → Agent. Never put connections on the downstream block and never point connections at Start/trigger. To reverse a wire, put connections on the new source only. To add Image Generator / Chart Generator / Exa / etc. TO an Agent, edit that Agent\'s inputs.tools array (types image_generator_v2, chart_generator, exa) and update the Agent messages/prompt so it chooses those tools from the user question — do not add those as canvas blocks and do not add a Function block as a substitute. Call get_blocks_metadata ONCE with every block type you need before the first edit. After create_workflow this turn, do not create again or call get_workflow_context — edit immediately. Up to 8 sequential edit_workflow calls are OK for multi-agent graphs. Human review uses type human_in_the_loop. App-owned verification may run after success — do not claim verified yourself. Always pass operations as a non-empty array.',
+      'Applies block ops (add/edit/delete) to a workflow. Wire on the SOURCE via params.connections (never type "edge"; never point at Start). Agent tools (image_generator_v2, chart_generator, exa) go in Agent.inputs.tools — not canvas blocks. Call get_blocks_metadata once before the first edit. After create_workflow this turn, edit immediately (do not recreate or get_workflow_context). Always pass a non-empty operations array.',
     parameters: {
       type: 'object',
       properties: {
@@ -151,7 +151,7 @@ const CORE_LOCAL_COPILOT_TOOLS: LocalCopilotToolDefinition[] = [
   {
     name: 'invoke_integration_tool',
     description:
-      'Runs a Arena integration tool directly (no workflow). Pass a registered toolId (e.g. exa_search, exa_answer, firecrawl_scrape, gmail_draft_v2) — listing first is not required for known ids. Call list_integration_tools only to discover operations for a service. For live/current web data prefer exa_answer (factual Q&A with citations) or exa_search (result lists) — same as the Exa block. For E2B-backed web apps when e2b.enabled is true, use development_generate_app or development_edit_app. Workspace env keys, BYOK, and hosted keys are applied automatically.',
+      'Runs an Arena integration tool (no workflow). Pass toolId (e.g. exa_answer, exa_search, gmail_draft_v2) + params. List first only to discover unknown ops. Live facts: prefer exa_answer/exa_search. Keys applied automatically.',
     parameters: {
       type: 'object',
       properties: {

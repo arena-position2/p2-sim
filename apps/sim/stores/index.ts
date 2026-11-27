@@ -8,6 +8,15 @@ const logger = createLogger('Stores')
 
 export const RECENT_IMPERSONATIONS_STORAGE_KEY = 'recent-impersonations'
 
+/**
+ * Device-scoped flag for the one-time Better Auth cookie Domain migration.
+ * Survives identity boundaries (`clearUserData`): wiping it re-runs the Arena
+ * session cookie-scope migration, which clears session cookies and SSO-resumes
+ * as the hub user — undoing admin impersonation.
+ * Bump the suffix when a new clear pass is required in production.
+ */
+export const AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY = 'sim_auth_session_cookie_scope_migration_v3'
+
 /** Why desktop tools still running for the previous identity were cancelled. */
 const SIGNED_OUT_ABORT_REASON = 'identity_boundary:clearUserData'
 
@@ -33,6 +42,7 @@ export async function clearUserData(options: ClearUserDataOptions = {}): Promise
       'next-favicon',
       'sim-theme',
       'sim-landing-theme',
+      AUTH_SESSION_COOKIE_SCOPE_MIGRATION_KEY,
       ...(options.preserveRecentImpersonations ? [RECENT_IMPERSONATIONS_STORAGE_KEY] : []),
     ]
     const keysToRemove = Object.keys(localStorage).filter((key) => !keysToKeep.includes(key))

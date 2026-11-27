@@ -58,6 +58,26 @@ export function canonicalCreateFilePath(args: Record<string, unknown>): string {
 }
 
 /**
+ * Coerces a nested tool arg that models often JSON-stringify (Zod then fails with
+ * "expected object, received string"). Mutates in place when parse succeeds.
+ */
+function coerceJsonObjectArg(args: Record<string, unknown>, key: string): void {
+  const value = args[key]
+  if (typeof value !== 'string') return
+  const asObject = tryParseJsonObject(value)
+  if (asObject) args[key] = asObject
+}
+
+/**
+ * Normalizes `function_execute` mount args before schema validation.
+ * Gemini/Claude often pass `inputs` / `outputs` as JSON strings.
+ */
+export function enrichFunctionExecuteArgs(args: Record<string, unknown>): void {
+  coerceJsonObjectArg(args, 'inputs')
+  coerceJsonObjectArg(args, 'outputs')
+}
+
+/**
  * Normalizes common `create_file` arg mistakes so AJV does not reject the call.
  * Models often pass a string/array for `outputs` or a bare `path`/`name` instead of `fileName`.
  */

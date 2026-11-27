@@ -49,7 +49,11 @@ export interface ReadWorkspaceFileTextInput {
   limit?: number
   /** Private classification for runtime consumers, omitted from ordinary API reads. */
   includeSecretProvenance?: boolean
-  /** Internal agent reads can decode plain source files identified by their MIME type. */
+  /**
+   * Internal agent reads can decode plain source files identified by their MIME type.
+   * For `.html`/`.htm`, also returns raw markup (tags intact) instead of HtmlParser prose —
+   * Copilot/edit paths need source they can patch.
+   */
   allowPlainText?: boolean
 }
 
@@ -155,6 +159,15 @@ export async function extractWorkspaceFileRecordText(
     )
   }
 
+  /**
+   * HtmlParser turns markup into structured prose (tags/scripts stripped). That
+   * is right for ordinary extraction, but agent/Copilot reads with
+   * `allowPlainText` need the editable source so greps for `class=` / `<script`
+   * work and patches stay surgical. Decode those as plain text instead.
+   */
+  const parseExtension =
+    input.allowPlainText && (extension === 'html' || extension === 'htm') ? 'txt' : extension
+
   const maxBytes = Math.min(input.maxBytes ?? MAX_TEXT_EXTRACTION_BYTES, MAX_TEXT_EXTRACTION_BYTES)
 
   /**
@@ -175,7 +188,7 @@ export async function extractWorkspaceFileRecordText(
         })
       ).buffer
     : await readSourceBuffer(file, maxBytes, signal)
-  const parsed = await parseFileText(content, extension, file.name, signal)
+  const parsed = await parseFileText(content, parseExtension, file.name, signal)
   const metadata = parsed.metadata ?? {}
 
   const truncated = metadata.truncated === true

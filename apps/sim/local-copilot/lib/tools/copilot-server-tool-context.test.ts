@@ -44,4 +44,8 @@ describe('toCopilotServerToolContext', () => {
       'read'
     )
   })
+
+  it('sets requestMode agent so open_resource panel tools are allowed', () => {
+    expect(toCopilotServerToolContext(baseCtx()).requestMode).toBe('agent')
+  })
 })

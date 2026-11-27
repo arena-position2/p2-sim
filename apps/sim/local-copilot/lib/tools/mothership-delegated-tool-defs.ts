@@ -4,7 +4,7 @@ import type { LocalCopilotToolDefinition } from '@/local-copilot/lib/types'
 
 const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
   run_workflow:
-    'Executes a workflow and returns block outputs, executionId, and status. Call get_workflow_run_options first when trigger inputs are unknown. For Start file[] / files inputs, pass workflow_input.files as [{ id: "<workspace-file-uuid>" }] — never a bare uploads/ or files/ path string; materialize_file chat uploads into files/… first when needed. Do not claim binary file attach is impossible.',
+    'Executes a workflow; returns block outputs + executionId. Call get_workflow_run_options first when inputs are unknown. Start file[] inputs: workflow_input.files as [{ id: "<workspace-file-uuid>" }] (materialize uploads/ first) — never a bare path string.',
   run_workflow_until_block:
     'Runs a workflow until a specific block completes, then returns partial outputs.',
   run_block:
@@ -19,33 +19,35 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
     'Loads workflow structure and metadata by workflowId (useful on home chat when no workflow is open).',
   list_integration_tools:
     'Lists available operations for a connected integration service (e.g. gmail, google_sheets, slack). Then call invoke_integration_tool with the exact tool id — do not call load_integration_tool.',
-  read: 'Reads a workspace file by canonical VFS path. For file bytes/text use files/<name>/content (e.g. files/page.html/content). Required before workspace_file operation=update on existing HTML/text so the edit starts from the current file. On HTML edit follow-ups prefer grep with user tokens before large offset/limit paging. Complex/Arena HTML may return truncated mega SVG lines — that is expected; use offset/limit or grep, then patch — never full-rewrite.',
-  glob: 'Finds workspace files by glob pattern (e.g. files/**/*.csv).',
-  grep: 'Searches file contents under a workspace path pattern. On HTML edit follow-ups, prefer grep with tokens from the user message (button label, heading, id/class) before large offset/limit reads, then workspace_file patch.',
+  read: 'Reads files/ or uploads/ by VFS path. Chat uploads: read("uploads/<name>"). Durable workspace text/HTML: read("files/<name>/content") — bare files/<name>.html is metadata. HTML/HTM /content is raw source (tags/classes/scripts intact) for patching. When not: do not invent bytes; prefer grep for targeted HTML edits before large offset paging.',
+  glob: 'Finds workspace files by glob pattern (e.g. files/**/*.csv). When not: do not start an HTML fix with glob — use preferredPath / uploads / read / grep.',
+  grep: 'Searches file contents under a path (HTML matches against raw source). When: HTML edit follow-ups — grep user tokens (label/heading/id/class) before large reads. When not: after empty matches on the preferred file, stop inventing patterns — read /content once then workspace_file patch; empty ≠ stripped markup.',
   create_file:
-    'Creates a workspace file. Prefer fileName with a VFS path (e.g. "files/Deck.pptx"). For markdown/text/json/csv/html, ALWAYS pass content with the full body — markdown must be finished GFM (# title, ## sections, lists, blank lines), not a wall of prose or a file wrapped in one code fence. HTML must stay lean (under ~100KB; no multi-hundred-KB inline SVG path dumps — oversized HTML create_file is rejected); for complex UIs split CSS/JS into sibling files or grow via append — never one-shot Arena/Figma-export megabyte pages. Do not also print that body in chat. Office formats (pptx/docx/pdf): empty shell only — no content — then workspace_file update + edit_content in later rounds. For PNG/JPEG/GIF/WebP: do NOT use create_file with base64 — call generate_image with outputs.files instead.',
-  create_file_folder: 'Creates a folder under the workspace files tree.',
+    'Creates a workspace file at fileName (e.g. files/Deck.pptx). Text/md/json/csv/html: pass full content (lean HTML only). Office pptx/docx/pdf: empty shell (no content) then workspace_file → edit_content. When not: never create_file images — use generate_image; never dump megabyte Arena/Figma HTML.',
+  create_file_folder:
+    'Optional folder stub. Prefer create_file with fileName like files/Apps/Page.html — folders are path prefixes and need no separate create.',
   workspace_file:
-    'Declares a content edit on an existing workspace file (append/update/patch). REQUIRED: operation, target={kind:"path", path:"files/..." }, title. For HTML/text, targeted changes (title, heading, one string) MUST use operation=patch with strategy=search_replace — update replaces the ENTIRE file and is blocked when the existing HTML is ≥40KB. Patch search must be a short unique live substring (max 600 chars) copied from read/grep — never a truncated mega-line or a large HTML dump. Always read files/<path>/content first before update. Never operation=create or target.kind=new_file. Example patch: {"operation":"patch","target":{"kind":"path","path":"files/page.html"},"title":"Title","edit":{"strategy":"search_replace","search":"<title>Old</title>"}}. Does not write the body — call edit_content in the NEXT tool round with content.',
+    'Declares an edit on an existing file. REQUIRED: operation, target={kind:"path", path:"files/..."}, title. Targeted HTML/text: operation=patch + search_replace (short live substring from read/grep). Does not write the body — call edit_content next round. When not: never operation=create / target.kind=new_file; never full update on large HTML (≥40KB).',
   download_to_workspace_file: 'Downloads a URL into a workspace file.',
   user_table:
-    'Creates, reads, and updates workspace tables — operations include create, get, get_schema, insert_row, batch_insert_rows, query_rows, update_row, add_column, import_file, create_from_file.',
+    'Creates, reads, and updates workspace tables (create, get, get_schema, insert_row, batch_insert_rows, query_rows, update_row, add_column, import_file, create_from_file).',
   knowledge_base:
-    'Manages knowledge bases — operations: create, list, get, query, add_file, update, delete, get_connector_schema, add_connector, update_connector, delete_connector, sync_connector. After create, keep data.id for follow-ups. Use list (optional search) to recover ids. add_file takes canonical files/ paths of the original file (PDF and other allowed types included), never uploads/ and never a markdown transcript of a binary file. Materialize a chat upload into files/ first. Before add_connector call get_connector_schema with connectorType (e.g. google_drive) — do not read knowledgebases/connectors via VFS. delete requires knowledgeBaseId or knowledgeBaseIds and only when the user asked.',
-  open_resource: 'Opens a workspace resource (workflow, file, table, knowledge base) in the UI.',
+    'Manages knowledge bases (create/list/get/query/add_file/update/delete/connectors). add_file accepts files/ paths only — materialize uploads/ first; never a markdown transcript of a PDF. When not: do not VFS-read knowledgebases/connectors — use get_connector_schema.',
+  open_resource:
+    'Opens a workspace resource in the UI. REQUIRED: resources=[{type,id}] — for files you may pass path (e.g. files/Apps/Page.html) instead of id; Local resolves path→id. Use after create_file to show the new file.',
   materialize_file:
-    'Copies chat uploads (`uploads/...`) into workspace `files/...` without changing bytes or type. Required before function_execute (uploads/ are not sandbox-mounted) and before knowledge_base add_file (add_file only accepts files/ paths).',
+    'Copies uploads/... into durable files/... (same bytes/type). Required before function_execute, knowledge_base add_file, and durable HTML/office edits that must leave uploads/.',
   generate_image:
-    'Generates an image from a text prompt (no workflow). Uses hosted/workspace keys automatically. Pass the user full request in `prompt`, including variation counts (e.g. "3 variations"). Optional outputs.files path to save under files/.',
+    'Generates an image from a text prompt (no workflow). Pass the full user request in prompt (keep variation counts). Optional outputs.files under files/.',
   search_online:
-    'Live web search via Exa (same keys as the Exa block: workspace EXA_API_KEY, BYOK, or hosted). Call this FIRST for real-world factual / current questions (who/what/when/where, news, prices, weather) — do not answer from memory. For citation-heavy Q&A you may use invoke_integration_tool with exa_answer instead. REQUIRED: query and toolTitle.',
+    'Live web search via Exa. Call FIRST for real-world factual/current questions — do not answer from memory. REQUIRED: query and toolTitle. Citation Q&A may use invoke_integration_tool exa_answer instead.',
   enrichment_run: 'Runs a one-off table enrichment lookup inline (no table/workflow required).',
   function_execute:
-    'Runs Python or shell in the remote E2B Mothership sandbox (Python-oriented template — never pass javascript). Return values appear in `result`; printed output appears in `stdout`. Tool results also include `capturedOutput` — use that for the user-facing answer. Mount workspace files/tables via `inputs`; save files with `outputs.files` or `outputPath`. Requires e2b.enabled in context. Prefer this over Daytona integration tools. DEFAULT-FIRST: omit sandboxId unless a required PyPI/apt package or managed CLI is missing from the default image.',
+    'Runs Python or shell in the E2B sandbox (never javascript). Mount via inputs; save via outputs.files. Use capturedOutput for the user answer. When not: never for HTML inspect/rewrite or office PPTX/DOCX/PDF — use read/grep/workspace_file/edit_content.',
   manage_sandbox:
-    'Creates, lists, updates, or deletes a persistent Sim sandbox (custom E2B image with PyPI deps, Debian packages, and managed CLIs). Use add when function_execute fails because a third-party package is missing, then pass the returned sandboxId to function_execute. Required: operation (add|edit|list|delete). add also needs name and language — Arena Copilot must use language=python (Mothership template has no JS runtime).',
+    'Manages a persistent custom sandbox (add|edit|list|delete). Use add only when function_execute fails for a missing package/CLI; language=python. When not: not for HTML/office file builds.',
   edit_content:
-    'Writes the body after a successful workspace_file in a prior round. REQUIRED: content (string). For pptx/docx/pdf put JavaScript using pre-initialized globals (pptx / docx / pdf) — never require/import. PPTX: SLIDE_W/MARGIN/CONTENT_W, title + bullets, one idea per slide. DOCX: __docxDocOptions + HeadingLevel + addSection (never docx.addSection). PDF: LETTER pages, margins, wrapped text. Markdown: finished GFM. Never a single unstyled dump. Never emit in the same batch as workspace_file.',
+    'Writes the body after a prior-round workspace_file. REQUIRED: content. Office: JS with pre-initialized pptx/docx/pdf globals (no require/import). Never same batch as workspace_file.',
   deploy_chat:
     'Deploys or undeploys a workflow as a shareable chat interface. Performs the full workflow deploy plus chat surface setup. REQUIRED on deploy: workflowId, identifier (URL slug), title, versionName, versionDescription. Call get_block_outputs for outputConfigs (agent content path). Call diff_workflows(ref1: "live", ref2: "draft") when unsure what changed. Returns chatUrl on success — share that with the user.',
   get_block_outputs:
@@ -109,12 +111,14 @@ const DELEGATED_TOOL_DESCRIPTIONS: Record<string, string> = {
     'Renames a workspace file in place. REQUIRED: path and newName (including extension). Use move_file to change folders.',
   move_file:
     'Moves workspace files into a folder. REQUIRED: paths (array). Omit destinationPath (or pass "files") for root.',
-  list_file_folders: 'Lists folders under the workspace files tree.',
-  rename_file_folder: 'Renames a files-tree folder. REQUIRED: path and name (new folder name).',
+  list_file_folders:
+    'Optional folder stub (often empty). When not: do not start HTML/office creates with folder listing — call create_file with files/<folder>/name.ext directly.',
+  rename_file_folder:
+    'Not available in Local Copilot yet — rename individual files with rename_file, or use the Files UI.',
   move_file_folder:
-    'Moves a files-tree folder. REQUIRED: path. Omit destinationPath (or pass "files") for root.',
+    'Not available in Local Copilot yet — move individual files with move_file, or use the Files UI.',
   delete_file_folder:
-    'Deletes files-tree folders by canonical VFS paths. REQUIRED: paths (array). Destructive — only call when the user explicitly asked.',
+    'Not available in Local Copilot yet — delete individual files with delete_file when the user explicitly asked, or use the Files UI.',
   set_block_enabled:
     'Enables or disables a block in a workflow. REQUIRED: blockId and enabled (boolean). Pass workflowId on home chat.',
   set_global_workflow_variables:

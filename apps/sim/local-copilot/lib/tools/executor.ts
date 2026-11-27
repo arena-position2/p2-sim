@@ -63,6 +63,10 @@ import {
   executeLoadUserSkill,
   LOAD_USER_SKILL_TOOL_NAME,
 } from '@/local-copilot/lib/tools/user-skills'
+import {
+  executeLocalFileFolderTool,
+  isLocalFileFolderToolName,
+} from '@/local-copilot/lib/tools/vfs-folder-tools'
 import { executeLocalVfsTool, isLocalVfsToolName } from '@/local-copilot/lib/tools/vfs-read-tools'
 import {
   runCreateWorkflowTool,
@@ -214,6 +218,11 @@ export interface ToolExecutionContext {
    * project queries/results through secret provenance (e.g. knowledge_base query).
    */
   resolvedSecretTraceRegistry?: ResolvedSecretTraceRegistry
+  /**
+   * Primary job for this user turn (summarize_upload, html_edit, …). Used to
+   * hard-reject out-of-scope mutations when preferred HTML would otherwise bleed.
+   */
+  turnJob?: import('@/local-copilot/lib/writes/turn-job').LocalCopilotTurnJob
 }
 
 export interface ToolExecutionResult {
@@ -649,6 +658,19 @@ async function executeLocalCopilotToolInner(
   ctx.allowedWorkflowIds ??= new Set()
   ctx.turnMutations ??= createTurnMutations()
 
+  // Turn-job fence (A5): summarize/read-upload must not mutate preferred HTML.
+  if (ctx.turnJob === 'summarize_upload') {
+    const { rejectOutOfJobToolCall } = await import('@/local-copilot/lib/writes/turn-job')
+    const outOfJob = rejectOutOfJobToolCall({ turnJob: ctx.turnJob, toolName, args })
+    if (outOfJob) {
+      logger.info('Arena Copilot rejected out-of-job tool for summarize_upload', {
+        toolName,
+        workflowId: ctx.workflowId,
+      })
+      return outOfJob
+    }
+  }
+
   if (toolSupportsIdempotency(toolName)) {
     const key = buildIdempotencyKey(toolName, args, ctx.activeToolCallId)
     const cached = getIdempotentResult(ctx.mutationIdempotency, key)
@@ -684,6 +706,12 @@ async function executeLocalCopilotToolInner(
   if (isLocalVfsToolName(toolName)) {
     logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
     return runLocalVfsTool(toolName, args, ctx)
+  }
+
+  // Folder leaves have no mothership handlers — stub locally so create_file paths work.
+  if (isLocalFileFolderToolName(toolName)) {
+    logger.info('Executing Arena Copilot tool', { toolName, workflowId: ctx.workflowId })
+    return executeLocalFileFolderTool(toolName, args, ctx)
   }
 
   // Workspace MCP deploy family (publish workflows as MCP servers). Distinct

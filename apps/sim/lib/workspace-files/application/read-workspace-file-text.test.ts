@@ -236,6 +236,41 @@ describe('readWorkspaceFileText', () => {
     )
   })
 
+  /**
+   * Copilot/agent HTML edits patch against live markup. Routing `.html` through
+   * HtmlParser strips tags into prose, so greps for class=/script miss and the
+   * model appends workarounds. Agent reads (`allowPlainText`) must decode raw
+   * source; public extraction without the flag still uses the HTML parser.
+   */
+  it('returns raw HTML source for agent reads and keeps structured extraction public', async () => {
+    const html = '<div class="chip">On Track</div><script>void 0</script>'
+    mocks.resolveContext.mockResolvedValue(
+      referenceContext({ name: 'page.html', type: 'text/html', size: html.length })
+    )
+    mocks.fetchBuffer.mockResolvedValue(Buffer.from(html))
+
+    await readWorkspaceFileText.execute({
+      principal: principals[0],
+      input: input({ allowPlainText: true }),
+    })
+    expect(mocks.parseBuffer).toHaveBeenCalledWith(
+      Buffer.from(html),
+      'txt',
+      expect.objectContaining({ contentMode: 'complete' })
+    )
+
+    mocks.parseBuffer.mockClear()
+    await readWorkspaceFileText.execute({
+      principal: principals[0],
+      input: input(),
+    })
+    expect(mocks.parseBuffer).toHaveBeenCalledWith(
+      Buffer.from(html),
+      'html',
+      expect.objectContaining({ contentMode: 'complete' })
+    )
+  })
+
   it('does not decode binary MIME as text when internal plain-text support is enabled', async () => {
     mocks.resolveContext.mockResolvedValue(
       referenceContext({ name: 'photo.png', type: 'image/png' })
